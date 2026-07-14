@@ -16,9 +16,11 @@ use App\Models\Attendance;
 use App\Models\Grade;
 use App\Models\User;
 use App\Models\Enrollment;
+use App\Models\Teacher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\DB; // Added for Database Transactions
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class TeacherController extends Controller
 {
@@ -44,6 +46,137 @@ class TeacherController extends Controller
         return response()->json([
             'stats' => $stats,
             'courses' => $courses,
+        ]);
+    }
+
+    // ============================================
+    // PROFILE MANAGEMENT (បន្ថែមថ្មី)
+    // ============================================
+
+    // Get teacher profile
+    public function getProfile()
+    {
+        $user = auth()->user();
+        $teacher = Teacher::where('user_id', $user->id)
+            ->with(['department', 'role'])
+            ->first();
+
+        if (!$teacher) {
+            return response()->json([
+                'message' => 'Teacher profile not found'
+            ], 404);
+        }
+
+        return response()->json([
+            'user' => $user,
+            'teacher' => $teacher,
+            'profile_image' => $teacher->profile_image_url,
+        ]);
+    }
+
+    // Update teacher profile image
+    public function updateProfileImage(Request $request)
+    {
+        $request->validate([
+            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:5120', // 5MB max
+        ]);
+
+        $user = auth()->user();
+        $teacher = Teacher::where('user_id', $user->id)->first();
+
+        if (!$teacher) {
+            return response()->json([
+                'message' => 'Teacher profile not found'
+            ], 404);
+        }
+
+        try {
+            // Delete old image if exists
+            if ($teacher->profile_image) {
+                $oldPath = str_replace('storage/', '', $teacher->profile_image);
+                $oldPath = str_replace('/storage/', '', $oldPath);
+                
+                if (Storage::disk('public')->exists($oldPath)) {
+                    Storage::disk('public')->delete($oldPath);
+                }
+            }
+
+            // Store new image
+            $image = $request->file('profile_image');
+            $filename = 'teacher_' . $user->id . '_' . Str::random(10) . '.' . $image->getClientOriginalExtension();
+            $path = $image->storeAs('teacher-profiles', $filename, 'public');
+            
+            // Update teacher record
+            $teacher->update([
+                'profile_image' => $path,
+            ]);
+
+            // Also update user if you want
+            // $user->update(['profile_image' => $path]);
+
+            return response()->json([
+                'message' => 'Profile image updated successfully',
+                'profile_image' => asset('storage/' . $path),
+                'teacher' => $teacher->fresh(),
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to upload image',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // Update teacher profile
+    public function updateProfile(Request $request)
+    {
+        $user = auth()->user();
+        $teacher = Teacher::where('user_id', $user->id)->first();
+
+        if (!$teacher) {
+            return response()->json([
+                'message' => 'Teacher profile not found'
+            ], 404);
+        }
+
+        $validated = $request->validate([
+            'first_name' => 'sometimes|string|max:255',
+            'last_name' => 'sometimes|string|max:255',
+            'email' => 'sometimes|email|unique:users,email,' . $user->id . '|unique:teachers,email,' . $teacher->id,
+            'phone' => 'nullable|string|max:20',
+            'gender' => 'nullable|in:Male,Female,Other',
+            'date_of_birth' => 'nullable|date',
+            'specialization' => 'nullable|string|max:255',
+        ]);
+
+        DB::transaction(function () use ($validated, $user, $teacher) {
+            // Update user
+            if (isset($validated['first_name']) || isset($validated['last_name']) || isset($validated['email'])) {
+                $user->update([
+                    'first_name' => $validated['first_name'] ?? $user->first_name,
+                    'last_name' => $validated['last_name'] ?? $user->last_name,
+                    'email' => $validated['email'] ?? $user->email,
+                ]);
+            }
+
+            // Update teacher
+            $teacher->update([
+                'first_name' => $validated['first_name'] ?? $teacher->first_name,
+                'last_name' => $validated['last_name'] ?? $teacher->last_name,
+                'email' => $validated['email'] ?? $teacher->email,
+                'phone' => $validated['phone'] ?? $teacher->phone,
+                'gender' => $validated['gender'] ?? $teacher->gender,
+                'date_of_birth' => $validated['date_of_birth'] ?? $teacher->date_of_birth,
+                'specialization' => $validated['specialization'] ?? $teacher->specialization,
+            ]);
+        });
+
+        return response()->json([
+            'message' => 'Profile updated successfully',
+            'user' => $user->fresh(),
+            'teacher' => $teacher->fresh(),
+            'profile_image' => $teacher->profile_image_url,
         ]);
     }
 
@@ -83,7 +216,6 @@ class TeacherController extends Controller
         $course = Course::where('teacher_id', auth()->id())
             ->findOrFail($request->course_id);
 
-        // Use DB Transaction to ensure both User and Enrollment are created together
         $user = DB::transaction(function () use ($validated, $course) {
             $user = User::create([
                 'first_name' => $validated['first_name'],
@@ -164,7 +296,6 @@ class TeacherController extends Controller
         Course::where('teacher_id', auth()->id())
             ->findOrFail($validated['course_id']);
 
-        // Wrapping bulk updates in a transaction
         DB::transaction(function () use ($validated) {
             foreach ($validated['attendance'] as $item) {
                 Attendance::updateOrCreate(
@@ -260,21 +391,19 @@ class TeacherController extends Controller
     {
         $request->validate([
             'lesson_id' => 'required|exists:lessons,id',
-            'file' => 'required|file|max:10240', // 10MB max
+            'file' => 'required|file|max:10240',
         ]);
 
         Lesson::where('created_by', auth()->id())
             ->findOrFail($request->lesson_id);
 
         $file = $request->file('file');
-        
-        // Use Laravel's secure store method. It generates a secure hash for the filename.
         $filePath = $file->store('lesson_files', 'public');
 
         $lessonFile = LessonFile::create([
             'lesson_id' => $request->lesson_id,
-            'file_name' => $file->getClientOriginalName(), // Keep original name for display UI
-            'file_path' => $filePath, // Secure path for storage
+            'file_name' => $file->getClientOriginalName(),
+            'file_path' => $filePath,
             'file_type' => $file->getClientOriginalExtension(),
         ]);
 
@@ -289,7 +418,7 @@ class TeacherController extends Controller
         $request->validate([
             'lesson_id' => 'required|exists:lessons,id',
             'title' => 'required|string|max:255',
-            'video' => 'required|file|mimes:mp4,mov,avi,wmv|max:204800', // 200MB max
+            'video' => 'required|file|mimes:mp4,mov,avi,wmv|max:204800',
             'duration' => 'nullable|string',
         ]);
 
@@ -363,7 +492,7 @@ class TeacherController extends Controller
         Course::where('teacher_id', auth()->id())
             ->findOrFail($validated['course_id']);
 
-        $quiz = Quiz::create($validated); // Replaced $request->all()
+        $quiz = Quiz::create($validated);
 
         return response()->json([
             'quiz' => $quiz,
@@ -386,7 +515,6 @@ class TeacherController extends Controller
             $query->where('teacher_id', auth()->id());
         })->findOrFail($quizId);
 
-        // Transaction ensures question options aren't lost if something fails
         $question = DB::transaction(function () use ($validated, $quizId) {
             $q = Question::create([
                 'quiz_id' => $quizId,

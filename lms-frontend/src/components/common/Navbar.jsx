@@ -12,6 +12,7 @@ import {
   AcademicCapIcon,
 } from '@heroicons/react/24/outline';
 
+
 const Navbar = () => {
   const { user, logout } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
