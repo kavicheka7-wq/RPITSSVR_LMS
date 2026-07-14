@@ -96,7 +96,6 @@ const ManageStudents = () => {
         ...formData,
         profile_image: file
       });
-      // បង្កើត preview URL
       const reader = new FileReader();
       reader.onloadend = () => {
         setPreviewImage(reader.result);
@@ -280,17 +279,14 @@ const ManageStudents = () => {
     return levels[level] || level;
   };
 
-  // ==============================================
-  // មុខងារទាញយក URL រូបភាព
-  // ==============================================
   const getProfileImageUrl = (imagePath) => {
     if (!imagePath) return null;
-    // ប្រសិនបើរូបភាពជា URL ពេញលេញ
     if (imagePath.startsWith('http')) {
       return imagePath;
     }
     // ប្រសិនបើរូបភាពត្រូវបានរក្សាទុកក្នុង storage
-    return `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/storage/${imagePath}`;
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    return `${baseUrl}/storage/${imagePath}`;
   };
 
   if (loading) {
@@ -352,9 +348,6 @@ const ManageStudents = () => {
                   សិស្ស
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  រូបភាព
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   អត្តលេខ
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -377,7 +370,7 @@ const ManageStudents = () => {
             <tbody className="bg-white divide-y divide-gray-100">
               {filteredStudents.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="px-6 py-14 text-center text-gray-500">
+                  <td colSpan="7" className="px-6 py-14 text-center text-gray-500">
                     <div className="flex flex-col items-center">
                       <UserGroupIcon className="h-16 w-16 text-gray-300 mb-3" />
                       <p className="font-medium">
@@ -392,11 +385,34 @@ const ManageStudents = () => {
               ) : (
                 filteredStudents.map((student) => (
                   <tr key={student.id} className="hover:bg-gray-50 transition-colors">
+                    {/* ========================================== */}
+                    {/* ជួរសិស្ស - បង្ហាញរូបភាពខាងមុខឈ្មោះ */}
+                    {/* ========================================== */}
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <div className="h-10 w-10 rounded-full bg-linear-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm">
-                          {student.first_name?.charAt(0)}{student.last_name?.charAt(0)}
-                        </div>
+                        {/* បង្ហាញរូបភាពប្រសិនបើមាន */}
+                        {student.profile_image ? (
+                          <img 
+                            src={getProfileImageUrl(student.profile_image)}
+                            alt={`${student.first_name} ${student.last_name}`}
+                            className="h-10 w-10 rounded-full object-cover border-2 border-gray-200 shadow-sm shrink-0"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              // បង្ហាញ avatar ជំនួស
+                              const parent = e.target.parentElement;
+                              const avatar = document.createElement('div');
+                              avatar.className = 'h-10 w-10 rounded-full bg-gradient-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm flex-shrink-0';
+                              avatar.textContent = `${student.first_name?.charAt(0) || ''}${student.last_name?.charAt(0) || ''}`;
+                              parent.insertBefore(avatar, e.target);
+                              e.target.style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          // ប្រសិនបើគ្មានរូបភាព បង្ហាញ avatar
+                          <div className="h-10 w-10 rounded-full bg-linear-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm shrink-0">
+                            {student.first_name?.charAt(0) || ''}{student.last_name?.charAt(0) || ''}
+                          </div>
+                        )}
                         <div className="ml-3">
                           <div className="text-sm font-medium text-gray-900">
                             {student.first_name} {student.last_name}
@@ -406,23 +422,6 @@ const ManageStudents = () => {
                           </div>
                         </div>
                       </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {student.profile_image ? (
-                        <img 
-                          src={getProfileImageUrl(student.profile_image)}
-                          alt={student.first_name}
-                          className="h-10 w-10 rounded-full object-cover border-2 border-gray-200"
-                          onError={(e) => {
-                            e.target.src = ''; // ប្រសិនបើរូបភាពផ្ទុកមិនបាន
-                            e.target.className = 'hidden'; // លាក់ img
-                          }}
-                        />
-                      ) : (
-                        <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                          <PhotoIcon className="h-5 w-5 text-gray-400" />
-                        </div>
-                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                       {student.student_code || '—'}
@@ -482,7 +481,7 @@ const ManageStudents = () => {
         )}
       </div>
 
-      {/* Modal - Create/Edit Student (ដូចដើម) */}
+      {/* Modal - Create/Edit Student */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 p-8 max-h-[90vh] overflow-y-auto">
