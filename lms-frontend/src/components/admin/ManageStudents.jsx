@@ -290,7 +290,7 @@ const ManageStudents = () => {
       return imagePath;
     }
     // ប្រសិនបើរូបភាពត្រូវបានរក្សាទុកក្នុង storage
-    return `${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/storage/${imagePath}`;
+    return `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/storage/${imagePath}`;
   };
 
   if (loading) {
