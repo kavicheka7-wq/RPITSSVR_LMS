@@ -5,10 +5,10 @@
 // are left as Tailwind defaults on purpose — they carry meaning and
 // shouldn't compete with the brand palette.
 
-module.exports = {
+export default {
   content: [
     "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}", // បន្ថែមបន្ទាត់នេះដើម្បីឲ្យ Tailwind ស្កេនរក class ក្នុង file React របស់អ្នក
+    "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {

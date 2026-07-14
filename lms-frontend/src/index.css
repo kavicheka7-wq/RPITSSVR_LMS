@@ -1,7 +1,5 @@
-@tailwind base;
-@tailwind components; /* បានប្តូរពី utilities ដែលជាន់គ្នា មកជា components វិញ */
-@tailwind utilities;
-
+@import "tailwindcss";
+@config "../tailwind.config.js";
 /* អ្នកអាចថែម CSS ធម្មតានៅទីនេះបានបើសិនជាត្រូវការ */
 body {
   font-family: 'Kantumruy Pro', 'Hanuman', sans-serif; /* សម្រាប់អក្សរខ្មែរស្អាត */

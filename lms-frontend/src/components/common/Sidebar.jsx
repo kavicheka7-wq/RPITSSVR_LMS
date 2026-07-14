@@ -31,6 +31,7 @@ const NAV_CONFIG = {
       { name: 'ការកំណត់', icon: Cog6ToothIcon, path: '/admin/settings' },
     ],
   },
+  
   Teacher: {
     label: 'គ្រូបង្រៀន',
     items: [
