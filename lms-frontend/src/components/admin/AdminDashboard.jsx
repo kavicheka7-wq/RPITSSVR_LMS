@@ -63,20 +63,20 @@ const AdminDashboard = () => {
   //   );
   // }
 
-  const statCards = [
+    const statCards = [
     { 
       title: 'អ្នកប្រើប្រាស់សរុប', 
-      value: stats?.total_users || 0, 
+      value: stats.total_users, 
       icon: UsersIcon, 
-      color: 'from-primary-500 to-primary-700',
-      bgColor: 'bg-primary-50',
-      textColor: 'text-primary-600',
+      color: 'from-blue-500 to-blue-600',
+      bgColor: 'bg-blue-50',
+      textColor: 'text-blue-600',
       trend: '+12%',
       trendUp: true,
     },
     { 
       title: 'សិស្ស', 
-      value: stats?.total_students || 0, 
+      value: stats.total_students, 
       icon: UserGroupIcon, 
       color: 'from-green-500 to-green-600',
       bgColor: 'bg-green-50',
@@ -86,45 +86,46 @@ const AdminDashboard = () => {
     },
     { 
       title: 'គ្រូបង្រៀន', 
-      value: stats?.total_teachers || 0, 
+      value: stats.total_teachers, 
       icon: AcademicCapIcon, 
-      color: 'from-accent-500 to-accent-600',
-      bgColor: 'bg-accent-50',
-      textColor: 'text-accent-600',
+      color: 'from-purple-500 to-purple-600',
+      bgColor: 'bg-purple-50',
+      textColor: 'text-purple-600',
       trend: '+5%',
       trendUp: true,
     },
     { 
       title: 'មុខវិជ្ជា', 
-      value: stats?.total_courses || 0, 
+      value: stats.total_courses, 
       icon: BookOpenIcon, 
-      color: 'from-primary-300 to-primary-500',
-      bgColor: 'bg-primary-50',
-      textColor: 'text-primary-500',
+      color: 'from-yellow-500 to-yellow-600',
+      bgColor: 'bg-yellow-50',
+      textColor: 'text-yellow-600',
       trend: '+15%',
       trendUp: true,
     },
     { 
       title: 'ជំនាញ', 
-      value: stats?.total_departments || 0, 
+      value: stats.total_departments, 
       icon: ChartBarIcon, 
-      color: 'from-gray-400 to-gray-600',
-      bgColor: 'bg-gray-100',
-      textColor: 'text-gray-600',
+      color: 'from-red-500 to-red-600',
+      bgColor: 'bg-red-50',
+      textColor: 'text-red-600',
       trend: '0%',
       trendUp: false,
     },
-    // { 
-    //   title: 'ការចុះឈ្មោះរៀន', 
-    //   value: stats?.total_enrollments || 0, 
-    //   icon: UserPlusIcon, 
-    //   color: 'from-accent-500 to-accent-700',
-    //   bgColor: 'bg-accent-50',
-    //   textColor: 'text-accent-600',
-    //   trend: '+22%',
-    //   trendUp: true,
-    // },
+    { 
+      title: 'ការចុះឈ្មោះរៀន', 
+      value: stats.total_enrollments, 
+      icon: UserPlusIcon, 
+      color: 'from-indigo-500 to-indigo-600',
+      bgColor: 'bg-indigo-50',
+      textColor: 'text-indigo-600',
+      trend: '+22%',
+      trendUp: true,
+    },
   ];
+
 
   // Sample chart data - replace with real data
   const chartData = [

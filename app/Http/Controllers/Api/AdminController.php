@@ -1,4 +1,5 @@
 <?php
+// app/Http/Controllers/Api/AdminController.php
 
 namespace App\Http\Controllers\Api;
 
@@ -8,6 +9,7 @@ use App\Models\Department;
 use App\Models\Course;
 use App\Models\Role;
 use App\Models\Teacher;
+use App\Models\Student;
 use App\Models\Enrollment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -30,7 +32,6 @@ class AdminController extends Controller
 
     public function createUser(Request $request)
     {
-        // 1. Capture the validated data into a variable
         $validated = $request->validate([
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
@@ -42,11 +43,9 @@ class AdminController extends Controller
             'status' => 'nullable|in:active,inactive',
         ]);
 
-        // 2. Hash the password before creating
         $validated['password'] = Hash::make($validated['password']);
         $validated['status'] = $validated['status'] ?? 'active';
 
-        // 3. Create using ONLY validated data (Security Improvement)
         $user = User::create($validated);
 
         return response()->json([
@@ -73,7 +72,7 @@ class AdminController extends Controller
         if (!empty($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
         } else {
-            unset($validated['password']); // Don't update password if it's empty
+            unset($validated['password']);
         }
 
         $user->update($validated);
@@ -94,95 +93,109 @@ class AdminController extends Controller
         ]);
     }
 
-   
     // --- Course Management ---
 
-    // public function getCourses(Request $request)
-    // {
-    //     $courses = Course::with(['department', 'teacher'])->paginate($request->per_page ?? 10);
-    //     return response()->json($courses);
-    // }
+    public function getCourses(Request $request)
+    {
+        $courses = Course::with(['department', 'teacher'])->paginate($request->per_page ?? 10);
+        return response()->json($courses);
+    }
 
-    // public function createCourse(Request $request)
-    // {
-    //     $validated = $request->validate([
-    //         'course_code' => 'required|string|max:50|unique:courses',
-    //         'course_name' => 'required|string|max:255',
-    //         'credit' => 'required|integer|min:1|max:6',
-    //         'description' => 'nullable|string',
-    //         'department_id' => 'required|exists:departments,id',
-    //         'teacher_id' => 'required|exists:users,id',
-    //     ]);
+    public function createCourse(Request $request)
+    {
+        $validated = $request->validate([
+            'course_code' => 'required|string|max:50|unique:courses',
+            'course_name' => 'required|string|max:255',
+            'credit' => 'required|integer|min:1|max:6',
+            'description' => 'nullable|string',
+            'department_id' => 'required|exists:departments,id',
+            'teacher_id' => 'required|exists:users,id',
+        ]);
 
-    //     $course = Course::create($validated);
+        $course = Course::create($validated);
 
-    //     return response()->json([
-    //         'course' => $course,
-    //         'message' => 'Course created successfully'
-    //     ], 201);
-    // }
+        return response()->json([
+            'course' => $course,
+            'message' => 'Course created successfully'
+        ], 201);
+    }
 
-    // public function updateCourse(Request $request, $id)
-    // {
-    //     $course = Course::findOrFail($id);
+    public function updateCourse(Request $request, $id)
+    {
+        $course = Course::findOrFail($id);
 
-    //     $validated = $request->validate([
-    //         'course_code' => ['sometimes', 'string', 'max:50', Rule::unique('courses')->ignore($course->id)],
-    //         'course_name' => 'sometimes|string|max:255',
-    //         'credit' => 'sometimes|integer|min:1|max:6',
-    //         'description' => 'nullable|string',
-    //         'department_id' => 'sometimes|exists:departments,id',
-    //         'teacher_id' => 'sometimes|exists:users,id',
-    //     ]);
+        $validated = $request->validate([
+            'course_code' => ['sometimes', 'string', 'max:50', Rule::unique('courses')->ignore($course->id)],
+            'course_name' => 'sometimes|string|max:255',
+            'credit' => 'sometimes|integer|min:1|max:6',
+            'description' => 'nullable|string',
+            'department_id' => 'sometimes|exists:departments,id',
+            'teacher_id' => 'sometimes|exists:users,id',
+        ]);
 
-    //     $course->update($validated);
+        $course->update($validated);
 
-    //     return response()->json([
-    //         'course' => $course,
-    //         'message' => 'Course updated successfully'
-    //     ]);
-    // }
+        return response()->json([
+            'course' => $course,
+            'message' => 'Course updated successfully'
+        ]);
+    }
 
-    // public function deleteCourse($id)
-    // {
-    //     $course = Course::findOrFail($id);
+    public function deleteCourse($id)
+    {
+        $course = Course::findOrFail($id);
         
-    //     if ($course->enrollments()->exists()) {
-    //         return response()->json([
-    //             'message' => 'Cannot delete course with enrolled students'
-    //         ], 400);
-    //     }
+        if ($course->enrollments()->exists()) {
+            return response()->json([
+                'message' => 'Cannot delete course with enrolled students'
+            ], 400);
+        }
 
-    //     $course->delete();
+        $course->delete();
 
-    //     return response()->json([
-    //         'message' => 'Course deleted successfully'
-    //     ]);
-    // }
+        return response()->json([
+            'message' => 'Course deleted successfully'
+        ]);
+    }
 
     // --- System Statistics ---
 
     public function getStats()
     {
-       // រាប់ចំនួនគ្រូពីតារាង teachers
+        // ==============================================
+        // រាប់ចំនួនពីតារាងនីមួយៗ
+        // ==============================================
+        
+        // 1. ចំនួនអ្នកប្រើប្រាស់សរុប
+        $totalUsers = User::count();
+        
+        // 2. ចំនួនសិស្ស (ពីតារាង students)
+        $totalStudents = Student::count();
+        
+        // 3. ចំនួនគ្រូបង្រៀន (ពីតារាង teachers)
         $totalTeachers = Teacher::count();
         
-        // រាប់ចំនួនសិស្សពីតារាង users (role_id = Student)
-        $studentRole = Role::where('role_name', 'Student')->first();
-        $totalStudents = $studentRole ? User::where('role_id', $studentRole->id)->count() : 0;
+        // 4. ចំនួនមុខវិជ្ជា (ពីតារាង courses)
+        $totalCourses = Course::count();
         
-        // រាប់ចំនួនអ្នកគ្រប់គ្រងពីតារាង users (role_id = Admin)
+        // 5. ចំនួនជំនាញ (ពីតារាង departments)
+        $totalDepartments = Department::count();
+        
+        // 6. ចំនួនអ្នកគ្រប់គ្រង
         $adminRole = Role::where('role_name', 'Admin')->first();
         $totalAdmins = $adminRole ? User::where('role_id', $adminRole->id)->count() : 0;
+        
+        // 7. ចំនួនការចុះឈ្មោះរៀន
+        $totalEnrollments = Enrollment::count();
 
         $stats = [
-            'total_users' => User::count(),
+            'total_users' => $totalUsers,
             'total_students' => $totalStudents,
-            'total_teachers' => $totalTeachers, // ចំនួនគ្រូពិតប្រាកដ
+            'total_teachers' => $totalTeachers,
+            'total_courses' => $totalCourses,
+            'total_departments' => $totalDepartments,
             'total_admins' => $totalAdmins,
-            'total_courses' => Course::count(),
-            'total_departments' => Department::count(),
-            'total_enrollments' => Enrollment::count(),
+            'total_enrollments' => $totalEnrollments,
         ];
 
         return response()->json($stats);
@@ -206,5 +219,4 @@ class AdminController extends Controller
             'message' => 'Settings updated successfully'
         ]);
     }
-
 }
