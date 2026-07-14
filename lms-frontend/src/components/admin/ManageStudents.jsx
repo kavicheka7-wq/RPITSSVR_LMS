@@ -108,7 +108,6 @@ const ManageStudents = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // ពិនិត្យមើលថាតើ studentRoleId មានតម្លៃ
     if (!studentRoleId) {
       toast.error('មិនអាចទាញយកតួនាទីសិស្សបានទេ');
       return;
@@ -118,10 +117,8 @@ const ManageStudents = () => {
       let response;
       
       if (editingStudent) {
-        // ========== EDIT MODE ==========
         const formDataToSend = new FormData();
         
-        // បន្ថែមទិន្នន័យទាំងអស់ទៅ FormData
         Object.keys(formData).forEach(key => {
           if (key === 'profile_image') {
             if (formData[key] instanceof File) {
@@ -132,15 +129,12 @@ const ManageStudents = () => {
           }
         });
         
-        // បន្ថែម role_id
         formDataToSend.append('role_id', studentRoleId);
         
-        // ប្រសិនបើគ្មាន password ទេ កុំបញ្ជូន password
         if (!formData.password) {
           formDataToSend.delete('password');
         }
         
-        // ប្រើ POST ជាមួយ _method PUT
         formDataToSend.append('_method', 'PUT');
         
         response = await api.post(`/admin/students/${editingStudent.id}`, formDataToSend, {
@@ -151,20 +145,16 @@ const ManageStudents = () => {
         toast.success('បានកែប្រែព័ត៌មានសិស្សដោយជោគជ័យ');
         
       } else {
-        // ========== CREATE MODE ==========
         const formDataToSend = new FormData();
         
-        // បន្ថែមទិន្នន័យទាំងអស់ទៅ FormData
         Object.keys(formData).forEach(key => {
           if (formData[key] !== null && formData[key] !== undefined && formData[key] !== '') {
             formDataToSend.append(key, formData[key]);
           }
         });
         
-        // បន្ថែម role_id
         formDataToSend.append('role_id', studentRoleId);
         
-        // ប្រសិនបើគ្មានរូបភាពទេ កុំបញ្ជូន profile_image
         if (!formData.profile_image) {
           formDataToSend.delete('profile_image');
         }
@@ -188,7 +178,6 @@ const ManageStudents = () => {
     } catch (error) {
       console.error('Submit error:', error.response?.data);
       
-      // បង្ហាញកំហុសលម្អិត
       if (error.response?.data?.errors) {
         const errors = error.response.data.errors;
         const errorMessages = Object.values(errors).flat().join('\n');
@@ -264,15 +253,15 @@ const ManageStudents = () => {
   };
 
   const filteredStudents = students.filter(student => {
-  const search = searchTerm.toLowerCase();
-  return (
-    student.first_name?.toLowerCase()?.includes(search) ||
-    student.last_name?.toLowerCase()?.includes(search) ||
-    student.email?.toLowerCase()?.includes(search) ||
-    student.student_code?.toLowerCase()?.includes(search) ||
-    student.batch_year?.toLowerCase()?.includes(search)
-  );
-});
+    const search = searchTerm.toLowerCase();
+    return (
+      student.first_name?.toLowerCase()?.includes(search) ||
+      student.last_name?.toLowerCase()?.includes(search) ||
+      student.email?.toLowerCase()?.includes(search) ||
+      student.student_code?.toLowerCase()?.includes(search) ||
+      student.batch_year?.toLowerCase()?.includes(search)
+    );
+  });
 
   const getStudyShiftLabel = (shift) => {
     const shifts = {
@@ -291,9 +280,22 @@ const ManageStudents = () => {
     return levels[level] || level;
   };
 
+  // ==============================================
+  // មុខងារទាញយក URL រូបភាព
+  // ==============================================
+  const getProfileImageUrl = (imagePath) => {
+    if (!imagePath) return null;
+    // ប្រសិនបើរូបភាពជា URL ពេញលេញ
+    if (imagePath.startsWith('http')) {
+      return imagePath;
+    }
+    // ប្រសិនបើរូបភាពត្រូវបានរក្សាទុកក្នុង storage
+    return `${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/storage/${imagePath}`;
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-100">
+      <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 mx-auto"></div>
           <p className="mt-4 text-gray-600 font-medium">កំពុងផ្ទុកទិន្នន័យ...</p>
@@ -350,6 +352,9 @@ const ManageStudents = () => {
                   សិស្ស
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  រូបភាព
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   អត្តលេខ
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -372,7 +377,7 @@ const ManageStudents = () => {
             <tbody className="bg-white divide-y divide-gray-100">
               {filteredStudents.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="px-6 py-14 text-center text-gray-500">
+                  <td colSpan="8" className="px-6 py-14 text-center text-gray-500">
                     <div className="flex flex-col items-center">
                       <UserGroupIcon className="h-16 w-16 text-gray-300 mb-3" />
                       <p className="font-medium">
@@ -389,7 +394,7 @@ const ManageStudents = () => {
                   <tr key={student.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <div className="h-10 w-10 rounded-full bg-linear-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm">
+                        <div className="h-10 w-10 rounded-full bg-gradient-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm">
                           {student.first_name?.charAt(0)}{student.last_name?.charAt(0)}
                         </div>
                         <div className="ml-3">
@@ -401,6 +406,23 @@ const ManageStudents = () => {
                           </div>
                         </div>
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {student.profile_image ? (
+                        <img 
+                          src={getProfileImageUrl(student.profile_image)}
+                          alt={student.first_name}
+                          className="h-10 w-10 rounded-full object-cover border-2 border-gray-200"
+                          onError={(e) => {
+                            e.target.src = ''; // ប្រសិនបើរូបភាពផ្ទុកមិនបាន
+                            e.target.className = 'hidden'; // លាក់ img
+                          }}
+                        />
+                      ) : (
+                        <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                          <PhotoIcon className="h-5 w-5 text-gray-400" />
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                       {student.student_code || '—'}
@@ -460,7 +482,7 @@ const ManageStudents = () => {
         )}
       </div>
 
-      {/* Modal - Create/Edit Student */}
+      {/* Modal - Create/Edit Student (ដូចដើម) */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 p-8 max-h-[90vh] overflow-y-auto">
@@ -480,7 +502,6 @@ const ManageStudents = () => {
             </div>
             
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* បង្ហាញព័ត៌មានថាតួនាទីត្រូវបានកំណត់ដោយស្វ័យប្រវត្តិ */}
               <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-2">
                 <AcademicCapIcon className="h-5 w-5 text-green-600" />
                 <span className="text-sm text-green-700">
