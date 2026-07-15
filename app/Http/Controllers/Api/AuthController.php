@@ -87,6 +87,7 @@ class AuthController extends Controller
             'status' => $user->status,
             'role_id' => $user->role_id,
             'role' => $user->role,
+            'profile_image' => $user->profile_image, // <--- បានបន្ថែមនៅទីនេះ
             'created_at' => $user->created_at,
             'updated_at' => $user->updated_at,
         ];
@@ -170,6 +171,7 @@ class AuthController extends Controller
             'status' => $user->status,
             'role_id' => $user->role_id,
             'role' => $user->role,
+            'profile_image' => $user->profile_image, // <--- បានបន្ថែមនៅទីនេះផងដែរ
             'created_at' => $user->created_at,
             'updated_at' => $user->updated_at,
         ];

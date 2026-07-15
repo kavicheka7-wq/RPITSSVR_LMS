@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\AdminTeacherController;
 use App\Http\Controllers\Api\AdminStudentController;
 use App\Http\Controllers\Api\DepartmentController;
 use App\Http\Controllers\Api\CourseController;
+use App\Http\Controllers\Api\ProfileController;
 use App\Models\Role; // សូមប្រាកដថាអ្នកមាន Model នេះ
 use App\Models\Department; // សូមប្រាកដថាអ្នកមាន Model នេះ
 use App\Models\Teacher; // សូមប្រាកដថាអ្នកមាន Model នេះ
@@ -39,6 +40,13 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'user']);
+    // Route សម្រាប់ទទួលការ Upload រូបភាពរបស់ User ទូទៅ (និង Admin)
+    Route::post('/user/profile/update-image', [ProfileController::class, 'updateImage']);
+    // នេះជា Route ថ្មីសម្រាប់ Update ព័ត៌មាន (ឈ្មោះ, អ៊ីមែល, លេខទូរស័ព្ទ)
+    Route::put('/user/profile/update', [ProfileController::class, 'update']);
+    // Route សម្រាប់ Teacher
+    Route::post('/teacher/profile/update-image', [ProfileController::class, 'updateTeacherImage']);
+    Route::put('/teacher/profile/update', [ProfileController::class, 'updateTeacher']);
 
     // Admin routes
     Route::prefix('admin')->middleware('role:Admin')->group(function () {

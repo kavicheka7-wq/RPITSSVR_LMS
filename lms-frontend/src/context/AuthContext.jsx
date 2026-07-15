@@ -147,6 +147,7 @@ export const AuthProvider = ({ children }) => {
       getTeacherData,
       getFullName,
       getEmail,
+      setUser,
     }}>
       {children}
     </AuthContext.Provider>

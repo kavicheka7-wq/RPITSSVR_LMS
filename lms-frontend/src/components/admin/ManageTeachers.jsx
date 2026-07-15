@@ -200,16 +200,16 @@ const ManageTeachers = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600 font-medium">កំពុងផ្ទុកទិន្នន័យ...</p>
-        </div>
-      </div>
-    );
-  }
+  // if (loading) {
+  //   return (
+  //     <div className="flex items-center justify-center min-h-[400px]">
+  //       <div className="text-center">
+  //         <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 mx-auto"></div>
+  //         <p className="mt-4 text-gray-600 font-medium">កំពុងផ្ទុកទិន្នន័យ...</p>
+  //       </div>
+  //     </div>
+  //   );
+  // }
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -295,9 +295,23 @@ const ManageTeachers = () => {
                   <tr key={teacher.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <div className="h-10 w-10 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center justify-center text-white font-medium text-sm shadow-sm">
-                          {teacher.first_name?.[0]}{teacher.last_name?.[0]}
-                        </div>
+                        {/* កូដទាញរូបភាព Profile របស់គ្រូបង្រៀន */}
+                        <div className="h-10 w-10 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold overflow-hidden">
+                            {teacher.profile_image ? (
+                              <img 
+                                src={teacher.profile_image} 
+                                alt="Profile" 
+                                className="h-full w-full object-cover"
+                                onError={(e) => {
+                                  // បើរូបភាព Error ឲ្យវាលោតមកបង្ហាញអក្សរកាត់វិញ
+                                  e.target.style.display = 'none';
+                                  e.target.parentElement.innerHTML = `<span>${teacher.first_name[0]}${teacher.last_name[0]}</span>`;
+                                }}
+                              />
+                            ) : (
+                              <span>{teacher.first_name[0]}{teacher.last_name[0]}</span>
+                            )}
+                          </div>
                         <div className="ml-3">
                           <div className="text-sm font-medium text-gray-900">
                             {teacher.first_name} {teacher.last_name}
