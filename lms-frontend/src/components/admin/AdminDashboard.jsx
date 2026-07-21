@@ -114,16 +114,6 @@ const AdminDashboard = () => {
       trend: '0%',
       trendUp: false,
     },
-    // { 
-    //   title: 'ការចុះឈ្មោះរៀន', 
-    //   value: stats?.total_enrollments || 0, 
-    //   icon: UserPlusIcon, 
-    //   color: 'from-accent-500 to-accent-700',
-    //   bgColor: 'bg-accent-50',
-    //   textColor: 'text-accent-600',
-    //   trend: '+22%',
-    //   trendUp: true,
-    // },
   ];
 
   // Sample chart data - replace with real data

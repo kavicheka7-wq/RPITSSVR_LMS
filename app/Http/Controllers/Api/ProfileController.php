@@ -142,4 +142,79 @@ class ProfileController extends Controller
 
         return response()->json($user);
     }
+
+    // ១. សម្រាប់ផ្លាស់ប្ដូររូបភាព Student
+    public function updateStudentImage(Request $request)
+    {
+        $request->validate([
+            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif|max:5120',
+        ]);
+
+        $user = Auth::user();
+        // ស្វែងរកទិន្នន័យសិស្សនៅក្នុងតារាង students ដោយផ្អែកលើ user_id
+        $student = \App\Models\Student::where('user_id', $user->id)->first();
+
+        if ($request->hasFile('profile_image')) {
+            $file = $request->file('profile_image');
+            
+            // លុបរូបចាស់ចេញ
+            if ($student && $student->profile_image) {
+                $oldImagePath = str_replace(url('storage') . '/', '', $student->profile_image);
+                Storage::disk('public')->delete($oldImagePath);
+            }
+
+            $filename = time() . '_student_' . $file->getClientOriginalName();
+            $path = $file->storeAs('profile_images', $filename, 'public');
+            $imageUrl = url('storage/' . $path);
+
+            // Update ចូលតារាង users 
+            $user->profile_image = $imageUrl;
+            $user->save();
+
+            // Update ចូលតារាង students ផងដែរ ដើម្បីឲ្យទិន្នន័យស៊ីគ្នា
+            if ($student) {
+                $student->profile_image = $imageUrl;
+                $student->save();
+            }
+
+            return response()->json([
+                'message' => 'បានផ្លាស់ប្ដូររូបភាពដោយជោគជ័យ',
+                'profile_image' => $imageUrl
+            ]);
+        }
+
+        return response()->json(['message' => 'រកមិនឃើញរូបភាព'], 400);
+    }
+
+    // ២. សម្រាប់កែប្រែព័ត៌មាន (ឈ្មោះ, អ៊ីមែល, លេខទូរស័ព្ទ) Student
+    public function updateStudent(Request $request)
+    {
+        $user = Auth::user();
+        $student = \App\Models\Student::where('user_id', $user->id)->first();
+
+        $request->validate([
+            'first_name' => 'required|string|max:100',
+            'last_name' => 'required|string|max:100',
+            'email' => 'required|string|email|max:255|unique:users,email,' . $user->id,
+            'phone' => 'nullable|string|max:20',
+        ]);
+
+        // Update តារាង users
+        $user->first_name = $request->first_name;
+        $user->last_name = $request->last_name;
+        $user->email = $request->email;
+        $user->phone = $request->phone;
+        $user->save();
+
+        // Update តារាង students ឲ្យស៊ីគ្នាជាមួយតារាង users 
+        if ($student) {
+            $student->first_name = $request->first_name;
+            $student->last_name = $request->last_name;
+            $student->email = $request->email;
+            $student->phone = $request->phone;
+            $student->save();
+        }
+
+        return response()->json($user);
+    }
 }

@@ -284,14 +284,13 @@ const ManageStudents = () => {
     if (imagePath.startsWith('http')) {
       return imagePath;
     }
-    // ប្រសិនបើរូបភាពត្រូវបានរក្សាទុកក្នុង storage
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     return `${baseUrl}/storage/${imagePath}`;
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-100">
+      <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 mx-auto"></div>
           <p className="mt-4 text-gray-600 font-medium">កំពុងផ្ទុកទិន្នន័យ...</p>
@@ -385,20 +384,15 @@ const ManageStudents = () => {
               ) : (
                 filteredStudents.map((student) => (
                   <tr key={student.id} className="hover:bg-gray-50 transition-colors">
-                    {/* ========================================== */}
-                    {/* ជួរសិស្ស - បង្ហាញរូបភាពខាងមុខឈ្មោះ */}
-                    {/* ========================================== */}
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        {/* បង្ហាញរូបភាពប្រសិនបើមាន */}
                         {student.profile_image ? (
                           <img 
                             src={getProfileImageUrl(student.profile_image)}
                             alt={`${student.first_name} ${student.last_name}`}
-                            className="h-10 w-10 rounded-full object-cover border-2 border-gray-200 shadow-sm shrink-0"
+                            className="h-10 w-10 rounded-full object-cover border-2 border-gray-200 shadow-sm flex-shrink-0"
                             onError={(e) => {
                               e.target.style.display = 'none';
-                              // បង្ហាញ avatar ជំនួស
                               const parent = e.target.parentElement;
                               const avatar = document.createElement('div');
                               avatar.className = 'h-10 w-10 rounded-full bg-gradient-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm flex-shrink-0';
@@ -408,9 +402,8 @@ const ManageStudents = () => {
                             }}
                           />
                         ) : (
-                          // ប្រសិនបើគ្មានរូបភាព បង្ហាញ avatar
-                          <div className="h-10 w-10 rounded-full bg-linear-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm shrink-0">
-                            {student.first_name?.charAt(0) || ''}{student.last_name?.charAt(0) || ''}
+                          <div className="h-10 w-10 rounded-full bg-gradient-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm flex-shrink-0">
+                            <span>{student.first_name?.charAt(0) || ''}{student.last_name?.charAt(0) || ''}</span>
                           </div>
                         )}
                         <div className="ml-3">
@@ -481,10 +474,12 @@ const ManageStudents = () => {
         )}
       </div>
 
-      {/* Modal - Create/Edit Student */}
+      {/* ========================================== */}
+      {/* MODAL - កែតម្រូវផ្ទាំងខ្មៅឱ្យស្រាលជាងមុន */}
+      {/* ========================================== */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 p-8 max-h-[90vh] overflow-y-auto animate-scaleIn">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
@@ -709,7 +704,7 @@ const ManageStudents = () => {
                       />
                     </div>
                     {previewImage && (
-                      <div className="shrink-0">
+                      <div className="flex-shrink-0">
                         <img 
                           src={previewImage} 
                           alt="Preview" 

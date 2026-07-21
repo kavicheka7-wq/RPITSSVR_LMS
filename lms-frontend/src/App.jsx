@@ -22,6 +22,9 @@ import ManageDepartments from './components/admin/ManageDepartments';
 
 // Teacher Components
 import TeacherDashboard from './components/teacher/TeacherDashboard';
+import TeacherAttendance from './components/teacher/TeacherAttendance';
+import ManageLessons from './components/teacher/ManageLessons';
+import TeacherManageStudents from './components/teacher/TeacherManageStudents';
 // import ManageClassroom from './components/teacher/ManageClassroom';
 // import CreateStudent from './components/teacher/CreateStudent';
 import ManageAttendance from './components/teacher/ManageAttendance';
@@ -97,7 +100,7 @@ const AppContent = () => {
                 {/* <Route path="/admin/users" element={<ManageUsers />} /> */}
                 <Route path="/admin/courses" element={<ManageCourses />} />
                 <Route path="/admin/departments" element={<ManageDepartments />} />
-                {/* <Route path="/admin/settings" element={<SystemSettings />} />  */}
+  
                 <Route path="/admin/teachers" element={<ManageTeachers />} />
                 <Route path="/admin/students" element={<ManageStudents />} />
               </Route>
@@ -105,16 +108,11 @@ const AppContent = () => {
               {/* Teacher Routes */}
               <Route element={<ProtectedRoute allowedRoles={['Teacher']} />}>
                 <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
-                {/* <Route path="/teacher/classroom" element={<ManageClassroom />} />
-                <Route path="/teacher/students/create" element={<CreateStudent />} /> */}
+                <Route path="/teacher/teacherattendance" element={<TeacherAttendance />} />
+                <Route path="/teacher/lessons" element={<ManageLessons />} />
                 <Route path="/teacher/attendance" element={<ManageAttendance />} />
-                {/* <Route path="/teacher/scores" element={<ManageScores />} />
-                <Route path="/teacher/majors/create" element={<CreateMajor />} />
-                <Route path="/teacher/subjects/create" element={<CreateSubject />} />
-                <Route path="/teacher/assignments/upload" element={<UploadAssignment />} />
-                <Route path="/teacher/homework/upload" element={<UploadHomework />} />
-                <Route path="/teacher/videos/upload" element={<UploadVideo />} />
-                <Route path="/teacher/exam" element={<OnlineExam />} /> */}
+                <Route path="/teacher/students" element={<TeacherManageStudents />} />
+                <Route path="/teacher/departments" element={<ManageDepartments />} />
               </Route>
 
               {/* Student Routes */}

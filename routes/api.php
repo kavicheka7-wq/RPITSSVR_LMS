@@ -47,6 +47,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Route សម្រាប់ Teacher
     Route::post('/teacher/profile/update-image', [ProfileController::class, 'updateTeacherImage']);
     Route::put('/teacher/profile/update', [ProfileController::class, 'updateTeacher']);
+    // Route សម្រាប់ Student
+    Route::post('/student/profile/update-image', [ProfileController::class, 'updateStudentImage']);
+    Route::put('/student/profile/update', [ProfileController::class, 'updateStudent']);
 
     // Admin routes
     Route::prefix('admin')->middleware('role:Admin')->group(function () {
@@ -100,8 +103,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/courses', [TeacherController::class, 'getMyCourses']);
         
         // Students
-        Route::get('/courses/{courseId}/students', [TeacherController::class, 'getStudents']);
-        Route::post('/students', [TeacherController::class, 'createStudent']);
+        Route::get('/students', [AdminStudentController::class, 'index']);
+        Route::post('/students', [AdminStudentController::class, 'store']);
+        Route::put('/students/{student}', [AdminStudentController::class, 'update']);
+        Route::delete('/students/{student}', [AdminStudentController::class, 'destroy']);
         
         // Attendance
         Route::get('/courses/{courseId}/attendance', [TeacherController::class, 'getAttendance']);
@@ -126,6 +131,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/quizzes', [TeacherController::class, 'createQuiz']);
         Route::post('/quizzes/{quizId}/questions', [TeacherController::class, 'addQuestion']);
         Route::get('/quizzes/{quizId}/results', [TeacherController::class, 'getQuizResults']);
+
+        // Department management
+        Route::get('/departments', [DepartmentController::class, 'index']);
+        Route::post('/departments', [DepartmentController::class, 'store']);
+        Route::put('/departments/{department}', [DepartmentController::class, 'update']);
+        Route::delete('/departments/{department}', [DepartmentController::class, 'destroy']);
+
     });
 
     // Student routes

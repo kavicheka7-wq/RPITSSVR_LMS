@@ -191,56 +191,7 @@ class TeacherController extends Controller
     }
 
     // --- Student Management ---
-    public function getStudents($courseId)
-    {
-        $course = Course::where('teacher_id', auth()->id())
-            ->findOrFail($courseId);
 
-        $students = $course->students()
-            ->withPivot('status', 'enrolled_date')
-            ->get();
-
-        return response()->json($students);
-    }
-
-    public function createStudent(Request $request)
-    {
-        $validated = $request->validate([
-            'first_name' => 'required|string|max:100',
-            'last_name' => 'required|string|max:100',
-            'email' => 'required|email|unique:users',
-            'password' => 'required|min:8',
-            'course_id' => 'required|exists:courses,id',
-        ]);
-
-        $course = Course::where('teacher_id', auth()->id())
-            ->findOrFail($request->course_id);
-
-        $user = DB::transaction(function () use ($validated, $course) {
-            $user = User::create([
-                'first_name' => $validated['first_name'],
-                'last_name' => $validated['last_name'],
-                'email' => $validated['email'],
-                'password' => bcrypt($validated['password']),
-                'role_id' => 3, // Student role
-                'status' => 'active',
-            ]);
-
-            Enrollment::create([
-                'student_id' => $user->id,
-                'course_id' => $course->id,
-                'enrolled_date' => now(),
-                'status' => 'active',
-            ]);
-
-            return $user;
-        });
-
-        return response()->json([
-            'student' => $user,
-            'message' => 'Student created and enrolled successfully'
-        ], 201);
-    }
 
     // --- Attendance Management ---
     public function getAttendance($courseId)
