@@ -24,10 +24,10 @@ const NAV_CONFIG = {
     label: 'អ្នកគ្រប់គ្រង',
     items: [
       { name: 'ផ្ទាំងគ្រប់គ្រង', icon: HomeIcon, path: '/admin/dashboard' },
+      { name: 'ដេប៉ាតឺម៉ង់', icon: Squares2X2Icon, path: '/admin/departments' },
       { name: 'គ្រូបង្រៀន', icon: AcademicCapIcon, path: '/admin/teachers' },
       { name: 'សិស្ស', icon: UserGroupIcon, path: '/admin/students' },
       { name: 'មុខវិជ្ជា', icon: BookOpenIcon, path: '/admin/courses' },
-      { name: 'ដេប៉ាតឺម៉ង់', icon: Squares2X2Icon, path: '/admin/departments' },
       { name: 'ការកំណត់', icon: Cog6ToothIcon, path: '/admin/settings' },
     ],
   },

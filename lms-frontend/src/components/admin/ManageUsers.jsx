@@ -110,16 +110,6 @@ const ManageUsers = () => {
     setShowModal(true);
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-14 w-14 border-2 border-primary-100 border-t-primary-600 mx-auto"></div>
-          <p className="mt-4 text-sm text-gray-500 font-medium">កំពុងផ្ទុកទិន្នន័យ...</p>
-        </div>
-      </div>
-    );
-  }
 
   const statusLabel = (status) => (status === 'active' ? 'សកម្ម' : 'អសកម្ម');
 
