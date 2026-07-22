@@ -15,6 +15,11 @@ class User extends Authenticatable
     use HasApiTokens, HasFactory, Notifiable;
 
     /**
+     * Appended attributes for JSON serialization.
+     */
+    protected $appends = ['full_name', 'name'];
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>
@@ -79,6 +84,16 @@ class User extends Authenticatable
      * Interact with the user's full name.
      */
     protected function fullName(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->first_name . ' ' . $this->last_name,
+        );
+    }
+
+    /**
+     * Interact with the user's name (compatibility alias for full name).
+     */
+    protected function name(): Attribute
     {
         return Attribute::make(
             get: fn () => $this->first_name . ' ' . $this->last_name,

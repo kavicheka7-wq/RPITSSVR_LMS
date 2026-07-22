@@ -18,11 +18,6 @@ use Illuminate\Support\Facades\Storage;
 
 class StudentController extends Controller
 {
-    public function __construct()
-    {
-        $this->middleware(['auth:sanctum', 'role:Student']);
-    }
-
     /**
      * HELPER METHOD: Check if the authenticated student is actively enrolled in a course.
      * Keeps the code DRY.
@@ -43,7 +38,7 @@ class StudentController extends Controller
         // OPTIMIZATION: Fixed N+1 queries by loading relationships and counting them at the DB level.
         $enrollments = $student->enrollments()
             ->with(['course' => function($query) {
-                $query->with('teacher')->withCount(['assignments', 'quizzes']);
+                $query->with(['teacher', 'teacherProfile', 'department'])->withCount(['assignments', 'quizzes']);
             }])
             ->where('status', 'active')
             ->get();
@@ -135,11 +130,24 @@ class StudentController extends Controller
     {
         $student = auth()->user();
         
-        $grades = Grade::with('course')
-            ->where('student_id', $student->id)
-            ->get();
+        $courses = Course::with(['teacher', 'teacherProfile', 'department'])->get();
+        
+        $grades = Grade::where('student_id', $student->id)->get()->keyBy('course_id');
 
-        return response()->json($grades);
+        $result = $courses->map(function ($course) use ($grades) {
+            $grade = $grades->get($course->id);
+            return [
+                'id' => $grade ? $grade->id : null,
+                'course_id' => $course->id,
+                'course' => $course,
+                'assignment_score' => $grade ? $grade->assignment_score : null,
+                'quiz_score' => $grade ? $grade->quiz_score : null,
+                'final_score' => $grade ? $grade->final_score : null,
+                'grade_letter' => $grade ? $grade->grade_letter : null,
+            ];
+        });
+
+        return response()->json($result);
     }
 
     public function getCourseScores($courseId)
@@ -157,12 +165,6 @@ class StudentController extends Controller
     // View Lessons
     public function getCourseLessons($courseId)
     {
-        $student = auth()->user();
-        
-        if (!$this->getActiveEnrollment($student->id, $courseId)) {
-            return response()->json(['message' => 'You are not enrolled in this course'], 403);
-        }
-
         $lessons = Lesson::with(['files', 'videos'])
             ->where('course_id', $courseId)
             ->orderBy('lesson_order')
@@ -182,10 +184,6 @@ class StudentController extends Controller
         $student = auth()->user();
         $assignment = Assignment::findOrFail($request->assignment_id);
         
-        if (!$this->getActiveEnrollment($student->id, $assignment->course_id)) {
-            return response()->json(['message' => 'You are not enrolled in this course'], 403);
-        }
-
         if (now()->gt($assignment->due_date)) {
             return response()->json(['message' => 'Assignment submission deadline has passed'], 400);
         }
@@ -276,19 +274,7 @@ class StudentController extends Controller
     {
         $student = auth()->user();
         
-        $quiz = Quiz::with(['questions.options'])->findOrFail($quizId);
-
-        if (!$this->getActiveEnrollment($student->id, $quiz->course_id)) {
-            return response()->json(['message' => 'You are not enrolled in this course'], 403);
-        }
-
-        if (now()->lt($quiz->start_date)) {
-            return response()->json(['message' => 'Quiz has not started yet'], 400);
-        }
-
-        if (now()->gt($quiz->end_date)) {
-            return response()->json(['message' => 'Quiz has ended'], 400);
-        }
+        $quiz = Quiz::with(['course', 'questions.options'])->findOrFail($quizId);
 
         $attempt = QuizAttempt::where('quiz_id', $quizId)
             ->where('student_id', $student->id)
@@ -298,41 +284,49 @@ class StudentController extends Controller
             return response()->json(['message' => 'You have already completed this quiz'], 400);
         }
 
+        $durationInSeconds = ($quiz->duration ?? 30) * 60;
+
         if ($attempt) {
-            $timeLeft = $quiz->duration * 60 - now()->diffInSeconds($attempt->started_at);
+            $elapsedSeconds = now()->getTimestamp() - $attempt->started_at->getTimestamp();
+            $timeLeft = $durationInSeconds - $elapsedSeconds;
             if ($timeLeft <= 0) {
                 $attempt->update(['submitted_at' => now()]);
-                return response()->json(['message' => 'Time is up! Quiz auto-submitted.']);
+                return response()->json(['message' => 'Time is up! Quiz auto-submitted.'], 400);
             }
         } else {
+            if (now()->lt($quiz->start_date)) {
+                return response()->json(['message' => 'Quiz has not started yet'], 400);
+            }
+
+            if (now()->gt($quiz->end_date)) {
+                return response()->json(['message' => 'Quiz has ended'], 400);
+            }
+
             $attempt = QuizAttempt::create([
                 'quiz_id' => $quizId,
                 'student_id' => $student->id,
                 'started_at' => now(),
             ]);
+            $timeLeft = $durationInSeconds;
         }
 
         return response()->json([
             'quiz' => $quiz,
             'attempt' => $attempt,
-            'time_left' => $quiz->duration * 60 - now()->diffInSeconds($attempt->started_at),
+            'time_left' => $timeLeft,
         ]);
     }
 
     public function submitQuiz(Request $request, $quizId)
     {
         $request->validate([
-            'answers' => 'required|array',
+            'answers' => 'nullable|array',
             'answers.*.question_id' => 'required|exists:questions,id',
             'answers.*.selected_option' => 'required|integer',
         ]);
 
         $student = auth()->user();
         $quiz = Quiz::findOrFail($quizId);
-        
-        if (!$this->getActiveEnrollment($student->id, $quiz->course_id)) {
-            return response()->json(['message' => 'You are not enrolled in this course'], 403);
-        }
 
         $attempt = QuizAttempt::where('quiz_id', $quizId)
             ->where('student_id', $student->id)
@@ -343,14 +337,16 @@ class StudentController extends Controller
             return response()->json(['message' => 'No active quiz attempt found'], 400);
         }
 
+        $answers = $request->input('answers', []);
+
         // OPTIMIZATION: Load all questions in a single query to avoid N+1 inside the loop
-        $questionIds = collect($request->answers)->pluck('question_id')->toArray();
+        $questionIds = collect($answers)->pluck('question_id')->toArray();
         $questions = Question::with('options')->whereIn('id', $questionIds)->get()->keyBy('id');
 
         $score = 0;
         $totalMarks = 0;
 
-        foreach ($request->answers as $answer) {
+        foreach ($answers as $answer) {
             $question = $questions->get($answer['question_id']);
             
             if (!$question) continue;
@@ -409,13 +405,9 @@ class StudentController extends Controller
     // Get all courses student is enrolled in
     public function getMyCourses()
     {
-        $student = auth()->user();
-        
-        $courses = $student->enrollments()
-            ->with('course.teacher')
-            ->where('status', 'active')
-            ->get()
-            ->pluck('course');
+        $courses = Course::with(['teacher', 'teacherProfile', 'department'])
+            ->orderBy('course_code')
+            ->get();
 
         return response()->json($courses);
     }
@@ -425,17 +417,24 @@ class StudentController extends Controller
     {
         $student = auth()->user();
         
-        if (!$this->getActiveEnrollment($student->id, $courseId)) {
-            return response()->json(['message' => 'You are not enrolled in this course'], 403);
-        }
-
-        $course = Course::with(['teacher', 'department'])->findOrFail($courseId);
+        $course = Course::with(['teacher', 'teacherProfile', 'department'])->findOrFail($courseId);
 
         $assignments = Assignment::where('course_id', $courseId)->get();
+        
+        $submissions = AssignmentSubmission::where('student_id', $student->id)
+            ->whereIn('assignment_id', $assignments->pluck('id'))
+            ->get();
+
         $quizzes = Quiz::where('course_id', $courseId)->get();
+        
+        $quizAttempts = QuizAttempt::where('student_id', $student->id)
+            ->whereIn('quiz_id', $quizzes->pluck('id'))
+            ->get();
+
         $attendance = Attendance::where('student_id', $student->id)
             ->where('course_id', $courseId)
             ->get();
+            
         $grade = Grade::where('student_id', $student->id)
             ->where('course_id', $courseId)
             ->first();
@@ -443,9 +442,105 @@ class StudentController extends Controller
         return response()->json([
             'course' => $course,
             'assignments' => $assignments,
+            'submissions' => $submissions,
             'quizzes' => $quizzes,
+            'quiz_attempts' => $quizAttempts,
             'attendance' => $attendance,
             'grade' => $grade,
         ]);
+    }
+
+    // Get all lessons in the system for general student viewing
+    public function getAllLessons()
+    {
+        $lessons = Lesson::with([
+            'course.teacher',
+            'course.teacherProfile',
+            'course.department',
+            'files',
+            'videos'
+        ])
+        ->orderBy('course_id')
+        ->orderBy('lesson_order')
+        ->get();
+
+        return response()->json($lessons);
+    }
+
+    // Get all assignments in the system for general student viewing & submission
+    public function getAllAssignments()
+    {
+        $student = auth()->user();
+        
+        $assignments = Assignment::with(['course.teacher', 'course.teacherProfile', 'course.department'])
+            ->orderBy('due_date', 'asc')
+            ->get();
+
+        // Load student submissions for these assignments
+        $submissions = AssignmentSubmission::where('student_id', $student->id)
+            ->whereIn('assignment_id', $assignments->pluck('id'))
+            ->get()
+            ->keyBy('assignment_id');
+
+        $result = $assignments->map(function ($assignment) use ($submissions) {
+            $submission = $submissions->get($assignment->id);
+            return [
+                'id' => $assignment->id,
+                'course_id' => $assignment->course_id,
+                'title' => $assignment->title,
+                'description' => $assignment->description,
+                'due_date' => $assignment->due_date,
+                'marks' => $assignment->marks,
+                'course' => $assignment->course,
+                'submission' => $submission ? [
+                    'id' => $submission->id,
+                    'file_path' => $submission->file_path,
+                    'submitted_at' => $submission->submitted_at,
+                    'score' => $submission->score,
+                    'feedback' => $submission->feedback,
+                ] : null
+            ];
+        });
+
+        return response()->json($result);
+    }
+
+    // Get all quizzes in the system for general student viewing & status
+    public function getAllQuizzes()
+    {
+        $student = auth()->user();
+        
+        $quizzes = Quiz::with(['course.teacher', 'course.teacherProfile', 'course.department'])
+            ->orderBy('start_date', 'asc')
+            ->get();
+
+        // Get student attempts for these quizzes
+        $attempts = QuizAttempt::where('student_id', $student->id)
+            ->whereIn('quiz_id', $quizzes->pluck('id'))
+            ->get()
+            ->keyBy('quiz_id');
+
+        $result = $quizzes->map(function ($quiz) use ($attempts) {
+            $attempt = $attempts->get($quiz->id);
+            return [
+                'id' => $quiz->id,
+                'course_id' => $quiz->course_id,
+                'title' => $quiz->title,
+                'description' => $quiz->description,
+                'duration' => $quiz->duration,
+                'total_mark' => $quiz->total_mark,
+                'start_date' => $quiz->start_date,
+                'end_date' => $quiz->end_date,
+                'course' => $quiz->course,
+                'attempt' => $attempt ? [
+                    'id' => $attempt->id,
+                    'score' => $attempt->score,
+                    'started_at' => $attempt->started_at,
+                    'submitted_at' => $attempt->submitted_at,
+                ] : null
+            ];
+        });
+
+        return response()->json($result);
     }
 }

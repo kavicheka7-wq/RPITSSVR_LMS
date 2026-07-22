@@ -78,6 +78,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/students', [AdminStudentController::class, 'store']);
         Route::put('/students/{student}', [AdminStudentController::class, 'update']);
         Route::delete('/students/{student}', [AdminStudentController::class, 'destroy']);
+        Route::get('/students/{student}/enrollments', [AdminStudentController::class, 'getEnrollments']);
+        Route::post('/students/{student}/enrollments', [AdminStudentController::class, 'enrollStudent']);
+        Route::delete('/students/{student}/enrollments/{courseId}', [AdminStudentController::class, 'unenrollStudent']);
 
   
         // Department management
@@ -101,12 +104,16 @@ Route::middleware('auth:sanctum')->group(function () {
         
         // Courses
         Route::get('/courses', [TeacherController::class, 'getMyCourses']);
+        Route::post('/courses', [TeacherController::class, 'createCourse']);
+        Route::put('/courses/{id}', [TeacherController::class, 'updateCourse']);
+        Route::delete('/courses/{id}', [TeacherController::class, 'deleteCourse']);
         
         // Students
         Route::get('/students', [AdminStudentController::class, 'index']);
         Route::post('/students', [AdminStudentController::class, 'store']);
         Route::put('/students/{student}', [AdminStudentController::class, 'update']);
         Route::delete('/students/{student}', [AdminStudentController::class, 'destroy']);
+        Route::get('/courses/{courseId}/students', [TeacherController::class, 'getCourseStudents']);
         
         // Attendance
         Route::get('/courses/{courseId}/attendance', [TeacherController::class, 'getAttendance']);
@@ -118,18 +125,30 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/scores', [TeacherController::class, 'updateScores']);
         
         // Lessons
+        Route::get('/lessons', [TeacherController::class, 'getLessons']);
         Route::post('/lessons', [TeacherController::class, 'createLesson']);
+        Route::put('/lessons/{id}', [TeacherController::class, 'updateLesson']);
+        Route::delete('/lessons/{id}', [TeacherController::class, 'deleteLesson']);
         Route::post('/lessons/file', [TeacherController::class, 'uploadLessonFile']);
+        Route::delete('/lessons/files/{id}', [TeacherController::class, 'deleteLessonFile']);
         Route::post('/lessons/video', [TeacherController::class, 'uploadVideo']);
+        Route::delete('/lessons/videos/{id}', [TeacherController::class, 'deleteVideo']);
         
         // Assignments
+        Route::get('/assignments', [TeacherController::class, 'getTeacherAssignments']);
         Route::get('/courses/{courseId}/assignments', [TeacherController::class, 'getAssignments']);
         Route::post('/assignments', [TeacherController::class, 'createAssignment']);
+        Route::put('/assignments/{id}', [TeacherController::class, 'updateAssignment']);
+        Route::delete('/assignments/{id}', [TeacherController::class, 'deleteAssignment']);
         
         // Quizzes
+        Route::get('/quizzes', [TeacherController::class, 'getTeacherQuizzes']);
         Route::get('/courses/{courseId}/quizzes', [TeacherController::class, 'getQuizzes']);
         Route::post('/quizzes', [TeacherController::class, 'createQuiz']);
+        Route::put('/quizzes/{id}', [TeacherController::class, 'updateQuiz']);
+        Route::delete('/quizzes/{id}', [TeacherController::class, 'deleteQuiz']);
         Route::post('/quizzes/{quizId}/questions', [TeacherController::class, 'addQuestion']);
+        Route::delete('/quizzes/questions/{id}', [TeacherController::class, 'deleteQuestion']);
         Route::get('/quizzes/{quizId}/results', [TeacherController::class, 'getQuizResults']);
 
         // Department management
@@ -149,6 +168,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/courses', [StudentController::class, 'getMyCourses']);
         Route::get('/courses/{courseId}', [StudentController::class, 'getCourseDetails']);
         Route::get('/courses/{courseId}/lessons', [StudentController::class, 'getCourseLessons']);
+        Route::get('/lessons', [StudentController::class, 'getAllLessons']);
         
         // Attendance
         Route::get('/attendance', [StudentController::class, 'getAttendance']);
@@ -159,6 +179,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/courses/{courseId}/scores', [StudentController::class, 'getCourseScores']);
         
         // Assignments
+        Route::get('/assignments', [StudentController::class, 'getAllAssignments']);
         Route::post('/assignments/submit', [StudentController::class, 'uploadAssignment']);
         
         // Homework/File upload
@@ -166,6 +187,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/videos', [StudentController::class, 'uploadVideo']);
         
         // Quizzes
+        Route::get('/quizzes', [StudentController::class, 'getAllQuizzes']);
         Route::get('/quizzes/{quizId}', [StudentController::class, 'getQuiz']);
         Route::post('/quizzes/{quizId}/submit', [StudentController::class, 'submitQuiz']);
         Route::get('/quizzes/{quizId}/results', [StudentController::class, 'getQuizResults']);

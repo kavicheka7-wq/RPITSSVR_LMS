@@ -15,11 +15,6 @@ use Illuminate\Validation\Rule;
 
 class AdminController extends Controller
 {
-    public function __construct()
-    {
-        $this->middleware(['auth:sanctum', 'role:Admin']);
-    }
-
     // --- User Management ---
 
     public function getUsers(Request $request)

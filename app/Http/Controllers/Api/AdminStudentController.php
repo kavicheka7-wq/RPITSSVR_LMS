@@ -8,6 +8,7 @@ use App\Models\Role;
 use App\Models\Student;
 use App\Models\User;
 use App\Models\Department;
+use App\Models\Enrollment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -208,6 +209,91 @@ class AdminStudentController extends Controller
         return response()->json([
             'message' => "បានលុបគណនីសិស្ស '{$studentName}' ដោយជោគជ័យ"
         ]);
+    }
+
+    public function getEnrollments(Student $student)
+    {
+        try {
+            $enrollments = Enrollment::with('course.teacher')
+                ->where('student_id', $student->user_id)
+                ->get();
+
+            return response()->json([
+                'data' => $enrollments,
+                'message' => 'បានទាញយកបញ្ជីការចុះឈ្មោះដោយជោគជ័យ'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching student enrollments: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យចុះឈ្មោះ'
+            ], 500);
+        }
+    }
+
+    public function enrollStudent(Request $request, Student $student)
+    {
+        try {
+            $validated = $request->validate([
+                'course_ids' => 'required|array',
+                'course_ids.*' => 'required|exists:courses,id',
+            ]);
+
+            $enrolledCourses = [];
+            foreach ($validated['course_ids'] as $courseId) {
+                $exists = Enrollment::where('student_id', $student->user_id)
+                    ->where('course_id', $courseId)
+                    ->exists();
+
+                if (!$exists) {
+                    $enrollment = Enrollment::create([
+                        'student_id' => $student->user_id,
+                        'course_id' => $courseId,
+                        'enrolled_date' => now(),
+                        'status' => 'active',
+                    ]);
+                    $enrolledCourses[] = $enrollment->load('course.teacher');
+                }
+            }
+
+            return response()->json([
+                'data' => $enrolledCourses,
+                'message' => 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្សដោយជោគជ័យ'
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Error enrolling student: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការចុះឈ្មោះមុខវិជ្ជាឱ្យសិស្ស: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function unenrollStudent(Student $student, $courseId)
+    {
+        try {
+            $deleted = Enrollment::where('student_id', $student->user_id)
+                ->where('course_id', $courseId)
+                ->delete();
+
+            if ($deleted) {
+                return response()->json([
+                    'message' => 'បានលុបការចុះឈ្មោះមុខវិជ្ជាដោយជោគជ័យ'
+                ]);
+            } else {
+                return response()->json([
+                    'message' => 'រកមិនឃើញការចុះឈ្មោះមុខវិជ្ជានេះទេ'
+                ], 404);
+            }
+        } catch (\Exception $e) {
+            \Log::error('Error unenrolling student: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការលុបការចុះឈ្មោះមុខវិជ្ជា'
+            ], 500);
+        }
     }
 
     private function generateStudentCode()

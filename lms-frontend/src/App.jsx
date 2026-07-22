@@ -1,4 +1,4 @@
-// src/App.jsx
+// src/App.jsx - Reload trigger
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
@@ -22,9 +22,12 @@ import ManageDepartments from './components/admin/ManageDepartments';
 
 // Teacher Components
 import TeacherDashboard from './components/teacher/TeacherDashboard';
-import TeacherAttendance from './components/teacher/TeacherAttendance';
+import TeacherManageCourses from './components/teacher/TeacherManageCourses';
+import TeacherManageAssignments from './components/teacher/TeacherManageAssignments';
+import TeacherManageQuizzes from './components/teacher/TeacherManageQuizzes';
 import ManageLessons from './components/teacher/ManageLessons';
 import TeacherManageStudents from './components/teacher/TeacherManageStudents';
+import TeacherManageScores from './components/teacher/TeacherManageScores';
 // import ManageClassroom from './components/teacher/ManageClassroom';
 // import CreateStudent from './components/teacher/CreateStudent';
 import ManageAttendance from './components/teacher/ManageAttendance';
@@ -40,6 +43,11 @@ import ManageAttendance from './components/teacher/ManageAttendance';
 import StudentDashboard from './components/student/StudentDashboard';
 import ViewAttendance from './components/student/ViewAttendance';
 import ViewScores from './components/student/ViewScores';
+import StudentCourses from './components/student/StudentCourses';
+import StudentCourseDetails from './components/student/StudentCourseDetails';
+import StudentLessons from './components/student/StudentLessons';
+import StudentAssignments from './components/student/StudentAssignments';
+import StudentQuizzes from './components/student/StudentQuizzes';
 // import StudentUploadAssignment from './components/student/UploadAssignment';
 // import StudentUploadHomework from './components/student/UploadHomework';
 
@@ -60,10 +68,11 @@ const AppContent = () => {
 
   const getDashboardPath = () => {
     if (!user) return '/login';
-    switch (user.role?.role_name) {
-      case 'Admin': return '/admin/dashboard';
-      case 'Teacher': return '/teacher/dashboard';
-      case 'Student': return '/student/dashboard';
+    const role = (user?.role?.role_name || user?.role_name || user?.role || '').toString().toLowerCase();
+    switch (role) {
+      case 'admin': return '/admin/dashboard';
+      case 'teacher': return '/teacher/dashboard';
+      case 'student': return '/student/dashboard';
       default: return '/login';
     }
   };
@@ -71,7 +80,7 @@ const AppContent = () => {
   // If user is not logged in, show auth pages without layout
   if (!user) {
     return (
-      <Router>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
@@ -84,7 +93,7 @@ const AppContent = () => {
 
   // User is logged in, show full layout with Navbar and Sidebar
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="min-h-screen bg-gray-50">
         <Navbar />
         <div className="flex">
@@ -108,9 +117,12 @@ const AppContent = () => {
               {/* Teacher Routes */}
               <Route element={<ProtectedRoute allowedRoles={['Teacher']} />}>
                 <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
-                <Route path="/teacher/teacherattendance" element={<TeacherAttendance />} />
+                <Route path="/teacher/courses" element={<TeacherManageCourses />} />
                 <Route path="/teacher/lessons" element={<ManageLessons />} />
+                <Route path="/teacher/assignments" element={<TeacherManageAssignments />} />
+                <Route path="/teacher/quizzes" element={<TeacherManageQuizzes />} />
                 <Route path="/teacher/attendance" element={<ManageAttendance />} />
+                <Route path="/teacher/scores" element={<TeacherManageScores />} />
                 <Route path="/teacher/students" element={<TeacherManageStudents />} />
                 <Route path="/teacher/departments" element={<ManageDepartments />} />
               </Route>
@@ -118,8 +130,13 @@ const AppContent = () => {
               {/* Student Routes */}
               <Route element={<ProtectedRoute allowedRoles={['Student']} />}>
                 <Route path="/student/dashboard" element={<StudentDashboard />} />
+                <Route path="/student/courses" element={<StudentCourses />} />
+                <Route path="/student/courses/:courseId" element={<StudentCourseDetails />} />
+                <Route path="/student/lessons" element={<StudentLessons />} />
                 <Route path="/student/attendance" element={<ViewAttendance />} />
                 <Route path="/student/scores" element={<ViewScores />} />
+                <Route path="/student/assignments" element={<StudentAssignments />} />
+                <Route path="/student/quizzes" element={<StudentQuizzes />} />
                 {/* <Route path="/student/assignments/upload" element={<StudentUploadAssignment />} />
                 <Route path="/student/homework/upload" element={<StudentUploadHomework />} /> */}
               </Route>

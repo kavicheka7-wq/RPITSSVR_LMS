@@ -11,6 +11,7 @@ import {
   MagnifyingGlassIcon,
   AcademicCapIcon,
   PhotoIcon,
+  BookOpenIcon,
 } from '@heroicons/react/24/outline';
 
 const ManageStudents = () => {
@@ -22,6 +23,14 @@ const ManageStudents = () => {
   const [studentRoleId, setStudentRoleId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [previewImage, setPreviewImage] = useState(null);
+  
+  // States for student course enrollments
+  const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [studentEnrollments, setStudentEnrollments] = useState([]);
+  const [allCourses, setAllCourses] = useState([]);
+  const [loadingEnrollments, setLoadingEnrollments] = useState(false);
+  const [selectedCourseToEnroll, setSelectedCourseToEnroll] = useState('');
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -197,6 +206,69 @@ const ManageStudents = () => {
         fetchStudents();
       } catch (error) {
         toast.error(error.response?.data?.message || 'មិនអាចលុបសិស្សបានទេ');
+      }
+    }
+  };
+
+  const openEnrollmentModal = async (student) => {
+    setSelectedStudent(student);
+    setShowEnrollmentModal(true);
+    setLoadingEnrollments(true);
+    try {
+      const enrollmentsRes = await api.get(`/admin/students/${student.id}/enrollments`);
+      setStudentEnrollments(enrollmentsRes.data.data || []);
+      
+      const coursesRes = await api.get('/admin/courses');
+      setAllCourses(coursesRes.data.data || coursesRes.data || []);
+      
+      setSelectedCourseToEnroll('');
+    } catch (error) {
+      console.error('Error fetching enrollment details:', error);
+      toast.error('មិនអាចទាញយកព័ត៌មានចុះឈ្មោះបានទេ');
+    } finally {
+      setLoadingEnrollments(false);
+    }
+  };
+
+  const handleEnrollCourse = async (e) => {
+    e.preventDefault();
+    if (!selectedCourseToEnroll) {
+      toast.error('សូមជ្រើសរើសមុខវិជ្ជា');
+      return;
+    }
+    
+    try {
+      setLoadingEnrollments(true);
+      await api.post(`/admin/students/${selectedStudent.id}/enrollments`, {
+        course_ids: [parseInt(selectedCourseToEnroll)]
+      });
+      toast.success('បានចុះឈ្មោះមុខវិជ្ជាដោយជោគជ័យ');
+      
+      const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
+      setStudentEnrollments(enrollmentsRes.data.data || []);
+      setSelectedCourseToEnroll('');
+    } catch (error) {
+      console.error('Error enrolling student:', error);
+      toast.error(error.response?.data?.message || 'មិនអាចចុះឈ្មោះមុខវិជ្ជាបានទេ');
+    } finally {
+      setLoadingEnrollments(false);
+    }
+  };
+
+  const handleUnenrollCourse = async (courseId) => {
+    if (window.confirm('តើអ្នកប្រាកដថាចង់លុបមុខវិជ្ជានេះចេញពីសិស្សនេះមែនទេ?')) {
+      try {
+        setLoadingEnrollments(true);
+        await api.delete(`/admin/students/${selectedStudent.id}/enrollments/${courseId}`);
+        toast.success('បានលុបមុខវិជ្ជាចេញពីសិស្សដោយជោគជ័យ');
+        
+        const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
+        setStudentEnrollments(enrollmentsRes.data.data || []);
+      } catch (error) {
+        console.error('Error unenrolling student:', error);
+        toast.error('មិនអាចលុបមុខវិជ្ជាចេញពីសិស្សបានទេ');
+      } finally {
+        setLoadingEnrollments(false);
       }
     }
   };
@@ -439,6 +511,13 @@ const ManageStudents = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       <div className="flex items-center justify-center space-x-2">
+                        <button
+                          onClick={() => openEnrollmentModal(student)}
+                          className="p-2 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-50 rounded-xl transition-all"
+                          title="ចុះឈ្មោះមុខវិជ្ជា (Manage Courses)"
+                        >
+                          <BookOpenIcon className="h-5 w-5" />
+                        </button>
                         <button
                           onClick={() => openEditModal(student)}
                           className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
@@ -768,6 +847,143 @@ const ManageStudents = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================== */}
+      {/* MODAL - គ្រប់គ្រងការចុះឈ្មោះចូលរៀន (Manage Enrollments) */}
+      {/* ========================================== */}
+      {showEnrollmentModal && selectedStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl mx-4 p-8 max-h-[90vh] overflow-y-auto flex flex-col animate-scaleIn">
+            {/* Header */}
+            <div className="flex justify-between items-center pb-4 border-b border-gray-100 mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                  <span className="bg-emerald-100 text-emerald-600 p-2 rounded-xl">
+                    <BookOpenIcon className="h-5 w-5" />
+                  </span>
+                  ចុះឈ្មោះមុខវិជ្ជា (Manage Courses)
+                </h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  សិស្ស៖ <span className="font-semibold text-gray-700">{selectedStudent.first_name} {selectedStudent.last_name}</span> ({selectedStudent.student_code || 'គ្មានអត្តលេខ'})
+                </p>
+              </div>
+              <button
+                onClick={() => setShowEnrollmentModal(false)}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+              >
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+
+            {loadingEnrollments && studentEnrollments.length === 0 ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600"></div>
+              </div>
+            ) : (
+              <div className="space-y-6 flex-1 overflow-y-auto pr-1">
+                {/* section 1: Add new enrollment */}
+                <div className="bg-gray-50 border border-gray-100 rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-1.5">
+                    <PlusIcon className="h-4 w-4 text-emerald-600" />
+                    ចុះឈ្មោះមុខវិជ្ជាថ្មី (Enroll New Course)
+                  </h3>
+                  
+                  {allCourses.filter(c => !studentEnrollments.some(e => e.course_id === c.id)).length === 0 ? (
+                    <p className="text-xs text-gray-500 italic bg-white border border-gray-200 rounded-xl p-3 text-center">
+                      សិស្សបានចុះឈ្មោះគ្រប់មុខវិជ្ជាដែលមានរួចរាល់ហើយ។ (All available courses enrolled)
+                    </p>
+                  ) : (
+                    <form onSubmit={handleEnrollCourse} className="flex flex-col sm:flex-row gap-3">
+                      <div className="flex-1">
+                        <select
+                          value={selectedCourseToEnroll}
+                          onChange={(e) => setSelectedCourseToEnroll(e.target.value)}
+                          className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-white text-sm"
+                        >
+                          <option value="">ជ្រើសរើសមុខវិជ្ជាដើម្បីចុះឈ្មោះ...</option>
+                          {allCourses
+                            .filter(course => !studentEnrollments.some(e => e.course_id === course.id))
+                            .map(course => (
+                              <option key={course.id} value={course.id}>
+                                {course.course_code} - {course.course_name} ({course.credit} ក្រេឌីត / {course.teacher ? `${course.teacher.first_name} ${course.teacher.last_name}` : 'គ្មានគ្រូ'})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                      <button
+                        type="submit"
+                        className="px-6 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-xl hover:bg-emerald-700 shadow-sm transition-all hover:shadow-md flex items-center justify-center gap-2 flex-shrink-0"
+                      >
+                        <PlusIcon className="h-4 w-4" />
+                        ចុះឈ្មោះចូលរៀន
+                      </button>
+                    </form>
+                  )}
+                </div>
+
+                {/* section 2: Current enrollments list */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-1.5">
+                    <AcademicCapIcon className="h-4 w-4 text-indigo-600" />
+                    មុខវិជ្ជាកំពុងសិក្សា ({studentEnrollments.length})
+                  </h3>
+                  
+                  {studentEnrollments.length === 0 ? (
+                    <div className="text-center py-10 border border-dashed border-gray-200 rounded-2xl">
+                      <BookOpenIcon className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+                      <p className="text-sm text-gray-500 font-medium">មិនទាន់បានចុះឈ្មោះមុខវិជ្ជាណាមួយនៅឡើយទេ</p>
+                      <p className="text-xs text-gray-400 mt-1">សូមជ្រើសរើសមុខវិជ្ជាខាងលើដើម្បីចុះឈ្មោះចូលរៀន</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+                      {studentEnrollments.map((enrollment) => (
+                        <div 
+                          key={enrollment.id} 
+                          className="flex items-center justify-between p-4 bg-white border border-gray-150 rounded-2xl hover:shadow-sm hover:border-gray-300 transition-all"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="h-9 w-9 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0 font-medium text-xs font-mono">
+                              {enrollment.course?.course_code || 'Sub'}
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-900 leading-snug">
+                                {enrollment.course?.course_name || 'ឈ្មោះមុខវិជ្ជា'}
+                              </h4>
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                គ្រូទទួលបន្ទុក៖ <span className="text-gray-700">{enrollment.course?.teacher ? `${enrollment.course.teacher.first_name} ${enrollment.course.teacher.last_name}` : '—'}</span> &bull; {enrollment.course?.credit || 3} ក្រេឌីត
+                              </p>
+                            </div>
+                          </div>
+                          
+                          <button
+                            type="button"
+                            onClick={() => handleUnenrollCourse(enrollment.course_id)}
+                            className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all"
+                            title="លុបមុខវិជ្ជាចេញ"
+                          >
+                            <TrashIcon className="h-5 w-5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="mt-6 pt-4 border-t border-gray-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowEnrollmentModal(false)}
+                className="px-6 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all"
+              >
+                រួចរាល់
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -36,24 +36,25 @@ const NAV_CONFIG = {
     label: 'គ្រូបង្រៀន',
     items: [
       { name: 'ផ្ទាំងគ្រប់គ្រង', icon: HomeIcon, path: '/teacher/dashboard' },
-      { name: 'វត្តមានគ្រូបង្រៀន', icon: ClipboardDocumentListIcon, path: '/teacher/teacherattendance' },
+      { name: 'មុខវិជ្ជា', icon: BookOpenIcon, path: '/teacher/courses' },
       { name: 'មេរៀន', icon: BookOpenIcon, path: '/teacher/lessons' },
       { name: 'សិស្ស', icon: UsersIcon, path: '/teacher/students' },
-      { name: 'វត្តមានសិស្ស', icon: ClipboardDocumentListIcon, path: '/teacher/studentattendance' },
+      { name: 'វត្តមានសិស្ស', icon: ClipboardDocumentListIcon, path: '/teacher/attendance' },
       { name: 'ពិន្ទុ', icon: ChartBarIcon, path: '/teacher/scores' },
-      { name: 'កិច្ចការ', icon: DocumentArrowUpIcon, path: '/teacher/assignments/upload' },
-      { name: 'កិច្ចការផ្ទះ', icon: FolderIcon, path: '/teacher/homework/upload' },
-      { name: 'ការប្រឡងអនឡាញ', icon: PencilSquareIcon, path: '/teacher/exam' },
+      { name: 'កិច្ចការ', icon: DocumentArrowUpIcon, path: '/teacher/assignments' },
+      { name: 'កម្រងសំណួរ', icon: PencilSquareIcon, path: '/teacher/quizzes' },
     ],
   },
   Student: {
     label: 'សិស្ស',
     items: [
       { name: 'ផ្ទាំងគ្រប់គ្រង', icon: HomeIcon, path: '/student/dashboard' },
+      { name: 'មុខវិជ្ជា', icon: BookOpenIcon, path: '/student/courses' },
+      { name: 'មេរៀន', icon: BookOpenIcon, path: '/student/lessons' },
       { name: 'វត្តមាន', icon: ClipboardDocumentListIcon, path: '/student/attendance' },
       { name: 'ពិន្ទុ', icon: ChartBarIcon, path: '/student/scores' },
-      { name: 'កិច្ចការ', icon: DocumentArrowUpIcon, path: '/student/assignments/upload' },
-      { name: 'កិច្ចការផ្ទះ', icon: FolderIcon, path: '/student/homework/upload' },
+      { name: 'កិច្ចការ', icon: DocumentArrowUpIcon, path: '/student/assignments' },
+      { name: 'កម្រងសំណួរ', icon: PencilSquareIcon, path: '/student/quizzes' },
     ],
   },
 };
@@ -112,7 +113,7 @@ const Sidebar = () => {
           <div className="space-y-1">
             {uniqueNavItems.map((item) => (
               <NavLink
-                key={item.path}
+                key={`${item.path}-${item.name}`}
                 to={item.path}
                 className={({ isActive }) =>
                   `group relative flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-300 ${
@@ -182,7 +183,7 @@ const Sidebar = () => {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .animation-delay-200 {
           animation-delay: 200ms;
         }

@@ -10,6 +10,8 @@ class Teacher extends Model
 {
     use HasFactory;
 
+    protected $appends = ['full_name', 'status', 'profile_image_url'];
+
     protected $fillable = [
         'user_id',
         'role_id',        // យើងទុក role_id ក្នុងតារាង teachers

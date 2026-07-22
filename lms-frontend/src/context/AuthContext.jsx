@@ -111,7 +111,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   const hasRole = (roleName) => {
-    return user?.role?.role_name === roleName;
+    if (!user) return false;
+    const userRole = user?.role?.role_name || user?.role_name || user?.role;
+    if (typeof userRole === 'string') {
+      return userRole.toLowerCase() === roleName.toLowerCase();
+    }
+    return false;
   };
 
   const getTeacherData = () => {

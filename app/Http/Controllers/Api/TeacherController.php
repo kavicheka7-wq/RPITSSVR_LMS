@@ -24,11 +24,6 @@ use Illuminate\Support\Str;
 
 class TeacherController extends Controller
 {
-    public function __construct()
-    {
-        $this->middleware(['auth:sanctum', 'role:Teacher']);
-    }
-
     // --- Dashboard ---
     public function dashboard()
     {
@@ -190,8 +185,115 @@ class TeacherController extends Controller
         return response()->json($courses);
     }
 
-    // --- Student Management ---
+    public function createCourse(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'course_code' => 'required|string|max:50|unique:courses,course_code',
+                'course_name' => 'required|string|max:255',
+                'credit' => 'required|integer|min:1|max:6',
+                'description' => 'nullable|string',
+                'department_id' => 'required|exists:departments,id',
+            ]);
 
+            $validated['teacher_id'] = auth()->id();
+
+            $course = Course::create($validated);
+
+            return response()->json([
+                'message' => 'បានបង្កើតមុខវិជ្ជាដោយជោគជ័យ',
+                'data' => $course->load(['department', 'teacher'])
+            ], 201);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Teacher Course store error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការបង្កើតមុខវិជ្ជា: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function updateCourse(Request $request, $id)
+    {
+        try {
+            $course = Course::where('teacher_id', auth()->id())->findOrFail($id);
+
+            $validated = $request->validate([
+                'course_code' => [
+                    'required',
+                    'string',
+                    'max:50',
+                    \Illuminate\Validation\Rule::unique('courses', 'course_code')->ignore($course->id),
+                ],
+                'course_name' => 'required|string|max:255',
+                'credit' => 'required|integer|min:1|max:6',
+                'description' => 'nullable|string',
+                'department_id' => 'required|exists:departments,id',
+            ]);
+
+            $course->update($validated);
+
+            return response()->json([
+                'message' => 'បានកែប្រែមុខវិជ្ជាដោយជោគជ័យ',
+                'data' => $course->fresh(['department', 'teacher'])
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Teacher Course update error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការកែប្រែមុខវិជ្ជា: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function deleteCourse($id)
+    {
+        try {
+            $course = Course::where('teacher_id', auth()->id())->findOrFail($id);
+
+            // Check if there are enrollments
+            if ($course->enrollments()->exists()) {
+                return response()->json([
+                    'message' => 'មិនអាចលុបមុខវិជ្ជាដែលមានសិស្សចុះឈ្មោះរៀនបានទេ'
+                ], 400);
+            }
+
+            $courseName = $course->course_name;
+            $course->delete();
+
+            return response()->json([
+                'message' => "បានលុបមុខវិជ្ជា '{$courseName}' ដោយជោគជ័យ"
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Teacher Course delete error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការលុបមុខវិជ្ជា'
+            ], 500);
+        }
+    }
+
+    // --- Student Management ---
+    public function getCourseStudents($courseId)
+    {
+        $course = Course::where('teacher_id', auth()->id())->findOrFail($courseId);
+
+        $students = $course->students()
+            ->wherePivot('status', 'active')
+            ->get();
+
+        return response()->json($students);
+    }
 
     // --- Attendance Management ---
     public function getAttendance($courseId)
@@ -268,13 +370,29 @@ class TeacherController extends Controller
     // --- Score Management ---
     public function getScores($courseId)
     {
-        Course::where('teacher_id', auth()->id())->findOrFail($courseId);
+        $course = Course::where('teacher_id', auth()->id())->findOrFail($courseId);
 
-        $scores = Grade::with('student')
-            ->where('course_id', $courseId)
+        $students = $course->students()
+            ->wherePivot('status', 'active')
             ->get();
 
-        return response()->json($scores);
+        $grades = Grade::where('course_id', $courseId)->get()->keyBy('student_id');
+
+        $result = $students->map(function ($student) use ($grades, $courseId) {
+            $grade = $grades->get($student->id);
+            return [
+                'id' => $grade ? $grade->id : null,
+                'student_id' => $student->id,
+                'course_id' => (int)$courseId,
+                'student' => $student,
+                'assignment_score' => $grade ? $grade->assignment_score : null,
+                'quiz_score' => $grade ? $grade->quiz_score : null,
+                'final_score' => $grade ? $grade->final_score : null,
+                'grade_letter' => $grade ? $grade->grade_letter : null,
+            ];
+        });
+
+        return response()->json($result);
     }
 
     public function updateScores(Request $request)
@@ -315,6 +433,27 @@ class TeacherController extends Controller
     }
 
     // --- Lesson Management ---
+    public function getLessons(Request $request)
+    {
+        try {
+            $query = Lesson::with(['course', 'files', 'videos'])
+                ->where('created_by', auth()->id());
+
+            if ($request->has('course_id') && !empty($request->course_id)) {
+                $query->where('course_id', $request->course_id);
+            }
+
+            $lessons = $query->orderBy('lesson_order')->get();
+
+            return response()->json($lessons);
+        } catch (\Exception $e) {
+            \Log::error('Teacher getLessons error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យមេរៀន: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function createLesson(Request $request)
     {
         $validated = $request->validate([
@@ -333,9 +472,73 @@ class TeacherController extends Controller
         $lesson = Lesson::create($validated);
 
         return response()->json([
-            'lesson' => $lesson,
+            'lesson' => $lesson->load(['course', 'files', 'videos']),
             'message' => 'Lesson created successfully'
         ], 201);
+    }
+
+    public function updateLesson(Request $request, $id)
+    {
+        try {
+            $lesson = Lesson::where('created_by', auth()->id())->findOrFail($id);
+
+            $validated = $request->validate([
+                'course_id' => 'required|exists:courses,id',
+                'title' => 'required|string|max:255',
+                'description' => 'nullable|string',
+                'lesson_order' => 'nullable|integer|min:0',
+            ]);
+
+            Course::where('teacher_id', auth()->id())
+                ->findOrFail($validated['course_id']);
+
+            $lesson->update($validated);
+
+            return response()->json([
+                'lesson' => $lesson->load(['course', 'files', 'videos']),
+                'message' => 'Lesson updated successfully'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Teacher updateLesson error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការកែប្រែមេរៀន: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function deleteLesson($id)
+    {
+        try {
+            $lesson = Lesson::where('created_by', auth()->id())->findOrFail($id);
+
+            // Delete associated files from storage and DB
+            foreach ($lesson->files as $file) {
+                Storage::disk('public')->delete($file->file_path);
+                $file->delete();
+            }
+
+            // Delete associated videos from storage and DB
+            foreach ($lesson->videos as $video) {
+                Storage::disk('public')->delete($video->video_url);
+                $video->delete();
+            }
+
+            $lesson->delete();
+
+            return response()->json([
+                'message' => 'បានលុបមេរៀនដោយជោគជ័យ'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Teacher deleteLesson error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការលុបមេរៀន: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     public function uploadLessonFile(Request $request)
@@ -362,6 +565,29 @@ class TeacherController extends Controller
             'file' => $lessonFile,
             'message' => 'File uploaded successfully'
         ]);
+    }
+
+    public function deleteLessonFile($id)
+    {
+        try {
+            $lessonFile = LessonFile::findOrFail($id);
+            
+            // Check if the lesson belongs to authenticated teacher
+            Lesson::where('created_by', auth()->id())->findOrFail($lessonFile->lesson_id);
+            
+            // Delete file from disk
+            Storage::disk('public')->delete($lessonFile->file_path);
+            $lessonFile->delete();
+            
+            return response()->json([
+                'message' => 'បានលុបឯកសារដោយជោគជ័យ'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Teacher deleteLessonFile error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការលុបឯកសារ'
+            ], 500);
+        }
     }
 
     public function uploadVideo(Request $request)
@@ -392,14 +618,59 @@ class TeacherController extends Controller
         ]);
     }
 
+    public function deleteVideo($id)
+    {
+        try {
+            $video = Video::findOrFail($id);
+            
+            // Check if the lesson belongs to authenticated teacher
+            Lesson::where('created_by', auth()->id())->findOrFail($video->lesson_id);
+            
+            // Delete video from disk
+            Storage::disk('public')->delete($video->video_url);
+            $video->delete();
+            
+            return response()->json([
+                'message' => 'បានលុបវីដេអូដោយជោគជ័យ'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Teacher deleteVideo error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការលុបវីដេអូ'
+            ], 500);
+        }
+    }
+
     // --- Assignment Management ---
+    public function getTeacherAssignments(Request $request)
+    {
+        try {
+            $query = Assignment::with(['course'])
+                ->withCount('submissions')
+                ->where('created_by', auth()->id());
+
+            if ($request->has('course_id') && !empty($request->course_id)) {
+                $query->where('course_id', $request->course_id);
+            }
+
+            $assignments = $query->orderBy('created_at', 'desc')->get();
+
+            return response()->json($assignments);
+        } catch (\Exception $e) {
+            \Log::error('Teacher getTeacherAssignments error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការទាញយកកិច្ចការ: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function createAssignment(Request $request)
     {
         $validated = $request->validate([
             'course_id' => 'required|exists:courses,id',
             'title' => 'required|string|max:255',
             'description' => 'required|string',
-            'due_date' => 'required|date|after:now',
+            'due_date' => 'required|date',
             'total_score' => 'nullable|numeric|min:0',
         ]);
 
@@ -412,9 +683,69 @@ class TeacherController extends Controller
         $assignment = Assignment::create($validated);
 
         return response()->json([
-            'assignment' => $assignment,
+            'assignment' => $assignment->load('course'),
             'message' => 'Assignment created successfully'
         ], 201);
+    }
+
+    public function updateAssignment(Request $request, $id)
+    {
+        try {
+            $assignment = Assignment::where('created_by', auth()->id())->findOrFail($id);
+
+            $validated = $request->validate([
+                'course_id' => 'required|exists:courses,id',
+                'title' => 'required|string|max:255',
+                'description' => 'required|string',
+                'due_date' => 'required|date',
+                'total_score' => 'required|numeric|min:0',
+            ]);
+
+            Course::where('teacher_id', auth()->id())
+                ->findOrFail($validated['course_id']);
+
+            $assignment->update($validated);
+
+            return response()->json([
+                'assignment' => $assignment->load('course'),
+                'message' => 'Assignment updated successfully'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Teacher updateAssignment error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការកែប្រែកិច្ចការ: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function deleteAssignment($id)
+    {
+        try {
+            $assignment = Assignment::where('created_by', auth()->id())->findOrFail($id);
+
+            // Check if there are submissions
+            if ($assignment->submissions()->exists()) {
+                return response()->json([
+                    'message' => 'មិនអាចលុបកិច្ចការដែលមានសិស្សដាក់រួចហើយបានទេ'
+                ], 400);
+            }
+
+            $assignment->delete();
+
+            return response()->json([
+                'message' => 'បានលុបកិច្ចការដោយជោគជ័យ'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Teacher deleteAssignment error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការលុបកិច្ចការ'
+            ], 500);
+        }
     }
 
     public function getAssignments($courseId)
@@ -429,6 +760,30 @@ class TeacherController extends Controller
     }
 
     // --- Quiz Management ---
+    public function getTeacherQuizzes(Request $request)
+    {
+        try {
+            $query = Quiz::with(['course', 'questions.options'])
+                ->withCount(['questions', 'attempts'])
+                ->whereHas('course', function ($query) {
+                    $query->where('teacher_id', auth()->id());
+                });
+
+            if ($request->has('course_id') && !empty($request->course_id)) {
+                $query->where('course_id', $request->course_id);
+            }
+
+            $quizzes = $query->orderBy('created_at', 'desc')->get();
+
+            return response()->json($quizzes);
+        } catch (\Exception $e) {
+            \Log::error('Teacher getTeacherQuizzes error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការទាញយកកម្រងសំណួរ: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function createQuiz(Request $request)
     {
         $validated = $request->validate([
@@ -436,7 +791,7 @@ class TeacherController extends Controller
             'title' => 'required|string|max:255',
             'duration' => 'required|integer|min:1',
             'total_mark' => 'required|numeric|min:0',
-            'start_date' => 'required|date|after:now',
+            'start_date' => 'required|date',
             'end_date' => 'required|date|after:start_date',
         ]);
 
@@ -446,9 +801,81 @@ class TeacherController extends Controller
         $quiz = Quiz::create($validated);
 
         return response()->json([
-            'quiz' => $quiz,
+            'quiz' => $quiz->load('course'),
             'message' => 'Quiz created successfully'
         ], 201);
+    }
+
+    public function updateQuiz(Request $request, $id)
+    {
+        try {
+            $quiz = Quiz::whereHas('course', function ($query) {
+                $query->where('teacher_id', auth()->id());
+            })->findOrFail($id);
+
+            $validated = $request->validate([
+                'course_id' => 'required|exists:courses,id',
+                'title' => 'required|string|max:255',
+                'duration' => 'required|integer|min:1',
+                'total_mark' => 'required|numeric|min:0',
+                'start_date' => 'required|date',
+                'end_date' => 'required|date|after:start_date',
+            ]);
+
+            Course::where('teacher_id', auth()->id())
+                ->findOrFail($validated['course_id']);
+
+            $quiz->update($validated);
+
+            return response()->json([
+                'quiz' => $quiz->load('course'),
+                'message' => 'Quiz updated successfully'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Teacher updateQuiz error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការកែប្រែកម្រងសំណួរ: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function deleteQuiz($id)
+    {
+        try {
+            $quiz = Quiz::whereHas('course', function ($query) {
+                $query->where('teacher_id', auth()->id());
+            })->findOrFail($id);
+
+            // Check if there are attempts
+            if ($quiz->attempts()->exists()) {
+                return response()->json([
+                    'message' => 'មិនអាចលុបកម្រងសំណួរដែលមានសិស្សចូលរួមធ្វើរួចហើយបានទេ'
+                ], 400);
+            }
+
+            // Delete questions and options in transaction
+            DB::transaction(function () use ($quiz) {
+                foreach ($quiz->questions as $question) {
+                    $question->options()->delete();
+                    $question->delete();
+                }
+                $quiz->delete();
+            });
+
+            return response()->json([
+                'message' => 'បានលុបកម្រងសំណួរដោយជោគជ័យ'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Teacher deleteQuiz error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការលុបកម្រងសំណួរ'
+            ], 500);
+        }
     }
 
     public function addQuestion(Request $request, $quizId)
@@ -493,12 +920,45 @@ class TeacherController extends Controller
         ], 201);
     }
 
+    public function deleteQuestion($id)
+    {
+        try {
+            $question = Question::findOrFail($id);
+            
+            // Check if quiz belongs to teacher
+            $quiz = Quiz::whereHas('course', function ($query) {
+                $query->where('teacher_id', auth()->id());
+            })->findOrFail($question->quiz_id);
+
+            // Check if there are attempts on the quiz
+            if ($quiz->attempts()->exists()) {
+                return response()->json([
+                    'message' => 'មិនអាចលុបសំណួរក្នុងកម្រងសំណួរដែលសិស្សបានធ្វើរួចហើយទេ'
+                ], 400);
+            }
+
+            DB::transaction(function () use ($question) {
+                $question->options()->delete();
+                $question->delete();
+            });
+
+            return response()->json([
+                'message' => 'បានលុបសំណួរដោយជោគជ័យ'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Teacher deleteQuestion error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការលុបសំណួរ'
+            ], 500);
+        }
+    }
+
     // --- Online Exam ---
     public function getQuizzes($courseId)
     {
         Course::where('teacher_id', auth()->id())->findOrFail($courseId);
 
-        $quizzes = Quiz::withCount('questions')
+        $quizzes = Quiz::with(['questions.options'])
             ->where('course_id', $courseId)
             ->get();
 
