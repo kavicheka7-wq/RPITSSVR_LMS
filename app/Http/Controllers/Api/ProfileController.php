@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Hash;
 
 class ProfileController extends Controller
 {
@@ -217,4 +218,32 @@ class ProfileController extends Controller
 
         return response()->json($user);
     }
+
+    // ៣. សម្រាប់ផ្លាស់ប្ដូរ Password
+    public function updatePassword(Request $request)
+        {
+            // 1. Validate ទិន្នន័យដែលផ្ញើមកពី Frontend
+            $request->validate([
+                'current_password' => 'required',
+                'new_password' => 'required|min:6',
+            ]);
+
+            $user = $request->user();
+
+            // 2. ផ្ទៀងផ្ទាត់ពាក្យសម្ងាត់ចាស់ ថាតើត្រឹមត្រូវឬទេ
+            if (!Hash::check($request->current_password, $user->password)) {
+                return response()->json([
+                    'message' => 'ពាក្យសម្ងាត់បច្ចុប្បន្នមិនត្រឹមត្រូវទេ!'
+                ], 400);
+            }
+
+            // 3. កែប្រែពាក្យសម្ងាត់ថ្មីចូល Database
+            $user->update([
+                'password' => Hash::make($request->new_password)
+            ]);
+
+            return response()->json([
+                'message' => 'បានផ្លាស់ប្ដូរពាក្យសម្ងាត់ដោយជោគជ័យ'
+            ]);
+        }
 }

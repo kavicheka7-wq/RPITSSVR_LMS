@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Cache; // បន្ថែមការហៅ Cache មកប្រើប្រាស់
 
 class AdminTeacherController extends Controller
 {
@@ -19,11 +20,13 @@ class AdminTeacherController extends Controller
      * Display a listing of all teachers
      * GET /admin/teachers
      */
-    public function index()
+    public function index(Request $request) // បន្ថែម Request សម្រាប់ទទួលយក per_page
     {
+        $perPage = $request->per_page ?? 10; // កំណត់ចំនួនកំណត់ត្រាក្នុងមួយទំព័រ (លំនាំដើម ១០)
+
         $teachers = Teacher::with(['department', 'user', 'role'])
             ->orderBy('first_name')
-            ->get();
+            ->paginate($perPage); // ប្ដូរពី get() ទៅជា paginate() ដើម្បីកុំឱ្យយឺតពេលមានទិន្នន័យច្រើន
 
         return response()->json([
             'data' => $teachers,
@@ -81,11 +84,14 @@ class AdminTeacherController extends Controller
                 'phone' => $validated['phone'] ?? null,
                 'department_id' => $validated['department_id'] ?? null,
                 'specialization' => $validated['specialization'] ?? null,
-                'employment_type' => $validated['employment_type'] ?? 'Full-time',
+                'employment_type' => $validated['employment_type'] ?? 'Full-time','Part-time','Contract',
             ]);
 
             return $teacher->load(['department', 'user', 'role']);
         });
+
+        // លុប Cache ពេលមានការបង្កើតគ្រូថ្មី ដើម្បីឱ្យ Dashboard ធ្វើបច្ចុប្បន្នភាពទិន្នន័យ
+        Cache::forget('admin_dashboard_stats');
 
         return response()->json([
             'message' => 'បានបង្កើតគណនីគ្រូបង្រៀនដោយជោគជ័យ',
@@ -184,6 +190,9 @@ class AdminTeacherController extends Controller
         
         // Delete user (cascade will delete teacher)
         $teacher->user->delete();
+
+        // លុប Cache ពេលមានការលុបគ្រូចេញ ដើម្បីឱ្យ Dashboard ធ្វើបច្ចុប្បន្នភាពទិន្នន័យ
+        Cache::forget('admin_dashboard_stats');
 
         return response()->json([
             'message' => "បានលុបគណនីគ្រូបង្រៀន '{$teacherName}' ដោយជោគជ័យ"

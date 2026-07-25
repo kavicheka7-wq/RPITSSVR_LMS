@@ -51,6 +51,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/student/profile/update-image', [ProfileController::class, 'updateStudentImage']);
     Route::put('/student/profile/update', [ProfileController::class, 'updateStudent']);
 
+    // បន្ថែម Route ថ្មីនេះសម្រាប់ដូរ Password
+    Route::put('/user/update-password', [ProfileController::class, 'updatePassword']);
+
     // Admin routes
     Route::prefix('admin')->middleware('role:Admin')->group(function () {
         // User management

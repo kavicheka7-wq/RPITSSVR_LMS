@@ -50,7 +50,6 @@ const ManageCourses = () => {
   const fetchCourses = async () => {
     try {
       const response = await api.get('/admin/courses');
-      // ពិនិត្យមើលថាតើទិន្នន័យស្ថិតក្នុង data.data ឬ data
       const coursesData = response.data.data || response.data || [];
       setCourses(coursesData);
       console.log('Courses loaded:', coursesData);
@@ -77,7 +76,8 @@ const ManageCourses = () => {
   const fetchTeachers = async () => {
     try {
       const response = await api.get('/admin/teachers');
-      const teachersData = response.data.data || response.data || [];
+      // កែត្រង់នេះ៖ ត្រូវថែម .data មួយទៀត (response.data.data.data) ព្រោះ API គ្រូបង្រៀនប្រើ paginate() រួចហើយ
+      const teachersData = response.data.data?.data || response.data.data || response.data || [];
       setTeachers(teachersData);
       console.log('Teachers loaded:', teachersData);
     } catch (error) {
@@ -240,125 +240,138 @@ const ManageCourses = () => {
         </div>
       </div>
 
-      {/* Courses Table */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-100">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  មុខវិជ្ជា
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  កូដ
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  ជំនាញ
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  គ្រូបង្រៀន
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  ក្រេឌីត
-                </th>
-                <th className="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  សកម្មភាព
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-100">
-              {filteredCourses.length === 0 ? (
+      {/* === បន្ថែមផ្នែក Loading === */}
+      {loading ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 flex flex-col items-center justify-center">
+          <div className="relative">
+            <div className="h-20 w-20 rounded-full border-t-2 border-b-2 border-indigo-100"></div>
+            <div className="absolute top-0 left-0 h-20 w-20 rounded-full border-t-2 border-indigo-600 animate-spin"></div>
+          </div>
+          <p className="mt-6 text-base font-medium text-gray-600">កំពុងផ្ទុកទិន្នន័យមុខវិជ្ជា...</p>
+          <p className="text-sm text-gray-400 mt-1">សូមរង់ចាំមួយភ្លែត</p>
+        </div>
+      ) : (
+        /* Courses Table - បង្ហាញតែពេល loading ចប់ */
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-100">
+              <thead className="bg-gray-50">
                 <tr>
-                  <td colSpan="6" className="px-6 py-14 text-center text-gray-500">
-                    <div className="flex flex-col items-center">
-                      <BookOpenIcon className="h-16 w-16 text-gray-300 mb-3" />
-                      <p className="font-medium">
-                        {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានមុខវិជ្ជានៅឡើយទេ'}
-                      </p>
-                      <p className="text-sm text-gray-400 mt-1">
-                        {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមមុខវិជ្ជា" ដើម្បីចាប់ផ្តើម'}
-                      </p>
-                    </div>
-                  </td>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    មុខវិជ្ជា
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    កូដ
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ជំនាញ
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    គ្រូបង្រៀន
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ក្រេឌីត
+                  </th>
+                  <th className="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    សកម្មភាព
+                  </th>
                 </tr>
-              ) : (
-                filteredCourses.map((course) => (
-                  <tr key={course.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="h-10 w-10 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center justify-center text-white font-medium text-sm shadow-sm">
-                          <BookOpenIcon className="h-5 w-5" />
-                        </div>
-                        <div className="ml-3">
-                          <div className="text-sm font-medium text-gray-900">
-                            {course.course_name}
-                          </div>
-                          <div className="text-xs text-gray-500 line-clamp-1">
-                            {course.description || 'គ្មានការពិពណ៌នា'}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="px-2 py-1 text-xs font-mono bg-gray-100 text-gray-700 rounded-lg">
-                        {course.course_code}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {course.department?.department_name || '—'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {course.teacher
-                        ? `${course.teacher.first_name} ${course.teacher.last_name}`
-                        : '—'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                        {course.credit} ក្រេឌីត
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center space-x-2">
-                        <button
-                          onClick={() => openEditModal(course)}
-                          className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
-                          title="កែប្រែ"
-                        >
-                          <PencilIcon className="h-5 w-5" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(course.id)}
-                          className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
-                          title="លុប"
-                        >
-                          <TrashIcon className="h-5 w-5" />
-                        </button>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-100">
+                {filteredCourses.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="px-6 py-14 text-center text-gray-500">
+                      <div className="flex flex-col items-center">
+                        <BookOpenIcon className="h-16 w-16 text-gray-300 mb-3" />
+                        <p className="font-medium">
+                          {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានមុខវិជ្ជានៅឡើយទេ'}
+                        </p>
+                        <p className="text-sm text-gray-400 mt-1">
+                          {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមមុខវិជ្ជា" ដើម្បីចាប់ផ្តើម'}
+                        </p>
                       </div>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        
-        {/* Footer with count */}
-        {filteredCourses.length > 0 && (
-          <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
-            <p className="text-sm text-gray-600">
-              បង្ហាញ <span className="font-medium text-gray-900">{filteredCourses.length}</span> មុខវិជ្ជា
-              {courses.length !== filteredCourses.length && (
-                <span> ក្នុងចំណោម <span className="font-medium text-gray-900">{courses.length}</span> មុខវិជ្ជា</span>
-              )}
-            </p>
+                ) : (
+                  filteredCourses.map((course) => (
+                    <tr key={course.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="h-10 w-10 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center justify-center text-white font-medium text-sm shadow-sm">
+                            <BookOpenIcon className="h-5 w-5" />
+                          </div>
+                          <div className="ml-3">
+                            <div className="text-sm font-medium text-gray-900">
+                              {course.course_name}
+                            </div>
+                            <div className="text-xs text-gray-500 line-clamp-1">
+                              {course.description || 'គ្មានការពិពណ៌នា'}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="px-2 py-1 text-xs font-mono bg-gray-100 text-gray-700 rounded-lg">
+                          {course.course_code}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {course.department?.department_name || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {course.teacher
+                          ? `${course.teacher.first_name} ${course.teacher.last_name}`
+                          : '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                          {course.credit} ក្រេឌីត
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <div className="flex items-center justify-center space-x-2">
+                          <button
+                            onClick={() => openEditModal(course)}
+                            className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
+                            title="កែប្រែ"
+                          >
+                            <PencilIcon className="h-5 w-5" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(course.id)}
+                            className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
+                            title="លុប"
+                          >
+                            <TrashIcon className="h-5 w-5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
+          
+          {/* Footer with count */}
+          {filteredCourses.length > 0 && (
+            <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
+              <p className="text-sm text-gray-600">
+                បង្ហាញ <span className="font-medium text-gray-900">{filteredCourses.length}</span> មុខវិជ្ជា
+                {courses.length !== filteredCourses.length && (
+                  <span> ក្នុងចំណោម <span className="font-medium text-gray-900">{courses.length}</span> មុខវិជ្ជា</span>
+                )}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Modal - Create/Edit Course */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 backdrop-blur-sm overflow-y-auto">
+          {/* បង្រួមទំហំពី max-w-3xl មកត្រឹម max-w-xl */}
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 p-8 max-h-[90vh] overflow-y-auto animate-scaleIn">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">

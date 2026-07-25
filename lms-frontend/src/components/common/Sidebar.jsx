@@ -2,6 +2,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import {
   HomeIcon,
   UserGroupIcon,
@@ -19,53 +20,63 @@ import {
   Squares2X2Icon,
 } from '@heroicons/react/24/outline';
 
-const NAV_CONFIG = {
-  Admin: {
-    label: 'អ្នកគ្រប់គ្រង',
-    items: [
-      { name: 'ផ្ទាំងគ្រប់គ្រង', icon: HomeIcon, path: '/admin/dashboard' },
-      { name: 'ដេប៉ាតឺម៉ង់', icon: Squares2X2Icon, path: '/admin/departments' },
-      { name: 'គ្រូបង្រៀន', icon: AcademicCapIcon, path: '/admin/teachers' },
-      { name: 'សិស្ស', icon: UserGroupIcon, path: '/admin/students' },
-      { name: 'មុខវិជ្ជា', icon: BookOpenIcon, path: '/admin/courses' },
-      { name: 'ការកំណត់', icon: Cog6ToothIcon, path: '/admin/settings' },
-    ],
-  },
-  
-  Teacher: {
-    label: 'គ្រូបង្រៀន',
-    items: [
-      { name: 'ផ្ទាំងគ្រប់គ្រង', icon: HomeIcon, path: '/teacher/dashboard' },
-      { name: 'មុខវិជ្ជា', icon: BookOpenIcon, path: '/teacher/courses' },
-      { name: 'មេរៀន', icon: BookOpenIcon, path: '/teacher/lessons' },
-      { name: 'សិស្ស', icon: UsersIcon, path: '/teacher/students' },
-      { name: 'វត្តមានសិស្ស', icon: ClipboardDocumentListIcon, path: '/teacher/attendance' },
-      { name: 'ពិន្ទុ', icon: ChartBarIcon, path: '/teacher/scores' },
-      { name: 'កិច្ចការ', icon: DocumentArrowUpIcon, path: '/teacher/assignments' },
-      { name: 'កម្រងសំណួរ', icon: PencilSquareIcon, path: '/teacher/quizzes' },
-    ],
-  },
-  Student: {
-    label: 'សិស្ស',
-    items: [
-      { name: 'ផ្ទាំងគ្រប់គ្រង', icon: HomeIcon, path: '/student/dashboard' },
-      { name: 'មុខវិជ្ជា', icon: BookOpenIcon, path: '/student/courses' },
-      { name: 'មេរៀន', icon: BookOpenIcon, path: '/student/lessons' },
-      { name: 'វត្តមាន', icon: ClipboardDocumentListIcon, path: '/student/attendance' },
-      { name: 'ពិន្ទុ', icon: ChartBarIcon, path: '/student/scores' },
-      { name: 'កិច្ចការ', icon: DocumentArrowUpIcon, path: '/student/assignments' },
-      { name: 'កម្រងសំណួរ', icon: PencilSquareIcon, path: '/student/quizzes' },
-    ],
-  },
-};
-
 const Sidebar = () => {
   const { hasRole } = useAuth();
+  const { t } = useLanguage();
 
+  // ==========================================
+  // NAVIGATION CONFIGURATION
+  // ==========================================
+  const NAV_CONFIG = {
+    Admin: {
+      label: t('អ្នកគ្រប់គ្រង', 'Administrator'),
+      items: [
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/admin/dashboard' },
+        { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/admin/teachers' },
+        { name: t('សិស្ស', 'Students'), icon: UserGroupIcon, path: '/admin/students' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/admin/courses' },
+        { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/admin/departments' },
+        // { name: t('ការកំណត់', 'Settings'), icon: Cog6ToothIcon, path: '/admin/settings' },
+      ],
+    },
+    Teacher: {
+      label: t('គ្រូបង្រៀន', 'Teacher'),
+      items: [
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/teacher/dashboard' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/teacher/courses' },
+        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/teacher/lessons' },
+        { name: t('សិស្ស', 'Students'), icon: UsersIcon, path: '/teacher/students' },
+        { name: t('វត្តមានសិស្ស', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/teacher/attendance' },
+        { name: t('ពិន្ទុ', 'Scores'), icon: ChartBarIcon, path: '/teacher/scores' },
+        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/teacher/assignments' },
+        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/teacher/quizzes' },
+        { name: t('វីដេអូ', 'Videos'), icon: VideoCameraIcon, path: '/teacher/videos' },
+      ],
+    },
+    Student: {
+      label: t('សិស្ស', 'Student'),
+      items: [
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/student/dashboard' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/student/courses' },
+        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/student/lessons' },
+        { name: t('វត្តមាន', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/student/attendance' },
+        { name: t('ពិន្ទុ', 'Scores'), icon: ChartBarIcon, path: '/student/scores' },
+        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/student/assignments' },
+        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/student/quizzes' },
+      ],
+    },
+  };
+
+  // ==========================================
+  // GET CURRENT ROLE CONFIG
+  // ==========================================
   const roleKey = Object.keys(NAV_CONFIG).find((role) => hasRole(role));
   const section = roleKey ? NAV_CONFIG[roleKey] : null;
   const navItems = section?.items || [];
 
+  // ==========================================
+  // REMOVE DUPLICATES
+  // ==========================================
   const uniqueNavItems = navItems.reduce((acc, current) => {
     const exists = acc.find(item => item.path === current.path && item.name === current.name);
     if (!exists) {
@@ -86,6 +97,7 @@ const Sidebar = () => {
       <div className="absolute inset-0 bg-gradient-to-b from-blue-800/10 via-transparent to-blue-950/20"></div>
       
       <div className="relative z-10 flex flex-col h-full">
+        {/* Header Logo */}
         <div className="px-5 pt-6 pb-3">
           <div className="flex items-center gap-3">
             <div className="h-12 w-12 bg-gradient-to-br from-yellow-400 via-yellow-500 to-yellow-600 rounded-xl flex items-center justify-center shadow-lg shadow-yellow-500/30 border border-yellow-400/30">
@@ -95,21 +107,24 @@ const Sidebar = () => {
               <p className="text-sm font-bold text-white tracking-wide">
                 LMS College
               </p>
-              <p className="text-[10px] text-yellow-400/70 mt-0.5 tracking-wider">ប្រព័ន្ធគ្រប់គ្រងសិក្សា</p>
+              <p className="text-[10px] text-yellow-400/70 mt-0.5 tracking-wider">
+                {t('ប្រព័ន្ធគ្រប់គ្រងសិក្សា', 'Learning Management System')}
+              </p>
             </div>
           </div>
           {section && (
             <div className="mt-4 flex items-center gap-2">
-              <div className="h-px flex-1 bg-gradient-to-r​ from-yellow-500/20 to-transparent"></div>
+              <div className="h-px flex-1 bg-gradient-to-r from-yellow-500/20 to-transparent"></div>
               <p className="text-[10px] font-semibold tracking-[0.2em] text-yellow-400/60 uppercase whitespace-nowrap">
                 {section.label}
               </p>
-              <div className="h-px flex-1 bg-gradient-to-l​ from-yellow-500/20 to-transparent"></div>
+              <div className="h-px flex-1 bg-gradient-to-l from-yellow-500/20 to-transparent"></div>
             </div>
           )}
         </div>
 
-        <nav className="px-3 flex-1 mt-2">
+        {/* Navigation */}
+        <nav className="px-3 flex-1 mt-2 overflow-y-auto">
           <div className="space-y-1">
             {uniqueNavItems.map((item) => (
               <NavLink
@@ -168,11 +183,13 @@ const Sidebar = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold text-blue-950 truncate">LMS College</p>
-                <p className="text-[10px] text-blue-950/70 mt-0.5">ប្រព័ន្ធគ្រប់គ្រងសិក្សា</p>
+                <p className="text-[10px] text-blue-950/70 mt-0.5">
+                  {t('ប្រព័ន្ធគ្រប់គ្រងសិក្សា', 'Learning Management System')}
+                </p>
                 <div className="mt-2 flex items-center gap-2">
                   <span className="inline-flex items-center gap-1.5 text-[10px] text-blue-950/80 font-medium">
                     <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse shadow-lg shadow-green-500/50"></span>
-                    សកម្ម
+                    {t('សកម្ម', 'Active')}
                   </span>
                   <span className="h-3 w-px bg-blue-950/20"></span>
                   <span className="text-[10px] text-blue-950/60">v2.0.1</span>

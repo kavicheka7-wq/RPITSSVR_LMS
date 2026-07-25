@@ -1,7 +1,7 @@
 <?php
 
 namespace App\Http\Controllers\Api;
-
+use Illuminate\Support\Facades\Cache;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Department;
@@ -157,32 +157,55 @@ class AdminController extends Controller
 
     // --- System Statistics ---
 
-    public function getStats()
-    {
-       // រាប់ចំនួនគ្រូពីតារាង teachers
-        $totalTeachers = Teacher::count();
+    // public function getStats()
+    // {
+    //    // រាប់ចំនួនគ្រូពីតារាង teachers
+    //     $totalTeachers = Teacher::count();
         
-        // រាប់ចំនួនសិស្សពីតារាង users (role_id = Student)
-        $studentRole = Role::where('role_name', 'Student')->first();
-        $totalStudents = $studentRole ? User::where('role_id', $studentRole->id)->count() : 0;
+    //     // រាប់ចំនួនសិស្សពីតារាង users (role_id = Student)
+    //     $studentRole = Role::where('role_name', 'Student')->first();
+    //     $totalStudents = $studentRole ? User::where('role_id', $studentRole->id)->count() : 0;
         
-        // រាប់ចំនួនអ្នកគ្រប់គ្រងពីតារាង users (role_id = Admin)
-        $adminRole = Role::where('role_name', 'Admin')->first();
-        $totalAdmins = $adminRole ? User::where('role_id', $adminRole->id)->count() : 0;
+    //     // រាប់ចំនួនអ្នកគ្រប់គ្រងពីតារាង users (role_id = Admin)
+    //     $adminRole = Role::where('role_name', 'Admin')->first();
+    //     $totalAdmins = $adminRole ? User::where('role_id', $adminRole->id)->count() : 0;
 
-        $stats = [
+    //     $stats = [
+    //         'total_users' => User::count(),
+    //         'total_students' => $totalStudents,
+    //         'total_teachers' => $totalTeachers, // ចំនួនគ្រូពិតប្រាកដ
+    //         'total_admins' => $totalAdmins,
+    //         'total_courses' => Course::count(),
+    //         'total_departments' => Department::count(),
+    //         'total_enrollments' => Enrollment::count(),
+    //     ];
+
+    //     return response()->json($stats);
+    // }
+
+
+    public function getStats()
+{
+    // ប្រើ Cache រក្សាទុកទិន្នន័យរយៈពេល 5 នាទី (300 វិនាទី) 
+    // វានឹង Query តែម្ដងប៉ុណ្ណោះក្នុងរយៈពេល 5 នាទី ជួយឱ្យ Dashboard លោតភ្លាមៗតែម្ដង
+    $stats = Cache::remember('admin_dashboard_stats',2, function () {
+        
+        $studentRole = Role::where('role_name', 'Student')->first();
+        $adminRole = Role::where('role_name', 'Admin')->first();
+
+        return [
             'total_users' => User::count(),
-            'total_students' => $totalStudents,
-            'total_teachers' => $totalTeachers, // ចំនួនគ្រូពិតប្រាកដ
-            'total_admins' => $totalAdmins,
+            'total_students' => $studentRole ? User::where('role_id', $studentRole->id)->count() : 0,
+            'total_teachers' => Teacher::count(),
+            'total_admins' => $adminRole ? User::where('role_id', $adminRole->id)->count() : 0,
             'total_courses' => Course::count(),
             'total_departments' => Department::count(),
             'total_enrollments' => Enrollment::count(),
         ];
+    });
 
-        return response()->json($stats);
-    }
-
+    return response()->json($stats);
+}
     // --- System Settings ---
 
     public function getSystemSettings()

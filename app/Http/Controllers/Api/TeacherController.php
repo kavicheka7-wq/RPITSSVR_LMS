@@ -69,6 +69,8 @@ class TeacherController extends Controller
         ]);
     }
 
+    
+
     // Update teacher profile image
     public function updateProfileImage(Request $request)
     {

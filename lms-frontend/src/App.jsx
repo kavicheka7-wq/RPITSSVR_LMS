@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { LanguageProvider } from './context/LanguageContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import Navbar from './components/common/Navbar';
 import Sidebar from './components/common/Sidebar';
@@ -98,7 +99,7 @@ const AppContent = () => {
         <Navbar />
         <div className="flex">
           <Sidebar />
-          <main className="flex-1 p-6">
+          <main className="flex-1 p-6 min-w-0 overflow-hidden">
             <Routes>
               {/* Redirect root to appropriate dashboard */}
               <Route path="/" element={<Navigate to={getDashboardPath()} replace />} />
@@ -153,10 +154,13 @@ const AppContent = () => {
 };
 
 // Main App Component
+// Main App Component
 function App() {
   return (
     <AuthProvider>
+      <LanguageProvider> 
       <AppContent />
+      </LanguageProvider>
     </AuthProvider>
   );
 }

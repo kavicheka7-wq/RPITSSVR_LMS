@@ -9,7 +9,6 @@ import {
   AcademicCapIcon,
   XMarkIcon,
   MagnifyingGlassIcon,
-  UserGroupIcon,
 } from '@heroicons/react/24/outline';
 
 const ManageTeachers = () => {
@@ -35,21 +34,35 @@ const ManageTeachers = () => {
     date_of_birth: '',
   });
 
+// ប្ដូរ useEffect មកប្រើទម្រង់ Promise.all វិញ
   useEffect(() => {
-    fetchTeachers();
-    fetchDepartments();
-    fetchTeacherRole(); // ទាញយក role Teacher
+    const loadInitialData = async () => {
+      setLoading(true); // លោត Loading តែម្ដងគត់នៅដើមទី
+      try {
+        // ហៅ API ទាំង ៣ ឲ្យរត់ព្រមគ្នា ដើម្បីចំណេញពេល
+        await Promise.all([
+          fetchTeachers(),
+          fetchDepartments(),
+          fetchTeacherRole()
+        ]);
+      } catch (error) {
+        console.error("Error loading initial data", error);
+      } finally {
+        setLoading(false); // បិទ Loading វិញពេល API ទាំង ៣ ដើរចប់
+      }
+    };
+
+    loadInitialData();
   }, []);
 
+  // កែប្រែ fetchTeachers ដោយដក setLoading ចេញ ព្រោះយើងបានដាក់វាក្នុង useEffect រួចហើយ
   const fetchTeachers = async () => {
     try {
       const response = await api.get('/admin/teachers');
-      setTeachers(response.data.data || []);
+      setTeachers(response.data.data.data || []);
     } catch (error) {
       console.error('Error fetching teachers:', error);
       toast.error('មិនអាចទាញយកបញ្ជីគ្រូបង្រៀនបានទេ');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -63,7 +76,6 @@ const ManageTeachers = () => {
     }
   };
 
-  // ទាញយកតួនាទី Teacher ដោយស្វ័យប្រវត្តិ
   const fetchTeacherRole = async () => {
     try {
       const response = await api.get('/roles');
@@ -71,7 +83,6 @@ const ManageTeachers = () => {
       const teacherRole = rolesData.find(r => r.role_name === 'Teacher');
       if (teacherRole) {
         setTeacherRoleId(teacherRole.id);
-        console.log('Teacher Role ID:', teacherRole.id);
       }
     } catch (error) {
       console.error('Error fetching teacher role:', error);
@@ -189,17 +200,6 @@ const ManageTeachers = () => {
     );
   });
 
-  // មុខងារប្រែក្លាយឈ្មោះតួនាទីជាភាសាខ្មែរ
-  const getRoleNameKhmer = (roleName) => {
-    if (!roleName) return '—';
-    switch(roleName) {
-      case 'Admin': return 'អ្នកគ្រប់គ្រង';
-      case 'Teacher': return 'គ្រូបង្រៀន';
-      case 'Student': return 'សិស្ស';
-      default: return roleName;
-    }
-  };
-
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -239,137 +239,149 @@ const ManageTeachers = () => {
         </div>
       </div>
 
-      {/* Teachers Table */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-100">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  គ្រូបង្រៀន
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  អត្តលេខ
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  អ៊ីមែល
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  ដេប៉ាតឺម៉ង់
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  ស្ថានភាព
-                </th>
-                <th className="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  សកម្មភាព
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-100">
-              {filteredTeachers?.length === 0 ? (
+      {/* === បន្ថែមផ្នែក Loading === */}
+      {loading ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 flex flex-col items-center justify-center">
+          <div className="relative">
+            <div className="h-20 w-20 rounded-full border-t-2 border-b-2 border-indigo-100"></div>
+            <div className="absolute top-0 left-0 h-20 w-20 rounded-full border-t-2 border-indigo-600 animate-spin"></div>
+          </div>
+          <p className="mt-6 text-base font-medium text-gray-600">កំពុងផ្ទុកទិន្នន័យគ្រូបង្រៀន...</p>
+          <p className="text-sm text-gray-400 mt-1">សូមរង់ចាំមួយភ្លែត</p>
+        </div>
+      ) : (
+        /* Teachers Table - បង្ហាញតែពេល loading ចប់ */
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-100">
+              <thead className="bg-gray-50">
                 <tr>
-                  <td colSpan="6" className="px-6 py-14 text-center text-gray-500">
-                    <div className="flex flex-col items-center">
-                      <AcademicCapIcon className="h-16 w-16 text-gray-300 mb-3" />
-                      <p className="font-medium">
-                        {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានគ្រូបង្រៀននៅឡើយទេ'}
-                      </p>
-                      <p className="text-sm text-gray-400 mt-1">
-                        {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមគ្រូបង្រៀន" ដើម្បីចាប់ផ្តើម'}
-                      </p>
-                    </div>
-                  </td>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    គ្រូបង្រៀន
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    អត្តលេខ
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    អ៊ីមែល
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ដេប៉ាតឺម៉ង់
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ស្ថានភាព
+                  </th>
+                  <th className="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    សកម្មភាព
+                  </th>
                 </tr>
-              ) : (
-                filteredTeachers?.map((teacher) => (
-                  <tr key={teacher.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        {/* កូដទាញរូបភាព Profile របស់គ្រូបង្រៀន */}
-                        <div className="h-10 w-10 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold overflow-hidden">
-                            {teacher.profile_image ? (
-                              <img 
-                                src={teacher.profile_image} 
-                                alt="Profile" 
-                                className="h-full w-full object-cover"
-                                onError={(e) => {
-                                  // បើរូបភាព Error ឲ្យវាលោតមកបង្ហាញអក្សរកាត់វិញ
-                                  e.target.style.display = 'none';
-                                  e.target.parentElement.innerHTML = `<span>${teacher.first_name[0]}${teacher.last_name[0]}</span>`;
-                                }}
-                              />
-                            ) : (
-                              <span>{teacher.first_name[0]}{teacher.last_name[0]}</span>
-                            )}
-                          </div>
-                        <div className="ml-3">
-                          <div className="text-sm font-medium text-gray-900">
-                            {teacher.first_name} {teacher.last_name}
-                          </div>
-                          <div className="text-xs text-gray-500">{teacher.specialization || '—'}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {teacher.teacher_code || '—'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {teacher.email}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {teacher.department?.department_name || teacher.department?.name || '—'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
-                        teacher.user?.status === 'active' 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-red-100 text-red-800'
-                      }`}>
-                        {teacher.user?.status === 'active' ? 'សកម្ម' : 'អសកម្ម'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center space-x-2">
-                        <button
-                          onClick={() => openEditModal(teacher)}
-                          className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
-                          title="កែប្រែ"
-                        >
-                          <PencilIcon className="h-5 w-5" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(teacher.id)}
-                          className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
-                          title="លុប"
-                        >
-                          <TrashIcon className="h-5 w-5" />
-                        </button>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-100">
+                {filteredTeachers?.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="px-6 py-14 text-center text-gray-500">
+                      <div className="flex flex-col items-center">
+                        <AcademicCapIcon className="h-16 w-16 text-gray-300 mb-3" />
+                        <p className="font-medium">
+                          {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានគ្រូបង្រៀននៅឡើយទេ'}
+                        </p>
+                        <p className="text-sm text-gray-400 mt-1">
+                          {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមគ្រូបង្រៀន" ដើម្បីចាប់ផ្តើម'}
+                        </p>
                       </div>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        
-        {/* Footer with count */}
-        {filteredTeachers.length > 0 && (
-          <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
-            <p className="text-sm text-gray-600">
-              បង្ហាញ <span className="font-medium text-gray-900">{filteredTeachers.length}</span> នាក់ 
-              {teachers.length !== filteredTeachers.length && (
-                <span> ក្នុងចំណោម <span className="font-medium text-gray-900">{teachers.length}</span> នាក់</span>
-              )}
-            </p>
+                ) : (
+                  filteredTeachers?.map((teacher) => (
+                    <tr key={teacher.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          {/* កូដទាញរូបភាព Profile របស់គ្រូបង្រៀន */}
+                          <div className="h-10 w-10 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold overflow-hidden shrink-0">
+                              {teacher.profile_image ? (
+                                <img 
+                                  src={teacher.profile_image} 
+                                  alt="Profile" 
+                                  className="h-full w-full object-cover"
+                                  onError={(e) => {
+                                    // បើរូបភាព Error ឲ្យវាលោតមកបង្ហាញអក្សរកាត់វិញ
+                                    e.target.style.display = 'none';
+                                    e.target.parentElement.innerHTML = `<span>${teacher.first_name[0]}${teacher.last_name[0]}</span>`;
+                                  }}
+                                />
+                              ) : (
+                                <span>{teacher.first_name[0]}{teacher.last_name[0]}</span>
+                              )}
+                            </div>
+                          <div className="ml-3">
+                            <div className="text-sm font-medium text-gray-900">
+                              {teacher.first_name} {teacher.last_name}
+                            </div>
+                            <div className="text-xs text-gray-500">{teacher.specialization || '—'}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {teacher.teacher_code || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {teacher.email}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {teacher.department?.department_name || teacher.department?.name || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                          teacher.user?.status === 'active' 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {teacher.user?.status === 'active' ? 'សកម្ម' : 'អសកម្ម'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <div className="flex items-center justify-center space-x-2">
+                          <button
+                            onClick={() => openEditModal(teacher)}
+                            className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
+                            title="កែប្រែ"
+                          >
+                            < PencilIcon className="h-5 w-5" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(teacher.id)}
+                            className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
+                            title="លុប"
+                          >
+                            <TrashIcon className="h-5 w-5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
+          
+          {/* Footer with count */}
+          {!loading && filteredTeachers.length > 0 && (
+            <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
+              <p className="text-sm text-gray-600">
+                បង្ហាញ <span className="font-medium text-gray-900">{filteredTeachers.length}</span> នាក់ 
+                {teachers.length !== filteredTeachers.length && (
+                  <span> ក្នុងចំណោម <span className="font-medium text-gray-900">{teachers.length}</span> នាក់</span>
+                )}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Modal - Create/Edit Teacher */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 p-8 max-h-[90vh] overflow-y-auto animate-scaleIn">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
@@ -407,7 +419,7 @@ const ManageTeachers = () => {
                     value={formData.first_name}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    placeholder="ឧ. សុខ"
+                    placeholder=""
                   />
                 </div>
                 <div>
@@ -421,7 +433,7 @@ const ManageTeachers = () => {
                     value={formData.last_name}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    placeholder="ឧ. វិសាល"
+                    placeholder=""
                   />
                 </div>
 
@@ -437,7 +449,7 @@ const ManageTeachers = () => {
                     value={formData.email}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    placeholder="teacher@email.com"
+                    placeholder=""
                   />
                 </div>
                 <div>
@@ -450,7 +462,7 @@ const ManageTeachers = () => {
                     value={formData.phone}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    placeholder="+855 12 345 678"
+                    placeholder="+855|"
                   />
                 </div>
 

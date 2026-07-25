@@ -30,6 +30,7 @@ const ManageDepartments = () => {
   }, []);
 
   const fetchDepartments = async () => {
+    setLoading(true); // ដាក់ Loading ពេលចាប់ផ្ដើមទាញទិន្នន័យ
     try {
       const response = await api.get('/admin/departments');
       setDepartments(response.data.data || []);
@@ -210,102 +211,114 @@ const ManageDepartments = () => {
         </div>
       </div>
 
-      {/* Departments Grid */}
-      {filteredDepartments.length === 0 ? (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
-          <BuildingLibraryIcon className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500 font-medium">
-            {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានដេប៉ាតឺម៉ង់នៅឡើយទេ'}
-          </p>
-          <p className="text-sm text-gray-400 mt-1">
-            {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមដេប៉ាតឺម៉ង់" ដើម្បីចាប់ផ្តើម'}
-          </p>
+      {/* បន្ថែមផ្នែក Loading កណ្ដាលអេក្រង់ */}
+      {loading ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 flex flex-col items-center justify-center">
+          <div className="relative">
+            <div className="h-20 w-20 rounded-full border-t-2 border-b-2 border-indigo-100"></div>
+            <div className="absolute top-0 left-0 h-20 w-20 rounded-full border-t-2 border-indigo-600 animate-spin"></div>
+          </div>
+          <p className="mt-6 text-base font-medium text-gray-600">កំពុងផ្ទុកទិន្នន័យដេប៉ាតឺម៉ង់...</p>
+          <p className="text-sm text-gray-400 mt-1">សូមរង់ចាំមួយភ្លែត</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredDepartments.map((dept, index) => {
-            const colorGradient = getDepartmentColor(index);
-            const deptName = dept.name || dept.department_name || 'មិនស្គាល់';
-            const deptDesc = dept.description || 'គ្មានការពិពណ៌នា';
-            const teacherCount = dept.teachers_count || 0;
-            const studentCount = dept.students_count || 0;
-            const courseCount = dept.courses_count || 0;
-            const totalUsers = teacherCount + studentCount;
+        /* Departments Grid - បង្ហាញតែពេល Loading ចប់ */
+        filteredDepartments.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
+            <BuildingLibraryIcon className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-500 font-medium">
+              {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានដេប៉ាតឺម៉ង់នៅឡើយទេ'}
+            </p>
+            <p className="text-sm text-gray-400 mt-1">
+              {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមដេប៉ាតឺម៉ង់" ដើម្បីចាប់ផ្តើម'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredDepartments.map((dept, index) => {
+              const colorGradient = getDepartmentColor(index);
+              const deptName = dept.name || dept.department_name || 'មិនស្គាល់';
+              const deptDesc = dept.description || 'គ្មានការពិពណ៌នា';
+              const teacherCount = dept.teachers_count || 0;
+              const studentCount = dept.students_count || 0;
+              const courseCount = dept.courses_count || 0;
+              const totalUsers = teacherCount + studentCount;
 
-            return (
-              <div 
-                key={dept.id} 
-                className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1 group"
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className={`h-12 w-12 rounded-xl bg-gradient-to-r ${colorGradient} flex items-center justify-center shadow-sm`}>
-                    <BuildingLibraryIcon className="h-6 w-6 text-white" />
+              return (
+                <div 
+                  key={dept.id} 
+                  className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1 group"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className={`h-12 w-12 rounded-xl bg-gradient-to-r ${colorGradient} flex items-center justify-center shadow-sm`}>
+                      <BuildingLibraryIcon className="h-6 w-6 text-white" />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => openEditModal(dept)}
+                        className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        title="កែប្រែ"
+                      >
+                        <PencilIcon className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(dept.id)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                        title="លុប"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => openEditModal(dept)}
-                      className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                      title="កែប្រែ"
-                    >
-                      <PencilIcon className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(dept.id)}
-                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                      title="លុប"
-                    >
-                      <TrashIcon className="h-4 w-4" />
-                    </button>
+
+                  <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                    {deptName}
+                  </h3>
+                  <p className="text-sm text-gray-500 mb-4 line-clamp-2">
+                    {deptDesc}
+                  </p>
+
+                  <div className="grid grid-cols-3 gap-2 pt-3 border-t border-gray-100">
+                    <div className="text-center">
+                      <div className="flex items-center justify-center gap-1 text-sm text-gray-600">
+                        <AcademicCapIcon className="h-4 w-4 text-purple-500" />
+                        <span className="font-medium text-gray-900">{teacherCount}</span>
+                      </div>
+                      <p className="text-xs text-gray-400">គ្រូ</p>
+                    </div>
+                    <div className="text-center">
+                      <div className="flex items-center justify-center gap-1 text-sm text-gray-600">
+                        <UserGroupIcon className="h-4 w-4 text-green-500" />
+                        <span className="font-medium text-gray-900">{studentCount}</span>
+                      </div>
+                      <p className="text-xs text-gray-400">សិស្ស</p>
+                    </div>
+                    <div className="text-center">
+                      <div className="flex items-center justify-center gap-1 text-sm text-gray-600">
+                        <BookOpenIcon className="h-4 w-4 text-blue-500" />
+                        <span className="font-medium text-gray-900">{courseCount}</span>
+                      </div>
+                      <p className="text-xs text-gray-400">មុខវិជ្ជា</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 pt-2 border-t border-gray-50">
+                    <div className="flex items-center justify-between text-xs text-gray-400">
+                      <span>អ្នកប្រើសរុប</span>
+                      <span className="font-medium text-gray-700">{totalUsers}</span>
+                    </div>
                   </div>
                 </div>
-
-                <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                  {deptName}
-                </h3>
-                <p className="text-sm text-gray-500 mb-4 line-clamp-2">
-                  {deptDesc}
-                </p>
-
-                <div className="grid grid-cols-3 gap-2 pt-3 border-t border-gray-100">
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-sm text-gray-600">
-                      <AcademicCapIcon className="h-4 w-4 text-purple-500" />
-                      <span className="font-medium text-gray-900">{teacherCount}</span>
-                    </div>
-                    <p className="text-xs text-gray-400">គ្រូ</p>
-                  </div>
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-sm text-gray-600">
-                      <UserGroupIcon className="h-4 w-4 text-green-500" />
-                      <span className="font-medium text-gray-900">{studentCount}</span>
-                    </div>
-                    <p className="text-xs text-gray-400">សិស្ស</p>
-                  </div>
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-sm text-gray-600">
-                      <BookOpenIcon className="h-4 w-4 text-blue-500" />
-                      <span className="font-medium text-gray-900">{courseCount}</span>
-                    </div>
-                    <p className="text-xs text-gray-400">មុខវិជ្ជា</p>
-                  </div>
-                </div>
-
-                <div className="mt-3 pt-2 border-t border-gray-50">
-                  <div className="flex items-center justify-between text-xs text-gray-400">
-                    <span>អ្នកប្រើសរុប</span>
-                    <span className="font-medium text-gray-700">{totalUsers}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )
       )}
 
-      {/* Modal - Create/Edit Department */}
+      {/* Modal - ប្ដូរពណ៌ផ្ទៃខាងក្រោយកុំឱ្យខ្មៅងងឹតពេក */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 animate-fadeIn">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 animate-scaleIn">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
@@ -333,7 +346,7 @@ const ManageDepartments = () => {
                   value={formData.name}
                   onChange={handleInputChange}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                  placeholder="ឧ. វិទ្យាសាស្ត្រកុំព្យូទ័រ"
+                  placeholder="បញ្ចូលឈ្មោះដេប៉ាតឺម៉ង់"
                 />
               </div>
 

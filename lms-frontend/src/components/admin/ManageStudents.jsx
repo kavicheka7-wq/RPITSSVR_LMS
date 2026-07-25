@@ -49,13 +49,28 @@ const ManageStudents = () => {
     profile_image: null,
   });
 
+  // ប្រើ Promise.all ដើម្បីឱ្យទាញទិន្នន័យលឿន
   useEffect(() => {
-    fetchStudents();
-    fetchDepartments();
-    fetchStudentRole();
+    const loadInitialData = async () => {
+      setLoading(true);
+      try {
+        await Promise.all([
+          fetchStudents(false), // ហៅដោយមិនបាច់ set loading ជាន់គ្នា
+          fetchDepartments(),
+          fetchStudentRole()
+        ]);
+      } catch (error) {
+        console.error("Error loading initial data", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadInitialData();
   }, []);
 
-  const fetchStudents = async () => {
+  const fetchStudents = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       const response = await api.get('/admin/students');
       setStudents(response.data.data || []);
@@ -63,7 +78,7 @@ const ManageStudents = () => {
       console.error('Error fetching students:', error);
       toast.error('មិនអាចទាញយកទិន្នន័យសិស្សបានទេ');
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
@@ -83,7 +98,6 @@ const ManageStudents = () => {
       const studentRole = rolesData.find(r => r.role_name === 'Student');
       if (studentRole) {
         setStudentRoleId(studentRole.id);
-        console.log('Student Role ID:', studentRole.id);
       }
     } catch (error) {
       console.error('Error fetching student role:', error);
@@ -175,11 +189,9 @@ const ManageStudents = () => {
         toast.success('បានបន្ថែមសិស្សដោយជោគជ័យ');
       }
       
-      console.log('Response:', response.data);
-      
       setShowModal(false);
       resetForm();
-      fetchStudents();
+      fetchStudents(true); // ទាញយកសាជាថ្មីដោយបង្ហាញ Loading
       localStorage.setItem('studentsUpdated', Date.now().toString());
       window.dispatchEvent(new Event('storage'));
       
@@ -203,7 +215,7 @@ const ManageStudents = () => {
         toast.success('បានលុបសិស្សដោយជោគជ័យ');
         localStorage.setItem('studentDeleted', Date.now().toString());
         window.dispatchEvent(new Event('storage'));
-        fetchStudents();
+        fetchStudents(true);
       } catch (error) {
         toast.error(error.response?.data?.message || 'មិនអាចលុបសិស្សបានទេ');
       }
@@ -360,7 +372,6 @@ const ManageStudents = () => {
     return `${baseUrl}/storage/${imagePath}`;
   };
 
-
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       {/* Header */}
@@ -399,149 +410,157 @@ const ManageStudents = () => {
         </div>
       </div>
 
-      {/* Students Table */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-100">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  សិស្ស
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  អត្តលេខ
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  អ៊ីមែល
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  ដេប៉ាតឺម៉ង់
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  វេនសិក្សា
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  ស្ថានភាព
-                </th>
-                <th className="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  សកម្មភាព
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-100">
-              {filteredStudents.length === 0 ? (
+      {/* === បន្ថែមផ្នែក Loading ឱ្យស្អាតដូចគ្រូ === */}
+      {loading ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 flex flex-col items-center justify-center">
+          <div className="relative">
+            <div className="h-20 w-20 rounded-full border-t-2 border-b-2 border-indigo-100"></div>
+            <div className="absolute top-0 left-0 h-20 w-20 rounded-full border-t-2 border-indigo-600 animate-spin"></div>
+          </div>
+          <p className="mt-6 text-base font-medium text-gray-600">កំពុងផ្ទុកទិន្នន័យសិស្ស...</p>
+          <p className="text-sm text-gray-400 mt-1">សូមរង់ចាំមួយភ្លែត</p>
+        </div>
+      ) : (
+        /* Students Table */
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-100">
+              <thead className="bg-gray-50">
                 <tr>
-                  <td colSpan="7" className="px-6 py-14 text-center text-gray-500">
-                    <div className="flex flex-col items-center">
-                      <UserGroupIcon className="h-16 w-16 text-gray-300 mb-3" />
-                      <p className="font-medium">
-                        {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានសិស្សនៅឡើយទេ'}
-                      </p>
-                      <p className="text-sm text-gray-400 mt-1">
-                        {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមសិស្ស" ដើម្បីចាប់ផ្តើម'}
-                      </p>
-                    </div>
-                  </td>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    សិស្ស
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    អត្តលេខ
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    អ៊ីមែល
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ដេប៉ាតឺម៉ង់
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    វេនសិក្សា
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ស្ថានភាព
+                  </th>
+                  <th className="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    សកម្មភាព
+                  </th>
                 </tr>
-              ) : (
-                filteredStudents.map((student) => (
-                  <tr key={student.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        {student.profile_image ? (
-                          <img 
-                            src={getProfileImageUrl(student.profile_image)}
-                            alt={`${student.first_name} ${student.last_name}`}
-                            className="h-10 w-10 rounded-full object-cover border-2 border-gray-200 shadow-sm flex-shrink-0"
-                            onError={(e) => {
-                              e.target.style.display = 'none';
-                              const parent = e.target.parentElement;
-                              const avatar = document.createElement('div');
-                              avatar.className = 'h-10 w-10 rounded-full bg-gradient-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm flex-shrink-0';
-                              avatar.textContent = `${student.first_name?.charAt(0) || ''}${student.last_name?.charAt(0) || ''}`;
-                              parent.insertBefore(avatar, e.target);
-                              e.target.style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          <div className="h-10 w-10 rounded-full bg-gradient-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm flex-shrink-0">
-                            <span>{student.first_name?.charAt(0) || ''}{student.last_name?.charAt(0) || ''}</span>
-                          </div>
-                        )}
-                        <div className="ml-3">
-                          <div className="text-sm font-medium text-gray-900">
-                            {student.first_name} {student.last_name}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {getDegreeLevelLabel(student.degree_level) || '—'}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {student.student_code || '—'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {student.email}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {student.department?.name || student.department?.department_name || '—'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {getStudyShiftLabel(student.study_shift)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
-                        student.user?.status === 'active' 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-red-100 text-red-800'
-                      }`}>
-                        {student.user?.status === 'active' ? 'សកម្ម' : 'អសកម្ម'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center space-x-2">
-                        <button
-                          onClick={() => openEnrollmentModal(student)}
-                          className="p-2 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-50 rounded-xl transition-all"
-                          title="ចុះឈ្មោះមុខវិជ្ជា (Manage Courses)"
-                        >
-                          <BookOpenIcon className="h-5 w-5" />
-                        </button>
-                        <button
-                          onClick={() => openEditModal(student)}
-                          className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
-                          title="កែប្រែ"
-                        >
-                          <PencilIcon className="h-5 w-5" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(student.id)}
-                          className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
-                          title="លុប"
-                        >
-                          <TrashIcon className="h-5 w-5" />
-                        </button>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-100">
+                {filteredStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="px-6 py-14 text-center text-gray-500">
+                      <div className="flex flex-col items-center">
+                        <UserGroupIcon className="h-16 w-16 text-gray-300 mb-3" />
+                        <p className="font-medium">
+                          {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានសិស្សនៅឡើយទេ'}
+                        </p>
+                        <p className="text-sm text-gray-400 mt-1">
+                          {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមសិស្ស" ដើម្បីចាប់ផ្តើម'}
+                        </p>
                       </div>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        
-        {filteredStudents.length > 0 && (
-          <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
-            <p className="text-sm text-gray-600">
-              បង្ហាញ <span className="font-medium text-gray-900">{filteredStudents.length}</span> នាក់ 
-              {students.length !== filteredStudents.length && (
-                <span> ក្នុងចំណោម <span className="font-medium text-gray-900">{students.length}</span> នាក់</span>
-              )}
-            </p>
+                ) : (
+                  filteredStudents.map((student) => (
+                    <tr key={student.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          {/* កូដទាញរូបភាព Profile របស់សិស្សឱ្យស្អាតដូចគ្រូ */}
+                          <div className="h-10 w-10 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold overflow-hidden shrink-0">
+                            {student.profile_image ? (
+                              <img 
+                                src={getProfileImageUrl(student.profile_image)}
+                                alt={`${student.first_name} ${student.last_name}`}
+                                className="h-full w-full object-cover"
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                  e.target.parentElement.innerHTML = `<span>${student.first_name?.charAt(0) || ''}${student.last_name?.charAt(0) || ''}</span>`;
+                                }}
+                              />
+                            ) : (
+                              <span>{student.first_name?.charAt(0) || ''}{student.last_name?.charAt(0) || ''}</span>
+                            )}
+                          </div>
+                          <div className="ml-3">
+                            <div className="text-sm font-medium text-gray-900">
+                              {student.first_name} {student.last_name}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {getDegreeLevelLabel(student.degree_level) || '—'}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {student.student_code || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {student.email}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {student.department?.name || student.department?.department_name || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {getStudyShiftLabel(student.study_shift)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                          student.user?.status === 'active' 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {student.user?.status === 'active' ? 'សកម្ម' : 'អសកម្ម'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <div className="flex items-center justify-center space-x-2">
+                          <button
+                            onClick={() => openEnrollmentModal(student)}
+                            className="p-2 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-50 rounded-xl transition-all"
+                            title="ចុះឈ្មោះមុខវិជ្ជា (Manage Courses)"
+                          >
+                            <BookOpenIcon className="h-5 w-5" />
+                          </button>
+                          <button
+                            onClick={() => openEditModal(student)}
+                            className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
+                            title="កែប្រែ"
+                          >
+                            <PencilIcon className="h-5 w-5" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(student.id)}
+                            className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
+                            title="លុប"
+                          >
+                            <TrashIcon className="h-5 w-5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
+          
+          {filteredStudents.length > 0 && (
+            <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
+              <p className="text-sm text-gray-600">
+                បង្ហាញ <span className="font-medium text-gray-900">{filteredStudents.length}</span> នាក់ 
+                {students.length !== filteredStudents.length && (
+                  <span> ក្នុងចំណោម <span className="font-medium text-gray-900">{students.length}</span> នាក់</span>
+                )}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ========================================== */}
       {/* MODAL - កែតម្រូវផ្ទាំងខ្មៅឱ្យស្រាលជាងមុន */}
@@ -585,7 +604,7 @@ const ManageStudents = () => {
                     value={formData.first_name}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    placeholder="ឧ. សុខ"
+                    placeholder=""
                   />
                 </div>
                 <div>
@@ -599,7 +618,7 @@ const ManageStudents = () => {
                     value={formData.last_name}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    placeholder="ឧ. វិសាល"
+                    placeholder=""
                   />
                 </div>
 
@@ -615,7 +634,7 @@ const ManageStudents = () => {
                     value={formData.email}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    placeholder="student@email.com"
+                    placeholder=""
                   />
                 </div>
                 <div>
@@ -628,7 +647,7 @@ const ManageStudents = () => {
                     value={formData.phone}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    placeholder="+855 12 345 678"
+                    placeholder="+855|"
                   />
                 </div>
 
@@ -757,7 +776,7 @@ const ManageStudents = () => {
                 </div>
 
                 {/* Row 7: Profile Image */}
-                <div className="md:col-span-2">
+                {/* <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
                     <PhotoIcon className="h-5 w-5 inline mr-1 text-gray-500" />
                     រូបភាពប្រវត្តិរូប
@@ -787,7 +806,7 @@ const ManageStudents = () => {
                       រូបភាពបច្ចុប្បន្ន: {editingStudent.profile_image}
                     </p>
                   )}
-                </div>
+                </div> */}
 
                 {/* Row 8: Password & Status */}
                 <div>
