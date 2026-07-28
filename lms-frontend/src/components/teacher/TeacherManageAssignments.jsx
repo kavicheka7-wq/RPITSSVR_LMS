@@ -56,18 +56,24 @@ export default function TeacherManageAssignments() {
   const fetchCourses = async () => {
     try {
       const response = await api.get('/teacher/courses');
-      setCourses(response.data || []);
+      // ធានាថាវាចាប់យក Array ជានិច្ច
+      const coursesData = response.data.data || response.data || [];
+      setCourses(Array.isArray(coursesData) ? coursesData : []);
     } catch (error) {
       toast.error('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ');
+      setCourses([]);
     }
   };
 
   const fetchAssignments = async () => {
     try {
       const response = await api.get('/teacher/assignments');
-      setAssignments(response.data || []);
+      // ធានាថាវាចាប់យក Array ជានិច្ច
+      const assignmentsData = response.data.data || response.data || [];
+      setAssignments(Array.isArray(assignmentsData) ? assignmentsData : []);
     } catch (error) {
       toast.error('មិនអាចទាញយកទិន្នន័យកិច្ចការបានទេ');
+      setAssignments([]);
     }
   };
 
@@ -79,7 +85,7 @@ export default function TeacherManageAssignments() {
   const openAddModal = () => {
     setEditingAssignment(null);
     setFormData({
-      course_id: courses[0]?.id || '',
+      course_id: Array.isArray(courses) && courses.length > 0 ? courses[0].id : '',
       title: '',
       description: '',
       due_date: '',
@@ -162,14 +168,15 @@ export default function TeacherManageAssignments() {
     }
   };
 
-  const filteredAssignments = assignments.filter(assignment => {
+  // ប្រើ Array.isArray ដើម្បីការពារ Error Filter
+  const filteredAssignments = Array.isArray(assignments) ? assignments.filter(assignment => {
     const search = searchTerm.toLowerCase();
     const matchesSearch = 
       assignment.title?.toLowerCase().includes(search) ||
       assignment.description?.toLowerCase().includes(search);
-    const matchesCourse = selectedCourse === '' || assignment.course_id.toString() === selectedCourse;
+    const matchesCourse = selectedCourse === '' || assignment.course_id?.toString() === selectedCourse;
     return matchesSearch && matchesCourse;
-  });
+  }) : [];
 
   const formatDate = (dateString) => {
     if (!dateString) return '—';
@@ -198,7 +205,7 @@ export default function TeacherManageAssignments() {
             </h1>
             <p className="text-sm text-gray-500 mt-1">
               បង្កើត និងគ្រប់គ្រងកិច្ចការផ្ទះ ឬគម្រោងសម្រាប់សិស្ស
-              <span className="ml-2 text-indigo-600 font-medium">({assignments.length} កិច្ចការ)</span>
+              <span className="ml-2 text-indigo-600 font-medium">({Array.isArray(assignments) ? assignments.length : 0} កិច្ចការ)</span>
             </p>
           </div>
           <button
@@ -231,7 +238,7 @@ export default function TeacherManageAssignments() {
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
             >
               <option value="">គ្រប់មុខវិជ្ជា</option>
-              {courses.map(course => (
+              {Array.isArray(courses) && courses.map(course => (
                 <option key={course.id} value={course.id}>
                   {course.course_name} ({course.course_code})
                 </option>
@@ -388,7 +395,7 @@ export default function TeacherManageAssignments() {
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
                 >
                   <option value="">ជ្រើសរើសមុខវិជ្ជា</option>
-                  {courses.map(course => (
+                  {Array.isArray(courses) && courses.map(course => (
                     <option key={course.id} value={course.id}>
                       {course.course_name} ({course.course_code})
                     </option>

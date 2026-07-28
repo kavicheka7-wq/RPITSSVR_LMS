@@ -1,3 +1,4 @@
+// src/components/teacher/TeacherManageScores.jsx
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
@@ -24,12 +25,18 @@ const TeacherManageScores = () => {
   const fetchCourses = async () => {
     try {
       const response = await api.get('/teacher/courses');
-      setCourses(response.data);
-      if (response.data.length > 0) {
-        setSelectedCourse(response.data[0].id);
+      // កែសម្រួល៖ ធានាថាវាចាប់យក Array ពី API យ៉ាងពិតប្រាកដ
+      const coursesData = response.data.data || response.data || [];
+      const validCourses = Array.isArray(coursesData) ? coursesData : [];
+      
+      setCourses(validCourses);
+      
+      if (validCourses.length > 0) {
+        setSelectedCourse(validCourses[0].id);
       }
     } catch (error) {
       toast.error('មិនអាចទាញយកបញ្ជីមុខវិជ្ជាបានទេ (Failed to fetch courses)');
+      setCourses([]); // ការពារកុំឱ្យ Error ពេលបណ្តាញមានបញ្ហា
     }
   };
 
@@ -38,9 +45,12 @@ const TeacherManageScores = () => {
     setLoading(true);
     try {
       const response = await api.get(`/teacher/courses/${selectedCourse}/scores`);
-      setStudentScores(response.data);
+      // ធានាថាវាជា Array
+      const scoresData = response.data.data || response.data || [];
+      setStudentScores(Array.isArray(scoresData) ? scoresData : []);
     } catch (error) {
       toast.error('មិនអាចទាញយកពិន្ទុសិស្សបានទេ (Failed to fetch student scores)');
+      setStudentScores([]);
     } finally {
       setLoading(false);
     }
@@ -154,7 +164,8 @@ const TeacherManageScores = () => {
                 className="w-full appearance-none bg-blue-900/35 backdrop-blur-md text-white border border-blue-700/50 rounded-2xl px-4 py-3 pr-10 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/30 transition-all cursor-pointer font-medium"
               >
                 <option value="" className="bg-blue-950 text-gray-300">-- ជ្រើសរើសមុខវិជ្ជា --</option>
-                {courses.map((course) => (
+                {/* កែសម្រួល៖ ប្រើ Array.isArray ដើម្បីការពារ Error Map */}
+                {Array.isArray(courses) && courses.map((course) => (
                   <option key={course.id} value={course.id} className="bg-blue-950 text-white">
                     {course.course_name} ({course.course_code})
                   </option>
@@ -184,12 +195,12 @@ const TeacherManageScores = () => {
                 <div className="flex items-center gap-2">
                   <BookOpenIcon className="h-5 w-5 text-blue-900" />
                   <span className="text-sm font-bold text-gray-700">
-                    ចំនួនសិស្សសរុប: {studentScores.length} នាក់
+                    ចំនួនសិស្សសរុប: {Array.isArray(studentScores) ? studentScores.length : 0} នាក់
                   </span>
                 </div>
                 <button
                   type="submit"
-                  disabled={saving || studentScores.length === 0}
+                  disabled={saving || !Array.isArray(studentScores) || studentScores.length === 0}
                   className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-blue-950 to-blue-900 hover:from-yellow-500 hover:to-yellow-600 hover:text-blue-950 text-white px-6 py-2.5 rounded-xl font-bold shadow-lg shadow-blue-950/10 hover:shadow-yellow-500/20 transition-all duration-300 disabled:opacity-50 disabled:pointer-events-none"
                 >
                   {saving ? (
@@ -229,7 +240,7 @@ const TeacherManageScores = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
-                    {studentScores.length === 0 ? (
+                    {!Array.isArray(studentScores) || studentScores.length === 0 ? (
                       <tr>
                         <td colSpan="5" className="px-6 py-12 text-center text-gray-500 font-medium">
                           <div className="flex flex-col items-center justify-center gap-2">

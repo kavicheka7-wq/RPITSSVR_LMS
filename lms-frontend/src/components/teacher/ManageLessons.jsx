@@ -15,7 +15,8 @@ import {
   XMarkIcon,
   ArrowPathIcon,
   ExclamationTriangleIcon,
-  PaperClipIcon
+  PaperClipIcon,
+  LinkIcon,
 } from '@heroicons/react/24/outline';
 
 export default function ManageLessons() {
@@ -34,12 +35,14 @@ export default function ManageLessons() {
   // File & Video upload loading states
   const [uploadingFileId, setUploadingFileId] = useState(null);
   const [uploadingVideoId, setUploadingVideoId] = useState(null);
+  const [uploadingYoutubeId, setUploadingYoutubeId] = useState(null);
 
   const fileInputRef = useRef(null);
   const videoFileInputRef = useRef(null);
 
   // State to track media being uploaded to a specific lesson (inside expanded section)
   const [videoTitle, setVideoTitle] = useState('');
+  const [youtubeUrl, setYoutubeUrl] = useState('');
 
   // Form state for creating/editing a lesson
   const [formData, setFormData] = useState({
@@ -48,6 +51,10 @@ export default function ManageLessons() {
     lesson_order: '1',
     description: '',
   });
+
+  // File upload state
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [youtubeVideo, setYoutubeVideo] = useState({ title: '', url: '' });
 
   useEffect(() => {
     fetchInitialData();
@@ -70,18 +77,22 @@ export default function ManageLessons() {
   const fetchCourses = async () => {
     try {
       const response = await api.get('/teacher/courses');
-      setCourses(response.data || []);
+      const coursesData = response.data.data || response.data || [];
+      setCourses(Array.isArray(coursesData) ? coursesData : []);
     } catch (error) {
       toast.error('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ');
+      setCourses([]);
     }
   };
 
   const fetchLessons = async () => {
     try {
       const response = await api.get('/teacher/lessons');
-      setLessons(response.data || []);
+      const lessonsData = response.data.data || response.data || [];
+      setLessons(Array.isArray(lessonsData) ? lessonsData : []);
     } catch (error) {
       toast.error('មិនអាចទាញយកទិន្នន័យមេរៀនបានទេ');
+      setLessons([]);
     }
   };
 
@@ -90,14 +101,25 @@ export default function ManageLessons() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleFileChange = (e) => {
+    const files = Array.from(e.target.files);
+    setSelectedFiles(prev => [...prev, ...files]);
+  };
+
+  const removeFile = (index) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const openAddModal = () => {
     setEditingLesson(null);
     setFormData({
       title: '',
-      course_id: courses[0]?.id || '',
-      lesson_order: (lessons.length + 1).toString(),
+      course_id: Array.isArray(courses) && courses.length > 0 ? courses[0].id : '',
+      lesson_order: ((Array.isArray(lessons) ? lessons.length : 0) + 1).toString(),
       description: '',
     });
+    setSelectedFiles([]);
+    setYoutubeVideo({ title: '', url: '' });
     setShowAddModal(true);
   };
 
@@ -109,9 +131,12 @@ export default function ManageLessons() {
       lesson_order: (lesson.lesson_order ?? 1).toString(),
       description: lesson.description || '',
     });
+    setSelectedFiles([]);
+    setYoutubeVideo({ title: '', url: '' });
     setShowAddModal(true);
   };
 
+  // កែសម្រួល handleSubmit ថ្មីដើម្បីរុញទាំងអក្សរ និងឯកសារ
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -124,15 +149,60 @@ export default function ManageLessons() {
     };
 
     try {
+      let currentLessonId = null;
+
+      // ជំហានទី១៖ បង្កើត ឬ កែប្រែមេរៀន (បញ្ជូនទិន្នន័យជាអក្សរ)
       if (editingLesson) {
         await api.put(`/teacher/lessons/${editingLesson.id}`, payload);
+        currentLessonId = editingLesson.id;
         toast.success('បានកែប្រែមេរៀនដោយជោគជ័យ');
       } else {
-        await api.post('/teacher/lessons', payload);
+        const response = await api.post('/teacher/lessons', payload);
+        // ចាប់យក ID របស់មេរៀនដែលទើបនឹងបង្កើតថ្មី 
+        currentLessonId = response.data?.lesson?.id || response.data?.id; 
         toast.success('បានបន្ថែមមេរៀនដោយជោគជ័យ');
       }
+
+      // ជំហានទី២៖ ផ្ទុកឡើងឯកសារ (ប្រសិនបើមាន)
+      if (selectedFiles.length > 0 && currentLessonId) {
+        for (const file of selectedFiles) {
+          const filePayload = new FormData();
+          filePayload.append('lesson_id', currentLessonId);
+          filePayload.append('file', file);
+          
+          try {
+             await api.post('/teacher/lessons/file', filePayload, {
+               headers: { 'Content-Type': 'multipart/form-data' }
+             });
+          } catch (fileError) {
+             console.error('File upload failed for', file.name, fileError);
+             toast.error(`មិនអាចផ្ទុកឯកសារ ${file.name} ឡើងបានទេ`);
+          }
+        }
+      }
+
+      // ជំហានទី៣៖ បញ្ចូលវីដេអូ YouTube (ប្រសិនបើមាន)
+      if (youtubeVideo.url && youtubeVideo.title && currentLessonId) {
+         const videoPayload = new FormData();
+         videoPayload.append('lesson_id', currentLessonId);
+         videoPayload.append('title', youtubeVideo.title);
+         videoPayload.append('video_url', youtubeVideo.url); 
+         
+         try {
+            await api.post('/teacher/lessons/video', videoPayload, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            });
+         } catch (videoError) {
+            console.error('Video upload failed', videoError);
+            toast.error('មិនអាចបញ្ចូលវីដេអូបានទេ');
+         }
+      }
+
       setShowAddModal(false);
+      setSelectedFiles([]);
+      setYoutubeVideo({ title: '', url: '' });
       await fetchLessons();
+      
     } catch (error) {
       console.error('Submit error:', error);
       if (error.response?.data?.errors) {
@@ -239,15 +309,14 @@ export default function ManageLessons() {
     }
   };
 
-  const filteredLessons = lessons.filter(lesson => {
+  const filteredLessons = Array.isArray(lessons) ? lessons.filter(lesson => {
     const search = searchTerm.toLowerCase();
     const matchesSearch = 
       lesson.title?.toLowerCase().includes(search) ||
       lesson.description?.toLowerCase().includes(search);
-    const matchesCourse = selectedCourse === '' || lesson.course_id.toString() === selectedCourse;
+    const matchesCourse = selectedCourse === '' || lesson.course_id?.toString() === selectedCourse;
     return matchesSearch && matchesCourse;
-  });
-
+  }) : [];
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -263,7 +332,7 @@ export default function ManageLessons() {
             </h1>
             <p className="text-sm text-gray-500 mt-1">
               បន្ថែមមេរៀន ក៏ដូចជាវីដេអូ និងឯកសារបង្រៀនសម្រាប់មុខវិជ្ជានីមួយៗ
-              <span className="ml-2 text-indigo-600 font-medium">({lessons.length} មេរៀន)</span>
+              <span className="ml-2 text-indigo-600 font-medium">({Array.isArray(lessons) ? lessons.length : 0} មេរៀន)</span>
             </p>
           </div>
           <button
@@ -296,7 +365,7 @@ export default function ManageLessons() {
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
             >
               <option value="">គ្រប់មុខវិជ្ជា</option>
-              {courses.map(course => (
+              {Array.isArray(courses) && courses.map(course => (
                 <option key={course.id} value={course.id}>
                   {course.course_name} ({course.course_code})
                 </option>
@@ -312,21 +381,11 @@ export default function ManageLessons() {
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  No
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Name
-                </th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Files
-                </th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Videos
-                </th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">No</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Files</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Videos</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
@@ -413,12 +472,11 @@ export default function ManageLessons() {
                         </td>
                       </tr>
 
-                      {/* Expanded Section for Files and Videos */}
+                      {/* Expanded Section */}
                       {isExpanded && (
                         <tr className="bg-gray-50/70">
                           <td colSpan="5" className="px-8 py-5">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                              
                               {/* Files Section */}
                               <div>
                                 <h4 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-1.5 border-b pb-1.5">
@@ -429,7 +487,7 @@ export default function ManageLessons() {
                                   {filesCount === 0 ? (
                                     <p className="text-xs text-gray-400 italic">គ្មានឯកសារផ្ទុកឡើង</p>
                                   ) : (
-                                    lesson.files.map(file => (
+                                    Array.isArray(lesson.files) && lesson.files.map(file => (
                                       <div key={file.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs hover:shadow-xs transition text-xs">
                                         <a
                                           href={`${api.defaults.baseURL.replace('/api', '')}/storage/${file.file_path}`}
@@ -484,7 +542,7 @@ export default function ManageLessons() {
                                   {videosCount === 0 ? (
                                     <p className="text-xs text-gray-400 italic">គ្មានវីដេអូផ្ទុកឡើង</p>
                                   ) : (
-                                    lesson.videos.map(video => (
+                                    Array.isArray(lesson.videos) && lesson.videos.map(video => (
                                       <div key={video.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs hover:shadow-xs transition text-xs">
                                         <a
                                           href={`${api.defaults.baseURL.replace('/api', '')}/storage/${video.video_url}`}
@@ -537,7 +595,6 @@ export default function ManageLessons() {
                                   />
                                 </div>
                               </div>
-
                             </div>
                           </td>
                         </tr>
@@ -551,10 +608,10 @@ export default function ManageLessons() {
         </div>
       </div>
 
-      {/* Modal - Add/Edit Lesson */}
+      {/* MODAL */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 p-8 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
@@ -571,22 +628,8 @@ export default function ManageLessons() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ចំណងជើងមេរៀន <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  name="title"
-                  required
-                  value={formData.title}
-                  onChange={handleInputChange}
-                  placeholder="ឧ. មេរៀនទី១៖ សេចក្តីផ្តើម"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+              {/* Row 1: Course & Order */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
                     មុខវិជ្ជា <span className="text-red-500">*</span>
@@ -599,7 +642,7 @@ export default function ManageLessons() {
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
                   >
                     <option value="">ជ្រើសរើសមុខវិជ្ជា</option>
-                    {courses.map(course => (
+                    {Array.isArray(courses) && courses.map(course => (
                       <option key={course.id} value={course.id}>
                         {course.course_name}
                       </option>
@@ -622,6 +665,23 @@ export default function ManageLessons() {
                 </div>
               </div>
 
+              {/* Row 2: Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  ចំណងជើងមេរៀន <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  name="title"
+                  required
+                  value={formData.title}
+                  onChange={handleInputChange}
+                  placeholder="ឧ. សេចក្តីផ្តើមអំពីកម្មវិធី..."
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                />
+              </div>
+
+              {/* Row 3: Description */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   ការពិពណ៌នា
@@ -636,6 +696,74 @@ export default function ManageLessons() {
                 />
               </div>
 
+              {/* Row 4: Upload Files */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  ផ្ទុកឡើងឯកសារ (PDF, DOCX, ជាដើម)
+                </label>
+                <div className="flex items-center gap-3">
+                  <label className="flex-1 cursor-pointer">
+                    <div className="flex items-center justify-center px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-indigo-400 transition-all bg-gray-50 hover:bg-indigo-50/30">
+                      <PaperClipIcon className="h-5 w-5 text-gray-400 mr-2" />
+                      <span className="text-sm text-gray-600">ជ្រើសរើសឯកសារ</span>
+                      <input
+                        type="file"
+                        multiple
+                        onChange={handleFileChange}
+                        className="hidden"
+                        accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls"
+                      />
+                    </div>
+                  </label>
+                </div>
+                {selectedFiles.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {selectedFiles.map((file, index) => (
+                      <div key={index} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-xl">
+                        <span className="text-sm text-gray-700 truncate max-w-[300px]">{file.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeFile(index)}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <XMarkIcon className="h-5 w-5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Row 5: YouTube Video */}
+              <div className="border-t border-gray-100 pt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  <VideoCameraIcon className="h-4 w-4 inline mr-1 text-purple-600" />
+                  វីដេអូ (YouTube URL)
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    placeholder="ចំណងជើងវីដេអូ"
+                    value={youtubeVideo.title}
+                    onChange={(e) => setYoutubeVideo({ ...youtubeVideo, title: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                  />
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <LinkIcon className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <input
+                      type="url"
+                      placeholder="https://youtube.com/..."
+                      value={youtubeVideo.url}
+                      onChange={(e) => setYoutubeVideo({ ...youtubeVideo, url: e.target.value })}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Buttons */}
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-100">
                 <button
                   type="button"
@@ -664,7 +792,7 @@ export default function ManageLessons() {
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 animate-fadeIn">
             <div className="flex items-center text-red-600 mb-4">
               <ExclamationTriangleIcon className="h-6 w-6 mr-2" />

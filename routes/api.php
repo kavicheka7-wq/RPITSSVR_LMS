@@ -11,11 +11,17 @@ use App\Http\Controllers\Api\AdminStudentController;
 use App\Http\Controllers\Api\DepartmentController;
 use App\Http\Controllers\Api\CourseController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\TeacherStudentController;
+use App\Http\Controllers\Api\TeacherCourseController;
+use App\Http\Controllers\Api\TeacherLessonController;
 use App\Models\Role; // សូមប្រាកដថាអ្នកមាន Model នេះ
 use App\Models\Department; // សូមប្រាកដថាអ្នកមាន Model នេះ
 use App\Models\Teacher; // សូមប្រាកដថាអ្នកមាន Model នេះ
 use App\Models\Student; // សូមប្រាកដថាអ្នកមាន Model នេះ
 use App\Models\Course; // សូមប្រាកដថាអ្នកមាន Model នេះ
+use App\Models\Lesson; // សូមប្រាកដថាអ្នកមាន Model នេះ
+use App\Models\LessonFile; // សូមប្រាកដថាអ្នកមាន Model នេះ
+use App\Models\Video; // សូមប្រាកដថាអ្នកមាន Model នេះ
 Route::get('/roles', function () {
     // ជម្រើសទី១៖ ប្រសិនបើអ្នកបានបង្កើត Table roles និងមានទិន្នន័យក្នុង Database រួចរាល់
     return response()->json(Role::all());
@@ -106,18 +112,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/dashboard', [TeacherController::class, 'dashboard']);
         
         // Courses
-        Route::get('/courses', [TeacherController::class, 'getMyCourses']);
-        Route::post('/courses', [TeacherController::class, 'createCourse']);
-        Route::put('/courses/{id}', [TeacherController::class, 'updateCourse']);
-        Route::delete('/courses/{id}', [TeacherController::class, 'deleteCourse']);
+        Route::get('/courses', [TeacherCourseController::class, 'index']);
+        Route::get('/courses/stats', [TeacherCourseController::class, 'getStats']);
+        Route::get('/courses/search', [TeacherCourseController::class, 'search']);
+        Route::get('/courses/{courseId}', [TeacherCourseController::class, 'show']);
         
         // Students
-        Route::get('/students', [AdminStudentController::class, 'index']);
-        Route::post('/students', [AdminStudentController::class, 'store']);
-        Route::put('/students/{student}', [AdminStudentController::class, 'update']);
-        Route::delete('/students/{student}', [AdminStudentController::class, 'destroy']);
-        Route::get('/courses/{courseId}/students', [TeacherController::class, 'getCourseStudents']);
-        
+        Route::get('/students', [TeacherStudentController::class, 'index']);
+        Route::get('/students/count', [TeacherStudentController::class, 'getCount']);
+        Route::get('/students/search', [TeacherStudentController::class, 'search']);
+        Route::get('/students/{studentId}', [TeacherStudentController::class, 'show']);
+
         // Attendance
         Route::get('/courses/{courseId}/attendance', [TeacherController::class, 'getAttendance']);
         Route::post('/attendance', [TeacherController::class, 'markAttendance']);
@@ -128,14 +133,23 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/scores', [TeacherController::class, 'updateScores']);
         
         // Lessons
-        Route::get('/lessons', [TeacherController::class, 'getLessons']);
-        Route::post('/lessons', [TeacherController::class, 'createLesson']);
-        Route::put('/lessons/{id}', [TeacherController::class, 'updateLesson']);
-        Route::delete('/lessons/{id}', [TeacherController::class, 'deleteLesson']);
-        Route::post('/lessons/file', [TeacherController::class, 'uploadLessonFile']);
-        Route::delete('/lessons/files/{id}', [TeacherController::class, 'deleteLessonFile']);
-        Route::post('/lessons/video', [TeacherController::class, 'uploadVideo']);
-        Route::delete('/lessons/videos/{id}', [TeacherController::class, 'deleteVideo']);
+        Route::get('/lessons', [TeacherLessonController::class, 'index']);
+        Route::post('/lessons', [TeacherLessonController::class, 'store']);
+        Route::get('/lessons/{lessonId}', [TeacherLessonController::class, 'show']);
+        Route::put('/lessons/{lesson}', [TeacherLessonController::class, 'update']);
+        Route::delete('/lessons/{lesson}', [TeacherLessonController::class, 'destroy']);
+        Route::post('/lessons/reorder', [TeacherLessonController::class, 'reorder']);
+        
+        // Lesson Files
+        Route::post('/lessons/file', [TeacherLessonController::class, 'uploadFile']);
+        Route::delete('/lessons/files/{fileId}', [TeacherLessonController::class, 'deleteFile']);
+        
+        // Lesson Videos
+        Route::post('/lessons/video', [TeacherLessonController::class, 'uploadVideo']);
+        Route::delete('/lessons/videos/{videoId}', [TeacherLessonController::class, 'deleteVideo']);
+        
+        // Get lessons by course
+        Route::get('/courses/{courseId}/lessons', [TeacherLessonController::class, 'getLessonsByCourse']);
         
         // Assignments
         Route::get('/assignments', [TeacherController::class, 'getTeacherAssignments']);

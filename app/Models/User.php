@@ -79,6 +79,13 @@ class User extends Authenticatable
     {
         return $this->hasMany(Enrollment::class, 'student_id');
     }
+    
+    // Relationship: User has one Teacher profile.
+     
+    public function teacher()
+    {
+        return $this->hasOne(Teacher::class, 'user_id');
+    }
 
     /**
      * Interact with the user's full name.

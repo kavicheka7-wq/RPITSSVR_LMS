@@ -6,7 +6,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Course;
 use App\Models\Department;
-use App\Models\User;
+use App\Models\Teacher; // បន្ថែម Model Teacher
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
@@ -49,7 +49,7 @@ class CourseController extends Controller
                 'credit' => 'required|integer|min:1|max:6',
                 'description' => 'nullable|string',
                 'department_id' => 'required|exists:departments,id',
-                'teacher_id' => 'required|exists:users,id',
+                'teacher_id' => 'required|exists:teachers,id', // 🔴 កែមកប្រើ teachers
             ]);
 
             $course = Course::create($validated);
@@ -109,7 +109,7 @@ class CourseController extends Controller
                 'credit' => 'required|integer|min:1|max:6',
                 'description' => 'nullable|string',
                 'department_id' => 'required|exists:departments,id',
-                'teacher_id' => 'required|exists:users,id',
+                'teacher_id' => 'required|exists:teachers,id', // 🔴 កែមកប្រើ teachers
             ]);
 
             $course->update($validated);
@@ -139,7 +139,6 @@ class CourseController extends Controller
     public function destroy(Course $course)
     {
         try {
-            // ពិនិត្យមើលថាតើមានការចុះឈ្មោះរៀនក្នុងមុខវិជ្ជានេះដែរឬទេ
             if ($course->enrollments()->exists()) {
                 return response()->json([
                     'message' => 'មិនអាចលុបមុខវិជ្ជាដែលមានសិស្សចុះឈ្មោះរៀនបានទេ'
@@ -196,14 +195,8 @@ class CourseController extends Controller
     public function getCoursesByTeacher($teacherId)
     {
         try {
-            $teacher = User::with('role')->findOrFail($teacherId);
-            
-            // ពិនិត្យមើលថាតើអ្នកនេះជាគ្រូបង្រៀនឬទេ
-            if ($teacher->role->role_name !== 'Teacher') {
-                return response()->json([
-                    'message' => 'អ្នកប្រើប្រាស់នេះមិនមែនជាគ្រូបង្រៀនទេ'
-                ], 400);
-            }
+            // 🔴 កែមកទាញយកពីតារាង teachers ផ្ទាល់
+            $teacher = Teacher::findOrFail($teacherId);
 
             $courses = Course::with(['department'])
                 ->where('teacher_id', $teacherId)
@@ -281,6 +274,7 @@ class CourseController extends Controller
                     $query->where('department_name', 'LIKE', "%{$keyword}%");
                 })
                 ->orWhereHas('teacher', function ($query) use ($keyword) {
+                    // ដំណើរការធម្មតាព្រោះតារាង teachers មាន first_name និង last_name
                     $query->where('first_name', 'LIKE', "%{$keyword}%")
                           ->orWhere('last_name', 'LIKE', "%{$keyword}%");
                 })

@@ -75,18 +75,24 @@ export default function TeacherManageQuizzes() {
   const fetchCourses = async () => {
     try {
       const response = await api.get('/teacher/courses');
-      setCourses(response.data || []);
+      // ធានាថាវាចាប់យក Array ជានិច្ច
+      const coursesData = response.data.data || response.data || [];
+      setCourses(Array.isArray(coursesData) ? coursesData : []);
     } catch (error) {
       toast.error('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ');
+      setCourses([]);
     }
   };
 
   const fetchQuizzes = async () => {
     try {
       const response = await api.get('/teacher/quizzes');
-      setQuizzes(response.data || []);
+      // ធានាថាវាចាប់យក Array ជានិច្ច
+      const quizzesData = response.data.data || response.data || [];
+      setQuizzes(Array.isArray(quizzesData) ? quizzesData : []);
     } catch (error) {
       toast.error('មិនអាចទាញយកទិន្នន័យកម្រងសំណួរបានទេ');
+      setQuizzes([]);
     }
   };
 
@@ -98,7 +104,7 @@ export default function TeacherManageQuizzes() {
   const openAddModal = () => {
     setEditingQuiz(null);
     setFormData({
-      course_id: courses[0]?.id || '',
+      course_id: Array.isArray(courses) && courses.length > 0 ? courses[0].id : '',
       title: '',
       duration: 60,
       total_mark: 100,
@@ -261,10 +267,11 @@ export default function TeacherManageQuizzes() {
     setMcqOptions(prev => prev.map((opt, i) => ({ ...opt, is_correct: i === index })));
   };
 
-  const filteredQuizzes = quizzes.filter(quiz => {
+  // ប្រើ Array.isArray ការពារការគាំង
+  const filteredQuizzes = Array.isArray(quizzes) ? quizzes.filter(quiz => {
     const search = searchTerm.toLowerCase();
     return quiz.title?.toLowerCase().includes(search);
-  });
+  }) : [];
 
   const formatDate = (dateString) => {
     if (!dateString) return '—';
@@ -293,7 +300,7 @@ export default function TeacherManageQuizzes() {
             </h1>
             <p className="text-sm text-gray-500 mt-1">
               បង្កើតកម្រងសំណួរប្រឡង និងគ្រប់គ្រងសំណួរនីមួយៗ
-              <span className="ml-2 text-indigo-600 font-medium">({quizzes.length} កម្រងសំណួរ)</span>
+              <span className="ml-2 text-indigo-600 font-medium">({Array.isArray(quizzes) ? quizzes.length : 0} កម្រងសំណួរ)</span>
             </p>
           </div>
           <button
@@ -440,7 +447,7 @@ export default function TeacherManageQuizzes() {
                                   <span className="text-xs text-indigo-600 font-medium">ពិន្ទុសរុប៖ {quiz.questions?.reduce((sum, q) => sum + parseFloat(q.mark), 0) || 0} / {quiz.total_mark}</span>
                                 </h4>
                                 <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                                  {(!quiz.questions || quiz.questions.length === 0) ? (
+                                  {(!Array.isArray(quiz.questions) || quiz.questions.length === 0) ? (
                                     <p className="text-xs text-gray-400 italic py-4">គ្មានសំណួរនៅក្នុងកម្រងសំណួរនេះទេ</p>
                                   ) : (
                                     quiz.questions.map((question, qIdx) => (
@@ -465,7 +472,7 @@ export default function TeacherManageQuizzes() {
                                         {/* Display MCQ Options */}
                                         {question.question_type === 'MCQ' && (
                                           <div className="grid grid-cols-2 gap-2">
-                                            {question.options?.map((opt, oIdx) => (
+                                            {Array.isArray(question.options) && question.options.map((opt, oIdx) => (
                                               <div 
                                                 key={opt.id} 
                                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${opt.is_correct ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-gray-50/50 border-gray-200 text-gray-700'}`}
@@ -481,7 +488,7 @@ export default function TeacherManageQuizzes() {
                                         {/* Display True/False Options */}
                                         {question.question_type === 'TrueFalse' && (
                                           <div className="flex gap-4">
-                                            {question.options?.map(opt => (
+                                            {Array.isArray(question.options) && question.options.map(opt => (
                                               <span 
                                                 key={opt.id} 
                                                 className={`px-3 py-1.5 rounded-lg border text-xs font-bold ${opt.is_correct ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
@@ -666,7 +673,8 @@ export default function TeacherManageQuizzes() {
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
                 >
                   <option value="">ជ្រើសរើសមុខវិជ្ជា</option>
-                  {courses.map(course => (
+                  {/* ធានាថាវាដំណើរការពេលបើក Modal */}
+                  {Array.isArray(courses) && courses.map(course => (
                     <option key={course.id} value={course.id}>
                       {course.course_name} ({course.course_code})
                     </option>
