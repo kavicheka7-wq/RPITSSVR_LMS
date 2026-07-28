@@ -14,7 +14,12 @@ const StudentCourses = () => {
   const fetchCourses = async () => {
     try {
       const response = await api.get('/student/courses');
-      setCourses(Array.isArray(response.data) ? response.data : []);
+      const coursesData = Array.isArray(response.data?.data)
+        ? response.data.data
+        : Array.isArray(response.data)
+        ? response.data
+        : [];
+      setCourses(coursesData);
     } catch (error) {
       console.error('Error fetching courses:', error);
       setCourses([]);
@@ -64,7 +69,7 @@ const StudentCourses = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {courses.map((course) => (
+          {(Array.isArray(courses) ? courses : []).map((course) => (
             <Link
               key={course.id}
               to={`/student/courses/${course.id}`}

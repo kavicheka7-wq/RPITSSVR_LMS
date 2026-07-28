@@ -10,6 +10,14 @@ const ManageAttendance = () => {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  const getArrayData = (resData) => {
+    if (!resData) return [];
+    if (Array.isArray(resData)) return resData;
+    if (Array.isArray(resData.data)) return resData.data;
+    if (resData.data && Array.isArray(resData.data.data)) return resData.data.data;
+    return [];
+  };
+
   useEffect(() => {
     fetchCourses();
   }, []);
@@ -17,12 +25,14 @@ const ManageAttendance = () => {
   const fetchCourses = async () => {
     try {
       const response = await api.get('/teacher/courses');
-      setCourses(response.data);
-      if (response.data.length > 0) {
-        setSelectedCourse(response.data[0].id);
+      const validCourses = getArrayData(response.data);
+      setCourses(validCourses);
+      if (validCourses.length > 0) {
+        setSelectedCourse(validCourses[0].id);
       }
     } catch (error) {
       toast.error('Failed to fetch courses');
+      setCourses([]);
     }
   };
 
@@ -31,12 +41,14 @@ const ManageAttendance = () => {
     setLoading(true);
     try {
       const response = await api.get(`/teacher/courses/${selectedCourse}/students`);
-      setStudents(response.data.map(student => ({
+      const validStudents = getArrayData(response.data);
+      setStudents(validStudents.map(student => ({
         ...student,
         attendance_status: 'Present', // Default
       })));
     } catch (error) {
       toast.error('Failed to fetch students');
+      setStudents([]);
     } finally {
       setLoading(false);
     }
@@ -95,7 +107,7 @@ const ManageAttendance = () => {
                 required
               >
                 <option value="">Select Course</option>
-                {courses.map((course) => (
+                {(Array.isArray(courses) ? courses : []).map((course) => (
                   <option key={course.id} value={course.id}>
                     {course.course_name} ({course.course_code})
                   </option>
@@ -127,7 +139,7 @@ const ManageAttendance = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {students.map((student) => (
+                {(Array.isArray(students) ? students : []).map((student) => (
                   <tr key={student.id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {student.first_name} {student.last_name}

@@ -32,10 +32,10 @@ const Sidebar = () => {
       label: t('អ្នកគ្រប់គ្រង', 'Administrator'),
       items: [
         { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/admin/dashboard' },
+        { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/admin/departments' },
         { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/admin/teachers' },
         { name: t('សិស្ស', 'Students'), icon: UserGroupIcon, path: '/admin/students' },
         { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/admin/courses' },
-        { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/admin/departments' },
         // { name: t('ការកំណត់', 'Settings'), icon: Cog6ToothIcon, path: '/admin/settings' },
       ],
     },

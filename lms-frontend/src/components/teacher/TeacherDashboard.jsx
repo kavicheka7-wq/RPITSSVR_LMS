@@ -157,7 +157,7 @@ export default function TeacherDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {courses.map((course) => (
+                {(Array.isArray(courses) ? courses : []).map((course) => (
                   <tr key={course.id} className="hover:bg-gray-50/50 transition cursor-pointer">
                     <td className="px-6 py-4 text-sm font-mono text-gray-600">{course.code}</td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-800">{course.name}</td>

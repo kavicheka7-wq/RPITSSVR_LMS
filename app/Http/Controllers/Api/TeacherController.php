@@ -177,11 +177,37 @@ class TeacherController extends Controller
         ]);
     }
 
+    /**
+     * Get teacher ID for the authenticated user, or fallback to user ID.
+     */
+    private function getTeacherId()
+    {
+        $user = auth()->user();
+        if ($user && $user->teacher) {
+            return $user->teacher->id;
+        }
+        return auth()->id();
+    }
+
+    /**
+     * Query courses owned by the authenticated teacher.
+     */
+    private function teacherCourseQuery()
+    {
+        $teacherId = $this->getTeacherId();
+        $userId = auth()->id();
+
+        return Course::where(function ($query) use ($teacherId, $userId) {
+            $query->where('teacher_id', $teacherId)
+                  ->orWhere('teacher_id', $userId);
+        });
+    }
+
     // --- Classroom Management ---
     public function getMyCourses()
     {
-        $courses = Course::with(['department', 'students'])
-            ->where('teacher_id', auth()->id())
+        $courses = $this->teacherCourseQuery()
+            ->with(['department', 'students'])
             ->get();
 
         return response()->json($courses);
@@ -198,7 +224,7 @@ class TeacherController extends Controller
                 'department_id' => 'required|exists:departments,id',
             ]);
 
-            $validated['teacher_id'] = auth()->id();
+            $validated['teacher_id'] = $this->getTeacherId();
 
             $course = Course::create($validated);
 
@@ -223,7 +249,7 @@ class TeacherController extends Controller
     public function updateCourse(Request $request, $id)
     {
         try {
-            $course = Course::where('teacher_id', auth()->id())->findOrFail($id);
+            $course = $this->teacherCourseQuery()->findOrFail($id);
 
             $validated = $request->validate([
                 'course_code' => [
@@ -261,7 +287,7 @@ class TeacherController extends Controller
     public function deleteCourse($id)
     {
         try {
-            $course = Course::where('teacher_id', auth()->id())->findOrFail($id);
+            $course = $this->teacherCourseQuery()->findOrFail($id);
 
             // Check if there are enrollments
             if ($course->enrollments()->exists()) {
@@ -288,7 +314,7 @@ class TeacherController extends Controller
     // --- Student Management ---
     public function getCourseStudents($courseId)
     {
-        $course = Course::where('teacher_id', auth()->id())->findOrFail($courseId);
+        $course = $this->teacherCourseQuery()->findOrFail($courseId);
 
         $students = $course->students()
             ->wherePivot('status', 'active')
@@ -300,8 +326,7 @@ class TeacherController extends Controller
     // --- Attendance Management ---
     public function getAttendance($courseId)
     {
-        $course = Course::where('teacher_id', auth()->id())
-            ->findOrFail($courseId);
+        $course = $this->teacherCourseQuery()->findOrFail($courseId);
 
         $attendance = Attendance::with('student')
             ->where('course_id', $courseId)
@@ -320,8 +345,7 @@ class TeacherController extends Controller
             'attendance_date' => 'required|date',
         ]);
 
-        Course::where('teacher_id', auth()->id())
-            ->findOrFail($validated['course_id']);
+        $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
         $attendance = Attendance::updateOrCreate(
             [
@@ -348,8 +372,7 @@ class TeacherController extends Controller
             'attendance.*.status' => 'required|in:Present,Absent,Late',
         ]);
 
-        Course::where('teacher_id', auth()->id())
-            ->findOrFail($validated['course_id']);
+        $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
         DB::transaction(function () use ($validated) {
             foreach ($validated['attendance'] as $item) {
@@ -372,7 +395,7 @@ class TeacherController extends Controller
     // --- Score Management ---
     public function getScores($courseId)
     {
-        $course = Course::where('teacher_id', auth()->id())->findOrFail($courseId);
+        $course = $this->teacherCourseQuery()->findOrFail($courseId);
 
         $students = $course->students()
             ->wherePivot('status', 'active')
@@ -411,8 +434,7 @@ class TeacherController extends Controller
 
         DB::transaction(function () use ($validated) {
             foreach ($validated['scores'] as $scoreData) {
-                Course::where('teacher_id', auth()->id())
-                    ->findOrFail($scoreData['course_id']);
+                $this->teacherCourseQuery()->findOrFail($scoreData['course_id']);
 
                 Grade::updateOrCreate(
                     [
@@ -465,8 +487,7 @@ class TeacherController extends Controller
             'lesson_order' => 'nullable|integer|min:0',
         ]);
 
-        Course::where('teacher_id', auth()->id())
-            ->findOrFail($validated['course_id']);
+        $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
         $validated['created_by'] = auth()->id();
         $validated['lesson_order'] = $validated['lesson_order'] ?? 0;
@@ -491,8 +512,7 @@ class TeacherController extends Controller
                 'lesson_order' => 'nullable|integer|min:0',
             ]);
 
-            Course::where('teacher_id', auth()->id())
-                ->findOrFail($validated['course_id']);
+            $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
             $lesson->update($validated);
 
@@ -676,8 +696,7 @@ class TeacherController extends Controller
             'total_score' => 'nullable|numeric|min:0',
         ]);
 
-        Course::where('teacher_id', auth()->id())
-            ->findOrFail($validated['course_id']);
+        $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
         $validated['total_score'] = $validated['total_score'] ?? 100;
         $validated['created_by'] = auth()->id();
@@ -703,8 +722,7 @@ class TeacherController extends Controller
                 'total_score' => 'required|numeric|min:0',
             ]);
 
-            Course::where('teacher_id', auth()->id())
-                ->findOrFail($validated['course_id']);
+            $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
             $assignment->update($validated);
 
@@ -752,7 +770,7 @@ class TeacherController extends Controller
 
     public function getAssignments($courseId)
     {
-        Course::where('teacher_id', auth()->id())->findOrFail($courseId);
+        $this->teacherCourseQuery()->findOrFail($courseId);
 
         $assignments = Assignment::withCount('submissions')
             ->where('course_id', $courseId)
@@ -765,10 +783,11 @@ class TeacherController extends Controller
     public function getTeacherQuizzes(Request $request)
     {
         try {
+            $teacherIds = [$this->getTeacherId(), auth()->id()];
             $query = Quiz::with(['course', 'questions.options'])
                 ->withCount(['questions', 'attempts'])
-                ->whereHas('course', function ($query) {
-                    $query->where('teacher_id', auth()->id());
+                ->whereHas('course', function ($query) use ($teacherIds) {
+                    $query->whereIn('teacher_id', $teacherIds);
                 });
 
             if ($request->has('course_id') && !empty($request->course_id)) {
@@ -797,8 +816,7 @@ class TeacherController extends Controller
             'end_date' => 'required|date|after:start_date',
         ]);
 
-        Course::where('teacher_id', auth()->id())
-            ->findOrFail($validated['course_id']);
+        $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
         $quiz = Quiz::create($validated);
 
@@ -811,8 +829,9 @@ class TeacherController extends Controller
     public function updateQuiz(Request $request, $id)
     {
         try {
-            $quiz = Quiz::whereHas('course', function ($query) {
-                $query->where('teacher_id', auth()->id());
+            $teacherIds = [$this->getTeacherId(), auth()->id()];
+            $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
+                $query->whereIn('teacher_id', $teacherIds);
             })->findOrFail($id);
 
             $validated = $request->validate([
@@ -824,8 +843,7 @@ class TeacherController extends Controller
                 'end_date' => 'required|date|after:start_date',
             ]);
 
-            Course::where('teacher_id', auth()->id())
-                ->findOrFail($validated['course_id']);
+            $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
             $quiz->update($validated);
 
@@ -849,8 +867,9 @@ class TeacherController extends Controller
     public function deleteQuiz($id)
     {
         try {
-            $quiz = Quiz::whereHas('course', function ($query) {
-                $query->where('teacher_id', auth()->id());
+            $teacherIds = [$this->getTeacherId(), auth()->id()];
+            $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
+                $query->whereIn('teacher_id', $teacherIds);
             })->findOrFail($id);
 
             // Check if there are attempts
@@ -891,8 +910,9 @@ class TeacherController extends Controller
             'options.*.is_correct' => 'required|boolean',
         ]);
 
-        $quiz = Quiz::whereHas('course', function ($query) {
-            $query->where('teacher_id', auth()->id());
+        $teacherIds = [$this->getTeacherId(), auth()->id()];
+        $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
+            $query->whereIn('teacher_id', $teacherIds);
         })->findOrFail($quizId);
 
         $question = DB::transaction(function () use ($validated, $quizId) {
@@ -928,8 +948,9 @@ class TeacherController extends Controller
             $question = Question::findOrFail($id);
             
             // Check if quiz belongs to teacher
-            $quiz = Quiz::whereHas('course', function ($query) {
-                $query->where('teacher_id', auth()->id());
+            $teacherIds = [$this->getTeacherId(), auth()->id()];
+            $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
+                $query->whereIn('teacher_id', $teacherIds);
             })->findOrFail($question->quiz_id);
 
             // Check if there are attempts on the quiz
@@ -958,7 +979,7 @@ class TeacherController extends Controller
     // --- Online Exam ---
     public function getQuizzes($courseId)
     {
-        Course::where('teacher_id', auth()->id())->findOrFail($courseId);
+        $this->teacherCourseQuery()->findOrFail($courseId);
 
         $quizzes = Quiz::with(['questions.options'])
             ->where('course_id', $courseId)
@@ -969,8 +990,9 @@ class TeacherController extends Controller
 
     public function getQuizResults($quizId)
     {
-        $quiz = Quiz::whereHas('course', function ($query) {
-            $query->where('teacher_id', auth()->id());
+        $teacherIds = [$this->getTeacherId(), auth()->id()];
+        $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
+            $query->whereIn('teacher_id', $teacherIds);
         })->findOrFail($quizId);
 
         $results = $quiz->attempts()

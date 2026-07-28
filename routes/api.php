@@ -123,7 +123,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/students/search', [TeacherStudentController::class, 'search']);
         Route::get('/students/{studentId}', [TeacherStudentController::class, 'show']);
 
-        // Attendance
+        // Attendance & Course Students
+        Route::get('/courses/{courseId}/students', [TeacherController::class, 'getCourseStudents']);
         Route::get('/courses/{courseId}/attendance', [TeacherController::class, 'getAttendance']);
         Route::post('/attendance', [TeacherController::class, 'markAttendance']);
         Route::post('/attendance/bulk', [TeacherController::class, 'bulkMarkAttendance']);

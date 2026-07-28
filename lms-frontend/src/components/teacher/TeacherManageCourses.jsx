@@ -43,11 +43,16 @@ const TeacherManageCourses = () => {
   const fetchCourses = async () => {
     try {
       const response = await api.get('/teacher/courses');
-      const coursesData = response.data.data || response.data || [];
+      const coursesData = Array.isArray(response.data?.data)
+        ? response.data.data
+        : Array.isArray(response.data)
+        ? response.data
+        : [];
       setCourses(coursesData);
       console.log('Courses loaded:', coursesData);
     } catch (error) {
       console.error('Error fetching courses:', error);
+      setCourses([]);
       toast.error('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ');
     }
   };
@@ -153,7 +158,7 @@ const TeacherManageCourses = () => {
                     </td>
                   </tr>
                 ) : (
-                  courses.map((course) => (
+                  (Array.isArray(courses) ? courses : []).map((course) => (
                     <tr key={course.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">

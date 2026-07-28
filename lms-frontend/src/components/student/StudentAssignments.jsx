@@ -190,7 +190,7 @@ const StudentAssignments = () => {
             className="w-full md:w-64 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-950 bg-white transition-colors font-semibold text-gray-700"
           >
             <option value="all">មុខវិជ្ជាទាំងអស់ (All Courses)</option>
-            {courses.map((course) => (
+            {(Array.isArray(courses) ? courses : []).map((course) => (
               <option key={course.id} value={course.id}>
                 {course.course_code.toUpperCase()} - {course.course_name}
               </option>
