@@ -15,6 +15,7 @@ class Grade extends Model
         'course_id',
         'assignment_score',
         'quiz_score',
+        'midterm_score',
         'final_score',
         'grade_letter',
     ];

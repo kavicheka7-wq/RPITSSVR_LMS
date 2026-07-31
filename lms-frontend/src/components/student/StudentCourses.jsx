@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import api from '../../services/api';
 import { BookOpenIcon, AcademicCapIcon, ArrowPathIcon, ExclamationCircleIcon, UserIcon } from '@heroicons/react/24/outline';
 
@@ -31,7 +30,7 @@ const StudentCourses = () => {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header section with gradient and premium styling */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 p-8 border border-blue-800/30 shadow-xl">
+      <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-blue-950 via-blue-900 to-indigo-950 p-8 border border-blue-800/30 shadow-xl">
         <div className="absolute top-0 right-0 w-96 h-96 bg-yellow-500/5 rounded-full blur-3xl -mr-32 -mt-32"></div>
         <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-400/5 rounded-full blur-3xl -ml-24 -mb-24"></div>
         
@@ -70,13 +69,12 @@ const StudentCourses = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {(Array.isArray(courses) ? courses : []).map((course) => (
-            <Link
+            <div
               key={course.id}
-              to={`/student/courses/${course.id}`}
-              className="group bg-white rounded-3xl border border-gray-100 hover:border-yellow-400/50 hover:shadow-xl transition-all duration-300 p-6 flex flex-col justify-between relative overflow-hidden"
+              className="group bg-white rounded-3xl border border-gray-100 p-6 flex flex-col justify-between relative overflow-hidden shadow-sm"
             >
               {/* Background accents */}
-              <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-400/5 rounded-full blur-2xl group-hover:bg-yellow-400/10 transition-colors"></div>
+              <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-400/5 rounded-full blur-2xl"></div>
 
               <div className="space-y-4">
                 {/* Course icon & Code */}
@@ -91,7 +89,7 @@ const StudentCourses = () => {
 
                 {/* Title */}
                 <div className="space-y-1.5">
-                  <h3 className="text-lg font-bold text-gray-900 group-hover:text-blue-900 transition-colors line-clamp-2">
+                  <h3 className="text-lg font-bold text-gray-900 line-clamp-2">
                     {course.course_name}
                   </h3>
                   {course.description && (
@@ -121,12 +119,8 @@ const StudentCourses = () => {
                     )}
                   </div>
                 </div>
-                
-                <span className="text-xs font-bold text-blue-900 group-hover:text-yellow-600 transition-colors shrink-0">
-                  ចូលមើលមេរៀន &rarr;
-                </span>
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}

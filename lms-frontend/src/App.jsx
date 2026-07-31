@@ -18,6 +18,7 @@ import ManageTeachers from './components/admin/ManageTeachers';
 import ManageStudents from './components/admin/ManageStudents';
 import ManageCourses from './components/admin/ManageCourses';
 import ManageDepartments from './components/admin/ManageDepartments';
+import AdminReports from './components/admin/AdminReports';
 // import SystemSettings from './components/admin/SystemSettings';
 ;
 
@@ -28,7 +29,7 @@ import TeacherManageAssignments from './components/teacher/TeacherManageAssignme
 import TeacherManageQuizzes from './components/teacher/TeacherManageQuizzes';
 import ManageLessons from './components/teacher/ManageLessons';
 import TeacherManageStudents from './components/teacher/TeacherManageStudents';
-import TeacherManageScores from './components/teacher/TeacherManageScores';
+import TeacherManageGrades from './components/teacher/TeacherManageGrades';
 // import ManageClassroom from './components/teacher/ManageClassroom';
 // import CreateStudent from './components/teacher/CreateStudent';
 import ManageAttendance from './components/teacher/ManageAttendance';
@@ -45,7 +46,6 @@ import StudentDashboard from './components/student/StudentDashboard';
 import ViewAttendance from './components/student/ViewAttendance';
 import ViewScores from './components/student/ViewScores';
 import StudentCourses from './components/student/StudentCourses';
-import StudentCourseDetails from './components/student/StudentCourseDetails';
 import StudentLessons from './components/student/StudentLessons';
 import StudentAssignments from './components/student/StudentAssignments';
 import StudentQuizzes from './components/student/StudentQuizzes';
@@ -113,6 +113,7 @@ const AppContent = () => {
   
                 <Route path="/admin/teachers" element={<ManageTeachers />} />
                 <Route path="/admin/students" element={<ManageStudents />} />
+                <Route path="/admin/reports" element={<AdminReports />} />
               </Route>
 
               {/* Teacher Routes */}
@@ -123,7 +124,8 @@ const AppContent = () => {
                 <Route path="/teacher/assignments" element={<TeacherManageAssignments />} />
                 <Route path="/teacher/quizzes" element={<TeacherManageQuizzes />} />
                 <Route path="/teacher/attendance" element={<ManageAttendance />} />
-                <Route path="/teacher/scores" element={<TeacherManageScores />} />
+                <Route path="/teacher/scores" element={<TeacherManageGrades />} />
+                <Route path="/teacher/grades" element={<TeacherManageGrades />} />
                 <Route path="/teacher/students" element={<TeacherManageStudents />} />
                 <Route path="/teacher/departments" element={<ManageDepartments />} />
               </Route>
@@ -132,10 +134,10 @@ const AppContent = () => {
               <Route element={<ProtectedRoute allowedRoles={['Student']} />}>
                 <Route path="/student/dashboard" element={<StudentDashboard />} />
                 <Route path="/student/courses" element={<StudentCourses />} />
-                <Route path="/student/courses/:courseId" element={<StudentCourseDetails />} />
                 <Route path="/student/lessons" element={<StudentLessons />} />
                 <Route path="/student/attendance" element={<ViewAttendance />} />
                 <Route path="/student/scores" element={<ViewScores />} />
+                <Route path="/student/grades" element={<ViewScores />} />
                 <Route path="/student/assignments" element={<StudentAssignments />} />
                 <Route path="/student/quizzes" element={<StudentQuizzes />} />
                 {/* <Route path="/student/assignments/upload" element={<StudentUploadAssignment />} />

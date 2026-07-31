@@ -20,6 +20,14 @@ const StudentLessons = () => {
   const [selectedCourse, setSelectedCourse] = useState('all');
   const [expandedLesson, setExpandedLesson] = useState(null);
 
+  const getStorageUrl = (path) => {
+    if (!path) return '#';
+    if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('//')) return path;
+    const backendBase = (api.defaults?.baseURL || 'http://localhost:8000/api').replace(/\/api\/?$/, '');
+    const cleanPath = path.replace(/^\/?storage\//, '');
+    return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
+  };
+
   useEffect(() => {
     fetchLessons();
   }, []);
@@ -209,7 +217,7 @@ const StudentLessons = () => {
                                   {getFileIcon(file.file_name)} {file.file_name}
                                 </span>
                                 <a
-                                  href={`${baseURL}/storage/${file.file_path}`}
+                                  href={getStorageUrl(file.file_path)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   download={file.file_name}
@@ -237,7 +245,7 @@ const StudentLessons = () => {
                                   🎥 {video.title}
                                 </span>
                                 <a
-                                  href={`${baseURL}/storage/${video.video_url}`}
+                                  href={getStorageUrl(video.video_url)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 px-2.5 py-1.5 rounded-xl border border-purple-100 transition"

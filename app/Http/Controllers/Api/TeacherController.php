@@ -14,6 +14,7 @@ use App\Models\Question;
 use App\Models\QuestionOption;
 use App\Models\Attendance;
 use App\Models\Grade;
+use App\Models\QuizAttempt;
 use App\Models\User;
 use App\Models\Enrollment;
 use App\Models\Teacher;
@@ -314,13 +315,20 @@ class TeacherController extends Controller
     // --- Student Management ---
     public function getCourseStudents($courseId)
     {
-        $course = $this->teacherCourseQuery()->findOrFail($courseId);
+        try {
+            $course = $this->teacherCourseQuery()->findOrFail($courseId);
 
-        $students = $course->students()
-            ->wherePivot('status', 'active')
-            ->get();
+            $students = $course->students()
+                ->wherePivot('status', 'active')
+                ->get();
 
-        return response()->json($students);
+            return response()->json($students);
+        } catch (\Exception $e) {
+            \Log::error('Teacher getCourseStudents error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការទាញយកបញ្ជីសិស្សក្នុងមុខវិជ្ជា: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     // --- Attendance Management ---
@@ -395,65 +403,215 @@ class TeacherController extends Controller
     // --- Score Management ---
     public function getScores($courseId)
     {
-        $course = $this->teacherCourseQuery()->findOrFail($courseId);
+        try {
+            $course = $this->teacherCourseQuery()->findOrFail($courseId);
 
-        $students = $course->students()
-            ->wherePivot('status', 'active')
-            ->get();
+            $students = $course->students()
+                ->where(function ($q) {
+                    $q->whereNull('enrollments.status')
+                      ->orWhere('enrollments.status', 'active')
+                      ->orWhere('enrollments.status', '');
+                })
+                ->get();
 
-        $grades = Grade::where('course_id', $courseId)->get()->keyBy('student_id');
+            if ($students->isEmpty()) {
+                $students = $course->students()->get();
+            }
 
-        $result = $students->map(function ($student) use ($grades, $courseId) {
-            $grade = $grades->get($student->id);
-            return [
-                'id' => $grade ? $grade->id : null,
-                'student_id' => $student->id,
-                'course_id' => (int)$courseId,
-                'student' => $student,
-                'assignment_score' => $grade ? $grade->assignment_score : null,
-                'quiz_score' => $grade ? $grade->quiz_score : null,
-                'final_score' => $grade ? $grade->final_score : null,
-                'grade_letter' => $grade ? $grade->grade_letter : null,
-            ];
-        });
+            $grades = Grade::where('course_id', $courseId)->get()->keyBy('student_id');
 
-        return response()->json($result);
+            // Load assignments and quizzes for course to calculate auto averages
+            $assignments = Assignment::where('course_id', $courseId)->get();
+            $quizzes = Quiz::where('course_id', $courseId)->get();
+
+            $assignmentIds = $assignments->pluck('id');
+            $quizIds = $quizzes->pluck('id');
+
+            $allSubmissions = AssignmentSubmission::whereIn('assignment_id', $assignmentIds)
+                ->whereNotNull('score')
+                ->get()
+                ->groupBy('student_id');
+
+            $allAttempts = QuizAttempt::whereIn('quiz_id', $quizIds)
+                ->whereNotNull('score')
+                ->get()
+                ->groupBy('student_id');
+
+            $result = $students->map(function ($student) use ($grades, $courseId, $assignments, $quizzes, $allSubmissions, $allAttempts) {
+                $grade = $grades->get($student->id);
+
+                // Auto-calculate Assignment %
+                $autoAssignmentScore = null;
+                $studentSubmissions = $allSubmissions->get($student->id, collect());
+                if ($studentSubmissions->count() > 0 && $assignments->count() > 0) {
+                    $totalEarned = 0;
+                    $totalMax = 0;
+                    foreach ($studentSubmissions as $sub) {
+                        $assign = $assignments->firstWhere('id', $sub->assignment_id);
+                        $maxScore = $assign ? ($assign->total_score ?? 100) : 100;
+                        if ($maxScore > 0) {
+                            $totalEarned += $sub->score;
+                            $totalMax += $maxScore;
+                        }
+                    }
+                    if ($totalMax > 0) {
+                        $autoAssignmentScore = round(($totalEarned / $totalMax) * 100, 2);
+                    }
+                }
+
+                // Auto-calculate Quiz %
+                $autoQuizScore = null;
+                $studentAttempts = $allAttempts->get($student->id, collect());
+                if ($studentAttempts->count() > 0 && $quizzes->count() > 0) {
+                    $totalEarned = 0;
+                    $totalMax = 0;
+                    foreach ($quizzes as $quiz) {
+                        $attemptsForQuiz = $studentAttempts->where('quiz_id', $quiz->id);
+                        if ($attemptsForQuiz->count() > 0) {
+                            $bestAttemptScore = $attemptsForQuiz->max('score');
+                            $maxMark = $quiz->total_mark ?? 100;
+                            if ($maxMark > 0) {
+                                $totalEarned += $bestAttemptScore;
+                                $totalMax += $maxMark;
+                            }
+                        }
+                    }
+                    if ($totalMax > 0) {
+                        $autoQuizScore = round(($totalEarned / $totalMax) * 100, 2);
+                    }
+                }
+
+                $assignScore = $grade && $grade->assignment_score !== null ? $grade->assignment_score : $autoAssignmentScore;
+                $quizScore = $grade && $grade->quiz_score !== null ? $grade->quiz_score : $autoQuizScore;
+                $midtermScore = $grade && $grade->midterm_score !== null ? $grade->midterm_score : null;
+                $finalScore = $grade && $grade->final_score !== null ? $grade->final_score : null;
+
+                $gradeLetter = $grade && $grade->grade_letter ? $grade->grade_letter : null;
+
+                // Also get student_code
+                $studentProfile = \App\Models\Student::where('user_id', $student->id)->first();
+                $studentCode = $studentProfile ? $studentProfile->student_code : ('STU' . str_pad($student->id, 3, '0', STR_PAD_LEFT));
+
+                return [
+                    'id' => $grade ? $grade->id : null,
+                    'student_id' => $student->id,
+                    'student_code' => $studentCode,
+                    'course_id' => (int)$courseId,
+                    'student' => [
+                        'id' => $student->id,
+                        'name' => $student->first_name . ' ' . $student->last_name,
+                        'email' => $student->email,
+                        'profile_image' => $student->profile_image
+                    ],
+                    'assignment_score' => $assignScore,
+                    'auto_assignment_score' => $autoAssignmentScore,
+                    'quiz_score' => $quizScore,
+                    'auto_quiz_score' => $autoQuizScore,
+                    'midterm_score' => $midtermScore,
+                    'final_score' => $finalScore,
+                    'grade_letter' => $gradeLetter,
+                ];
+            });
+
+            return response()->json($result);
+        } catch (\Exception $e) {
+            \Log::error('Teacher getScores error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការទាញយកពិន្ទុ: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     public function updateScores(Request $request)
     {
-        $validated = $request->validate([
-            'scores' => 'required|array',
-            'scores.*.student_id' => 'required|exists:users,id',
-            'scores.*.course_id' => 'required|exists:courses,id',
-            'scores.*.assignment_score' => 'nullable|numeric|min:0|max:100',
-            'scores.*.quiz_score' => 'nullable|numeric|min:0|max:100',
-            'scores.*.final_score' => 'nullable|numeric|min:0|max:100',
-            'scores.*.grade_letter' => 'nullable|string|max:2',
-        ]);
+        try {
+            $validated = $request->validate([
+                'scores' => 'required|array',
+                'scores.*.student_id' => 'required|exists:users,id',
+                'scores.*.course_id' => 'required|exists:courses,id',
+                'scores.*.assignment_score' => 'nullable|numeric|min:0|max:100',
+                'scores.*.quiz_score' => 'nullable|numeric|min:0|max:100',
+                'scores.*.midterm_score' => 'nullable|numeric|min:0|max:100',
+                'scores.*.final_score' => 'nullable|numeric|min:0|max:100',
+                'scores.*.grade_letter' => 'nullable|string|max:2',
+            ]);
 
-        DB::transaction(function () use ($validated) {
-            foreach ($validated['scores'] as $scoreData) {
-                $this->teacherCourseQuery()->findOrFail($scoreData['course_id']);
+            DB::transaction(function () use ($validated) {
+                foreach ($validated['scores'] as $scoreData) {
+                    $this->teacherCourseQuery()->findOrFail($scoreData['course_id']);
 
-                Grade::updateOrCreate(
-                    [
-                        'student_id' => $scoreData['student_id'],
-                        'course_id' => $scoreData['course_id'],
-                    ],
-                    [
-                        'assignment_score' => $scoreData['assignment_score'] ?? null,
-                        'quiz_score' => $scoreData['quiz_score'] ?? null,
-                        'final_score' => $scoreData['final_score'] ?? null,
-                        'grade_letter' => $scoreData['grade_letter'] ?? null,
-                    ]
-                );
-            }
-        });
+                    Grade::updateOrCreate(
+                        [
+                            'student_id' => $scoreData['student_id'],
+                            'course_id' => $scoreData['course_id'],
+                        ],
+                        [
+                            'assignment_score' => $scoreData['assignment_score'] ?? null,
+                            'quiz_score' => $scoreData['quiz_score'] ?? null,
+                            'midterm_score' => $scoreData['midterm_score'] ?? null,
+                            'final_score' => $scoreData['final_score'] ?? null,
+                            'grade_letter' => $scoreData['grade_letter'] ?? null,
+                        ]
+                    );
+                }
+            });
 
-        return response()->json([
-            'message' => 'Scores updated successfully'
-        ]);
+            return response()->json([
+                'message' => 'បានរក្សាទុកពិន្ទុដោយជោគជ័យ'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Teacher updateScores error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការរក្សាទុកពិន្ទុ: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function storeGrade(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'student_id' => 'required|exists:users,id',
+                'course_id' => 'required|exists:courses,id',
+                'assignment_score' => 'nullable|numeric|min:0|max:100',
+                'quiz_score' => 'nullable|numeric|min:0|max:100',
+                'midterm_score' => 'nullable|numeric|min:0|max:100',
+                'final_score' => 'nullable|numeric|min:0|max:100',
+                'grade_letter' => 'nullable|string|max:2',
+            ]);
+
+            $this->teacherCourseQuery()->findOrFail($validated['course_id']);
+
+            $assign = $validated['assignment_score'] ?? null;
+            $quiz = $validated['quiz_score'] ?? null;
+            $midterm = $validated['midterm_score'] ?? null;
+            $final = $validated['final_score'] ?? null;
+            $letter = $validated['grade_letter'] ?? null;
+
+            $grade = Grade::updateOrCreate(
+                [
+                    'student_id' => $validated['student_id'],
+                    'course_id' => $validated['course_id'],
+                ],
+                [
+                    'assignment_score' => $assign,
+                    'quiz_score' => $quiz,
+                    'midterm_score' => $midterm,
+                    'final_score' => $final,
+                    'grade_letter' => $letter,
+                ]
+            );
+
+            return response()->json([
+                'grade' => $grade,
+                'message' => 'បានរក្សាទុកពិន្ទុដោយជោគជ័យ'
+            ], 201);
+        } catch (\Exception $e) {
+            \Log::error('Teacher storeGrade error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការបង្កើតពិន្ទុ: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     // --- Lesson Management ---
@@ -779,6 +937,97 @@ class TeacherController extends Controller
         return response()->json($assignments);
     }
 
+    public function getAssignmentSubmissions($assignmentId)
+    {
+        try {
+            $assignment = Assignment::with(['course'])->findOrFail($assignmentId);
+
+            // Check teacher ownership
+            if ($assignment->created_by !== auth()->id()) {
+                $teacherId = $this->getTeacherId();
+                if (!$teacherId || $assignment->course->teacher_id !== $teacherId) {
+                    return response()->json([
+                        'message' => 'Unauthorized action'
+                    ], 403);
+                }
+            }
+
+            $submissions = AssignmentSubmission::with(['student:id,first_name,last_name,email,profile_image'])
+                ->where('assignment_id', $assignmentId)
+                ->orderBy('submitted_at', 'desc')
+                ->get()
+                ->map(function ($submission) {
+                    return [
+                        'id' => $submission->id,
+                        'assignment_id' => $submission->assignment_id,
+                        'student_id' => $submission->student_id,
+                        'student' => $submission->student,
+                        'file_path' => $submission->file_path,
+                        'file_url' => asset('storage/' . $submission->file_path),
+                        'submitted_at' => $submission->submitted_at,
+                        'score' => $submission->score,
+                        'feedback' => $submission->feedback,
+                        'created_at' => $submission->created_at,
+                        'updated_at' => $submission->updated_at,
+                    ];
+                });
+
+            return response()->json([
+                'assignment' => $assignment,
+                'submissions' => $submissions
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Teacher getAssignmentSubmissions error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការទាញយកការដាក់កិច្ចការ: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function gradeSubmission(Request $request, $submissionId)
+    {
+        try {
+            $submission = AssignmentSubmission::with('assignment.course')->findOrFail($submissionId);
+            $assignment = $submission->assignment;
+
+            // Check teacher ownership
+            if ($assignment->created_by !== auth()->id()) {
+                $teacherId = $this->getTeacherId();
+                if (!$teacherId || $assignment->course->teacher_id !== $teacherId) {
+                    return response()->json([
+                        'message' => 'Unauthorized action'
+                    ], 403);
+                }
+            }
+
+            $maxScore = $assignment->total_score ?? 100;
+            $validated = $request->validate([
+                'score' => "nullable|numeric|min:0|max:{$maxScore}",
+                'feedback' => 'nullable|string',
+            ]);
+
+            $submission->update([
+                'score' => $validated['score'] ?? null,
+                'feedback' => $validated['feedback'] ?? null,
+            ]);
+
+            return response()->json([
+                'submission' => $submission->fresh(['student:id,first_name,last_name,email,profile_image']),
+                'message' => 'បានកែប្រែពិន្ទុ និងការផ្តល់មតិយោបល់ដោយជោគជ័យ'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Teacher gradeSubmission error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការដាក់ពិន្ទុ: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     // --- Quiz Management ---
     public function getTeacherQuizzes(Request $request)
     {
@@ -824,6 +1073,93 @@ class TeacherController extends Controller
             'quiz' => $quiz->load('course'),
             'message' => 'Quiz created successfully'
         ], 201);
+    }
+
+    public function importQuizzes(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'course_id' => 'nullable|exists:courses,id',
+                'quizzes' => 'required|array|min:1',
+                'quizzes.*.title' => 'required|string|max:255',
+                'quizzes.*.course_id' => 'nullable|exists:courses,id',
+                'quizzes.*.duration' => 'nullable|integer|min:1',
+                'quizzes.*.total_mark' => 'nullable|numeric|min:0',
+                'quizzes.*.start_date' => 'nullable|date',
+                'quizzes.*.end_date' => 'nullable|date',
+                'quizzes.*.questions' => 'nullable|array',
+                'quizzes.*.questions.*.question_text' => 'required|string',
+                'quizzes.*.questions.*.question_type' => 'nullable|in:MCQ,TrueFalse,Essay',
+                'quizzes.*.questions.*.mark' => 'nullable|numeric|min:0',
+                'quizzes.*.questions.*.options' => 'nullable|array',
+            ]);
+
+            $importedQuizzes = [];
+
+            DB::transaction(function () use ($validated, $request, &$importedQuizzes) {
+                foreach ($validated['quizzes'] as $quizData) {
+                    $courseId = $quizData['course_id'] ?? $validated['course_id'] ?? null;
+                    if (!$courseId) {
+                        throw new \Exception('គ្រប់កម្រងសំណួរត្រូវមាន course_id ត្រឹមត្រូវ');
+                    }
+
+                    // Verify teacher course ownership
+                    $this->teacherCourseQuery()->findOrFail($courseId);
+
+                    $now = now();
+                    $startDate = !empty($quizData['start_date']) ? $quizData['start_date'] : $now;
+                    $endDate = !empty($quizData['end_date']) ? $quizData['end_date'] : $now->copy()->addDays(7);
+
+                    $quiz = Quiz::create([
+                        'course_id' => $courseId,
+                        'title' => $quizData['title'],
+                        'duration' => $quizData['duration'] ?? 60,
+                        'total_mark' => $quizData['total_mark'] ?? 100,
+                        'start_date' => $startDate,
+                        'end_date' => $endDate,
+                    ]);
+
+                    if (isset($quizData['questions']) && is_array($quizData['questions'])) {
+                        foreach ($quizData['questions'] as $qData) {
+                            $qType = $qData['question_type'] ?? 'MCQ';
+                            $question = Question::create([
+                                'quiz_id' => $quiz->id,
+                                'question_text' => $qData['question_text'],
+                                'question_type' => $qType,
+                                'mark' => $qData['mark'] ?? 10,
+                            ]);
+
+                            if (isset($qData['options']) && is_array($qData['options'])) {
+                                foreach ($qData['options'] as $opt) {
+                                    QuestionOption::create([
+                                        'question_id' => $question->id,
+                                        'option_text' => $opt['option_text'] ?? '',
+                                        'is_correct' => filter_var($opt['is_correct'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
+
+                    $importedQuizzes[] = $quiz->load(['course', 'questions.options']);
+                }
+            });
+
+            return response()->json([
+                'quizzes' => $importedQuizzes,
+                'message' => 'បាននាំចូលកម្រងសំណួរដោយជោគជ័យ'
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'ទម្រង់ទិន្នន័យ JSON មិនត្រឹមត្រូវ',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Teacher importQuizzes error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការនាំចូលកម្រងសំណួរ: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     public function updateQuiz(Request $request, $id)

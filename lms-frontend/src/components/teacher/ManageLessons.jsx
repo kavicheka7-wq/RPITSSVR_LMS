@@ -60,6 +60,14 @@ export default function ManageLessons() {
     fetchInitialData();
   }, []);
 
+  const getStorageUrl = (path) => {
+    if (!path) return '#';
+    if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('//')) return path;
+    const backendBase = (api.defaults?.baseURL || 'http://localhost:8000/api').replace(/\/api\/?$/, '');
+    const cleanPath = path.replace(/^\/?storage\//, '');
+    return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
+  };
+
   const fetchInitialData = async () => {
     setLoading(true);
     try {
@@ -490,7 +498,7 @@ export default function ManageLessons() {
                                     Array.isArray(lesson.files) && lesson.files.map(file => (
                                       <div key={file.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs hover:shadow-xs transition text-xs">
                                         <a
-                                          href={`${api.defaults.baseURL.replace('/api', '')}/storage/${file.file_path}`}
+                                          href={getStorageUrl(file.file_path)}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="text-indigo-600 hover:underline font-medium truncate max-w-[200px]"

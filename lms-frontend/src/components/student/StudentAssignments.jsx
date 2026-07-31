@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
+import { handleDownloadFile } from '../../utils/downloadUtils';
 import {
   DocumentCheckIcon,
   ArrowPathIcon,
@@ -10,7 +11,8 @@ import {
   ExclamationCircleIcon,
   MagnifyingGlassIcon,
   FunnelIcon,
-  ClipboardDocumentCheckIcon
+  ClipboardDocumentCheckIcon,
+  ArrowDownTrayIcon
 } from '@heroicons/react/24/outline';
 
 const StudentAssignments = () => {
@@ -24,6 +26,14 @@ const StudentAssignments = () => {
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [uploadFile, setUploadFile] = useState(null);
   const [submittingFile, setSubmittingFile] = useState(false);
+
+  const getStorageUrl = (path) => {
+    if (!path) return '#';
+    if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('//')) return path;
+    const backendBase = (api.defaults?.baseURL || 'http://localhost:8000/api').replace(/\/api\/?$/, '');
+    const cleanPath = path.replace(/^\/?storage\//, '');
+    return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
+  };
 
   useEffect(() => {
     fetchAssignments();
@@ -274,6 +284,18 @@ const StudentAssignments = () => {
                       {submission.feedback && (
                         <div className="text-[10px] text-yellow-600 bg-yellow-500/5 p-2 rounded-lg border border-yellow-500/10 mt-1 italic font-medium">
                           Feedback: {submission.feedback}
+                        </div>
+                      )}
+                      {submission.file_path && (
+                        <div className="pt-1.5 border-t border-gray-100">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadFile(submission.file_path)}
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                          >
+                            <ArrowDownTrayIcon className="h-3.5 w-3.5" />
+                            ទាញយកឯកសារដែលបានផ្ញើ
+                          </button>
                         </div>
                       )}
                     </div>

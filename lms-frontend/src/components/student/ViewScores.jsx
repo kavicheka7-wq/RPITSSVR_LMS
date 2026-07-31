@@ -81,7 +81,7 @@ const ViewScores = () => {
     <div className="max-w-7xl mx-auto space-y-6">
       
       {/* Header Banner */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-8 shadow-xl border border-blue-900">
+      <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-8 shadow-xl border border-blue-900">
         <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
         
@@ -143,6 +143,7 @@ const ViewScores = () => {
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">សាស្រ្តាចារ្យ (Instructor)</th>
                   <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">ពិន្ទុកិច្ចការ (Assignments)</th>
                   <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">ពិន្ទុកម្រងសំណួរ (Quizzes)</th>
+                  <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">ពិន្ទុពាក់កណ្តាលឆមាស (Midterm)</th>
                   <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">ពិន្ទុចុងក្រោយ (Final Score)</th>
                   <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider rounded-r-2xl">និទ្ទេសរួម (Grade)</th>
                 </tr>
@@ -170,7 +171,7 @@ const ViewScores = () => {
                           </div>
                         )}
                         <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-bold text-gray-800 truncate max-w-[150px]">
+                          <span className="text-xs font-bold text-gray-800 truncate max-w-37.5">
                             {grade.course?.teacher?.name || 'គ្រូបង្រៀន'}
                           </span>
                           {grade.course?.teacher_profile?.specialization && (
@@ -189,6 +190,11 @@ const ViewScores = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       <span className={`text-xs font-bold ${grade.quiz_score !== null ? 'text-gray-900' : 'text-gray-400'}`}>
                         {grade.quiz_score !== null ? `${grade.quiz_score}%` : '-'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      <span className={`text-xs font-bold ${grade.midterm_score !== null ? 'text-gray-900' : 'text-gray-400'}`}>
+                        {grade.midterm_score !== null ? `${grade.midterm_score}%` : '-'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">

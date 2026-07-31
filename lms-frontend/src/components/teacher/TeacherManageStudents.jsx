@@ -240,19 +240,19 @@ const TeacherManageStudents = () => {
                             <img 
                               src={getProfileImageUrl(student.profile_image)}
                               alt={`${student.first_name} ${student.last_name}`}
-                              className="h-10 w-10 rounded-full object-cover border-2 border-gray-200 shadow-sm flex-shrink-0"
+                              className="h-10 w-10 rounded-full object-cover border-2 border-gray-200 shadow-sm shrink-0"
                               onError={(e) => {
                                 e.target.style.display = 'none';
                                 const parent = e.target.parentElement;
                                 const avatar = document.createElement('div');
-                                avatar.className = 'h-10 w-10 rounded-full bg-gradient-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm flex-shrink-0';
+                                avatar.className = 'h-10 w-10 rounded-full bg-linear-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm shrink-0';
                                 avatar.textContent = `${student.first_name?.charAt(0) || ''}${student.last_name?.charAt(0) || ''}`;
                                 parent.insertBefore(avatar, e.target);
                                 e.target.style.display = 'none';
                               }}
                             />
                           ) : (
-                            <div className="h-10 w-10 rounded-full bg-gradient-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm flex-shrink-0">
+                            <div className="h-10 w-10 rounded-full bg-linear-to-r from-green-500 to-teal-500 flex items-center justify-center text-white font-medium text-sm shadow-sm shrink-0">
                               <span>{student.first_name?.charAt(0) || ''}{student.last_name?.charAt(0) || ''}</span>
                             </div>
                           )}

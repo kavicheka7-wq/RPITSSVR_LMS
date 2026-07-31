@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\StudentController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AdminTeacherController;
 use App\Http\Controllers\Api\AdminStudentController;
+use App\Http\Controllers\Api\AdminReportController;
 use App\Http\Controllers\Api\DepartmentController;
 use App\Http\Controllers\Api\CourseController;
 use App\Http\Controllers\Api\ProfileController;
@@ -41,6 +42,64 @@ Route::get('/roles', function () {
 // Public routes
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+
+// Check file existence route (returns 200 OK with exists boolean)
+Route::get('/check-file-exists', function (\Illuminate\Http\Request $request) {
+    $path = $request->query('path');
+    if (!$path) {
+        return response()->json(['exists' => false, 'message' => 'Path parameter is required']);
+    }
+
+    $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', $path);
+    $cleanPath = ltrim($cleanPath, '/');
+
+    $exists = \Illuminate\Support\Facades\Storage::disk('public')->exists($cleanPath) ||
+              file_exists(storage_path('app/public/' . $cleanPath)) ||
+              file_exists(public_path('storage/' . $cleanPath));
+
+    return response()->json(['exists' => (bool)$exists]);
+});
+
+// Download file route (Forces Content-Disposition: attachment)
+Route::get('/download-file', function (\Illuminate\Http\Request $request) {
+    $path = $request->query('path');
+    if (!$path) {
+        return response()->json(['message' => 'Path parameter is required'], 400);
+    }
+
+    $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', $path);
+    $cleanPath = ltrim($cleanPath, '/');
+
+    $fullPath = null;
+    if (\Illuminate\Support\Facades\Storage::disk('public')->exists($cleanPath)) {
+        $fullPath = \Illuminate\Support\Facades\Storage::disk('public')->path($cleanPath);
+    } elseif (file_exists(storage_path('app/public/' . $cleanPath))) {
+        $fullPath = storage_path('app/public/' . $cleanPath);
+    } elseif (file_exists(public_path('storage/' . $cleanPath))) {
+        $fullPath = public_path('storage/' . $cleanPath);
+    }
+
+    if (!$fullPath || !file_exists($fullPath)) {
+        return response(
+            "<div style='font-family:sans-serif;text-align:center;padding:60px;background:#f9fafb;min-h-screen;'>
+                <div style='max-width:480px;margin:0 auto;background:#fff;padding:32px;border-radius:16px;box-shadow:0 4px 12px rgba(0,0,0,0.05);'>
+                    <div style='font-size:48px;margin-bottom:16px;'>⚠️</div>
+                    <h2 style='color:#111827;margin-bottom:8px;'>មិនរកឃើញឯកសារ (File Not Found)</h2>
+                    <p style='color:#6b7280;font-size:14px;line-height:1.5;'>ឯកសារនេះមិនមាននៅលើ Server ទៀតទេ ឬត្រូវបានលុបចោល។ សូមសាកល្បងផ្ទុកឡើងឯកសារជាថ្មី។</p>
+                    <p style='color:#9ca3af;font-size:12px;margin-top:12px;'>(The requested file is no longer available on the server. Please re-upload the file.)</p>
+                </div>
+            </div>",
+            404
+        )->header('Content-Type', 'text/html');
+    }
+
+    $filename = basename($fullPath);
+
+    return response()->download($fullPath, $filename, [
+        'Access-Control-Allow-Origin' => '*',
+        'Access-Control-Expose-Headers' => 'Content-Disposition',
+    ]);
+});
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
@@ -104,6 +163,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/stats', [AdminController::class, 'getStats']);
         Route::get('/settings', [AdminController::class, 'getSystemSettings']);
         Route::put('/settings', [AdminController::class, 'updateSystemSettings']);
+
+        // Reports
+        Route::get('/reports/overview', [AdminReportController::class, 'getOverviewReport']);
+        Route::get('/reports/enrollments', [AdminReportController::class, 'getEnrollmentReport']);
+        Route::get('/reports/attendance', [AdminReportController::class, 'getAttendanceReport']);
+        Route::get('/reports/academic', [AdminReportController::class, 'getAcademicReport']);
     });
 
     // Teacher routes
@@ -131,6 +196,7 @@ Route::middleware('auth:sanctum')->group(function () {
         
         // Scores
         Route::get('/courses/{courseId}/scores', [TeacherController::class, 'getScores']);
+        Route::post('/scores', [TeacherController::class, 'storeGrade']);
         Route::put('/scores', [TeacherController::class, 'updateScores']);
         
         // Lessons
@@ -158,11 +224,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/assignments', [TeacherController::class, 'createAssignment']);
         Route::put('/assignments/{id}', [TeacherController::class, 'updateAssignment']);
         Route::delete('/assignments/{id}', [TeacherController::class, 'deleteAssignment']);
+        Route::get('/assignments/{assignmentId}/submissions', [TeacherController::class, 'getAssignmentSubmissions']);
+        Route::put('/submissions/{submissionId}/grade', [TeacherController::class, 'gradeSubmission']);
         
         // Quizzes
         Route::get('/quizzes', [TeacherController::class, 'getTeacherQuizzes']);
         Route::get('/courses/{courseId}/quizzes', [TeacherController::class, 'getQuizzes']);
         Route::post('/quizzes', [TeacherController::class, 'createQuiz']);
+        Route::post('/quizzes/import', [TeacherController::class, 'importQuizzes']);
         Route::put('/quizzes/{id}', [TeacherController::class, 'updateQuiz']);
         Route::delete('/quizzes/{id}', [TeacherController::class, 'deleteQuiz']);
         Route::post('/quizzes/{quizId}/questions', [TeacherController::class, 'addQuestion']);

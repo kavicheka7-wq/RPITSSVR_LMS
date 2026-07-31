@@ -142,6 +142,7 @@ class StudentController extends Controller
                 'course' => $course,
                 'assignment_score' => $grade ? $grade->assignment_score : null,
                 'quiz_score' => $grade ? $grade->quiz_score : null,
+                'midterm_score' => $grade ? $grade->midterm_score : null,
                 'final_score' => $grade ? $grade->final_score : null,
                 'grade_letter' => $grade ? $grade->grade_letter : null,
             ];
