@@ -18,7 +18,11 @@ import {
   CheckCircleIcon,
   ArrowUpTrayIcon,
   ArrowDownTrayIcon,
-  DocumentTextIcon
+  DocumentTextIcon,
+  EyeIcon,
+  UserCircleIcon,
+  AcademicCapIcon,
+  DocumentCheckIcon
 } from '@heroicons/react/24/outline';
 
 export default function TeacherManageQuizzes() {
@@ -39,8 +43,12 @@ export default function TeacherManageQuizzes() {
   const [importCourseId, setImportCourseId] = useState('');
   const [jsonContent, setJsonContent] = useState('');
   const [importFile, setImportFile] = useState(null);
-  const [parsedQuizzes, setParsedQuizzes] = useState([]);
-  const [isImporting, setIsImporting] = useState(false);
+  // Submissions Modal State
+  const [showSubmissionsModal, setShowSubmissionsModal] = useState(false);
+  const [viewingQuiz, setViewingQuiz] = useState(null);
+  const [submissions, setSubmissions] = useState([]);
+  const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const [submissionSearch, setSubmissionSearch] = useState('');
 
   // Form states for creating/editing a Quiz
   const [formData, setFormData] = useState({
@@ -384,6 +392,32 @@ export default function TeacherManageQuizzes() {
     }
   };
 
+  // Fetch Quiz Attempts / Submissions for a teacher to view
+  const openSubmissionsModal = async (quiz) => {
+    setViewingQuiz(quiz);
+    setShowSubmissionsModal(true);
+    setLoadingSubmissions(true);
+    setSubmissionSearch('');
+    try {
+      const response = await api.get(`/teacher/quizzes/${quiz.id}/results`);
+      const attemptsData = response.data.attempts || response.data || [];
+      setSubmissions(Array.isArray(attemptsData) ? attemptsData : []);
+    } catch (error) {
+      console.error('Error fetching quiz submissions:', error);
+      toast.error('មិនអាចទាញយកទិន្នន័យការប្រឡងរបស់សិស្សបានទេ');
+      setSubmissions([]);
+    } finally {
+      setLoadingSubmissions(false);
+    }
+  };
+
+  const filteredSubmissions = Array.isArray(submissions) ? submissions.filter(attempt => {
+    const search = submissionSearch.toLowerCase();
+    const studentName = attempt.student ? `${attempt.student.first_name || ''} ${attempt.student.last_name || ''}`.toLowerCase() : '';
+    const studentEmail = attempt.student?.email?.toLowerCase() || '';
+    return studentName.includes(search) || studentEmail.includes(search);
+  }) : [];
+
   // ប្រើ Array.isArray ការពារការគាំង
   const filteredQuizzes = Array.isArray(quizzes) ? quizzes.filter(quiz => {
     const search = searchTerm.toLowerCase();
@@ -524,13 +558,25 @@ export default function TeacherManageQuizzes() {
                             {questionsCount}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                        <td className="px-6 py-4 whitespace-nowrap text-center" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => openSubmissionsModal(quiz)}
+                            className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors cursor-pointer shadow-2xs"
+                            title="មើលការប្រឡងរបស់សិស្ស"
+                          >
+                            <EyeIcon className="h-3.5 w-3.5 mr-1" />
                             {attemptsCount} នាក់
-                          </span>
+                          </button>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-center space-x-2">
+                            <button
+                              onClick={() => openSubmissionsModal(quiz)}
+                              className="p-2 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-50 rounded-xl transition-all"
+                              title="មើលការប្រឡងសិស្ស (Submissions)"
+                            >
+                              <EyeIcon className="h-5 w-5" />
+                            </button>
                             <button
                               onClick={() => openEditModal(quiz)}
                               className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
@@ -1072,6 +1118,206 @@ export default function TeacherManageQuizzes() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal - View Student Submissions / Attempts */}
+      {showSubmissionsModal && viewingQuiz && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                  <span className="bg-emerald-100 text-emerald-600 p-2 rounded-xl">
+                    <DocumentCheckIcon className="h-6 w-6" />
+                  </span>
+                  លទ្ធផល និងការប្រឡងរបស់សិស្ស (Quiz Submissions)
+                </h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  កម្រងសំណួរ៖ <span className="font-semibold text-gray-800">{viewingQuiz.title}</span> 
+                  <span className="mx-2">•</span> 
+                  ពិន្ទុសរុប៖ <span className="font-semibold text-indigo-600">{viewingQuiz.total_mark} ពិន្ទុ</span>
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowSubmissionsModal(false);
+                  setViewingQuiz(null);
+                  setSubmissions([]);
+                }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+              >
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-4 flex items-center gap-4">
+                  <div className="p-3 bg-indigo-600 text-white rounded-xl shadow-xs">
+                    <AcademicCapIcon className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="text-xs text-indigo-600 font-semibold uppercase tracking-wider">សិស្សប្រឡងសរុប</div>
+                    <div className="text-2xl font-bold text-indigo-950">{submissions.length} នាក់</div>
+                  </div>
+                </div>
+
+                <div className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-4 flex items-center gap-4">
+                  <div className="p-3 bg-emerald-600 text-white rounded-xl shadow-xs">
+                    <CheckCircleIcon className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="text-xs text-emerald-600 font-semibold uppercase tracking-wider">ជាប់ (Pass ≥ 50%)</div>
+                    <div className="text-2xl font-bold text-emerald-950">
+                      {submissions.filter(s => (parseFloat(s.score) / (parseFloat(viewingQuiz.total_mark) || 1)) >= 0.5).length} នាក់
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-amber-50/60 border border-amber-100 rounded-xl p-4 flex items-center gap-4">
+                  <div className="p-3 bg-amber-600 text-white rounded-xl shadow-xs">
+                    <ClockIcon className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="text-xs text-amber-600 font-semibold uppercase tracking-wider">ពិន្ទុមធ្យម (Avg Score)</div>
+                    <div className="text-2xl font-bold text-amber-950">
+                      {submissions.length > 0 
+                        ? (submissions.reduce((acc, curr) => acc + (parseFloat(curr.score) || 0), 0) / submissions.length).toFixed(1)
+                        : '0'} / {viewingQuiz.total_mark}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative">
+                <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="ស្វែងរកតាមឈ្មោះ ឬអ៊ីមែលរបស់សិស្ស..."
+                  value={submissionSearch}
+                  onChange={(e) => setSubmissionSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+                />
+              </div>
+
+              {/* Submissions Table / List */}
+              {loadingSubmissions ? (
+                <div className="py-16 text-center text-gray-500">
+                  <ArrowPathIcon className="h-8 w-8 animate-spin mx-auto text-emerald-600 mb-2" />
+                  <p className="text-sm font-medium">កំពុងទាញយកទិន្នន័យការប្រឡង...</p>
+                </div>
+              ) : filteredSubmissions.length === 0 ? (
+                <div className="py-14 text-center text-gray-500 border border-dashed border-gray-200 rounded-2xl">
+                  <DocumentCheckIcon className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+                  <p className="text-base font-semibold text-gray-700">
+                    {submissionSearch ? 'មិនរកឃើញសិស្សតាមការស្វែងរកទេ' : 'មិនទាន់មានសិស្សប្រឡងកម្រងសំណួរនេះនៅឡើយទេ'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {submissionSearch ? 'សូមពិនិត្យពាក្យស្វែងរកឡើងវិញ' : 'នៅពេលសិស្សធ្វើកម្រងសំណួរចោទ លទ្ធផលនឹងបង្ហាញនៅទីនេះ'}
+                  </p>
+                </div>
+              ) : (
+                <div className="border border-gray-100 rounded-xl overflow-hidden shadow-2xs">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-100">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">No</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">ព័ត៌មានសិស្ស</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">ថ្ងៃ ចាប់ផ្តើម</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">ថ្ងៃ ប្រគល់ (Submitted)</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">ពិន្ទុទទួលបាន</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">ស្ថានភាព</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100">
+                        {filteredSubmissions.map((attempt, idx) => {
+                          const student = attempt.student;
+                          const studentName = student 
+                            ? `${student.first_name || ''} ${student.last_name || ''}`.trim() || student.email 
+                            : 'Unknown Student';
+                          const scoreVal = parseFloat(attempt.score) || 0;
+                          const totalVal = parseFloat(viewingQuiz.total_mark) || 100;
+                          const percentage = Math.round((scoreVal / totalVal) * 100);
+                          const isPassed = percentage >= 50;
+
+                          return (
+                            <tr key={attempt.id || idx} className="hover:bg-gray-50/60 transition-colors">
+                              <td className="px-4 py-3 text-xs font-semibold text-gray-400">
+                                {idx + 1}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  {student?.profile_image ? (
+                                    <img
+                                      src={student.profile_image.startsWith('http') ? student.profile_image : `/storage/${student.profile_image}`}
+                                      alt={studentName}
+                                      className="w-9 h-9 rounded-full object-cover border border-gray-200"
+                                      onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                                    />
+                                  ) : null}
+                                  <div className={`w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0 ${student?.profile_image ? 'hidden' : ''}`}>
+                                    {studentName.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div className="text-sm font-bold text-gray-900">{studentName}</div>
+                                    <div className="text-xs text-gray-400">{student?.email || '—'}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-center text-xs text-gray-600">
+                                {formatDate(attempt.started_at)}
+                              </td>
+                              <td className="px-4 py-3 text-center text-xs text-gray-600 font-medium">
+                                {formatDate(attempt.submitted_at)}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <div className="text-sm font-extrabold text-gray-900">
+                                  {scoreVal} <span className="text-xs font-normal text-gray-400">/ {totalVal}</span>
+                                </div>
+                                <div className="text-[11px] font-semibold text-indigo-600 mt-0.5">
+                                  ({percentage}%)
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${
+                                  isPassed 
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                                    : 'bg-rose-100 text-rose-800 border border-rose-200'
+                                }`}>
+                                  {isPassed ? 'ជាប់ (Passed)' : 'ធ្លាក់ (Failed)'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSubmissionsModal(false);
+                  setViewingQuiz(null);
+                  setSubmissions([]);
+                }}
+                className="px-5 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all"
+              >
+                បិទ (Close)
+              </button>
+            </div>
           </div>
         </div>
       )}

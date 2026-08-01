@@ -418,14 +418,41 @@ class TeacherController extends Controller
                 $students = $course->students()->get();
             }
 
-            $grades = Grade::where('course_id', $courseId)->get()->keyBy('student_id');
+            // Fallback 1: If course enrollments are empty, get students in course's department
+            if ($students->isEmpty() && $course->department_id) {
+                $deptStudentUserIds = \App\Models\Student::where('department_id', $course->department_id)
+                    ->pluck('user_id')
+                    ->filter();
+                if ($deptStudentUserIds->isNotEmpty()) {
+                    $students = \App\Models\User::whereIn('id', $deptStudentUserIds)->get();
+                }
+            }
 
-            // Load assignments and quizzes for course to calculate auto averages
+            // Fallback 2: Get students with grades, submissions or attempts for this course
             $assignments = Assignment::where('course_id', $courseId)->get();
             $quizzes = Quiz::where('course_id', $courseId)->get();
-
             $assignmentIds = $assignments->pluck('id');
             $quizIds = $quizzes->pluck('id');
+
+            if ($students->isEmpty()) {
+                $studentUserIds = Grade::where('course_id', $courseId)->pluck('student_id')
+                    ->merge(AssignmentSubmission::whereIn('assignment_id', $assignmentIds)->pluck('student_id'))
+                    ->merge(QuizAttempt::whereIn('quiz_id', $quizIds)->pluck('student_id'))
+                    ->unique()
+                    ->filter();
+
+                if ($studentUserIds->isNotEmpty()) {
+                    $students = \App\Models\User::whereIn('id', $studentUserIds)->get();
+                }
+            }
+
+            // Fallback 3: Get all students with role 'Student'
+            if ($students->isEmpty()) {
+                $studentRoleId = \App\Models\Role::where('role_name', 'Student')->value('id') ?? 3;
+                $students = \App\Models\User::where('role_id', $studentRoleId)->get();
+            }
+
+            $grades = Grade::where('course_id', $courseId)->get()->keyBy('student_id');
 
             $allSubmissions = AssignmentSubmission::whereIn('assignment_id', $assignmentIds)
                 ->whereNotNull('score')
@@ -488,20 +515,35 @@ class TeacherController extends Controller
 
                 $gradeLetter = $grade && $grade->grade_letter ? $grade->grade_letter : null;
 
-                // Also get student_code
+                // Retrieve student profile details
                 $studentProfile = \App\Models\Student::where('user_id', $student->id)->first();
-                $studentCode = $studentProfile ? $studentProfile->student_code : ('STU' . str_pad($student->id, 3, '0', STR_PAD_LEFT));
+                $studentCode = $studentProfile && $studentProfile->student_code 
+                    ? $studentProfile->student_code 
+                    : ('STU' . str_pad($student->id, 3, '0', STR_PAD_LEFT));
+
+                $studentFirstName = $student->first_name ?: ($studentProfile ? $studentProfile->first_name : '');
+                $studentLastName = $student->last_name ?: ($studentProfile ? $studentProfile->last_name : '');
+                $studentEmail = $student->email ?: ($studentProfile ? $studentProfile->email : '');
+                $profileImage = $student->profile_image ?: ($studentProfile ? $studentProfile->profile_image : null);
+
+                $fullName = trim($studentFirstName . ' ' . $studentLastName);
+                if (empty($fullName)) {
+                    $fullName = $studentEmail ?: ('Student #' . $student->id);
+                }
 
                 return [
                     'id' => $grade ? $grade->id : null,
                     'student_id' => $student->id,
                     'student_code' => $studentCode,
+                    'student_name' => $fullName,
                     'course_id' => (int)$courseId,
                     'student' => [
                         'id' => $student->id,
-                        'name' => $student->first_name . ' ' . $student->last_name,
-                        'email' => $student->email,
-                        'profile_image' => $student->profile_image
+                        'name' => $fullName,
+                        'first_name' => $studentFirstName,
+                        'last_name' => $studentLastName,
+                        'email' => $studentEmail,
+                        'profile_image' => $profileImage
                     ],
                     'assignment_score' => $assignScore,
                     'auto_assignment_score' => $autoAssignmentScore,
@@ -1326,15 +1368,40 @@ class TeacherController extends Controller
 
     public function getQuizResults($quizId)
     {
-        $teacherIds = [$this->getTeacherId(), auth()->id()];
-        $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
-            $query->whereIn('teacher_id', $teacherIds);
-        })->findOrFail($quizId);
+        try {
+            $teacherIds = [$this->getTeacherId(), auth()->id()];
+            $quiz = Quiz::with('course')
+                ->whereHas('course', function ($query) use ($teacherIds) {
+                    $query->whereIn('teacher_id', $teacherIds);
+                })->findOrFail($quizId);
 
-        $results = $quiz->attempts()
-            ->with('student')
-            ->get();
+            $attempts = $quiz->attempts()
+                ->with(['student:id,first_name,last_name,email,profile_image'])
+                ->orderBy('submitted_at', 'desc')
+                ->get()
+                ->map(function ($attempt) {
+                    return [
+                        'id' => $attempt->id,
+                        'quiz_id' => $attempt->quiz_id,
+                        'student_id' => $attempt->student_id,
+                        'student' => $attempt->student,
+                        'score' => $attempt->score,
+                        'started_at' => $attempt->started_at,
+                        'submitted_at' => $attempt->submitted_at,
+                        'created_at' => $attempt->created_at,
+                        'updated_at' => $attempt->updated_at,
+                    ];
+                });
 
-        return response()->json($results);
+            return response()->json([
+                'quiz' => $quiz,
+                'attempts' => $attempts
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Teacher getQuizResults error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការទាញយកលទ្ធផលកម្រងសំណួរ: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

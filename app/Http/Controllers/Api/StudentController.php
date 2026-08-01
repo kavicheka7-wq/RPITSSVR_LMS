@@ -129,22 +129,175 @@ class StudentController extends Controller
     public function getScores()
     {
         $student = auth()->user();
+        $studentProfile = \App\Models\Student::where('user_id', $student->id)->first();
         
-        $courses = Course::with(['teacher', 'teacherProfile', 'department'])->get();
-        
+        // 1. Get courses the student is enrolled in or fallback to department/all courses
+        $enrolledCourseIds = Enrollment::where('student_id', $student->id)
+            ->where(function ($q) {
+                $q->whereNull('status')
+                  ->orWhere('status', 'active')
+                  ->orWhere('status', '');
+            })
+            ->pluck('course_id');
+
+        if ($enrolledCourseIds->isNotEmpty()) {
+            $courses = Course::with(['teacher', 'department'])
+                ->whereIn('id', $enrolledCourseIds)
+                ->get();
+        } else if ($studentProfile && $studentProfile->department_id) {
+            $courses = Course::with(['teacher', 'department'])
+                ->where('department_id', $studentProfile->department_id)
+                ->get();
+        } else {
+            $courses = Course::with(['teacher', 'department'])->get();
+        }
+
+        // 2. Load Grade records for this student
         $grades = Grade::where('student_id', $student->id)->get()->keyBy('course_id');
 
-        $result = $courses->map(function ($course) use ($grades) {
+        // 3. Map courses with auto-calculated assignment score & quiz score if manual grade is null
+        $result = $courses->map(function ($course) use ($student, $grades) {
             $grade = $grades->get($course->id);
+
+            // Auto-calculate Assignment score %
+            $assignments = Assignment::where('course_id', $course->id)->get();
+            $autoAssignmentScore = null;
+            if ($assignments->isNotEmpty()) {
+                $submissions = AssignmentSubmission::whereIn('assignment_id', $assignments->pluck('id'))
+                    ->where('student_id', $student->id)
+                    ->whereNotNull('score')
+                    ->get();
+
+                if ($submissions->isNotEmpty()) {
+                    $totalEarned = 0;
+                    $totalMax = 0;
+                    foreach ($submissions as $sub) {
+                        $assign = $assignments->firstWhere('id', $sub->assignment_id);
+                        $maxScore = $assign ? ($assign->total_score ?? 100) : 100;
+                        if ($maxScore > 0) {
+                            $totalEarned += $sub->score;
+                            $totalMax += $maxScore;
+                        }
+                    }
+                    if ($totalMax > 0) {
+                        $autoAssignmentScore = round(($totalEarned / $totalMax) * 100, 2);
+                    }
+                }
+            }
+
+            // Auto-calculate Quiz score %
+            $quizzes = Quiz::where('course_id', $course->id)->get();
+            $autoQuizScore = null;
+            if ($quizzes->isNotEmpty()) {
+                $attempts = QuizAttempt::whereIn('quiz_id', $quizzes->pluck('id'))
+                    ->where('student_id', $student->id)
+                    ->whereNotNull('score')
+                    ->get();
+
+                if ($attempts->isNotEmpty()) {
+                    $totalEarned = 0;
+                    $totalMax = 0;
+                    foreach ($quizzes as $quiz) {
+                        $attemptsForQuiz = $attempts->where('quiz_id', $quiz->id);
+                        if ($attemptsForQuiz->isNotEmpty()) {
+                            $bestScore = $attemptsForQuiz->max('score');
+                            $maxMark = $quiz->total_mark ?? 100;
+                            if ($maxMark > 0) {
+                                $totalEarned += $bestScore;
+                                $totalMax += $maxMark;
+                            }
+                        }
+                    }
+                    if ($totalMax > 0) {
+                        $autoQuizScore = round(($totalEarned / $totalMax) * 100, 2);
+                    }
+                }
+            }
+
+            $assignScore = $grade && $grade->assignment_score !== null ? $grade->assignment_score : $autoAssignmentScore;
+            $quizScore = $grade && $grade->quiz_score !== null ? $grade->quiz_score : $autoQuizScore;
+            $midtermScore = $grade && $grade->midterm_score !== null ? $grade->midterm_score : null;
+            $finalScore = $grade && $grade->final_score !== null ? $grade->final_score : null;
+
+            // If finalScore is null but we have component scores, compute auto weighted total
+            if ($finalScore === null) {
+                $a = $assignScore !== null ? (float)$assignScore : null;
+                $q = $quizScore !== null ? (float)$quizScore : null;
+                $m = $midtermScore !== null ? (float)$midtermScore : null;
+
+                $weightedSum = 0;
+                $weightTotal = 0;
+                if ($a !== null) { $weightedSum += $a * 0.20; $weightTotal += 0.20; }
+                if ($q !== null) { $weightedSum += $q * 0.20; $weightTotal += 0.20; }
+                if ($m !== null) { $weightedSum += $m * 0.25; $weightTotal += 0.25; }
+
+                if ($weightTotal > 0) {
+                    $finalScore = round(($weightedSum / $weightTotal), 2);
+                }
+            }
+
+            $gradeLetter = $grade && $grade->grade_letter ? $grade->grade_letter : null;
+            if (!$gradeLetter && $finalScore !== null) {
+                if ($finalScore >= 90) $gradeLetter = 'A';
+                elseif ($finalScore >= 85) $gradeLetter = 'B+';
+                elseif ($finalScore >= 80) $gradeLetter = 'B';
+                elseif ($finalScore >= 70) $gradeLetter = 'C+';
+                elseif ($finalScore >= 65) $gradeLetter = 'C';
+                elseif ($finalScore >= 50) $gradeLetter = 'D';
+                else $gradeLetter = 'F';
+            }
+
+            // Teacher data combining User and Teacher profile
+            $teacherUser = $course->teacher;
+            $teacherProfile = \App\Models\Teacher::where('user_id', $course->teacher_id)->first();
+
+            $teacherName = $teacherUser 
+                ? trim($teacherUser->first_name . ' ' . $teacherUser->last_name) 
+                : ($teacherProfile ? trim($teacherProfile->first_name . ' ' . $teacherProfile->last_name) : '');
+            
+            if (empty($teacherName)) {
+                $teacherName = $teacherUser ? $teacherUser->email : 'គ្រូបង្រៀន';
+            }
+
+            $profileImg = $teacherUser && $teacherUser->profile_image 
+                ? $teacherUser->profile_image 
+                : ($teacherProfile ? $teacherProfile->profile_image : null);
+            
+            if ($profileImg && !filter_var($profileImg, FILTER_VALIDATE_URL)) {
+                $profileImg = asset('storage/' . ltrim($profileImg, '/'));
+            }
+
+            $teacherData = [
+                'id' => $course->teacher_id,
+                'name' => $teacherName,
+                'full_name' => $teacherName,
+                'first_name' => $teacherUser ? $teacherUser->first_name : ($teacherProfile ? $teacherProfile->first_name : ''),
+                'last_name' => $teacherUser ? $teacherUser->last_name : ($teacherProfile ? $teacherProfile->last_name : ''),
+                'email' => $teacherUser ? $teacherUser->email : ($teacherProfile ? $teacherProfile->email : ''),
+                'profile_image_url' => $profileImg,
+                'specialization' => $teacherProfile ? $teacherProfile->specialization : null,
+            ];
+
             return [
                 'id' => $grade ? $grade->id : null,
                 'course_id' => $course->id,
-                'course' => $course,
-                'assignment_score' => $grade ? $grade->assignment_score : null,
-                'quiz_score' => $grade ? $grade->quiz_score : null,
-                'midterm_score' => $grade ? $grade->midterm_score : null,
-                'final_score' => $grade ? $grade->final_score : null,
-                'grade_letter' => $grade ? $grade->grade_letter : null,
+                'course' => [
+                    'id' => $course->id,
+                    'course_code' => $course->course_code,
+                    'course_name' => $course->course_name,
+                    'credit' => $course->credit,
+                    'description' => $course->description,
+                    'teacher' => $teacherData,
+                    'teacher_profile' => $teacherData,
+                    'department' => $course->department,
+                ],
+                'assignment_score' => $assignScore,
+                'auto_assignment_score' => $autoAssignmentScore,
+                'quiz_score' => $quizScore,
+                'auto_quiz_score' => $autoQuizScore,
+                'midterm_score' => $midtermScore,
+                'final_score' => $finalScore,
+                'grade_letter' => $gradeLetter,
             ];
         });
 

@@ -59,9 +59,19 @@ const TeacherManageGrades = () => {
       const scoresData = response.data.data || response.data || [];
       const formatted = Array.isArray(scoresData)
         ? scoresData.map((s, idx) => {
-            const stuCode = s.student_code || s.student?.code || `STU${String(s.student_id || idx + 1).padStart(3, '0')}`;
-            const assign = s.assignment_score !== null && s.assignment_score !== undefined ? s.assignment_score : '';
-            const quiz = s.quiz_score !== null && s.quiz_score !== undefined ? s.quiz_score : '';
+            const studentName = s.student?.name 
+              || (s.student?.first_name ? `${s.student.first_name} ${s.student.last_name || ''}`.trim() : '') 
+              || s.student_name 
+              || s.name 
+              || `Student #${s.student_id || idx + 1}`;
+
+            const stuCode = s.student_code || s.student?.student_code || s.student?.code || `STU${String(s.student_id || idx + 1).padStart(3, '0')}`;
+            
+            const autoAssign = s.auto_assignment_score !== null && s.auto_assignment_score !== undefined ? s.auto_assignment_score : '';
+            const autoQuiz = s.auto_quiz_score !== null && s.auto_quiz_score !== undefined ? s.auto_quiz_score : '';
+
+            const assign = s.assignment_score !== null && s.assignment_score !== undefined ? s.assignment_score : autoAssign;
+            const quiz = s.quiz_score !== null && s.quiz_score !== undefined ? s.quiz_score : autoQuiz;
             const midterm = s.midterm_score !== null && s.midterm_score !== undefined ? s.midterm_score : '';
             const finalTotal = s.final_score !== null && s.final_score !== undefined ? s.final_score : '';
 
@@ -85,15 +95,20 @@ const TeacherManageGrades = () => {
               }
             }
 
+            const { total, letter } = calculateRowMetrics(assign, quiz, midterm, exam);
+
             return {
               ...s,
+              student_name: studentName,
               student_code: stuCode,
               assignment_score: assign,
+              auto_assignment_score: autoAssign,
               quiz_score: quiz,
+              auto_quiz_score: autoQuiz,
               midterm_score: midterm,
               exam_score: exam,
-              final_score: finalTotal,
-              grade_letter: s.grade_letter ?? '',
+              final_score: total !== null ? total : finalTotal,
+              grade_letter: letter || s.grade_letter || '',
             };
           })
         : [];
@@ -174,8 +189,12 @@ const TeacherManageGrades = () => {
   const handleAutoFill = () => {
     setStudentScores((prev) =>
       prev.map((item) => {
-        const assign = item.assignment_score !== '' ? item.assignment_score : (item.auto_assignment_score ?? '');
-        const quiz = item.quiz_score !== '' ? item.quiz_score : (item.auto_quiz_score ?? '');
+        const assign = item.auto_assignment_score !== '' && item.auto_assignment_score !== null && item.auto_assignment_score !== undefined
+          ? item.auto_assignment_score 
+          : item.assignment_score;
+        const quiz = item.auto_quiz_score !== '' && item.auto_quiz_score !== null && item.auto_quiz_score !== undefined
+          ? item.auto_quiz_score 
+          : item.quiz_score;
         const midterm = item.midterm_score ?? '';
         const exam = item.exam_score ?? '';
 
@@ -409,15 +428,21 @@ const TeacherManageGrades = () => {
                         <tr key={item.student_id} className="hover:bg-gray-50/50 transition-colors">
                           {/* Student Cell */}
                           <td className="py-3 px-6">
-                            <div>
-                              <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-full bg-blue-600 text-white font-semibold text-sm flex items-center justify-center shrink-0">
-                                  {initial}
-                                </div>
-                                <div>
-                                  <div className="font-medium text-gray-900 text-sm">{studentName}</div>
-                                  <div className="text-xs text-gray-400">{studentCode}</div>
-                                </div>
+                            <div className="flex items-center gap-3">
+                              {item.student?.profile_image ? (
+                                <img
+                                  src={item.student.profile_image.startsWith('http') ? item.student.profile_image : `/storage/${item.student.profile_image}`}
+                                  alt={studentName}
+                                  className="w-9 h-9 rounded-full object-cover border border-gray-200"
+                                  onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                                />
+                              ) : null}
+                              <div className={`w-9 h-9 rounded-full bg-blue-600 text-white font-semibold text-sm flex items-center justify-center shrink-0 ${item.student?.profile_image ? 'hidden' : ''}`}>
+                                {initial}
+                              </div>
+                              <div>
+                                <div className="font-medium text-gray-900 text-sm">{studentName}</div>
+                                <div className="text-xs text-gray-400 font-mono">{studentCode}</div>
                               </div>
                             </div>
                           </td>
@@ -429,10 +454,11 @@ const TeacherManageGrades = () => {
                               min="0"
                               max="100"
                               step="0.5"
-                              placeholder="—"
+                              placeholder={item.auto_assignment_score !== '' && item.auto_assignment_score !== null ? `${item.auto_assignment_score}` : '—'}
                               value={item.assignment_score}
                               onChange={(e) => handleScoreChange(item.student_id, 'assignment_score', e.target.value)}
                               className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded text-center text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                              title={item.auto_assignment_score !== '' ? `Auto Assignment Score: ${item.auto_assignment_score}` : 'Assignment score'}
                             />
                           </td>
 
@@ -443,10 +469,11 @@ const TeacherManageGrades = () => {
                               min="0"
                               max="100"
                               step="0.5"
-                              placeholder="—"
+                              placeholder={item.auto_quiz_score !== '' && item.auto_quiz_score !== null ? `${item.auto_quiz_score}` : '—'}
                               value={item.quiz_score}
                               onChange={(e) => handleScoreChange(item.student_id, 'quiz_score', e.target.value)}
                               className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded text-center text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                              title={item.auto_quiz_score !== '' ? `Auto Quiz Score: ${item.auto_quiz_score}` : 'Quiz score'}
                             />
                           </td>
 
@@ -461,6 +488,7 @@ const TeacherManageGrades = () => {
                               value={item.midterm_score}
                               onChange={(e) => handleScoreChange(item.student_id, 'midterm_score', e.target.value)}
                               className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded text-center text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                              title="Midterm exam score"
                             />
                           </td>
 
@@ -475,6 +503,7 @@ const TeacherManageGrades = () => {
                               value={item.exam_score}
                               onChange={(e) => handleScoreChange(item.student_id, 'exam_score', e.target.value)}
                               className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded text-center text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                              title="Final exam score"
                             />
                           </td>
 

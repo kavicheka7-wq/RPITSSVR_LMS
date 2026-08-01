@@ -14,7 +14,8 @@ const ViewScores = () => {
   const fetchScores = async () => {
     try {
       const response = await api.get('/student/scores');
-      setGrades(Array.isArray(response.data) ? response.data : []);
+      const scoresData = response.data?.data || response.data || [];
+      setGrades(Array.isArray(scoresData) ? scoresData : []);
     } catch (error) {
       toast.error('មិនអាចទាញយកពិន្ទុបានទេ (Failed to fetch scores)');
     } finally {
@@ -149,64 +150,75 @@ const ViewScores = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
-                {grades.map((grade) => (
-                  <tr key={grade.course?.id || grade.course_id} className="hover:bg-gray-50/40 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-bold text-gray-900">{grade.course?.course_name}</span>
-                        <span className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">{grade.course?.course_code} &bull; {grade.course?.credit} Credits</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        {grade.course?.teacher_profile?.profile_image_url ? (
-                          <img
-                            src={grade.course.teacher_profile.profile_image_url}
-                            alt={grade.course.teacher?.name}
-                            className="h-6 w-6 rounded-full object-cover border border-gray-100"
-                          />
-                        ) : (
-                          <div className="h-6 w-6 rounded-full bg-blue-900/10 flex items-center justify-center border border-blue-900/10">
-                            <span className="text-[8px] text-blue-900 font-bold">T</span>
-                          </div>
-                        )}
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-bold text-gray-800 truncate max-w-37.5">
-                            {grade.course?.teacher?.name || 'គ្រូបង្រៀន'}
-                          </span>
-                          {grade.course?.teacher_profile?.specialization && (
-                            <span className="text-[9px] text-gray-400 truncate">
-                              {grade.course.teacher_profile.specialization}
-                            </span>
-                          )}
+                {grades.map((grade) => {
+                  const teacher = grade.course?.teacher || grade.course?.teacher_profile;
+                  const teacherName = teacher?.name || teacher?.full_name || (teacher?.first_name ? `${teacher.first_name} ${teacher.last_name || ''}`.trim() : '') || 'គ្រូបង្រៀន';
+                  const teacherImg = teacher?.profile_image_url || (teacher?.profile_image ? (teacher.profile_image.startsWith('http') ? teacher.profile_image : `/storage/${teacher.profile_image}`) : null);
+
+                  const assignVal = grade.assignment_score !== null && grade.assignment_score !== undefined && grade.assignment_score !== '' ? grade.assignment_score : null;
+                  const quizVal = grade.quiz_score !== null && grade.quiz_score !== undefined && grade.quiz_score !== '' ? grade.quiz_score : null;
+                  const midtermVal = grade.midterm_score !== null && grade.midterm_score !== undefined && grade.midterm_score !== '' ? grade.midterm_score : null;
+                  const finalVal = grade.final_score !== null && grade.final_score !== undefined && grade.final_score !== '' ? grade.final_score : null;
+
+                  return (
+                    <tr key={grade.course?.id || grade.course_id} className="hover:bg-gray-50/40 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-gray-900">{grade.course?.course_name || '—'}</span>
+                          <span className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">{grade.course?.course_code} &bull; {grade.course?.credit || 3} Credits</span>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className={`text-xs font-bold ${grade.assignment_score !== null ? 'text-gray-900' : 'text-gray-400'}`}>
-                        {grade.assignment_score !== null ? `${grade.assignment_score}%` : '-'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className={`text-xs font-bold ${grade.quiz_score !== null ? 'text-gray-900' : 'text-gray-400'}`}>
-                        {grade.quiz_score !== null ? `${grade.quiz_score}%` : '-'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className={`text-xs font-bold ${grade.midterm_score !== null ? 'text-gray-900' : 'text-gray-400'}`}>
-                        {grade.midterm_score !== null ? `${grade.midterm_score}%` : '-'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className={`text-sm font-extrabold ${grade.final_score !== null ? 'text-blue-950 bg-blue-900/5 px-2.5 py-1.5 rounded-lg border border-blue-900/10' : 'text-gray-400'}`}>
-                        {grade.final_score !== null ? `${grade.final_score}%` : '-'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      {getGradeBadge(grade.grade_letter)}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          {teacherImg ? (
+                            <img
+                              src={teacherImg}
+                              alt={teacherName}
+                              className="h-7 w-7 rounded-full object-cover border border-gray-200"
+                              onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                            />
+                          ) : null}
+                          <div className={`h-7 w-7 rounded-full bg-blue-900/10 text-blue-900 flex items-center justify-center font-bold text-xs shrink-0 border border-blue-900/10 ${teacherImg ? 'hidden' : ''}`}>
+                            {teacherName.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-xs font-bold text-gray-800 truncate max-w-37.5">
+                              {teacherName}
+                            </span>
+                            {teacher?.specialization && (
+                              <span className="text-[9px] text-gray-400 truncate">
+                                {teacher.specialization}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className={`text-xs font-bold ${assignVal !== null ? 'text-gray-900' : 'text-gray-400'}`}>
+                          {assignVal !== null ? `${assignVal}%` : '-'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className={`text-xs font-bold ${quizVal !== null ? 'text-gray-900' : 'text-gray-400'}`}>
+                          {quizVal !== null ? `${quizVal}%` : '-'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className={`text-xs font-bold ${midtermVal !== null ? 'text-gray-900' : 'text-gray-400'}`}>
+                          {midtermVal !== null ? `${midtermVal}%` : '-'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className={`text-sm font-extrabold ${finalVal !== null ? 'text-blue-950 bg-blue-900/5 px-2.5 py-1.5 rounded-lg border border-blue-900/10' : 'text-gray-400'}`}>
+                          {finalVal !== null ? `${finalVal}%` : '-'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        {getGradeBadge(grade.grade_letter)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
