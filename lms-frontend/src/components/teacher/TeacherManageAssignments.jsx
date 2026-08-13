@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
 import { handleDownloadFile } from '../../utils/downloadUtils';
+import { useLanguage } from '../../context/LanguageContext';
 import {
   ClipboardDocumentListIcon,
   PlusIcon,
@@ -21,6 +22,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function TeacherManageAssignments() {
+  const { t, language } = useLanguage();
   const [assignments, setAssignments] = useState([]);
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -74,7 +76,7 @@ export default function TeacherManageAssignments() {
       const coursesData = response.data.data || response.data || [];
       setCourses(Array.isArray(coursesData) ? coursesData : []);
     } catch (error) {
-      toast.error('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ', 'Cannot fetch courses data'));
       setCourses([]);
     }
   };
@@ -85,7 +87,7 @@ export default function TeacherManageAssignments() {
       const assignmentsData = response.data.data || response.data || [];
       setAssignments(Array.isArray(assignmentsData) ? assignmentsData : []);
     } catch (error) {
-      toast.error('មិនអាចទាញយកទិន្នន័យកិច្ចការបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យកិច្ចការបានទេ', 'Cannot fetch assignments data'));
       setAssignments([]);
     }
   };
@@ -142,10 +144,10 @@ export default function TeacherManageAssignments() {
     try {
       if (editingAssignment) {
         await api.put(`/teacher/assignments/${editingAssignment.id}`, payload);
-        toast.success('បានកែប្រែកិច្ចការដោយជោគជ័យ');
+        toast.success(t('បានកែប្រែកិច្ចការដោយជោគជ័យ', 'Assignment updated successfully'));
       } else {
         await api.post('/teacher/assignments', payload);
-        toast.success('បានបន្ថែមកិច្ចការដោយជោគជ័យ');
+        toast.success(t('បានបន្ថែមកិច្ចការដោយជោគជ័យ', 'Assignment created successfully'));
       }
       setShowAddModal(false);
       await fetchAssignments();
@@ -154,7 +156,7 @@ export default function TeacherManageAssignments() {
       if (error.response?.data?.errors) {
         toast.error(Object.values(error.response.data.errors).flat().join('\n'));
       } else {
-        toast.error(error.response?.data?.message || 'ការរក្សាទុកកិច្ចការបានបរាជ័យ');
+        toast.error(error.response?.data?.message || t('ការរក្សាទុកកិច្ចការបានបរាជ័យ', 'Failed to save assignment'));
       }
     } finally {
       setIsSubmitting(false);
@@ -170,12 +172,12 @@ export default function TeacherManageAssignments() {
     if (!selectedAssignment) return;
     try {
       const response = await api.delete(`/teacher/assignments/${selectedAssignment.id}`);
-      toast.success(response.data?.message || 'បានលុបកិច្ចការដោយជោគជ័យ');
+      toast.success(t('បានលុបកិច្ចការដោយជោគជ័យ', 'Assignment deleted successfully'));
       setShowDeleteModal(false);
       setSelectedAssignment(null);
       await fetchAssignments();
     } catch (error) {
-      toast.error(error.response?.data?.message || 'មិនអាចលុបកិច្ចការបានទេ');
+      toast.error(error.response?.data?.message || t('មិនអាចលុបកិច្ចការបានទេ', 'Cannot delete assignment'));
     }
   };
 
@@ -277,7 +279,7 @@ export default function TeacherManageAssignments() {
   const formatDate = (dateString) => {
     if (!dateString) return '—';
     const date = new Date(dateString);
-    return date.toLocaleDateString('kh-KH', {
+    return date.toLocaleDateString(language === 'km' ? 'kh-KH' : 'en-US', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
@@ -296,11 +298,11 @@ export default function TeacherManageAssignments() {
               <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
                 <ClipboardDocumentListIcon className="h-6 w-6" />
               </span>
-              គ្រប់គ្រងកិច្ចការ (Assignments)
+              {t('គ្រប់គ្រងកិច្ចការ', 'Manage Assignments')}
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              បង្កើត និងគ្រប់គ្រងកិច្ចការផ្ទះ ឬគម្រោងសម្រាប់សិស្ស
-              <span className="ml-2 text-indigo-600 font-medium">({Array.isArray(assignments) ? assignments.length : 0} កិច្ចការ)</span>
+              {t('បង្កើត និងគ្រប់គ្រងកិច្ចការផ្ទះ ឬគម្រោងសម្រាប់សិស្ស', 'Create and manage homework or projects for students')}
+              <span className="ml-2 text-indigo-600 font-medium">({Array.isArray(assignments) ? assignments.length : 0} {t('កិច្ចការ', 'assignments')})</span>
             </p>
           </div>
           <button
@@ -308,7 +310,7 @@ export default function TeacherManageAssignments() {
             className="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl shadow-sm hover:bg-indigo-700 transition-all hover:shadow-md"
           >
             <PlusIcon className="h-5 w-5 mr-2" />
-            បន្ថែមតម្លៃកិច្ចការ
+            {t('បន្ថែមតម្លៃកិច្ចការ', 'Add Assignment')}
           </button>
         </div>
       </div>
@@ -320,7 +322,7 @@ export default function TeacherManageAssignments() {
             <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
             <input
               type="text"
-              placeholder="ស្វែងរកតាមចំណងជើង ឬការពិពណ៌នា..."
+              placeholder={t('ស្វែងរកតាមចំណងជើង ឬការពិពណ៌នា...', 'Search by title or description...')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
@@ -332,7 +334,7 @@ export default function TeacherManageAssignments() {
               onChange={(e) => setSelectedCourse(e.target.value)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
             >
-              <option value="">គ្រប់មុខវិជ្ជា</option>
+              <option value="">{t('គ្រប់មុខវិជ្ជា', 'All Courses')}</option>
               {Array.isArray(courses) && courses.map(course => (
                 <option key={course.id} value={course.id}>
                   {course.course_name} ({course.course_code})
@@ -350,12 +352,12 @@ export default function TeacherManageAssignments() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">No</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">កិច្ចការ (Assignment)</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">មុខវិជ្ជា (Course)</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">ថ្ងៃកំណត់ (Due Date)</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">ពិន្ទុសរុប (Score)</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">ការដាក់ (Submissions)</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('កិច្ចការ', 'Assignment')}</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('មុខវិជ្ជា', 'Course')}</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ថ្ងៃកំណត់', 'Due Date')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ពិន្ទុសរុប', 'Total Score')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ការដាក់', 'Submissions')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('សកម្មភាព', 'Actions')}</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
@@ -365,10 +367,10 @@ export default function TeacherManageAssignments() {
                     <div className="flex flex-col items-center">
                       <ClipboardDocumentListIcon className="h-16 w-16 text-gray-300 mb-3" />
                       <p className="font-medium">
-                        {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានកិច្ចការនៅឡើយទេ'}
+                        {searchTerm ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found') : t('មិនទាន់មានកិច្ចការនៅឡើយទេ', 'No assignments available yet')}
                       </p>
                       <p className="text-sm text-gray-400 mt-1">
-                        {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមតម្លៃកិច្ចការ" ដើម្បីចាប់ផ្តើម'}
+                        {searchTerm ? t('សូមប្តូរពាក្យស្វែងរក', 'Try a different search term') : t('ចុច "បន្ថែមតម្លៃកិច្ចការ" ដើម្បីចាប់ផ្តើម', 'Click "Add Assignment" to start')}
                       </p>
                     </div>
                   </td>
@@ -391,7 +393,7 @@ export default function TeacherManageAssignments() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-800 font-medium">
-                          {assignment.course?.course_name || 'គ្មានមុខវិជ្ជា'}
+                          {assignment.course?.course_name || t('គ្មានមុខវិជ្ជា', 'No course')}
                         </div>
                         <div className="text-xs text-gray-500 font-mono mt-0.5">
                           {assignment.course?.course_code}
@@ -404,21 +406,21 @@ export default function TeacherManageAssignments() {
                         </div>
                         {isOverdue && (
                           <span className="inline-block mt-0.5 px-2 py-0.5 rounded-sm bg-red-50 text-red-700 text-[10px] font-bold">
-                            ហួសកំណត់
+                            {t('ហួសកំណត់', 'Overdue')}
                           </span>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-bold text-gray-800">
-                        {assignment.total_score} ភិន្ទុ
+                        {assignment.total_score} {t('ពិន្ទុ', 'pts')}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <button
                           onClick={() => openSubmissionsModal(assignment)}
                           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all hover:scale-105 ${submissionsCount > 0 ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                          title="មើលការដាក់កិច្ចការ"
+                          title={t('មើលការដាក់កិច្ចការ', 'View Submissions')}
                         >
                           <EyeIcon className="h-4 w-4" />
-                          {submissionsCount} នាក់
+                          {submissionsCount} {t('នាក់', 'subs')}
                         </button>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
@@ -426,21 +428,21 @@ export default function TeacherManageAssignments() {
                           <button
                             onClick={() => openSubmissionsModal(assignment)}
                             className="p-2 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-50 rounded-xl transition-all"
-                            title="មើលការដាក់កិច្ចការ"
+                            title={t('មើលការដាក់កិច្ចការ', 'View Submissions')}
                           >
                             <EyeIcon className="h-5 w-5" />
                           </button>
                           <button
                             onClick={() => openEditModal(assignment)}
                             className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
-                            title="កែប្រែ"
+                            title={t('កែប្រែ', 'Edit')}
                           >
                             <PencilSquareIcon className="h-5 w-5" />
                           </button>
                           <button
                             onClick={() => handleDeleteClick(assignment)}
                             className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
-                            title="លុប"
+                            title={t('លុប', 'Delete')}
                           >
                             <TrashIcon className="h-5 w-5" />
                           </button>

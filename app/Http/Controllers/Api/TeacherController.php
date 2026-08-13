@@ -28,20 +28,63 @@ class TeacherController extends Controller
     // --- Dashboard ---
     public function dashboard()
     {
-        $teacher = auth()->user();
-        $courses = $teacher->courses()->withCount(['students', 'lessons', 'assignments', 'quizzes'])->get();
+        $teacherId = $this->getTeacherId();
+        $userId = auth()->id();
+
+        $courses = Course::where(function ($query) use ($teacherId, $userId) {
+            $query->where('teacher_id', $teacherId)
+                  ->orWhere('teacher_id', $userId);
+        })
+        ->with(['department'])
+        ->withCount(['enrollments as students_count', 'lessons', 'assignments', 'quizzes'])
+        ->get();
         
+        $courseIds = $courses->pluck('id')->toArray();
+
+        $totalStudents = Enrollment::whereIn('course_id', $courseIds)->distinct('student_id')->count('student_id');
+        $totalLessons = $courses->sum('lessons_count');
+        $totalAssignments = $courses->sum('assignments_count');
+        $totalQuizzes = $courses->sum('quizzes_count');
+
+        $pendingAssignments = AssignmentSubmission::whereHas('assignment', function ($q) use ($courseIds) {
+            $q->whereIn('course_id', $courseIds);
+        })->whereNull('score')->count();
+
+        $presentToday = Attendance::whereIn('course_id', $courseIds)
+            ->whereDate('attendance_date', now()->toDateString())
+            ->where('status', 'Present')
+            ->count();
+
         $stats = [
             'total_courses' => $courses->count(),
-            'total_students' => $courses->sum('students_count'),
-            'total_lessons' => $courses->sum('lessons_count'),
-            'total_assignments' => $courses->sum('assignments_count'),
-            'total_quizzes' => $courses->sum('quizzes_count'),
+            'total_students' => $totalStudents,
+            'total_lessons' => $totalLessons,
+            'total_assignments' => $totalAssignments,
+            'total_quizzes' => $totalQuizzes,
+            'pending_assignments' => $pendingAssignments,
+            'present_today' => $presentToday,
         ];
+
+        $recentSubmissions = AssignmentSubmission::whereHas('assignment', function ($q) use ($courseIds) {
+            $q->whereIn('course_id', $courseIds);
+        })
+        ->with(['student:id,first_name,last_name,email', 'assignment:id,title,course_id'])
+        ->orderBy('created_at', 'desc')
+        ->take(6)
+        ->get()
+        ->map(function ($sub) {
+            return [
+                'id' => $sub->id,
+                'student_name' => $sub->student ? trim($sub->student->first_name . ' ' . $sub->student->last_name) : 'សិស្ស',
+                'assignment_title' => $sub->assignment ? $sub->assignment->title : 'កិច្ចការ',
+                'submitted_at' => $sub->created_at ? $sub->created_at->diffForHumans() : null,
+            ];
+        });
 
         return response()->json([
             'stats' => $stats,
             'courses' => $courses,
+            'recent_activities' => $recentSubmissions,
         ]);
     }
 

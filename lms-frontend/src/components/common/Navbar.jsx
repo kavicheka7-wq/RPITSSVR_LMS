@@ -1,5 +1,6 @@
 // src/components/common/Navbar.jsx
 import React, { useState, Fragment, useRef } from 'react';
+import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { Menu, Transition, Dialog } from '@headlessui/react';
@@ -24,6 +25,15 @@ import {
   EyeIcon,
   EyeSlashIcon,
   GlobeAltIcon,
+  HomeIcon,
+  BuildingLibraryIcon,
+  BookOpenIcon,
+  ChartBarIcon,
+  FolderIcon,
+  UsersIcon,
+  ClipboardDocumentListIcon,
+  DocumentArrowUpIcon,
+  PencilSquareIcon,
 } from '@heroicons/react/24/outline';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
@@ -291,13 +301,51 @@ const Navbar = () => {
 
   const getUserCreatedAt = () => {
     if (user?.created_at) {
-      return new Date(user.created_at).toLocaleDateString('km-KH', {
+      return new Date(user.created_at).toLocaleDateString(language === 'km' ? 'km-KH' : 'en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
       });
     }
     return '—';
+  };
+
+  const getNavItems = () => {
+    const role = (user?.role?.role_name || user?.role_name || user?.role || '').toString();
+    if (role === 'Admin' || role === 'admin') {
+      return [
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/admin/dashboard' },
+        { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/admin/departments' },
+        { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/admin/teachers' },
+        { name: t('សិស្ស', 'Students'), icon: UserGroupIcon, path: '/admin/students' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/admin/courses' },
+        { name: t('របាយការណ៍', 'Reports'), icon: ChartBarIcon, path: '/admin/reports' },
+      ];
+    }
+    if (role === 'Teacher' || role === 'teacher') {
+      return [
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/teacher/dashboard' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/teacher/courses' },
+        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/teacher/lessons' },
+        { name: t('សិស្ស', 'Students'), icon: UsersIcon, path: '/teacher/students' },
+        { name: t('វត្តមានសិស្ស', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/teacher/attendance' },
+        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/teacher/grades' },
+        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/teacher/assignments' },
+        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/teacher/quizzes' },
+      ];
+    }
+    if (role === 'Student' || role === 'student') {
+      return [
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/student/dashboard' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/student/courses' },
+        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/student/lessons' },
+        { name: t('វត្តមាន', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/student/attendance' },
+        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/student/grades' },
+        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/student/assignments' },
+        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/student/quizzes' },
+      ];
+    }
+    return [];
   };
 
   return (
@@ -321,23 +369,23 @@ const Navbar = () => {
                   <AcademicCapIcon className="h-5 w-5 text-yellow-300" />
                 </div>
                 <h1 className="ml-3 text-xl font-bold text-white tracking-tight drop-shadow-md">
-                  LMS College
+                  LMS RPITSSVR
                 </h1>
               </div>
             </div>
 
-            <div className="hidden sm:ml-6 sm:flex sm:items-center space-x-4">
+            <div className="hidden md:flex md:items-center space-x-4">
               {/* Language Toggle Button */}
               <button
                 onClick={toggleLanguage}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700/50 hover:bg-blue-600/50 rounded-xl border border-blue-500/30 transition-all text-white text-sm font-medium"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700/50 hover:bg-blue-600/50 rounded-xl border border-blue-500/30 transition-all text-white text-sm font-medium cursor-pointer"
               >
                 <GlobeAltIcon className="h-4 w-4" />
                 <span>{language === 'km' ? 'ខ្មែរ' : 'English'}</span>
               </button>
 
               <Menu as="div" className="relative ml-3">
-                <Menu.Button className="flex items-center text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-yellow-400/50 focus:ring-offset-2 focus:ring-offset-blue-900 transition-all hover:ring-2 hover:ring-yellow-400/30">
+                <Menu.Button className="flex items-center text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-yellow-400/50 focus:ring-offset-2 focus:ring-offset-blue-900 transition-all hover:ring-2 hover:ring-yellow-400/30 cursor-pointer">
                   <div className="h-9 w-9 rounded-full bg-blue-700/50 backdrop-blur-sm flex items-center justify-center text-white font-medium text-sm shadow-lg overflow-hidden border-2 border-yellow-400/30 hover:border-yellow-400/60 transition-all">
                     {getProfileImage() ? (
                       <img 
@@ -364,7 +412,7 @@ const Navbar = () => {
                   leaveFrom="transform opacity-100 scale-100"
                   leaveTo="transform opacity-0 scale-95"
                 >
-                  <Menu.Items className="origin-top-right absolute right-0 mt-2 w-56 rounded-2xl shadow-2xl py-1 bg-white ring-1 ring-black/5 focus:outline-none overflow-hidden">
+                  <Menu.Items className="origin-top-right absolute right-0 mt-2 w-56 rounded-2xl shadow-2xl py-1 bg-white ring-1 ring-black/5 focus:outline-none overflow-hidden z-50">
                     <div className="px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
                       <p className="text-sm font-semibold text-gray-900">{getUserDisplayName()}</p>
                       <p className="text-xs text-gray-500">{getUserEmail()}</p>
@@ -373,7 +421,7 @@ const Navbar = () => {
                       {({ active }) => (
                         <button
                           onClick={openProfileModal}
-                          className={`${active ? 'bg-blue-50 text-blue-700' : 'text-gray-700'} flex w-full items-center px-4 py-2.5 text-sm transition-colors`}
+                          className={`${active ? 'bg-blue-50 text-blue-700' : 'text-gray-700'} flex w-full items-center px-4 py-2.5 text-sm transition-colors cursor-pointer`}
                         >
                           <UserCircleIcon className={`h-5 w-5 mr-3 ${active ? 'text-blue-500' : 'text-gray-400'}`} />
                           {t('ប្រវត្តិរូប', 'Profile')}
@@ -384,7 +432,7 @@ const Navbar = () => {
                       {({ active }) => (
                         <button
                           onClick={openSettingsModal}
-                          className={`${active ? 'bg-blue-50 text-blue-700' : 'text-gray-700'} flex w-full items-center px-4 py-2.5 text-sm transition-colors`}
+                          className={`${active ? 'bg-blue-50 text-blue-700' : 'text-gray-700'} flex w-full items-center px-4 py-2.5 text-sm transition-colors cursor-pointer`}
                         >
                           <Cog6ToothIcon className={`h-5 w-5 mr-3 ${active ? 'text-blue-500' : 'text-gray-400'}`} />
                           {t('ការកំណត់', 'Settings')}
@@ -395,7 +443,7 @@ const Navbar = () => {
                       {({ active }) => (
                         <button
                           onClick={logout}
-                          className={`${active ? 'bg-red-50 text-red-600' : 'text-red-500'} flex w-full items-center px-4 py-2.5 text-sm border-t border-gray-100 transition-colors`}
+                          className={`${active ? 'bg-red-50 text-red-600' : 'text-red-500'} flex w-full items-center px-4 py-2.5 text-sm border-t border-gray-100 transition-colors cursor-pointer`}
                         >
                           <ArrowRightOnRectangleIcon className={`h-5 w-5 mr-3 ${active ? 'text-red-500' : 'text-red-400'}`} />
                           {t('ចាកចេញ', 'Logout')}
@@ -407,27 +455,27 @@ const Navbar = () => {
               </Menu>
             </div>
 
-            <div className="flex items-center sm:hidden gap-2">
+            <div className="flex items-center md:hidden gap-2">
               <button
                 onClick={toggleLanguage}
-                className="p-2 rounded-xl text-yellow-300/70 hover:text-yellow-300 hover:bg-blue-800/50 transition-all"
+                className="p-2 rounded-xl text-yellow-300/70 hover:text-yellow-300 hover:bg-blue-800/50 transition-all cursor-pointer"
               >
                 <GlobeAltIcon className="h-5 w-5" />
               </button>
               <button
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="inline-flex items-center justify-center p-2 rounded-xl text-yellow-300/70 hover:text-yellow-300 hover:bg-blue-800/50 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 transition-all"
+                className="inline-flex items-center justify-center p-2 rounded-xl text-yellow-300/70 hover:text-yellow-300 hover:bg-blue-800/50 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 transition-all cursor-pointer"
               >
-                <Bars3Icon className="h-6 w-6" />
+                {isMobileMenuOpen ? <XMarkIcon className="h-6 w-6" /> : <Bars3Icon className="h-6 w-6" />}
               </button>
             </div>
           </div>
         </div>
 
         {isMobileMenuOpen && (
-          <div className="sm:hidden border-t border-blue-700/30 bg-blue-900/95 backdrop-blur-sm">
-            <div className="pt-2 pb-3 space-y-1">
-              <div className="px-4 py-3 bg-blue-800/50">
+          <div className="md:hidden border-t border-blue-700/30 bg-blue-950/98 backdrop-blur-md max-h-[85vh] overflow-y-auto">
+            <div className="pt-3 pb-4 space-y-3 px-4">
+              <div className="p-3 bg-blue-900/60 rounded-2xl border border-blue-700/30 flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                   <div className="h-10 w-10 rounded-full bg-blue-700/50 flex items-center justify-center text-white font-medium text-sm overflow-hidden border-2 border-yellow-400/30">
                     {getProfileImage() ? (
@@ -445,45 +493,74 @@ const Navbar = () => {
                     )}
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-white">
+                    <p className="text-sm font-bold text-white">
                       {getUserDisplayName()}
                     </p>
                     <p className="text-xs text-yellow-300/70">{getUserEmail()}</p>
                   </div>
                 </div>
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-400/20 text-yellow-300 border border-yellow-400/30">
-                    {getRoleName(getUserRole())}
-                  </span>
-                </div>
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-400/20 text-yellow-300 border border-yellow-400/30">
+                  {getRoleName(getUserRole())}
+                </span>
               </div>
-              <button
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  openProfileModal();
-                }}
-                className="block w-full text-left px-4 py-3 text-base font-medium text-yellow-300/80 hover:text-yellow-300 hover:bg-blue-800/50 transition-colors"
-              >
-                <UserCircleIcon className="h-5 w-5 inline mr-2" />
-                {t('ប្រវត្តិរូប', 'Profile')}
-              </button>
-              <button
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  openSettingsModal();
-                }}
-                className="block w-full text-left px-4 py-3 text-base font-medium text-yellow-300/80 hover:text-yellow-300 hover:bg-blue-800/50 transition-colors"
-              >
-                <Cog6ToothIcon className="h-5 w-5 inline mr-2" />
-                {t('ការកំណត់', 'Settings')}
-              </button>
-              <button
-                onClick={logout}
-                className="block w-full text-left px-4 py-3 text-base font-medium text-red-400/80 hover:text-red-300 hover:bg-blue-800/50 transition-colors"
-              >
-                <ArrowRightOnRectangleIcon className="h-5 w-5 inline mr-2" />
-                {t('ចាកចេញ', 'Logout')}
-              </button>
+
+              {/* Mobile Navigation Links */}
+              <div className="space-y-1 pt-2 border-t border-blue-800/40">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-yellow-400/60 px-2 mb-1">
+                  {t('ម៉ឺនុយបញ្ជា', 'Navigation Menu')}
+                </p>
+                {getNavItems().map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                          isActive
+                            ? 'bg-yellow-400 text-blue-950 font-bold shadow-md'
+                            : 'text-blue-100 hover:bg-blue-800/60 hover:text-yellow-300'
+                        }`
+                      }
+                    >
+                      <Icon className="h-5 w-5 shrink-0" />
+                      <span>{item.name}</span>
+                    </NavLink>
+                  );
+                })}
+              </div>
+
+              {/* User Account Actions */}
+              <div className="pt-2 border-t border-blue-800/40 space-y-1">
+                <button
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    openProfileModal();
+                  }}
+                  className="flex items-center w-full px-3 py-2.5 text-sm font-medium text-blue-100 hover:bg-blue-800/60 hover:text-yellow-300 rounded-xl transition-all"
+                >
+                  <UserCircleIcon className="h-5 w-5 mr-3 text-yellow-400" />
+                  {t('ប្រវត្តិរូប', 'Profile')}
+                </button>
+                <button
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    openSettingsModal();
+                  }}
+                  className="flex items-center w-full px-3 py-2.5 text-sm font-medium text-blue-100 hover:bg-blue-800/60 hover:text-yellow-300 rounded-xl transition-all"
+                >
+                  <Cog6ToothIcon className="h-5 w-5 mr-3 text-yellow-400" />
+                  {t('ការកំណត់', 'Settings')}
+                </button>
+                <button
+                  onClick={logout}
+                  className="flex items-center w-full px-3 py-2.5 text-sm font-medium text-rose-300 hover:bg-rose-900/40 rounded-xl transition-all"
+                >
+                  <ArrowRightOnRectangleIcon className="h-5 w-5 mr-3 text-rose-400" />
+                  {t('ចាកចេញ', 'Logout')}
+                </button>
+              </div>
             </div>
           </div>
         )}

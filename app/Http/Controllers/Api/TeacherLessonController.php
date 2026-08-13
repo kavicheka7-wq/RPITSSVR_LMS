@@ -15,6 +15,25 @@ use Illuminate\Validation\Rule;
 
 class TeacherLessonController extends Controller
 {
+    private function getTeacherCoursesQuery()
+    {
+        $user = Auth::user();
+        $teacherId = ($user && $user->teacher) ? $user->teacher->id : null;
+        $userId = Auth::id();
+
+        return Course::where(function ($query) use ($teacherId, $userId) {
+            if ($teacherId) {
+                $query->where('teacher_id', $teacherId);
+            }
+            $query->orWhere('teacher_id', $userId);
+        });
+    }
+
+    private function checkCourseOwnership($courseId)
+    {
+        return $this->getTeacherCoursesQuery()->findOrFail($courseId);
+    }
+
     /**
      * Get all lessons for the teacher's courses
      * GET /teacher/lessons
@@ -22,25 +41,16 @@ class TeacherLessonController extends Controller
     public function index()
     {
         try {
-            $teacher = Auth::user()->teacher;
-            
-            if (!$teacher) {
-                return response()->json([
-                    'message' => 'អ្នកមិនមែនជាគ្រូបង្រៀនទេ'
-                ], 403);
-            }
-
-            // ទាញយក ID នៃមុខវិជ្ជាទាំងអស់របស់គ្រូ
-            $courseIds = $teacher->courses()->pluck('id');
+            $courseIds = $this->getTeacherCoursesQuery()->pluck('id');
 
             if ($courseIds->isEmpty()) {
                 return response()->json([
                     'data' => [],
+                    'total' => 0,
                     'message' => 'អ្នកមិនទាន់មានមុខវិជ្ជាបង្រៀននៅឡើយទេ'
                 ]);
             }
 
-            // ទាញយកមេរៀនទាំងអស់ដែលទាក់ទងនឹងមុខវិជ្ជារបស់គ្រូ
             $lessons = Lesson::with(['course', 'files', 'videos'])
                 ->whereIn('course_id', $courseIds)
                 ->orderBy('lesson_order')
@@ -67,11 +77,7 @@ class TeacherLessonController extends Controller
     public function getLessonsByCourse($courseId)
     {
         try {
-            $teacher = Auth::user()->teacher;
-            
-            // ពិនិត្យមើលថាមុខវិជ្ជានេះជារបស់គ្រូនេះ
-            $course = Course::where('teacher_id', $teacher->id)
-                ->findOrFail($courseId);
+            $course = $this->checkCourseOwnership($courseId);
 
             $lessons = Lesson::with(['files', 'videos'])
                 ->where('course_id', $courseId)
@@ -111,22 +117,11 @@ class TeacherLessonController extends Controller
                 'lesson_order' => 'nullable|integer|min:0',
             ]);
 
-            $teacher = auth()->user()->teacher;
-            
-            if (!$teacher) {
-                return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
-            }
+            $this->checkCourseOwnership($validated['course_id']);
 
-            // ការផ្ទៀងផ្ទាត់សិទ្ធិម្ចាស់មុខវិជ្ជាគឺប្រើ $teacher->id គឺត្រឹមត្រូវហើយ
-            Course::where('teacher_id', $teacher->id)
-                ->findOrFail($validated['course_id']);
-
-            // ត្រូវប្រើ auth()->id() វិញសម្រាប់អ្នកបង្កើត
-            $validated['created_by'] = auth()->id(); 
-            
+            $validated['created_by'] = Auth::id(); 
             $validated['lesson_order'] = $validated['lesson_order'] ?? 0;
             
-            // បញ្ចូលទិន្នន័យ
             $lesson = Lesson::create($validated);
 
             return response()->json([
@@ -154,24 +149,17 @@ class TeacherLessonController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            $teacher = Auth::user()->teacher;
-            if (!$teacher) {
-                return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
-            }
-
-            // ស្វែងរកមេរៀនដោយប្រើ ID ផ្ទាល់
             $lesson = Lesson::findOrFail($id);
+            $this->checkCourseOwnership($lesson->course_id);
 
             $validated = $request->validate([
                 'title' => 'required|string|max:255',
                 'course_id' => 'required|exists:courses,id',
-                'lesson_order' => 'required|integer|min:1',
+                'lesson_order' => 'required|integer|min:0',
                 'description' => 'nullable|string',
             ]);
 
-            // ពិនិត្យមើលថាមុខវិជ្ជាថ្មីជារបស់គ្រូនេះ
-            Course::where('teacher_id', $teacher->id)
-                ->findOrFail($validated['course_id']);
+            $this->checkCourseOwnership($validated['course_id']);
 
             $lesson->update([
                 'title' => $validated['title'],
@@ -205,19 +193,9 @@ class TeacherLessonController extends Controller
     public function destroy($id)
     {
         try {
-            $teacher = Auth::user()->teacher;
-            if (!$teacher) {
-                return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
-            }
-
-            // ស្វែងរកមេរៀនដោយប្រើ ID ផ្ទាល់
             $lesson = Lesson::findOrFail($id);
+            $this->checkCourseOwnership($lesson->course_id);
 
-            // ពិនិត្យមើលថាមេរៀននេះជារបស់គ្រូនេះ
-            Course::where('teacher_id', $teacher->id)
-                ->findOrFail($lesson->course_id);
-
-            // លុបឯកសារនិងវីដេអូដែលទាក់ទង
             foreach ($lesson->files as $file) {
                 Storage::disk('public')->delete($file->file_path);
                 $file->delete();
@@ -255,15 +233,8 @@ class TeacherLessonController extends Controller
                 'file' => 'required|file|max:10240|mimes:pdf,doc,docx,ppt,pptx,xls,xlsx,txt',
             ]);
 
-            $teacher = Auth::user()->teacher;
-            if (!$teacher) {
-                return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
-            }
-
-            // ពិនិត្យមើលថាមេរៀននេះជារបស់គ្រូនេះ
             $lesson = Lesson::findOrFail($validated['lesson_id']);
-            Course::where('teacher_id', $teacher->id)
-                ->findOrFail($lesson->course_id);
+            $this->checkCourseOwnership($lesson->course_id);
 
             $file = $request->file('file');
             $originalName = $file->getClientOriginalName();
@@ -302,18 +273,9 @@ class TeacherLessonController extends Controller
     public function deleteFile($fileId)
     {
         try {
-            $teacher = Auth::user()->teacher;
-            
-            if (!$teacher) {
-                return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
-            }
-
             $file = LessonFile::findOrFail($fileId);
-            
-            // ពិនិត្យមើលថាមេរៀននេះជារបស់គ្រូនេះ
             $lesson = Lesson::findOrFail($file->lesson_id);
-            Course::where('teacher_id', $teacher->id)
-                ->findOrFail($lesson->course_id);
+            $this->checkCourseOwnership($lesson->course_id);
 
             Storage::disk('public')->delete($file->file_path);
             $file->delete();
@@ -337,7 +299,6 @@ class TeacherLessonController extends Controller
     public function uploadVideo(Request $request)
     {
         try {
-            // អនុញ្ញាតឱ្យមាន File វីដេអូ ឬ video_url ក៏បាន
             $validated = $request->validate([
                 'lesson_id' => 'required|exists:lessons,id',
                 'title' => 'required|string|max:255',
@@ -345,30 +306,19 @@ class TeacherLessonController extends Controller
                 'video_url' => 'nullable|string',
             ]);
 
-            $teacher = Auth::user()->teacher;
-            
-            if (!$teacher) {
-                return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
-            }
-
-            // ផ្ទៀងផ្ទាត់ម្ចាស់មេរៀន
             $lesson = Lesson::findOrFail($validated['lesson_id']);
-            Course::where('teacher_id', $teacher->id)
-                ->findOrFail($lesson->course_id);
+            $this->checkCourseOwnership($lesson->course_id);
 
             $videoPath = '';
 
-            // បើមានភ្ជាប់មកជាមួយនូវ File វីដេអូ
             if ($request->hasFile('video')) {
                 $video = $request->file('video');
                 $fileName = time() . '_' . $video->getClientOriginalName();
                 $videoPath = $video->storeAs('lesson_videos', $fileName, 'public');
             } 
-            // បើគ្មាន File ទេ តែមានភ្ជាប់ YouTube URL
             elseif (!empty($validated['video_url'])) {
                 $videoPath = $validated['video_url'];
             } 
-            // បើអត់ទាំងពីរ ទាត់ចោល
             else {
                 return response()->json(['message' => 'សូមបញ្ចូលវីដេអូ ឬ តំណភ្ជាប់ YouTube'], 422);
             }
@@ -405,18 +355,9 @@ class TeacherLessonController extends Controller
     public function deleteVideo($videoId)
     {
         try {
-            $teacher = Auth::user()->teacher;
-            
-            if (!$teacher) {
-                return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
-            }
-
             $video = Video::findOrFail($videoId);
-            
-            // ពិនិត្យមើលថាមេរៀននេះជារបស់គ្រូនេះ
             $lesson = Lesson::findOrFail($video->lesson_id);
-            Course::where('teacher_id', $teacher->id)
-                ->findOrFail($lesson->course_id);
+            $this->checkCourseOwnership($lesson->course_id);
 
             Storage::disk('public')->delete($video->video_url);
             $video->delete();
@@ -440,18 +381,10 @@ class TeacherLessonController extends Controller
     public function show($lessonId)
     {
         try {
-            $teacher = Auth::user()->teacher;
-            
-            if (!$teacher) {
-                return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
-            }
-
             $lesson = Lesson::with(['course', 'files', 'videos'])
                 ->findOrFail($lessonId);
 
-            // ពិនិត្យមើលថាមេរៀននេះជារបស់គ្រូនេះ
-            Course::where('teacher_id', $teacher->id)
-                ->findOrFail($lesson->course_id);
+            $this->checkCourseOwnership($lesson->course_id);
 
             return response()->json([
                 'data' => $lesson,
@@ -473,12 +406,6 @@ class TeacherLessonController extends Controller
     public function reorder(Request $request)
     {
         try {
-            $teacher = Auth::user()->teacher;
-            
-            if (!$teacher) {
-                return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
-            }
-
             $validated = $request->validate([
                 'lessons' => 'required|array',
                 'lessons.*.id' => 'required|exists:lessons,id',
@@ -487,11 +414,7 @@ class TeacherLessonController extends Controller
 
             foreach ($validated['lessons'] as $item) {
                 $lesson = Lesson::findOrFail($item['id']);
-                
-                // ពិនិត្យមើលថាមេរៀននេះជារបស់គ្រូនេះ
-                Course::where('teacher_id', $teacher->id)
-                    ->findOrFail($lesson->course_id);
-
+                $this->checkCourseOwnership($lesson->course_id);
                 $lesson->update(['lesson_order' => $item['order']]);
             }
 

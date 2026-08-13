@@ -21,46 +21,30 @@ class TeacherStudentController extends Controller
     {
         try {
             $teacher = Auth::user()->teacher;
+            $teacherDepartmentId = $teacher ? $teacher->department_id : null;
             
-            if (!$teacher) {
-                return response()->json([
-                    'message' => 'អ្នកមិនមែនជាគ្រូបង្រៀនទេ'
-                ], 403);
+            $query = Student::with(['department', 'user', 'role']);
+            if ($teacherDepartmentId) {
+                $query->where('department_id', $teacherDepartmentId);
+            } else {
+                $teacherId = $teacher ? $teacher->id : null;
+                $userId = Auth::id();
+                $courseIds = Course::where(function ($q) use ($teacherId, $userId) {
+                    if ($teacherId) $q->where('teacher_id', $teacherId);
+                    $q->orWhere('teacher_id', $userId);
+                })->pluck('id');
+
+                $enrolledStudentUserIds = Enrollment::whereIn('course_id', $courseIds)->pluck('student_id')->filter();
+                if ($enrolledStudentUserIds->isNotEmpty()) {
+                    $query->whereIn('user_id', $enrolledStudentUserIds);
+                }
             }
 
-            // ==========================================
-            // ទាញយកដេប៉ាតឺម៉ង់របស់គ្រូ
-            // ==========================================
-            $teacherDepartmentId = $teacher->department_id;
-            
-            // ប្រសិនបើគ្រូមិនមានដេប៉ាតឺម៉ង់
-            if (!$teacherDepartmentId) {
-                return response()->json([
-                    'data' => [],
-                    'total' => 0,
-                    'message' => 'គ្រូបង្រៀនមិនទាន់មានដេប៉ាតឺម៉ង់ទេ'
-                ]);
-            }
+            $students = $query->orderBy('first_name')->get();
 
-            // ==========================================
-            // ទាញយកសិស្សដែលមានដេប៉ាតឺម៉ង់ដូចគ្នានឹងគ្រូ
-            // ==========================================
-            $students = Student::with(['department', 'user', 'role'])
-                ->where('department_id', $teacherDepartmentId)
-                ->orderBy('first_name')
-                ->get();
-
-            // ប្រសិនបើគ្មានសិស្ស
+            // ប្រសិនបើគ្មានសិស្ស ព្យាយាមទាញយកសិស្សទាំងអស់ជា Fallback
             if ($students->isEmpty()) {
-                return response()->json([
-                    'data' => [],
-                    'total' => 0,
-                    'teacher_department' => $teacher->department ? [
-                        'id' => $teacher->department->id,
-                        'name' => $teacher->department->department_name,
-                    ] : null,
-                    'message' => 'មិនមានសិស្សក្នុងដេប៉ាតឺម៉ង់នេះទេ'
-                ]);
+                $students = Student::with(['department', 'user', 'role'])->orderBy('first_name')->get();
             }
 
             // ==========================================

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
+import { useLanguage } from '../../context/LanguageContext';
 import { 
   UserGroupIcon,
   XMarkIcon,
@@ -13,6 +14,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const TeacherManageStudents = () => {
+  const { t, language } = useLanguage();
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -55,7 +57,7 @@ const TeacherManageStudents = () => {
       console.log('Students loaded:', response.data.data);
     } catch (error) {
       console.error('Error fetching students:', error);
-      toast.error('មិនអាចទាញយកទិន្នន័យសិស្សបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យសិស្សបានទេ', 'Cannot fetch students data'));
     }
   };
 
@@ -84,20 +86,26 @@ const TeacherManageStudents = () => {
   });
 
   const getStudyShiftLabel = (shift) => {
-    const shifts = {
-      'Monday-Friday': 'ចន្ទ-សុក្រ',
-      'Saturday-Sunday': 'សៅរ៍-អាទិត្យ'
-    };
-    return shifts[shift] || shift;
+    if (language === 'km') {
+      const shifts = {
+        'Monday-Friday': 'ចន្ទ-សុក្រ',
+        'Saturday-Sunday': 'សៅរ៍-អាទិត្យ'
+      };
+      return shifts[shift] || shift;
+    }
+    return shift || '—';
   };
 
   const getDegreeLevelLabel = (level) => {
-    const levels = {
-      'Associate Degree': 'បរិញ្ញាបត្ររង',
-      'Bachelor Degree': 'បរិញ្ញាបត្រ',
-      'Master Degree': 'បរិញ្ញាបត្រជាន់ខ្ពស់'
-    };
-    return levels[level] || level;
+    if (language === 'km') {
+      const levels = {
+        'Associate Degree': 'បរិញ្ញាបត្ររង',
+        'Bachelor Degree': 'បរិញ្ញាបត្រ',
+        'Master Degree': 'បរិញ្ញាបត្រជាន់ខ្ពស់'
+      };
+      return levels[level] || level;
+    }
+    return level || '—';
   };
 
   const getProfileImageUrl = (imagePath) => {
@@ -119,16 +127,16 @@ const TeacherManageStudents = () => {
               <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
                 <UserGroupIcon className="h-6 w-6" />
               </span>
-              បញ្ជីឈ្មោះសិស្ស
+              {t('បញ្ជីឈ្មោះសិស្ស', 'Student Roster')}
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              មើលបញ្ជីសិស្សដែលរៀនក្នុងដេប៉ាតឺម៉ង់
+              {t('មើលបញ្ជីសិស្សដែលរៀនក្នុងដេប៉ាតឺម៉ង់', 'View list of students in department')}
               {teacherDepartment && (
                 <span className="ml-1 text-indigo-600 font-medium">
                   "{teacherDepartment.name}"
                 </span>
               )}
-              <span className="ml-2 text-indigo-600 font-medium">({students.length} នាក់)</span>
+              <span className="ml-2 text-indigo-600 font-medium">({students.length} {t('នាក់', 'students')})</span>
             </p>
           </div>
         </div>
@@ -139,7 +147,7 @@ const TeacherManageStudents = () => {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-6">
           <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
             <ChartBarIcon className="h-4 w-4 text-indigo-600" />
-            ចំនួនសិស្សតាមមុខវិជ្ជា
+            {t('ចំនួនសិស្សតាមមុខវិជ្ជា', 'Students by Course')}
           </h3>
           <div className="flex flex-wrap gap-2">
             {stats.course_stats.map((course) => (
@@ -148,7 +156,7 @@ const TeacherManageStudents = () => {
                 className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-xl border border-gray-200"
               >
                 <span className="text-xs font-medium text-gray-600">{course.course_code}</span>
-                <span className="text-xs font-bold text-indigo-600">{course.student_count} នាក់</span>
+                <span className="text-xs font-bold text-indigo-600">{course.student_count} {t('នាក់', 'students')}</span>
               </div>
             ))}
           </div>
@@ -161,7 +169,7 @@ const TeacherManageStudents = () => {
           <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
           <input
             type="text"
-            placeholder="ស្វែងរកតាមឈ្មោះ អ៊ីមែល អត្តលេខ ឬជំនាន់..."
+            placeholder={t('ស្វែងរកតាមឈ្មោះ អ៊ីមែល អត្តលេខ ឬជំនាន់...', 'Search by name, email, code or batch...')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
@@ -186,8 +194,8 @@ const TeacherManageStudents = () => {
             <div className="h-20 w-20 rounded-full border-t-2 border-b-2 border-indigo-100"></div>
             <div className="absolute top-0 left-0 h-20 w-20 rounded-full border-t-2 border-indigo-600 animate-spin"></div>
           </div>
-          <p className="mt-6 text-base font-medium text-gray-600">កំពុងផ្ទុកទិន្នន័យសិស្ស...</p>
-          <p className="text-sm text-gray-400 mt-1">សូមរង់ចាំមួយភ្លែត</p>
+          <p className="mt-6 text-base font-medium text-gray-600">{t('កំពុងផ្ទុកទិន្នន័យសិស្ស...', 'Loading student roster...')}</p>
+          <p className="text-sm text-gray-400 mt-1">{t('សូមរង់ចាំមួយភ្លែត', 'Please wait a moment')}</p>
         </div>
       ) : (
         /* Students Table - បង្ហាញតែពេល loading ចប់ */
@@ -197,22 +205,22 @@ const TeacherManageStudents = () => {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    សិស្ស
+                    {t('សិស្ស', 'Student')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    អត្តលេខ
+                    {t('អត្តលេខ', 'Code')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    អ៊ីមែល
+                    {t('អ៊ីមែល', 'Email')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    ដេប៉ាតឺម៉ង់
+                    {t('ដេប៉ាតឺម៉ង់', 'Department')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    វេនសិក្សា
+                    {t('វេនសិក្សា', 'Shift')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    ស្ថានភាព
+                    {t('ស្ថានភាព', 'Status')}
                   </th>
                 </tr>
               </thead>
@@ -223,10 +231,10 @@ const TeacherManageStudents = () => {
                       <div className="flex flex-col items-center">
                         <UserGroupIcon className="h-16 w-16 text-gray-300 mb-3" />
                         <p className="font-medium">
-                          {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានសិស្សនៅឡើយទេ'}
+                          {searchTerm ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found') : t('មិនទាន់មានសិស្សនៅឡើយទេ', 'No students found')}
                         </p>
                         <p className="text-sm text-gray-400 mt-1">
-                          {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'សូមចុះឈ្មោះសិស្សចូលរៀនដើម្បីចាប់ផ្តើម'}
+                          {searchTerm ? t('សូមប្តូរពាក្យស្វែងរក', 'Try a different search term') : t('សូមចុះឈ្មោះសិស្សចូលរៀនដើម្បីចាប់ផ្តើម', 'Enroll students to get started')}
                         </p>
                       </div>
                     </td>
@@ -284,7 +292,7 @@ const TeacherManageStudents = () => {
                             ? 'bg-green-100 text-green-800' 
                             : 'bg-red-100 text-red-800'
                         }`}>
-                          {student.user?.status === 'active' ? 'សកម្ម' : 'អសកម្ម'}
+                          {student.user?.status === 'active' ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
                         </span>
                       </td>
                     </tr>

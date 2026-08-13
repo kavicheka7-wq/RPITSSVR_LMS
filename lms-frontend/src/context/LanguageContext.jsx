@@ -21,11 +21,12 @@ export const LanguageProvider = ({ children }) => {
   };
 
   const t = (khmer, english) => {
-    return language === 'km' ? khmer : english;
+    if (language === 'km') return khmer;
+    return english !== undefined && english !== null ? english : khmer;
   };
 
   return (
-    <LanguageContext.Provider value={{ language, toggleLanguage, t }}>
+    <LanguageContext.Provider value={{ language, setLanguage, toggleLanguage, t }}>
       {children}
     </LanguageContext.Provider>
   );

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
+import { useLanguage } from '../../context/LanguageContext';
 import { 
   PencilIcon, 
   TrashIcon, 
@@ -12,6 +13,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const ManageCourses = () => {
+  const { t } = useLanguage();
   const [courses, setCourses] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -52,10 +54,9 @@ const ManageCourses = () => {
       const response = await api.get('/admin/courses');
       const coursesData = response.data.data || response.data || [];
       setCourses(coursesData);
-      console.log('Courses loaded:', coursesData);
     } catch (error) {
       console.error('Error fetching courses:', error);
-      toast.error('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ', 'Cannot fetch courses data'));
       throw error;
     }
   };
@@ -65,10 +66,9 @@ const ManageCourses = () => {
       const response = await api.get('/admin/departments');
       const departmentsData = response.data.data || response.data || [];
       setDepartments(departmentsData);
-      console.log('Departments loaded:', departmentsData);
     } catch (error) {
       console.error('Error fetching departments:', error);
-      toast.error('មិនអាចទាញយកទិន្នន័យជំនាញបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យជំនាញបានទេ', 'Cannot fetch departments data'));
       throw error;
     }
   };
@@ -76,13 +76,11 @@ const ManageCourses = () => {
   const fetchTeachers = async () => {
     try {
       const response = await api.get('/admin/teachers');
-      // កែត្រង់នេះ៖ ត្រូវថែម .data មួយទៀត (response.data.data.data) ព្រោះ API គ្រូបង្រៀនប្រើ paginate() រួចហើយ
       const teachersData = response.data.data?.data || response.data.data || response.data || [];
       setTeachers(teachersData);
-      console.log('Teachers loaded:', teachersData);
     } catch (error) {
       console.error('Error fetching teachers:', error);
-      toast.error('មិនអាចទាញយកទិន្នន័យគ្រូបង្រៀនបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យគ្រូបង្រៀនបានទេ', 'Cannot fetch teachers data'));
       throw error;
     }
   };
@@ -100,9 +98,8 @@ const ManageCourses = () => {
     
     const payload = { ...formData };
 
-    // ពិនិត្យមើលថាតើមានទិន្នន័យគ្រប់គ្រាន់
     if (!payload.course_name || !payload.course_code || !payload.department_id || !payload.teacher_id) {
-      toast.error('សូមបំពេញព័ត៌មានឱ្យបានពេញលេញ');
+      toast.error(t('សូមបំពេញព័ត៌មានឱ្យបានពេញលេញ', 'Please fill in all required fields'));
       return;
     }
 
@@ -110,17 +107,15 @@ const ManageCourses = () => {
       let response;
       if (editingCourse) {
         response = await api.put(`/admin/courses/${editingCourse.id}`, payload);
-        toast.success('បានកែប្រែមុខវិជ្ជាដោយជោគជ័យ');
+        toast.success(t('បានកែប្រែមុខវិជ្ជាដោយជោគជ័យ', 'Course updated successfully'));
       } else {
         response = await api.post('/admin/courses', payload);
-        toast.success('បានបន្ថែមមុខវិជ្ជាដោយជោគជ័យ');
+        toast.success(t('បានបន្ថែមមុខវិជ្ជាដោយជោគជ័យ', 'Course added successfully'));
       }
-      
-      console.log('Response:', response.data);
       
       setShowModal(false);
       resetForm();
-      await fetchCourses(); // ធ្វើបច្ចុប្បន្នភាពបញ្ជី
+      await fetchCourses();
       
     } catch (error) {
       console.error('Submit error:', error.response?.data);
@@ -130,20 +125,20 @@ const ManageCourses = () => {
         const errorMessages = Object.values(errors).flat().join('\n');
         toast.error(errorMessages);
       } else {
-        toast.error(error.response?.data?.message || 'ការធ្វើប្រតិបត្តិការបានបរាជ័យ');
+        toast.error(error.response?.data?.message || t('ការធ្វើប្រតិបត្តិការបានបរាជ័យ', 'Operation failed'));
       }
     }
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('តើអ្នកប្រាកដថាចង់លុបមុខវិជ្ជានេះមែនទេ?')) {
+    if (window.confirm(t('តើអ្នកប្រាកដថាចង់លុបមុខវិជ្ជានេះមែនទេ?', 'Are you sure you want to delete this course?'))) {
       try {
         await api.delete(`/admin/courses/${id}`);
-        toast.success('បានលុបមុខវិជ្ជាដោយជោគជ័យ');
+        toast.success(t('បានលុបមុខវិជ្ជាដោយជោគជ័យ', 'Course deleted successfully'));
         await fetchCourses();
       } catch (error) {
         console.error('Delete error:', error.response?.data);
-        toast.error(error.response?.data?.message || 'មិនអាចលុបមុខវិជ្ជាបានទេ');
+        toast.error(error.response?.data?.message || t('មិនអាចលុបមុខវិជ្ជាបានទេ', 'Cannot delete course'));
       }
     }
   };
@@ -178,7 +173,6 @@ const ManageCourses = () => {
     setShowModal(true);
   };
 
-  // Filter courses based on search
   const filteredCourses = courses.filter(course => {
     const search = searchTerm.toLowerCase();
     return (
@@ -190,7 +184,6 @@ const ManageCourses = () => {
     );
   });
 
-
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       {/* Header */}
@@ -201,11 +194,11 @@ const ManageCourses = () => {
               <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
                 <BookOpenIcon className="h-6 w-6" />
               </span>
-              គ្រប់គ្រងមុខវិជ្ជា
+              {t('គ្រប់គ្រងមុខវិជ្ជា', 'Manage Courses')}
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              បន្ថែម និងគ្រប់គ្រងមុខវិជ្ជាទាំងអស់ក្នុងប្រព័ន្ធ
-              <span className="ml-2 text-indigo-600 font-medium">({courses.length} មុខវិជ្ជា)</span>
+              {t('បន្ថែម និងគ្រប់គ្រងមុខវិជ្ជាទាំងអស់ក្នុងប្រព័ន្ធ', 'Add and manage all system courses')}
+              <span className="ml-2 text-indigo-600 font-medium">({courses.length} {t('មុខវិជ្ជា', 'courses')})</span>
             </p>
           </div>
           <button
@@ -213,7 +206,7 @@ const ManageCourses = () => {
             className="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl shadow-sm hover:bg-indigo-700 transition-all hover:shadow-md"
           >
             <PlusIcon className="h-5 w-5 mr-2" />
-            បន្ថែមមុខវិជ្ជា
+            {t('បន្ថែមមុខវិជ្ជា', 'Add Course')}
           </button>
         </div>
       </div>
@@ -224,7 +217,7 @@ const ManageCourses = () => {
           <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
           <input
             type="text"
-            placeholder="ស្វែងរកតាមឈ្មោះ កូដ ជំនាញ ឬគ្រូបង្រៀន..."
+            placeholder={t('ស្វែងរកតាមឈ្មោះ កូដ ជំនាញ ឬគ្រូបង្រៀន...', 'Search by name, code, department, or teacher...')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
@@ -240,40 +233,38 @@ const ManageCourses = () => {
         </div>
       </div>
 
-      {/* === បន្ថែមផ្នែក Loading === */}
       {loading ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 flex flex-col items-center justify-center">
           <div className="relative">
             <div className="h-20 w-20 rounded-full border-t-2 border-b-2 border-indigo-100"></div>
             <div className="absolute top-0 left-0 h-20 w-20 rounded-full border-t-2 border-indigo-600 animate-spin"></div>
           </div>
-          <p className="mt-6 text-base font-medium text-gray-600">កំពុងផ្ទុកទិន្នន័យមុខវិជ្ជា...</p>
-          <p className="text-sm text-gray-400 mt-1">សូមរង់ចាំមួយភ្លែត</p>
+          <p className="mt-6 text-base font-medium text-gray-600">{t('កំពុងផ្ទុកទិន្នន័យមុខវិជ្ជា...', 'Loading courses data...')}</p>
+          <p className="text-sm text-gray-400 mt-1">{t('សូមរង់ចាំមួយភ្លែត', 'Please wait a moment')}</p>
         </div>
       ) : (
-        /* Courses Table - បង្ហាញតែពេល loading ចប់ */
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-100">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    មុខវិជ្ជា
+                    {t('មុខវិជ្ជា', 'Course')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    កូដ
+                    {t('កូដ', 'Code')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    ជំនាញ
+                    {t('ជំនាញ', 'Department')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    គ្រូបង្រៀន
+                    {t('គ្រូបង្រៀន', 'Teacher')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    ក្រេឌីត
+                    {t('ក្រេឌីត', 'Credit')}
                   </th>
                   <th className="px-6 py-4 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    សកម្មភាព
+                    {t('សកម្មភាព', 'Action')}
                   </th>
                 </tr>
               </thead>
@@ -284,10 +275,10 @@ const ManageCourses = () => {
                       <div className="flex flex-col items-center">
                         <BookOpenIcon className="h-16 w-16 text-gray-300 mb-3" />
                         <p className="font-medium">
-                          {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានមុខវិជ្ជានៅឡើយទេ'}
+                          {searchTerm ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found') : t('មិនទាន់មានមុខវិជ្ជានៅឡើយទេ', 'No courses available yet')}
                         </p>
                         <p className="text-sm text-gray-400 mt-1">
-                          {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមមុខវិជ្ជា" ដើម្បីចាប់ផ្តើម'}
+                          {searchTerm ? t('សូមប្តូរពាក្យស្វែងរក', 'Try a different search term') : t('ចុច "បន្ថែមមុខវិជ្ជា" ដើម្បីចាប់ផ្តើម', 'Click "Add Course" to start')}
                         </p>
                       </div>
                     </td>
@@ -305,7 +296,7 @@ const ManageCourses = () => {
                               {course.course_name}
                             </div>
                             <div className="text-xs text-gray-500 line-clamp-1">
-                              {course.description || 'គ្មានការពិពណ៌នា'}
+                              {course.description || t('គ្មានការពិពណ៌នា', 'No description')}
                             </div>
                           </div>
                         </div>
@@ -325,7 +316,7 @@ const ManageCourses = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                          {course.credit} ក្រេឌីត
+                          {course.credit} {t('ក្រេឌីត', 'Credits')}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
@@ -333,14 +324,14 @@ const ManageCourses = () => {
                           <button
                             onClick={() => openEditModal(course)}
                             className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
-                            title="កែប្រែ"
+                            title={t('កែប្រែ', 'Edit')}
                           >
                             <PencilIcon className="h-5 w-5" />
                           </button>
                           <button
                             onClick={() => handleDelete(course.id)}
                             className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
-                            title="លុប"
+                            title={t('លុប', 'Delete')}
                           >
                             <TrashIcon className="h-5 w-5" />
                           </button>
@@ -353,13 +344,12 @@ const ManageCourses = () => {
             </table>
           </div>
           
-          {/* Footer with count */}
           {filteredCourses.length > 0 && (
             <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
               <p className="text-sm text-gray-600">
-                បង្ហាញ <span className="font-medium text-gray-900">{filteredCourses.length}</span> មុខវិជ្ជា
+                {t('បង្ហាញ', 'Showing')} <span className="font-medium text-gray-900">{filteredCourses.length}</span> {t('មុខវិជ្ជា', 'courses')}
                 {courses.length !== filteredCourses.length && (
-                  <span> ក្នុងចំណោម <span className="font-medium text-gray-900">{courses.length}</span> មុខវិជ្ជា</span>
+                  <span> {t('ក្នុងចំណោម', 'out of')} <span className="font-medium text-gray-900">{courses.length}</span> {t('មុខវិជ្ជា', 'courses')}</span>
                 )}
               </p>
             </div>
@@ -370,14 +360,13 @@ const ManageCourses = () => {
       {/* Modal - Create/Edit Course */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 backdrop-blur-sm overflow-y-auto">
-          {/* បង្រួមទំហំពី max-w-3xl មកត្រឹម max-w-xl */}
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 p-8 max-h-[90vh] overflow-y-auto animate-scaleIn">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
                   <BookOpenIcon className="h-5 w-5" />
                 </span>
-                {editingCourse ? 'កែប្រែមុខវិជ្ជា' : 'បន្ថែមមុខវិជ្ជាថ្មី'}
+                {editingCourse ? t('កែប្រែមុខវិជ្ជា', 'Edit Course') : t('បន្ថែមមុខវិជ្ជាថ្មី', 'Add New Course')}
               </h2>
               <button
                 onClick={() => setShowModal(false)}
@@ -390,7 +379,7 @@ const ManageCourses = () => {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ឈ្មោះមុខវិជ្ជា <span className="text-red-500">*</span>
+                  {t('ឈ្មោះមុខវិជ្ជា', 'Course Name')} <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -399,14 +388,14 @@ const ManageCourses = () => {
                   value={formData.course_name}
                   onChange={handleInputChange}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                  placeholder="ឧ. គ្រឹះវិទ្យាសាស្ត្រកុំព្យូទ័រ"
+                  placeholder={t('ឧ. គ្រឹះវិទ្យាសាស្ត្រកុំព្យូទ័រ', 'e.g. Computer Science Fundamentals')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    កូដមុខវិជ្ជា <span className="text-red-500">*</span>
+                    {t('កូដមុខវិជ្ជា', 'Course Code')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -415,12 +404,12 @@ const ManageCourses = () => {
                     value={formData.course_code}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    placeholder="ឧ. CS101"
+                    placeholder={t('ឧ. CS101', 'e.g. CS101')}
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    ក្រេឌីត <span className="text-red-500">*</span>
+                    {t('ក្រេឌីត', 'Credit')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -437,7 +426,7 @@ const ManageCourses = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ជំនាញ <span className="text-red-500">*</span>
+                  {t('ជំនាញ', 'Department')} <span className="text-red-500">*</span>
                 </label>
                 <select
                   name="department_id"
@@ -446,7 +435,7 @@ const ManageCourses = () => {
                   onChange={handleInputChange}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all bg-white"
                 >
-                  <option value="">ជ្រើសរើសជំនាញ</option>
+                  <option value="">{t('ជ្រើសរើសជំនាញ', 'Select Department')}</option>
                   {departments.map((dept) => (
                     <option key={dept.id} value={dept.id}>
                       {dept.department_name || dept.name}
@@ -457,7 +446,7 @@ const ManageCourses = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  គ្រូបង្រៀនទទួលបន្ទុក <span className="text-red-500">*</span>
+                  {t('គ្រូបង្រៀនទទួលបន្ទុក', 'Assigned Teacher')} <span className="text-red-500">*</span>
                 </label>
                 <select
                   name="teacher_id"
@@ -466,7 +455,7 @@ const ManageCourses = () => {
                   onChange={handleInputChange}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all bg-white"
                 >
-                  <option value="">ជ្រើសរើសគ្រូបង្រៀន</option>
+                  <option value="">{t('ជ្រើសរើសគ្រូបង្រៀន', 'Select Teacher')}</option>
                   {teachers.map((teacher) => (
                     <option key={teacher.id} value={teacher.id}>
                       {teacher.first_name} {teacher.last_name}
@@ -477,7 +466,7 @@ const ManageCourses = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ការពិពណ៌នា
+                  {t('ការពិពណ៌នា', 'Description')}
                 </label>
                 <textarea
                   name="description"
@@ -485,7 +474,7 @@ const ManageCourses = () => {
                   value={formData.description}
                   onChange={handleInputChange}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
-                  placeholder="ពិពណ៌នាអំពីមុខវិជ្ជា..."
+                  placeholder={t('ពិពណ៌នាអំពីមុខវិជ្ជា...', 'Describe the course...')}
                 />
               </div>
 
@@ -495,14 +484,14 @@ const ManageCourses = () => {
                   onClick={() => setShowModal(false)}
                   className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all"
                 >
-                  បោះបង់
+                  {t('បោះបង់', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-all shadow-sm hover:shadow-md flex items-center gap-2"
                 >
                   <BookOpenIcon className="h-5 w-5" />
-                  {editingCourse ? 'រក្សាទុក' : 'បង្កើតមុខវិជ្ជា'}
+                  {editingCourse ? t('រក្សាទុក', 'Save') : t('បង្កើតមុខវិជ្ជា', 'Create Course')}
                 </button>
               </div>
             </form>

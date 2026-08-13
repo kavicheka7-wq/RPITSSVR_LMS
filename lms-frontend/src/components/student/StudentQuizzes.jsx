@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
+import { useLanguage } from '../../context/LanguageContext';
 import {
   AcademicCapIcon,
   ClockIcon,
@@ -15,16 +16,17 @@ import {
 } from '@heroicons/react/24/outline';
 
 const StudentQuizzes = () => {
+  const { t } = useLanguage();
   const [quizzes, setQuizzes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('all');
 
   // Attempt Quiz State
-  const [activeQuizAttempt, setActiveQuizAttempt] = useState(null); // quiz data with questions
-  const [attemptAnswers, setAttemptAnswers] = useState({}); // { question_id: selected_option_id }
+  const [activeQuizAttempt, setActiveQuizAttempt] = useState(null);
+  const [attemptAnswers, setAttemptAnswers] = useState({});
   const [loadingQuiz, setLoadingQuiz] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(0); // in seconds
+  const [timeLeft, setTimeLeft] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const timerRef = useRef(null);
   const endTimeRef = useRef(null);
@@ -57,7 +59,7 @@ const StudentQuizzes = () => {
       const response = await api.get('/student/quizzes');
       setQuizzes(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
-      toast.error('មិនអាចទាញយកកម្រងសំណួរបានទេ (Failed to fetch quizzes)');
+      toast.error(t('មិនអាចទាញយកកម្រងសំណួរបានទេ', 'Failed to fetch quizzes'));
     } finally {
       setLoading(false);
     }
@@ -71,7 +73,7 @@ const StudentQuizzes = () => {
       setAttemptAnswers({});
       const rawTimeLeft = response.data.time_left;
       const duration = response.data.quiz?.duration;
-      let secondsLeft = 30 * 60; // fallback 30 mins
+      let secondsLeft = 30 * 60;
 
       if (rawTimeLeft !== undefined && rawTimeLeft !== null) {
         secondsLeft = parseInt(rawTimeLeft, 10);
@@ -86,7 +88,7 @@ const StudentQuizzes = () => {
       setTimeLeft(secondsLeft);
       endTimeRef.current = Date.now() + secondsLeft * 1000;
     } catch (error) {
-      const errMsg = error.response?.data?.message || 'មិនអាចចាប់ផ្តើមធ្វើសំណួរបានទេ';
+      const errMsg = error.response?.data?.message || t('មិនអាចចាប់ផ្តើមធ្វើសំណួរបានទេ', 'Cannot start quiz');
       toast.error(errMsg);
     } finally {
       setLoadingQuiz(false);
@@ -104,11 +106,10 @@ const StudentQuizzes = () => {
     if (e) e.preventDefault();
     if (isSubmitting) return;
 
-    // Check if all questions are answered (unless it's an auto-submit from timeout)
     if (!isAuto && activeQuizAttempt?.questions) {
       const unanswered = activeQuizAttempt.questions.filter(q => !attemptAnswers[q.id]);
       if (unanswered.length > 0) {
-        if (!window.confirm(`អ្នកនៅសល់សំណួរចំនួន ${unanswered.length} ទៀតមិនទាន់ឆ្លើយ។ តើអ្នកចង់ផ្ញើចម្លើយមែនទេ?`)) {
+        if (!window.confirm(t(`អ្នកនៅសល់សំណួរចំនួន ${unanswered.length} ទៀតមិនទាន់ឆ្លើយ។ តើអ្នកចង់ផ្ញើចម្លើយមែនទេ?`, `You have ${unanswered.length} unanswered questions. Do you want to submit anyway?`))) {
           return;
         }
       }
@@ -118,7 +119,6 @@ const StudentQuizzes = () => {
     clearInterval(timerRef.current);
     endTimeRef.current = null;
 
-    // Format answers: [ { question_id, selected_option } ]
     const formattedAnswers = Object.entries(attemptAnswers).map(([qId, optId]) => ({
       question_id: Number(qId),
       selected_option: optId
@@ -130,9 +130,9 @@ const StudentQuizzes = () => {
       });
       setQuizResult(response.data);
       setActiveQuizAttempt(null);
-      fetchQuizzes(); // Refresh list to update status
+      fetchQuizzes();
     } catch (error) {
-      const errMsg = error.response?.data?.message || 'មានបញ្ហាក្នុងការផ្ញើចម្លើយ';
+      const errMsg = error.response?.data?.message || t('មានបញ្ហាក្នុងការផ្ញើចម្លើយ', 'Failed to submit quiz');
       toast.error(errMsg);
     } finally {
       setIsSubmitting(false);
@@ -145,7 +145,6 @@ const StudentQuizzes = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Filter & unique courses logic
   const courses = Array.from(new Set(quizzes.map(q => q.course?.id).filter(Boolean))).map(id => {
     const quiz = quizzes.find(q => q.course?.id === id);
     return quiz ? quiz.course : null;
@@ -168,7 +167,7 @@ const StudentQuizzes = () => {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <ArrowPathIcon className="h-10 w-10 text-blue-900 animate-spin" />
-        <p className="text-sm text-gray-500 font-sans">កំពុងទាញយកព័ត៌មានកម្រងសំណួរ... (Loading quizzes...)</p>
+        <p className="text-sm text-gray-500 font-sans">{t('កំពុងទាញយកព័ត៌មានកម្រងសំណួរ...', 'Loading quizzes...')}</p>
       </div>
     );
   }
@@ -184,11 +183,11 @@ const StudentQuizzes = () => {
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
             <span className="text-xs font-bold text-yellow-400 bg-yellow-400/10 px-3 py-1 rounded-lg border border-yellow-400/20 uppercase tracking-wider font-sans">
-              មជ្ឈមណ្ឌលវាយតម្លៃ (Quizzes Hub)
+              {t('មជ្ឈមណ្ឌលវាយតម្លៃ', 'Quizzes Hub')}
             </span>
-            <h1 className="text-3xl font-extrabold tracking-tight">កម្រងសំណួរវាយតម្លៃទាំងអស់</h1>
+            <h1 className="text-3xl font-extrabold tracking-tight">{t('កម្រងសំណួរវាយតម្លៃទាំងអស់', 'All Quizzes & Assessments')}</h1>
             <p className="text-blue-200 text-sm max-w-xl font-medium">
-              ចូលរួមធ្វើតេស្ត កម្រងសំណួរលំហាត់ និងវាស់ស្ទង់សមត្ថភាពសិក្សាតាមមុខវិជ្ជានីមួយៗ។ (Complete exams and quizzes.)
+              {t('ចូលរួមធ្វើតេស្ត កម្រងសំណួរលំហាត់ និងវាស់ស្ទង់សមត្ថភាពសិក្សាតាមមុខវិជ្ជានីមួយៗ។', 'Take exams, quizzes and assess learning progress.')}
             </p>
           </div>
 
@@ -199,7 +198,7 @@ const StudentQuizzes = () => {
                 <CheckCircleIcon className="h-5 w-5 text-blue-300" />
               </div>
               <div>
-                <p className="text-[10px] text-white/50 font-bold uppercase tracking-wider">ធ្វើរួចរាល់ (Completed)</p>
+                <p className="text-[10px] text-white/50 font-bold uppercase tracking-wider">{t('ធ្វើរួចរាល់', 'Completed')}</p>
                 <p className="text-base font-black text-white">{completedCount} / {totalCount}</p>
               </div>
             </div>
@@ -209,7 +208,7 @@ const StudentQuizzes = () => {
                 <PencilSquareIcon className="h-5 w-5 text-yellow-400" />
               </div>
               <div>
-                <p className="text-[10px] text-white/50 font-bold uppercase tracking-wider">អាចធ្វើបាន (Active)</p>
+                <p className="text-[10px] text-white/50 font-bold uppercase tracking-wider">{t('អាចធ្វើបាន', 'Active')}</p>
                 <p className="text-base font-black text-white">{activeCount}</p>
               </div>
             </div>
@@ -225,7 +224,7 @@ const StudentQuizzes = () => {
           <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder="ស្វែងរកតាមឈ្មោះសំណួរ ឬមុខវិជ្ជា... (Search quizzes...)"
+            placeholder={t('ស្វែងរកតាមឈ្មោះសំណួរ ឬមុខវិជ្ជា...', 'Search quizzes...')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-11 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-950 transition-colors"
@@ -240,7 +239,7 @@ const StudentQuizzes = () => {
             onChange={(e) => setSelectedCourse(e.target.value)}
             className="w-full md:w-64 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-950 bg-white transition-colors font-semibold text-gray-700"
           >
-            <option value="all">មុខវិជ្ជាទាំងអស់ (All Courses)</option>
+            <option value="all">{t('មុខវិជ្ជាទាំងអស់', 'All Courses')}</option>
             {(Array.isArray(courses) ? courses : []).map((course) => (
               <option key={course.id} value={course.id}>
                 {course.course_code.toUpperCase()} - {course.course_name}
@@ -255,8 +254,8 @@ const StudentQuizzes = () => {
       {filteredQuizzes.length === 0 ? (
         <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-12 text-center text-gray-400 space-y-2">
           <PencilSquareIcon className="h-12 w-12 mx-auto text-gray-300" />
-          <h3 className="text-base font-bold text-gray-700">មិនរកឃើញកម្រងសំណួរឡើយទេ</h3>
-          <p className="text-xs text-gray-400">សាកល្បងផ្លាស់ប្តូរតម្រង ឬស្វែងរកចំណងជើងផ្សេងទៀត។</p>
+          <h3 className="text-base font-bold text-gray-700">{t('មិនរកឃើញកម្រងសំណួរឡើយទេ', 'No quizzes found')}</h3>
+          <p className="text-xs text-gray-400">{t('សាកល្បងផ្លាស់ប្តូរតម្រង ឬស្វែងរកចំណងជើងផ្សេងទៀត។', 'Try changing filters or search terms.')}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -269,7 +268,6 @@ const StudentQuizzes = () => {
             
             const isNotStartedYet = now < start;
             const isExpired = now > end;
-            const isActive = (!isCompleted && !isNotStartedYet && !isExpired) || hasActiveAttempt;
 
             return (
               <div
@@ -293,14 +291,14 @@ const StudentQuizzes = () => {
                               : 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
                     }`}>
                       {isCompleted 
-                        ? '✔ ធ្វើរួចរាល់' 
+                        ? t('✔ ធ្វើរួចរាល់', '✔ Completed')
                         : hasActiveAttempt 
-                          ? '⚡ កំពុងធ្វើ' 
+                          ? t('⚡ កំពុងធ្វើ', '⚡ In Progress')
                           : isExpired 
-                            ? '✖ ហួសពេលកំណត់' 
+                            ? t('✖ ហួសពេលកំណត់', '✖ Expired')
                             : isNotStartedYet 
-                              ? '⏱ មិនទាន់បើក' 
-                              : '⚡ អាចធ្វើបាន'}
+                              ? t('⏱ មិនទាន់បើក', '⏱ Upcoming')
+                              : t('⚡ អាចធ្វើបាន', '⚡ Available')}
                     </span>
                   </div>
 
@@ -311,15 +309,15 @@ const StudentQuizzes = () => {
 
                   <div className="space-y-1.5 border-t border-gray-50 pt-3 text-[11px] text-gray-400">
                     <div className="flex justify-between">
-                      <span>រយៈពេលធ្វើ (Duration):</span>
-                      <span className="font-bold text-gray-700">{quiz.duration} នាទី (mins)</span>
+                      <span>{t('រយៈពេលធ្វើ (Duration):', 'Duration:')}</span>
+                      <span className="font-bold text-gray-700">{quiz.duration} {t('នាទី', 'mins')}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>ចាប់ផ្តើម៖</span>
+                      <span>{t('ចាប់ផ្តើម៖', 'Starts:')}</span>
                       <span className="font-semibold text-gray-700">{new Date(quiz.start_date).toLocaleDateString()}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>បញ្ចប់៖</span>
+                      <span>{t('បញ្ចប់៖', 'Ends:')}</span>
                       <span className="font-semibold text-gray-700">{new Date(quiz.end_date).toLocaleDateString()}</span>
                     </div>
                   </div>
@@ -329,21 +327,21 @@ const StudentQuizzes = () => {
                   {isCompleted ? (
                     <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 px-4 py-2.5 rounded-xl text-xs font-bold text-center flex items-center justify-center gap-1.5">
                       <CheckCircleIcon className="h-5 w-5" />
-                      <span>ចម្លើយផ្ញើរួច &bull; ពិន្ទុ៖ {quiz.attempt.score} / {quiz.total_mark} ({quiz.total_mark > 0 ? Math.round((quiz.attempt.score / quiz.total_mark) * 100) : 0}%)</span>
+                      <span>{t('ចម្លើយផ្ញើរួច', 'Submitted')} &bull; {t('ពិន្ទុ៖', 'Score:')} {quiz.attempt.score} / {quiz.total_mark} ({quiz.total_mark > 0 ? Math.round((quiz.attempt.score / quiz.total_mark) * 100) : 0}%)</span>
                     </div>
                   ) : isNotStartedYet ? (
                     <button
                       disabled
                       className="w-full bg-gray-50 border border-gray-200 text-gray-400 text-xs font-bold py-2.5 rounded-xl cursor-not-allowed text-center"
                     >
-                      មិនទាន់ចាប់ផ្តើមឡើយ (Locked)
+                      {t('មិនទាន់ចាប់ផ្តើមឡើយ', 'Not started yet')}
                     </button>
                   ) : isExpired && !hasActiveAttempt ? (
                     <button
                       disabled
                       className="w-full bg-rose-500/5 border border-rose-500/10 text-rose-400 text-xs font-bold py-2.5 rounded-xl cursor-not-allowed text-center"
                     >
-                      ហួសពេលកំណត់ហើយ (Expired)
+                      {t('ហួសពេលកំណត់ហើយ', 'Expired')}
                     </button>
                   ) : (
                     <button
@@ -352,7 +350,7 @@ const StudentQuizzes = () => {
                       className="w-full inline-flex items-center justify-center gap-1.5 bg-blue-950 hover:bg-yellow-500 hover:text-blue-950 text-white text-xs font-bold py-2.5 rounded-xl shadow-md transition-all cursor-pointer"
                     >
                       <PencilSquareIcon className="h-5 w-5" />
-                      {hasActiveAttempt ? 'បន្តការធ្វើតេស្ត (Resume Quiz)' : 'ចាប់ផ្តើមធ្វើតេស្ត (Attempt Quiz)'}
+                      {hasActiveAttempt ? t('បន្តការធ្វើតេស្ត', 'Resume Quiz') : t('ចាប់ផ្តើមធ្វើតេស្ត', 'Attempt Quiz')}
                     </button>
                   )}
                 </div>
@@ -377,20 +375,19 @@ const StudentQuizzes = () => {
               </div>
               <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-xl border border-white/10 text-sm font-bold">
                 <ClockIcon className="h-5 w-5 text-yellow-400 animate-pulse" />
-                <span>ពេលវេលានៅសល់: <span className="text-yellow-400">{formatTime(timeLeft)}</span></span>
+                <span>{t('ពេលវេលានៅសល់:', 'Time Remaining:')} <span className="text-yellow-400">{formatTime(timeLeft)}</span></span>
               </div>
             </div>
 
-            {/* Modal Body (Scrollable Questions) */}
+            {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-8 space-y-8">
               {activeQuizAttempt.questions?.map((q, idx) => (
                 <div key={q.id} className="space-y-4 border-b border-gray-100 pb-6 last:border-b-0 last:pb-0">
                   <div className="flex gap-2">
-                    <span className="font-extrabold text-blue-950 text-base shrink-0">សំណួរ {idx + 1}៖</span>
+                    <span className="font-extrabold text-blue-950 text-base shrink-0">{t('សំណួរ', 'Question')} {idx + 1}៖</span>
                     <h3 className="text-gray-900 font-bold text-base leading-relaxed">{q.question_text}</h3>
                   </div>
 
-                  {/* Options List */}
                   <div className="grid grid-cols-1 gap-2.5 pl-6">
                     {q.options?.map((opt) => {
                       const isSelected = attemptAnswers[q.id] === opt.id;
@@ -424,7 +421,7 @@ const StudentQuizzes = () => {
               <button
                 type="button"
                 onClick={() => {
-                  if (window.confirm('តើអ្នកចង់បោះបង់ការប្រឡងមែនទេ?')) {
+                  if (window.confirm(t('តើអ្នកចង់បោះបង់ការប្រឡងមែនទេ?', 'Are you sure you want to cancel the quiz?'))) {
                     setActiveQuizAttempt(null);
                     setAttemptAnswers({});
                     endTimeRef.current = null;
@@ -432,7 +429,7 @@ const StudentQuizzes = () => {
                 }}
                 className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-6 py-2.5 rounded-xl transition"
               >
-                បោះបង់ (Cancel)
+                {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 type="button"
@@ -440,7 +437,7 @@ const StudentQuizzes = () => {
                 disabled={isSubmitting}
                 className="bg-blue-950 hover:bg-yellow-500 hover:text-blue-950 text-white font-bold px-6 py-2.5 rounded-xl shadow transition"
               >
-                {isSubmitting ? 'កំពុងផ្ញើ...' : 'ផ្ញើចម្លើយ (Submit)'}
+                {isSubmitting ? t('កំពុងផ្ញើ...', 'Submitting...') : t('ផ្ញើចម្លើយ', 'Submit Quiz')}
               </button>
             </div>
           </div>
@@ -456,19 +453,19 @@ const StudentQuizzes = () => {
             </div>
             
             <div className="space-y-2">
-              <h2 className="text-xl font-bold text-gray-900">ការបញ្ជូនតេស្តទទួលបានជោគជ័យ!</h2>
-              <p className="text-xs text-gray-400">ចម្លើយរបស់អ្នកត្រូវបានកត់ត្រារួចរាល់ហើយ។</p>
+              <h2 className="text-xl font-bold text-gray-900">{t('ការបញ្ជូនតេស្តទទួលបានជោគជ័យ!', 'Quiz Submitted Successfully!')}</h2>
+              <p className="text-xs text-gray-400">{t('ចម្លើយរបស់អ្នកត្រូវបានកត់ត្រារួចរាល់ហើយ។', 'Your responses have been recorded.')}</p>
             </div>
 
             <div className="bg-gray-50 border border-gray-100 p-5 rounded-2xl space-y-2 text-sm text-gray-700">
               <div className="flex justify-between">
-                <span>ពិន្ទុសរុប (Exam Score)៖</span>
+                <span>{t('ពិន្ទុសរុប (Exam Score)៖', 'Exam Score:')}</span>
                 <span className="font-extrabold text-blue-950 text-base">
                   {quizResult.total_marks > 0 ? Math.round((quizResult.score / quizResult.total_marks) * 100) : 0}%
                 </span>
               </div>
               <div className="flex justify-between">
-                <span>ចម្លើយត្រឹមត្រូវ (Points)៖</span>
+                <span>{t('ចម្លើយត្រឹមត្រូវ (Points)៖', 'Points:')}</span>
                 <span className="font-extrabold text-gray-900">{quizResult.score} / {quizResult.total_marks || 100}</span>
               </div>
             </div>
@@ -477,7 +474,7 @@ const StudentQuizzes = () => {
               onClick={() => setQuizResult(null)}
               className="w-full bg-blue-950 hover:bg-yellow-500 hover:text-blue-950 text-white font-bold py-2.5 rounded-xl shadow transition"
             >
-              បិទបង្អួច (Close Window)
+              {t('បិទបង្អួច', 'Close Window')}
             </button>
           </div>
         </div>

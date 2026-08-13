@@ -134,6 +134,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/courses/{course}', [CourseController::class, 'destroy']);
 
       // Teacher management
+        Route::get('teachers/export-all', [AdminTeacherController::class, 'exportAll']);
+        Route::post('teachers/import', [AdminTeacherController::class, 'import']);
         Route::get('teachers/', [AdminTeacherController::class, 'index']);
         Route::post('teachers/', [AdminTeacherController::class, 'store']);
         Route::put('teachers/{teacher}', [AdminTeacherController::class, 'update']);
@@ -141,7 +143,8 @@ Route::middleware('auth:sanctum')->group(function () {
         
 
         // Student management
-       
+        Route::get('/students/export-all', [AdminStudentController::class, 'exportAll']);
+        Route::post('/students/import', [AdminStudentController::class, 'import']);
         Route::get('/students', [AdminStudentController::class, 'index']);
         Route::post('/students', [AdminStudentController::class, 'store']);
         Route::put('/students/{student}', [AdminStudentController::class, 'update']);

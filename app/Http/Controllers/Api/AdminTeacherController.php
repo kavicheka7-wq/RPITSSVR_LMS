@@ -200,6 +200,96 @@ class AdminTeacherController extends Controller
     }
 
     /**
+     * Get all teachers for export without pagination
+     * GET /admin/teachers/export-all
+     */
+    public function exportAll()
+    {
+        $teachers = Teacher::with(['department', 'user', 'role'])
+            ->orderBy('first_name')
+            ->get();
+
+        return response()->json([
+            'data' => $teachers,
+            'message' => 'បានទាញយកទិន្នន័យគ្រូបង្រៀនទាំងអស់ដោយជោគជ័យ'
+        ]);
+    }
+
+    /**
+     * Import multiple teachers
+     * POST /admin/teachers/import
+     */
+    public function import(Request $request)
+    {
+        $request->validate([
+            'teachers' => 'required|array|min:1',
+            'teachers.*.first_name' => 'required|string|max:100',
+            'teachers.*.last_name' => 'required|string|max:100',
+            'teachers.*.email' => 'required|email',
+        ]);
+
+        $teacherRole = Role::where('role_name', 'Teacher')->firstOrFail();
+        $importedCount = 0;
+        $skipped = [];
+
+        DB::transaction(function () use ($request, $teacherRole, &$importedCount, &$skipped) {
+            foreach ($request->teachers as $index => $item) {
+                // Check duplicate email in users or teachers
+                $emailExists = User::where('email', $item['email'])->exists() || Teacher::where('email', $item['email'])->exists();
+                if ($emailExists) {
+                    $skipped[] = [
+                        'row' => $index + 1,
+                        'email' => $item['email'],
+                        'reason' => 'អ៊ីមែលនេះមានរួចហើយ (Email already exists)'
+                    ];
+                    continue;
+                }
+
+                $password = !empty($item['password']) ? $item['password'] : '12345678';
+                $gender = in_array($item['gender'] ?? '', ['Male', 'Female', 'Other']) ? $item['gender'] : null;
+                $employmentType = in_array($item['employment_type'] ?? '', ['Full-time', 'Part-time', 'Contract']) ? $item['employment_type'] : 'Full-time';
+                $status = in_array($item['status'] ?? '', ['active', 'inactive']) ? $item['status'] : 'active';
+
+                $user = User::create([
+                    'first_name' => $item['first_name'],
+                    'last_name' => $item['last_name'],
+                    'email' => $item['email'],
+                    'password' => Hash::make($password),
+                    'phone' => $item['phone'] ?? null,
+                    'gender' => $gender,
+                    'status' => $status,
+                    'role_id' => $teacherRole->id,
+                ]);
+
+                Teacher::create([
+                    'user_id' => $user->id,
+                    'role_id' => $teacherRole->id,
+                    'teacher_code' => !empty($item['teacher_code']) ? $item['teacher_code'] : $this->generateTeacherCode(),
+                    'first_name' => $item['first_name'],
+                    'last_name' => $item['last_name'],
+                    'gender' => $gender,
+                    'date_of_birth' => !empty($item['date_of_birth']) ? $item['date_of_birth'] : null,
+                    'email' => $item['email'],
+                    'phone' => $item['phone'] ?? null,
+                    'department_id' => $item['department_id'] ?? null,
+                    'specialization' => $item['specialization'] ?? null,
+                    'employment_type' => $employmentType,
+                ]);
+
+                $importedCount++;
+            }
+        });
+
+        Cache::forget('admin_dashboard_stats');
+
+        return response()->json([
+            'message' => "នាំចូលគ្រូបង្រៀនចំនួន {$importedCount} នាក់ដោយជោគជ័យ",
+            'imported_count' => $importedCount,
+            'skipped' => $skipped
+        ]);
+    }
+
+    /**
      * Generate unique teacher code
      */
     private function generateTeacherCode()

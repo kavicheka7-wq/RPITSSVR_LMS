@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
+import { useLanguage } from '../../context/LanguageContext';
 import {
   PencilSquareIcon,
   TrashIcon,
@@ -26,6 +27,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function TeacherManageQuizzes() {
+  const { t, language } = useLanguage();
   const [quizzes, setQuizzes] = useState([]);
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -94,11 +96,10 @@ export default function TeacherManageQuizzes() {
   const fetchCourses = async () => {
     try {
       const response = await api.get('/teacher/courses');
-      // ធានាថាវាចាប់យក Array ជានិច្ច
       const coursesData = response.data.data || response.data || [];
       setCourses(Array.isArray(coursesData) ? coursesData : []);
     } catch (error) {
-      toast.error('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ', 'Cannot fetch courses data'));
       setCourses([]);
     }
   };
@@ -106,11 +107,10 @@ export default function TeacherManageQuizzes() {
   const fetchQuizzes = async () => {
     try {
       const response = await api.get('/teacher/quizzes');
-      // ធានាថាវាចាប់យក Array ជានិច្ច
       const quizzesData = response.data.data || response.data || [];
       setQuizzes(Array.isArray(quizzesData) ? quizzesData : []);
     } catch (error) {
-      toast.error('មិនអាចទាញយកទិន្នន័យកម្រងសំណួរបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យកម្រងសំណួរបានទេ', 'Cannot fetch quizzes data'));
       setQuizzes([]);
     }
   };
@@ -136,7 +136,6 @@ export default function TeacherManageQuizzes() {
   const openEditModal = (quiz) => {
     setEditingQuiz(quiz);
 
-    // Format dates to datetime-local format
     let formattedStart = '';
     let formattedEnd = '';
     const tzOffset = new Date().getTimezoneOffset() * 60000;
@@ -175,10 +174,10 @@ export default function TeacherManageQuizzes() {
     try {
       if (editingQuiz) {
         await api.put(`/teacher/quizzes/${editingQuiz.id}`, payload);
-        toast.success('បានកែប្រែកម្រងសំណួរដោយជោគជ័យ');
+        toast.success(t('បានកែប្រែកម្រងសំណួរដោយជោគជ័យ', 'Quiz updated successfully'));
       } else {
         await api.post('/teacher/quizzes', payload);
-        toast.success('បានបន្ថែមកម្រងសំណួរដោយជោគជ័យ');
+        toast.success(t('បានបន្ថែមកម្រងសំណួរដោយជោគជ័យ', 'Quiz created successfully'));
       }
       setShowAddModal(false);
       await fetchQuizzes();
@@ -187,7 +186,7 @@ export default function TeacherManageQuizzes() {
       if (error.response?.data?.errors) {
         toast.error(Object.values(error.response.data.errors).flat().join('\n'));
       } else {
-        toast.error(error.response?.data?.message || 'ការរក្សាទុកកម្រងសំណួរបានបរាជ័យ');
+        toast.error(error.response?.data?.message || t('ការរក្សាទុកកម្រងសំណួរបានបរាជ័យ', 'Failed to save quiz'));
       }
     } finally {
       setIsSubmitting(false);
@@ -203,19 +202,19 @@ export default function TeacherManageQuizzes() {
     if (!selectedQuiz) return;
     try {
       const response = await api.delete(`/teacher/quizzes/${selectedQuiz.id}`);
-      toast.success(response.data?.message || 'បានលុបកម្រងសំណួរដោយជោគជ័យ');
+      toast.success(response.data?.message || t('បានលុបកម្រងសំណួរដោយជោគជ័យ', 'Quiz deleted successfully'));
       setShowDeleteModal(false);
       setSelectedQuiz(null);
       await fetchQuizzes();
     } catch (error) {
-      toast.error(error.response?.data?.message || 'មិនអាចលុបកម្រងសំណួរបានទេ');
+      toast.error(error.response?.data?.message || t('មិនអាចលុបកម្រងសំណួរបានទេ', 'Cannot delete quiz'));
     }
   };
 
   // Add Question logic
   const handleAddQuestion = async (quizId) => {
     if (!questionText) {
-      toast.error('សូមបញ្ចូលខ្លឹមសារសំណួរ');
+      toast.error(t('សូមបញ្ចូលខ្លឹមសារសំណួរ', 'Please enter question content'));
       return;
     }
 
@@ -223,19 +222,19 @@ export default function TeacherManageQuizzes() {
     if (questionType === 'MCQ') {
       const filledOptions = mcqOptions.filter(opt => opt.option_text.trim() !== '');
       if (filledOptions.length < 2) {
-        toast.error('សំណួរពហុជ្រើសរើស ត្រូវតែមានជម្រើសយ៉ាងតិច ២');
+        toast.error(t('សំណួរពហុជ្រើសរើស ត្រូវតែមានជម្រើសយ៉ាងតិច ២', 'Multiple choice questions must have at least 2 options'));
         return;
       }
       const hasCorrect = filledOptions.some(opt => opt.is_correct);
       if (!hasCorrect) {
-        toast.error('សូមជ្រើសរើសចម្លើយត្រឹមត្រូវមួយយ៉ាងតិច');
+        toast.error(t('សូមជ្រើសរើសចម្លើយត្រឹមត្រូវមួយយ៉ាងតិច', 'Please select at least one correct option'));
         return;
       }
       options = filledOptions;
     } else if (questionType === 'TrueFalse') {
       options = [
-        { option_text: 'ពិត (True)', is_correct: tfCorrect === 'true' },
-        { option_text: 'មិនពិត (False)', is_correct: tfCorrect === 'false' }
+        { option_text: t('ពិត (True)', 'True'), is_correct: tfCorrect === 'true' },
+        { option_text: t('មិនពិត (False)', 'False'), is_correct: tfCorrect === 'false' }
       ];
     }
 
@@ -249,7 +248,7 @@ export default function TeacherManageQuizzes() {
     setAddingQuestionQuizId(quizId);
     try {
       await api.post(`/teacher/quizzes/${quizId}/questions`, payload);
-      toast.success('បានបន្ថែមសំណួរដោយជោគជ័យ');
+      toast.success(t('បានបន្ថែមសំណួរដោយជោគជ័យ', 'Question added successfully'));
       setQuestionText('');
       setQuestionMark(10);
       setMcqOptions([
@@ -260,7 +259,7 @@ export default function TeacherManageQuizzes() {
       ]);
       await fetchQuizzes();
     } catch (error) {
-      toast.error(error.response?.data?.message || 'មិនអាចបន្ថែមសំណួរបានទេ');
+      toast.error(error.response?.data?.message || t('មិនអាចបន្ថែមសំណួរបានទេ', 'Cannot add question'));
     } finally {
       setAddingQuestionQuizId(null);
     }
@@ -268,13 +267,13 @@ export default function TeacherManageQuizzes() {
 
   // Delete Question
   const handleDeleteQuestion = async (questionId) => {
-    if (!window.confirm('តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបសំណួរនេះមែនទេ?')) return;
+    if (!window.confirm(t('តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបសំណួរនេះមែនទេ?', 'Are you sure you want to delete this question?'))) return;
     try {
       await api.delete(`/teacher/quizzes/questions/${questionId}`);
-      toast.success('បានលុបសំណួរដោយជោគជ័យ');
+      toast.success(t('បានលុបសំណួរដោយជោគជ័យ', 'Question deleted successfully'));
       await fetchQuizzes();
     } catch (error) {
-      toast.error(error.response?.data?.message || 'មិនអាចលុបសំណួរបានទេ');
+      toast.error(error.response?.data?.message || t('មិនអាចលុបសំណួរបានទេ', 'Cannot delete question'));
     }
   };
 
@@ -348,7 +347,7 @@ export default function TeacherManageQuizzes() {
         setParsedQuizzes(quizArray);
         setJsonContent(JSON.stringify(parsed, null, 2));
       } catch (err) {
-        toast.error('ឯកសារ JSON មិនត្រឹមត្រូវ (Invalid JSON format)');
+        toast.error(t('ឯកសារ JSON មិនត្រឹមត្រូវ (Invalid JSON format)', 'Invalid JSON format'));
         setParsedQuizzes([]);
       }
     };
@@ -358,12 +357,12 @@ export default function TeacherManageQuizzes() {
   const handleImportSubmit = async (e) => {
     e.preventDefault();
     if (!parsedQuizzes || parsedQuizzes.length === 0) {
-      toast.error('សូមជ្រើសរើសឯកសារ JSON ឬបិទភ្ជាប់ទិន្នន័យ JSON ដែលមានសំណួរ');
+      toast.error(t('សូមជ្រើសរើសឯកសារ JSON ឬបិទភ្ជាប់ទិន្នន័យ JSON ដែលមានសំណួរ', 'Please select a JSON file or paste valid JSON content'));
       return;
     }
     const targetCourse = importCourseId || (courses.length > 0 ? courses[0].id : '');
     if (!targetCourse) {
-      toast.error('សូមជ្រើសរើសមុខវិជ្ជាសម្រាប់កម្រងសំណួរ');
+      toast.error(t('សូមជ្រើសរើសមុខវិជ្ជាសម្រាប់កម្រងសំណួរ', 'Please select a course for the quiz'));
       return;
     }
 
@@ -378,7 +377,7 @@ export default function TeacherManageQuizzes() {
       };
 
       const response = await api.post('/teacher/quizzes/import', payload);
-      toast.success(response.data?.message || 'បាននាំចូលកម្រងសំណួរដោយជោគជ័យ');
+      toast.success(response.data?.message || t('បាននាំចូលកម្រងសំណួរដោយជោគជ័យ', 'Quizzes imported successfully'));
       setShowImportModal(false);
       setParsedQuizzes([]);
       setJsonContent('');
@@ -386,7 +385,7 @@ export default function TeacherManageQuizzes() {
       await fetchQuizzes();
     } catch (error) {
       console.error('Import error:', error);
-      toast.error(error.response?.data?.message || 'ការនាំចូលកម្រងសំណួរបានបរាជ័យ');
+      toast.error(error.response?.data?.message || t('ការនាំចូលកម្រងសំណួរបានបរាជ័យ', 'Failed to import quizzes'));
     } finally {
       setIsImporting(false);
     }
@@ -404,7 +403,7 @@ export default function TeacherManageQuizzes() {
       setSubmissions(Array.isArray(attemptsData) ? attemptsData : []);
     } catch (error) {
       console.error('Error fetching quiz submissions:', error);
-      toast.error('មិនអាចទាញយកទិន្នន័យការប្រឡងរបស់សិស្សបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យការប្រឡងរបស់សិស្សបានទេ', 'Cannot fetch student exam submissions'));
       setSubmissions([]);
     } finally {
       setLoadingSubmissions(false);
@@ -418,7 +417,6 @@ export default function TeacherManageQuizzes() {
     return studentName.includes(search) || studentEmail.includes(search);
   }) : [];
 
-  // ប្រើ Array.isArray ការពារការគាំង
   const filteredQuizzes = Array.isArray(quizzes) ? quizzes.filter(quiz => {
     const search = searchTerm.toLowerCase();
     return quiz.title?.toLowerCase().includes(search);
@@ -427,9 +425,9 @@ export default function TeacherManageQuizzes() {
   const formatDate = (dateString) => {
     if (!dateString) return '—';
     const date = new Date(dateString);
-    return date.toLocaleDateString('kh-KH', {
+    return date.toLocaleDateString(language === 'km' ? 'kh-KH' : 'en-US', {
       year: 'numeric',
-      month: 'long',
+      month: 'short',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
@@ -447,27 +445,27 @@ export default function TeacherManageQuizzes() {
               <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
                 <BookOpenIcon className="h-6 w-6" />
               </span>
-              គ្រប់គ្រងកម្រងសំណួរ (Quizzes)
+              {t('គ្រប់គ្រងកម្រងសំណួរ', 'Manage Quizzes')}
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              បង្កើតកម្រងសំណួរប្រឡង និងគ្រប់គ្រងសំណួរនីមួយៗ
-              <span className="ml-2 text-indigo-600 font-medium">({Array.isArray(quizzes) ? quizzes.length : 0} កម្រងសំណួរ)</span>
+              {t('បង្កើតកម្រងសំណួរប្រឡង និងគ្រប់គ្រងសំណួរនីមួយៗ', 'Create exam quizzes and manage individual questions')}
+              <span className="ml-2 text-indigo-600 font-medium">({Array.isArray(quizzes) ? quizzes.length : 0} {t('កម្រងសំណួរ', 'quizzes')})</span>
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => setShowImportModal(true)}
-              className="inline-flex items-center justify-center px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-xl shadow-sm hover:bg-emerald-700 transition-all hover:shadow-md"
+              className="inline-flex items-center justify-center px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-xl shadow-sm hover:bg-emerald-700 transition-all hover:shadow-md cursor-pointer"
             >
               <ArrowUpTrayIcon className="h-5 w-5 mr-2" />
-              Import Quizzes JSON
+              {t('នាំចូលកម្រងសំណួរ JSON', 'Import Quizzes JSON')}
             </button>
             <button
               onClick={openAddModal}
-              className="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl shadow-sm hover:bg-indigo-700 transition-all hover:shadow-md"
+              className="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl shadow-sm hover:bg-indigo-700 transition-all hover:shadow-md cursor-pointer"
             >
               <PlusIcon className="h-5 w-5 mr-2" />
-              បន្ថែមតម្លៃកម្រងសំណួរ
+              {t('បន្ថែមតម្លៃកម្រងសំណួរ', 'Add New Quiz')}
             </button>
           </div>
         </div>
@@ -479,7 +477,7 @@ export default function TeacherManageQuizzes() {
           <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
           <input
             type="text"
-            placeholder="ស្វែងរកតាមចំណងជើងកម្រងសំណួរ..."
+            placeholder={t('ស្វែងរកតាមចំណងជើងកម្រងសំណួរ...', 'Search by quiz title...')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
@@ -493,14 +491,14 @@ export default function TeacherManageQuizzes() {
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">No</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">ចំណងជើងកម្រងសំណួរ</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">មុខវិជ្ជា (Course)</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">រយះពេល</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">ពិន្ទុសរុប</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">ចំនួនសំណួរ</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Attempts</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ល.រ', 'No')}</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ចំណងជើងកម្រងសំណួរ', 'Quiz Title')}</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('មុខវិជ្ជា (Course)', 'Course')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('រយះពេល', 'Duration')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ពិន្ទុសរុប', 'Total Mark')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ចំនួនសំណួរ', 'Questions')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ការប្រឡង (Attempts)', 'Attempts')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('សកម្មភាព', 'Actions')}</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
@@ -510,10 +508,10 @@ export default function TeacherManageQuizzes() {
                     <div className="flex flex-col items-center">
                       <BookOpenIcon className="h-16 w-16 text-gray-300 mb-3" />
                       <p className="font-medium">
-                        {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានកម្រងសំណួរនៅឡើយទេ'}
+                        {searchTerm ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found') : t('មិនទាន់មានកម្រងសំណួរនៅឡើយទេ', 'No quizzes available yet')}
                       </p>
                       <p className="text-sm text-gray-400 mt-1">
-                        {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមតម្លៃកម្រងសំណួរ" ដើម្បីចាប់ផ្តើម'}
+                        {searchTerm ? t('សូមប្តូរពាក្យស្វែងរក', 'Please try a different search keyword') : t('ចុច "បន្ថែមតម្លៃកម្រងសំណួរ" ដើម្បីចាប់ផ្តើម', 'Click "Add New Quiz" to get started')}
                       </p>
                     </div>
                   </td>
@@ -536,8 +534,8 @@ export default function TeacherManageQuizzes() {
                         <td className="px-6 py-4">
                           <div className="text-sm font-bold text-gray-900">{quiz.title}</div>
                           <div className="text-[10px] text-gray-400 mt-1 flex flex-col gap-0.5">
-                            <span>ចាប់ផ្តើម៖ {formatDate(quiz.start_date)}</span>
-                            <span>បញ្ចប់៖ {formatDate(quiz.end_date)}</span>
+                            <span>{t('ចាប់ផ្តើម៖', 'Start:')} {formatDate(quiz.start_date)}</span>
+                            <span>{t('បញ្ចប់៖', 'End:')} {formatDate(quiz.end_date)}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -547,11 +545,11 @@ export default function TeacherManageQuizzes() {
                         <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-600">
                           <div className="flex items-center justify-center gap-1">
                             <ClockIcon className="h-4 w-4 text-gray-400" />
-                            {quiz.duration} នាទី
+                            {quiz.duration} {t('នាទី', 'mins')}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-bold text-gray-800">
-                          {quiz.total_mark} ភិន្ទុ
+                          {quiz.total_mark} {t('ពិន្ទុ', 'pts')}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800">
@@ -562,10 +560,10 @@ export default function TeacherManageQuizzes() {
                           <button
                             onClick={() => openSubmissionsModal(quiz)}
                             className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors cursor-pointer shadow-2xs"
-                            title="មើលការប្រឡងរបស់សិស្ស"
+                            title={t('មើលការប្រឡងរបស់សិស្ស', 'View Student Submissions')}
                           >
                             <EyeIcon className="h-3.5 w-3.5 mr-1" />
-                            {attemptsCount} នាក់
+                            {attemptsCount} {t('នាក់', 'students')}
                           </button>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center" onClick={(e) => e.stopPropagation()}>
@@ -573,28 +571,28 @@ export default function TeacherManageQuizzes() {
                             <button
                               onClick={() => openSubmissionsModal(quiz)}
                               className="p-2 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-50 rounded-xl transition-all"
-                              title="មើលការប្រឡងសិស្ស (Submissions)"
+                              title={t('មើលការប្រឡងសិស្ស (Submissions)', 'View Submissions')}
                             >
                               <EyeIcon className="h-5 w-5" />
                             </button>
                             <button
                               onClick={() => openEditModal(quiz)}
                               className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
-                              title="កែប្រែ"
+                              title={t('កែប្រែ', 'Edit')}
                             >
                               <PencilSquareIcon className="h-5 w-5" />
                             </button>
                             <button
                               onClick={() => handleDeleteClick(quiz)}
                               className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
-                              title="លុប"
+                              title={t('លុប', 'Delete')}
                             >
                               <TrashIcon className="h-5 w-5" />
                             </button>
                             <button
                               onClick={() => setExpandedQuiz(isExpanded ? null : quiz.id)}
                               className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
-                              title={isExpanded ? 'បិទសំណួរ' : 'បង្ហាញសំណួរ'}
+                              title={isExpanded ? t('បិទសំណួរ', 'Hide Questions') : t('បង្ហាញសំណួរ', 'Show Questions')}
                             >
                               {isExpanded ? (
                                 <ChevronUpIcon className="h-5 w-5" />
@@ -615,25 +613,25 @@ export default function TeacherManageQuizzes() {
                               {/* Questions List (Left 2 columns) */}
                               <div className="lg:col-span-2 space-y-4">
                                 <h4 className="text-sm font-bold text-gray-900 border-b pb-2 flex justify-between items-center">
-                                  <span>បញ្ជីសំណួរ ({quiz.questions?.length || 0})</span>
-                                  <span className="text-xs text-indigo-600 font-medium">ពិន្ទុសរុប៖ {quiz.questions?.reduce((sum, q) => sum + parseFloat(q.mark), 0) || 0} / {quiz.total_mark}</span>
+                                  <span>{t('បញ្ជីសំណួរ', 'Questions List')} ({quiz.questions?.length || 0})</span>
+                                  <span className="text-xs text-indigo-600 font-medium">{t('ពិន្ទុសរុប៖', 'Total Mark:')} {quiz.questions?.reduce((sum, q) => sum + parseFloat(q.mark), 0) || 0} / {quiz.total_mark}</span>
                                 </h4>
                                 <div className="space-y-3 max-h-100 overflow-y-auto pr-2">
                                   {(!Array.isArray(quiz.questions) || quiz.questions.length === 0) ? (
-                                    <p className="text-xs text-gray-400 italic py-4">គ្មានសំណួរនៅក្នុងកម្រងសំណួរនេះទេ</p>
+                                    <p className="text-xs text-gray-400 italic py-4">{t('គ្មានសំណួរនៅក្នុងកម្រងសំណួរនេះទេ', 'No questions in this quiz yet')}</p>
                                   ) : (
                                     quiz.questions.map((question, qIdx) => (
                                       <div key={question.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-2xs hover:shadow-xs transition relative">
                                         <div className="flex justify-between items-start mb-2">
                                           <div className="text-xs font-bold text-gray-900">
-                                            សំណួរទី {qIdx + 1} <span className="ml-2 font-normal text-gray-400 bg-gray-50 px-2 py-0.5 rounded-sm">{question.question_type}</span>
+                                            {t('សំណួរទី', 'Question')} {qIdx + 1} <span className="ml-2 font-normal text-gray-400 bg-gray-50 px-2 py-0.5 rounded-sm">{question.question_type}</span>
                                           </div>
                                           <div className="flex items-center gap-2">
-                                            <span className="text-xs font-bold text-indigo-600">{question.mark} ភិន្ទុ</span>
+                                            <span className="text-xs font-bold text-indigo-600">{question.mark} {t('ពិន្ទុ', 'pts')}</span>
                                             <button
                                               onClick={() => handleDeleteQuestion(question.id)}
-                                              className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition"
-                                              title="លុបសំណួរ"
+                                              className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                                              title={t('លុបសំណួរ', 'Delete question')}
                                             >
                                               <TrashIcon className="h-4 w-4" />
                                             </button>
@@ -678,12 +676,12 @@ export default function TeacherManageQuizzes() {
 
                               {/* Add Question Form (Right 1 column) */}
                               <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs h-fit space-y-4">
-                                <h4 className="text-sm font-bold text-gray-900 border-b pb-2">បន្ថែមសំណួរថ្មី</h4>
+                                <h4 className="text-sm font-bold text-gray-900 border-b pb-2">{t('បន្ថែមសំណួរថ្មី', 'Add New Question')}</h4>
                                 <div>
-                                  <label className="block text-xs font-semibold text-gray-500 mb-1">ខ្លឹមសារសំណួរ</label>
+                                  <label className="block text-xs font-semibold text-gray-500 mb-1">{t('ខ្លឹមសារសំណួរ', 'Question Content')}</label>
                                   <textarea
                                     rows={2}
-                                    placeholder="បញ្ចូលសំណួរ..."
+                                    placeholder={t('បញ្ចូលសំណួរ...', 'Enter question content...')}
                                     value={questionText}
                                     onChange={(e) => setQuestionText(e.target.value)}
                                     className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
@@ -691,19 +689,19 @@ export default function TeacherManageQuizzes() {
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
                                   <div>
-                                    <label className="block text-xs font-semibold text-gray-500 mb-1">ប្រភេទសំណួរ</label>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1">{t('ប្រភេទសំណួរ', 'Question Type')}</label>
                                     <select
                                       value={questionType}
                                       onChange={(e) => setQuestionType(e.target.value)}
                                       className="w-full px-2 py-2 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                     >
-                                      <option value="MCQ">ពហុជ្រើសរើស (MCQ)</option>
-                                      <option value="TrueFalse">ពិត/មិនពិត (True/False)</option>
-                                      <option value="Essay">សរសេររៀបរាប់ (Essay)</option>
+                                      <option value="MCQ">{t('ពហុជ្រើសរើស (MCQ)', 'Multiple Choice (MCQ)')}</option>
+                                      <option value="TrueFalse">{t('ពិត/មិនពិត (True/False)', 'True / False')}</option>
+                                      <option value="Essay">{t('សរសេររៀបរាប់ (Essay)', 'Essay')}</option>
                                     </select>
                                   </div>
                                   <div>
-                                    <label className="block text-xs font-semibold text-gray-500 mb-1">ពិន្ទុ</label>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1">{t('ពិន្ទុ', 'Mark')}</label>
                                     <input
                                       type="number"
                                       value={questionMark}
@@ -716,13 +714,13 @@ export default function TeacherManageQuizzes() {
                                 {/* MCQ Option Inputs */}
                                 {questionType === 'MCQ' && (
                                   <div className="space-y-2">
-                                    <label className="block text-xs font-semibold text-gray-500">ចម្លើយជម្រើស (និងកំណត់ចម្លើយត្រូវ)</label>
+                                    <label className="block text-xs font-semibold text-gray-500">{t('ចម្លើយជម្រើស (និងកំណត់ចម្លើយត្រូវ)', 'Options (and set correct answer)')}</label>
                                     {mcqOptions.map((opt, oIdx) => (
                                       <div key={oIdx} className="flex items-center gap-2">
                                         <span className="text-xs font-bold text-gray-400">{String.fromCharCode(65 + oIdx)}.</span>
                                         <input
                                           type="text"
-                                          placeholder={`ជម្រើស ${String.fromCharCode(65 + oIdx)}...`}
+                                          placeholder={`${t('ជម្រើស', 'Option')} ${String.fromCharCode(65 + oIdx)}...`}
                                           value={opt.option_text}
                                           onChange={(e) => handleMcqOptionChange(oIdx, e.target.value)}
                                           className="flex-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none"
@@ -732,8 +730,8 @@ export default function TeacherManageQuizzes() {
                                           name={`mcq_correct_${quiz.id}`}
                                           checked={opt.is_correct}
                                           onChange={() => handleMcqCorrectToggle(oIdx)}
-                                          className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300"
-                                          title="កំណត់ចម្លើយត្រឹមត្រូវ"
+                                          className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 cursor-pointer"
+                                          title={t('កំណត់ចម្លើយត្រឹមត្រូវ', 'Set correct answer')}
                                         />
                                       </div>
                                     ))}
@@ -743,9 +741,9 @@ export default function TeacherManageQuizzes() {
                                 {/* True/False Options */}
                                 {questionType === 'TrueFalse' && (
                                   <div>
-                                    <label className="block text-xs font-semibold text-gray-500 mb-2">ចម្លើយត្រូវ</label>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-2">{t('ចម្លើយត្រូវ', 'Correct Answer')}</label>
                                     <div className="flex gap-4">
-                                      <label className="inline-flex items-center text-xs font-medium text-gray-700">
+                                      <label className="inline-flex items-center text-xs font-medium text-gray-700 cursor-pointer">
                                         <input
                                           type="radio"
                                           name={`tf_correct_${quiz.id}`}
@@ -754,9 +752,9 @@ export default function TeacherManageQuizzes() {
                                           onChange={() => setTfCorrect('true')}
                                           className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 mr-1.5"
                                         />
-                                        ពិត (True)
+                                        {t('ពិត (True)', 'True')}
                                       </label>
-                                      <label className="inline-flex items-center text-xs font-medium text-gray-700">
+                                      <label className="inline-flex items-center text-xs font-medium text-gray-700 cursor-pointer">
                                         <input
                                           type="radio"
                                           name={`tf_correct_${quiz.id}`}
@@ -765,7 +763,7 @@ export default function TeacherManageQuizzes() {
                                           onChange={() => setTfCorrect('false')}
                                           className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 mr-1.5"
                                         />
-                                        មិនពិត (False)
+                                        {t('មិនពិត (False)', 'False')}
                                       </label>
                                     </div>
                                   </div>
@@ -774,14 +772,14 @@ export default function TeacherManageQuizzes() {
                                 <button
                                   onClick={() => handleAddQuestion(quiz.id)}
                                   disabled={addingQuestionQuizId === quiz.id || !questionText}
-                                  className="w-full inline-flex items-center justify-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl transition disabled:opacity-40"
+                                  className="w-full inline-flex items-center justify-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl transition disabled:opacity-40 cursor-pointer"
                                 >
                                   {addingQuestionQuizId === quiz.id ? (
                                     <ArrowPathIcon className="h-4 w-4 animate-spin mr-1.5" />
                                   ) : (
                                     <PlusIcon className="h-4 w-4 mr-1.5" />
                                   )}
-                                  បន្ថែមសំណួរ
+                                  {t('បន្ថែមសំណួរ', 'Add Question')}
                                 </button>
                               </div>
 
@@ -807,7 +805,7 @@ export default function TeacherManageQuizzes() {
                 <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
                   <BookOpenIcon className="h-5 w-5" />
                 </span>
-                {editingQuiz ? 'កែប្រែកម្រងសំណួរ' : 'បង្កើតកម្រងសំណួរថ្មី'}
+                {editingQuiz ? t('កែប្រែកម្រងសំណួរ', 'Edit Quiz') : t('បង្កើតកម្រងសំណួរថ្មី', 'Create New Quiz')}
               </h2>
               <button
                 onClick={() => setShowAddModal(false)}
@@ -820,7 +818,7 @@ export default function TeacherManageQuizzes() {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ចំណងជើងកម្រងសំណួរ <span className="text-red-500">*</span>
+                  {t('ចំណងជើងកម្រងសំណួរ', 'Quiz Title')} <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -828,14 +826,14 @@ export default function TeacherManageQuizzes() {
                   required
                   value={formData.title}
                   onChange={handleInputChange}
-                  placeholder="ឧ. តេស្តសាកល្បងឆមាសទី១"
+                  placeholder={t('ឧ. តេស្តសាកល្បងឆមាសទី១', 'e.g., Semester 1 Practice Quiz')}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  មុខវិជ្ជា <span className="text-red-500">*</span>
+                  {t('មុខវិជ្ជា', 'Course')} <span className="text-red-500">*</span>
                 </label>
                 <select
                   name="course_id"
@@ -844,8 +842,7 @@ export default function TeacherManageQuizzes() {
                   onChange={handleInputChange}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
                 >
-                  <option value="">ជ្រើសរើសមុខវិជ្ជា</option>
-                  {/* ធានាថាវាដំណើរការពេលបើក Modal */}
+                  <option value="">{t('ជ្រើសរើសមុខវិជ្ជា', 'Select Course')}</option>
                   {Array.isArray(courses) && courses.map(course => (
                     <option key={course.id} value={course.id}>
                       {course.course_name} ({course.course_code})
@@ -857,7 +854,7 @@ export default function TeacherManageQuizzes() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    រយះពេលធ្វើតេស្ត (នាទី) <span className="text-red-500">*</span>
+                    {t('រយះពេលធ្វើតេស្ត (នាទី)', 'Duration (Minutes)')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -871,7 +868,7 @@ export default function TeacherManageQuizzes() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    ពិន្ទុសរុប <span className="text-red-500">*</span>
+                    {t('ពិន្ទុសរុប', 'Total Mark')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -888,7 +885,7 @@ export default function TeacherManageQuizzes() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    ថ្ងៃចាប់ផ្តើម <span className="text-red-500">*</span>
+                    {t('ថ្ងៃចាប់ផ្តើម', 'Start Date')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="datetime-local"
@@ -901,7 +898,7 @@ export default function TeacherManageQuizzes() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    ថ្ងៃបញ្ចប់ <span className="text-red-500">*</span>
+                    {t('ថ្ងៃបញ្ចប់', 'End Date')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="datetime-local"
@@ -918,21 +915,21 @@ export default function TeacherManageQuizzes() {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all"
+                  className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
                 >
-                  បោះបង់
+                  {t('បោះបង់', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-all shadow-sm hover:shadow-md flex items-center gap-2 disabled:opacity-50"
+                  className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-all shadow-sm hover:shadow-md flex items-center gap-2 disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmitting ? (
                     <ArrowPathIcon className="h-5 w-5 animate-spin" />
                   ) : (
                     <BookOpenIcon className="h-5 w-5" />
                   )}
-                  {editingQuiz ? 'រក្សាទុក' : 'បង្កើតកម្រងសំណួរ'}
+                  {editingQuiz ? t('រក្សាទុក', 'Save Changes') : t('បង្កើតកម្រងសំណួរ', 'Create Quiz')}
                 </button>
               </div>
             </form>
@@ -946,12 +943,12 @@ export default function TeacherManageQuizzes() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 animate-fadeIn">
             <div className="flex items-center text-red-600 mb-4">
               <ExclamationTriangleIcon className="h-6 w-6 mr-2" />
-              <h3 className="text-lg font-bold">បញ្ជាក់ការលុប</h3>
+              <h3 className="text-lg font-bold">{t('បញ្ជាក់ការលុប', 'Confirm Deletion')}</h3>
             </div>
             <p className="text-sm text-gray-600 mb-6">
-              តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបកម្រងសំណួរ «<span className="font-semibold text-gray-800">{selectedQuiz?.title}</span>» នេះមែនទេ?
+              {t('តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបកម្រងសំណួរ', 'Are you sure you want to delete quiz')} «<span className="font-semibold text-gray-800">{selectedQuiz?.title}</span>» {t('នេះមែនទេ?', 'this quiz?')}
               <br />
-              <span className="text-red-500 text-xs font-semibold mt-1 block">ការលុបកម្រងសំណួរនេះនឹងធ្វើឱ្យបាត់បង់រាល់ព័ត៌មានសំណួរ និងចម្លើយទាំងអស់ពាក់ព័ន្ធ។</span>
+              <span className="text-red-500 text-xs font-semibold mt-1 block">{t('ការលុបកម្រងសំណួរនេះនឹងធ្វើឱ្យបាត់បង់រាល់ព័ត៌មានសំណួរ និងចម្លើយទាំងអស់ពាក់ព័ន្ធ។', 'Deleting this quiz will permanently remove all associated questions and answers.')}</span>
             </p>
             <div className="flex justify-end space-x-3">
               <button
@@ -959,15 +956,15 @@ export default function TeacherManageQuizzes() {
                   setShowDeleteModal(false);
                   setSelectedQuiz(null);
                 }}
-                className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all"
+                className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
-                បោះបង់
+                {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-4 py-2 text-sm text-white bg-red-600 rounded-xl hover:bg-red-700 transition-all shadow-sm"
+                className="px-4 py-2 text-sm text-white bg-red-600 rounded-xl hover:bg-red-700 transition-all shadow-sm cursor-pointer"
               >
-                លុបចោល
+                {t('លុបចោល', 'Delete')}
               </button>
             </div>
           </div>
@@ -983,7 +980,7 @@ export default function TeacherManageQuizzes() {
                 <span className="bg-emerald-100 text-emerald-600 p-2 rounded-xl">
                   <ArrowUpTrayIcon className="h-5 w-5" />
                 </span>
-                នាំចូលកម្រងសំណួរតាម JSON (Import Quiz JSON)
+                {t('នាំចូលកម្រងសំណួរតាម JSON (Import Quiz JSON)', 'Import Quiz JSON')}
               </h2>
               <button
                 onClick={() => {
@@ -1002,7 +999,7 @@ export default function TeacherManageQuizzes() {
               {/* Target Course Selector */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ជ្រើសរើសមុខវិជ្ជាសម្រាប់នាំចូល <span className="text-red-500">*</span>
+                  {t('ជ្រើសរើសមុខវិជ្ជាសម្រាប់នាំចូល', 'Select Course to Import')} <span className="text-red-500">*</span>
                 </label>
                 <select
                   required
@@ -1010,7 +1007,7 @@ export default function TeacherManageQuizzes() {
                   onChange={(e) => setImportCourseId(e.target.value)}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white transition-all text-sm"
                 >
-                  <option value="">ជ្រើសរើសមុខវិជ្ជា</option>
+                  <option value="">{t('ជ្រើសរើសមុខវិជ្ជា', 'Select Course')}</option>
                   {Array.isArray(courses) && courses.map(course => (
                     <option key={course.id} value={course.id}>
                       {course.course_name} ({course.course_code})
@@ -1023,15 +1020,15 @@ export default function TeacherManageQuizzes() {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-sm font-medium text-gray-700">
-                    ជ្រើសរើសឯកសារ JSON <span className="text-red-500">*</span>
+                    {t('ជ្រើសរើសឯកសារ JSON', 'Select JSON File')} <span className="text-red-500">*</span>
                   </label>
                   <button
                     type="button"
                     onClick={downloadSampleJson}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:underline"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:underline cursor-pointer"
                   >
                     <ArrowDownTrayIcon className="h-3.5 w-3.5" />
-                    ទាញយកគំរូឯកសារ JSON
+                    {t('ទាញយកគំរូឯកសារ JSON', 'Download JSON Sample')}
                   </button>
                 </div>
                 <div className="border-2 border-dashed border-gray-300 hover:border-emerald-500 rounded-2xl p-6 text-center bg-gray-50/50 transition-colors">
@@ -1045,10 +1042,10 @@ export default function TeacherManageQuizzes() {
                   <label htmlFor="json-file-input" className="cursor-pointer flex flex-col items-center">
                     <DocumentTextIcon className="h-10 w-10 text-emerald-600 mb-2" />
                     <span className="text-sm font-semibold text-gray-800">
-                      {importFile ? importFile.name : 'ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ .json'}
+                      {importFile ? importFile.name : t('ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ .json', 'Click here to select .json file')}
                     </span>
                     <span className="text-xs text-gray-400 mt-1">
-                      {importFile ? `${(importFile.size / 1024).toFixed(1)} KB` : 'ទម្រង់ឯកសារ JSON (Standard Quiz JSON)'}
+                      {importFile ? `${(importFile.size / 1024).toFixed(1)} KB` : t('ទម្រង់ឯកសារ JSON (Standard Quiz JSON)', 'Standard Quiz JSON format')}
                     </span>
                   </label>
                 </div>
@@ -1059,11 +1056,11 @@ export default function TeacherManageQuizzes() {
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-800 space-y-1">
                   <div className="font-bold flex items-center gap-1 text-emerald-900">
                     <CheckCircleIcon className="h-4 w-4" />
-                    បានរកឃើញកម្រងសំណួរចំនួន {parsedQuizzes.length} កម្រង
+                    {t('បានរកឃើញកម្រងសំណួរចំនួន', 'Found quizzes:')} {parsedQuizzes.length} {t('កម្រង', 'quizzes')}
                   </div>
                   {parsedQuizzes.map((q, idx) => (
                     <div key={idx} className="pl-5 text-emerald-700">
-                      • {q.title || 'កម្រងសំណួរគ្មានចំណងជើង'} ({q.questions?.length || 0} សំណួរ)
+                      • {q.title || t('កម្រងសំណួរគ្មានចំណងជើង', 'Untitled Quiz')} ({q.questions?.length || 0} {t('សំណួរ', 'questions')})
                     </div>
                   ))}
                 </div>
@@ -1072,7 +1069,7 @@ export default function TeacherManageQuizzes() {
               {/* JSON Textarea Editor */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ឬបិទភ្ជាប់ទិន្នន័យ JSON ផ្ទាល់នៅទីនេះ (Or Paste JSON Directly)
+                  {t('ឬបិទភ្ជាប់ទិន្នន័យ JSON ផ្ទាល់នៅទីនេះ (Or Paste JSON Directly)', 'Or Paste JSON Directly')}
                 </label>
                 <textarea
                   rows={6}
@@ -1100,21 +1097,21 @@ export default function TeacherManageQuizzes() {
                     setJsonContent('');
                     setImportFile(null);
                   }}
-                  className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all"
+                  className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
                 >
-                  បោះបង់
+                  {t('បោះបង់', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isImporting || parsedQuizzes.length === 0}
-                  className="px-5 py-2.5 text-sm font-medium text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-all shadow-sm hover:shadow-md flex items-center gap-2 disabled:opacity-50"
+                  className="px-5 py-2.5 text-sm font-medium text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-all shadow-sm hover:shadow-md flex items-center gap-2 disabled:opacity-50 cursor-pointer"
                 >
                   {isImporting ? (
                     <ArrowPathIcon className="h-5 w-5 animate-spin" />
                   ) : (
                     <ArrowUpTrayIcon className="h-5 w-5" />
                   )}
-                  នាំចូលកម្រងសំណួរ ({parsedQuizzes.length})
+                  {t('នាំចូលកម្រងសំណួរ', 'Import Quizzes')} ({parsedQuizzes.length})
                 </button>
               </div>
             </form>
@@ -1133,12 +1130,12 @@ export default function TeacherManageQuizzes() {
                   <span className="bg-emerald-100 text-emerald-600 p-2 rounded-xl">
                     <DocumentCheckIcon className="h-6 w-6" />
                   </span>
-                  លទ្ធផល និងការប្រឡងរបស់សិស្ស (Quiz Submissions)
+                  {t('លទ្ធផល និងការប្រឡងរបស់សិស្ស (Quiz Submissions)', 'Quiz Submissions & Results')}
                 </h2>
                 <p className="text-xs text-gray-500 mt-1">
-                  កម្រងសំណួរ៖ <span className="font-semibold text-gray-800">{viewingQuiz.title}</span> 
+                  {t('កម្រងសំណួរ៖', 'Quiz:')} <span className="font-semibold text-gray-800">{viewingQuiz.title}</span> 
                   <span className="mx-2">•</span> 
-                  ពិន្ទុសរុប៖ <span className="font-semibold text-indigo-600">{viewingQuiz.total_mark} ពិន្ទុ</span>
+                  {t('ពិន្ទុសរុប៖', 'Total Mark:')} <span className="font-semibold text-indigo-600">{viewingQuiz.total_mark} {t('ពិន្ទុ', 'pts')}</span>
                 </p>
               </div>
               <button
@@ -1162,8 +1159,8 @@ export default function TeacherManageQuizzes() {
                     <AcademicCapIcon className="h-6 w-6" />
                   </div>
                   <div>
-                    <div className="text-xs text-indigo-600 font-semibold uppercase tracking-wider">សិស្សប្រឡងសរុប</div>
-                    <div className="text-2xl font-bold text-indigo-950">{submissions.length} នាក់</div>
+                    <div className="text-xs text-indigo-600 font-semibold uppercase tracking-wider">{t('សិស្សប្រឡងសរុប', 'Total Students')}</div>
+                    <div className="text-2xl font-bold text-indigo-950">{submissions.length} {t('នាក់', 'students')}</div>
                   </div>
                 </div>
 
@@ -1172,9 +1169,9 @@ export default function TeacherManageQuizzes() {
                     <CheckCircleIcon className="h-6 w-6" />
                   </div>
                   <div>
-                    <div className="text-xs text-emerald-600 font-semibold uppercase tracking-wider">ជាប់ (Pass ≥ 50%)</div>
+                    <div className="text-xs text-emerald-600 font-semibold uppercase tracking-wider">{t('ជាប់ (Pass ≥ 50%)', 'Passed (≥ 50%)')}</div>
                     <div className="text-2xl font-bold text-emerald-950">
-                      {submissions.filter(s => (parseFloat(s.score) / (parseFloat(viewingQuiz.total_mark) || 1)) >= 0.5).length} នាក់
+                      {submissions.filter(s => (parseFloat(s.score) / (parseFloat(viewingQuiz.total_mark) || 1)) >= 0.5).length} {t('នាក់', 'students')}
                     </div>
                   </div>
                 </div>
@@ -1184,7 +1181,7 @@ export default function TeacherManageQuizzes() {
                     <ClockIcon className="h-6 w-6" />
                   </div>
                   <div>
-                    <div className="text-xs text-amber-600 font-semibold uppercase tracking-wider">ពិន្ទុមធ្យម (Avg Score)</div>
+                    <div className="text-xs text-amber-600 font-semibold uppercase tracking-wider">{t('ពិន្ទុមធ្យម (Avg Score)', 'Average Score')}</div>
                     <div className="text-2xl font-bold text-amber-950">
                       {submissions.length > 0 
                         ? (submissions.reduce((acc, curr) => acc + (parseFloat(curr.score) || 0), 0) / submissions.length).toFixed(1)
@@ -1199,7 +1196,7 @@ export default function TeacherManageQuizzes() {
                 <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="ស្វែងរកតាមឈ្មោះ ឬអ៊ីមែលរបស់សិស្ស..."
+                  placeholder={t('ស្វែងរកតាមឈ្មោះ ឬអ៊ីមែលរបស់សិស្ស...', 'Search by student name or email...')}
                   value={submissionSearch}
                   onChange={(e) => setSubmissionSearch(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
@@ -1210,16 +1207,16 @@ export default function TeacherManageQuizzes() {
               {loadingSubmissions ? (
                 <div className="py-16 text-center text-gray-500">
                   <ArrowPathIcon className="h-8 w-8 animate-spin mx-auto text-emerald-600 mb-2" />
-                  <p className="text-sm font-medium">កំពុងទាញយកទិន្នន័យការប្រឡង...</p>
+                  <p className="text-sm font-medium">{t('កំពុងទាញយកទិន្នន័យការប្រឡង...', 'Fetching exam submissions...')}</p>
                 </div>
               ) : filteredSubmissions.length === 0 ? (
                 <div className="py-14 text-center text-gray-500 border border-dashed border-gray-200 rounded-2xl">
                   <DocumentCheckIcon className="h-12 w-12 text-gray-300 mx-auto mb-2" />
                   <p className="text-base font-semibold text-gray-700">
-                    {submissionSearch ? 'មិនរកឃើញសិស្សតាមការស្វែងរកទេ' : 'មិនទាន់មានសិស្សប្រឡងកម្រងសំណួរនេះនៅឡើយទេ'}
+                    {submissionSearch ? t('មិនរកឃើញសិស្សតាមការស្វែងរកទេ', 'No students match your search') : t('មិនទាន់មានសិស្សប្រឡងកម្រងសំណួរនេះនៅឡើយទេ', 'No students have taken this quiz yet')}
                   </p>
                   <p className="text-xs text-gray-400 mt-1">
-                    {submissionSearch ? 'សូមពិនិត្យពាក្យស្វែងរកឡើងវិញ' : 'នៅពេលសិស្សធ្វើកម្រងសំណួរចោទ លទ្ធផលនឹងបង្ហាញនៅទីនេះ'}
+                    {submissionSearch ? t('សូមពិនិត្យពាក្យស្វែងរកឡើងវិញ', 'Please check your search keywords') : t('នៅពេលសិស្សធ្វើកម្រងសំណួរចោទ លទ្ធផលនឹងបង្ហាញនៅទីនេះ', 'When students attempt the quiz, their results will appear here')}
                   </p>
                 </div>
               ) : (
@@ -1228,12 +1225,12 @@ export default function TeacherManageQuizzes() {
                     <table className="min-w-full divide-y divide-gray-100">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">No</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">ព័ត៌មានសិស្ស</th>
-                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">ថ្ងៃ ចាប់ផ្តើម</th>
-                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">ថ្ងៃ ប្រគល់ (Submitted)</th>
-                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">ពិន្ទុទទួលបាន</th>
-                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">ស្ថានភាព</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{t('ល.រ', 'No')}</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{t('ព័ត៌មានសិស្ស', 'Student Info')}</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{t('ថ្ងៃ ចាប់ផ្តើម', 'Started At')}</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{t('ថ្ងៃ ប្រគល់ (Submitted)', 'Submitted At')}</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{t('ពិន្ទុទទួលបាន', 'Score')}</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{t('ស្ថានភាព', 'Status')}</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-100">
@@ -1241,7 +1238,7 @@ export default function TeacherManageQuizzes() {
                           const student = attempt.student;
                           const studentName = student 
                             ? `${student.first_name || ''} ${student.last_name || ''}`.trim() || student.email 
-                            : 'Unknown Student';
+                            : t('មិនស្គាល់អត្តសញ្ញាណ', 'Unknown Student');
                           const scoreVal = parseFloat(attempt.score) || 0;
                           const totalVal = parseFloat(viewingQuiz.total_mark) || 100;
                           const percentage = Math.round((scoreVal / totalVal) * 100);
@@ -1291,7 +1288,7 @@ export default function TeacherManageQuizzes() {
                                     ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
                                     : 'bg-rose-100 text-rose-800 border border-rose-200'
                                 }`}>
-                                  {isPassed ? 'ជាប់ (Passed)' : 'ធ្លាក់ (Failed)'}
+                                  {isPassed ? t('ជាប់ (Passed)', 'Passed') : t('ធ្លាក់ (Failed)', 'Failed')}
                                 </span>
                               </td>
                             </tr>
@@ -1313,9 +1310,9 @@ export default function TeacherManageQuizzes() {
                   setViewingQuiz(null);
                   setSubmissions([]);
                 }}
-                className="px-5 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all"
+                className="px-5 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
-                បិទ (Close)
+                {t('បិទ (Close)', 'Close')}
               </button>
             </div>
           </div>

@@ -2,16 +2,18 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 
 const ProtectedRoute = ({ allowedRoles }) => {
   const { user, isAuthenticated, loading } = useAuth();
+  const { t } = useLanguage();
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-14 w-14 border-2 border-primary-100 border-t-primary-600 mx-auto"></div>
-          <p className="mt-4 text-sm text-gray-500 font-medium">កំពុងផ្ទៀងផ្ទាត់...</p>
+          <p className="mt-4 text-sm text-gray-500 font-medium">{t('កំពុងផ្ទៀងផ្ទាត់...', 'Authenticating...')}</p>
         </div>
       </div>
     );

@@ -2,8 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
+import { useLanguage } from '../../context/LanguageContext';
 
 const ManageAttendance = () => {
+  const { t } = useLanguage();
   const [courses, setCourses] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState('');
   const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
@@ -31,7 +33,7 @@ const ManageAttendance = () => {
         setSelectedCourse(validCourses[0].id);
       }
     } catch (error) {
-      toast.error('Failed to fetch courses');
+      toast.error(t('មិនអាចទាញយកបញ្ជីមុខវិជ្ជាបានទេ', 'Failed to fetch courses'));
       setCourses([]);
     }
   };
@@ -44,10 +46,10 @@ const ManageAttendance = () => {
       const validStudents = getArrayData(response.data);
       setStudents(validStudents.map(student => ({
         ...student,
-        attendance_status: 'Present', // Default
+        attendance_status: 'Present',
       })));
     } catch (error) {
-      toast.error('Failed to fetch students');
+      toast.error(t('មិនអាចទាញយកបញ្ជីសិស្សបានទេ', 'Failed to fetch students'));
       setStudents([]);
     } finally {
       setLoading(false);
@@ -83,9 +85,9 @@ const ManageAttendance = () => {
         attendance: attendanceData,
       });
 
-      toast.success('Attendance marked successfully');
+      toast.success(t('បានកត់ត្រាវត្តមានដោយជោគជ័យ', 'Attendance marked successfully'));
     } catch (error) {
-      toast.error('Failed to mark attendance');
+      toast.error(t('មិនអាចកត់ត្រាវត្តមានបានទេ', 'Failed to mark attendance'));
     } finally {
       setLoading(false);
     }
@@ -93,20 +95,20 @@ const ManageAttendance = () => {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Manage Attendance</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">{t('គ្រប់គ្រងវត្តមាន', 'Manage Attendance')}</h1>
 
       <div className="bg-white rounded-lg shadow p-6">
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Course</label>
+              <label className="block text-sm font-medium text-gray-700">{t('មុខវិជ្ជា', 'Course')}</label>
               <select
                 value={selectedCourse}
                 onChange={(e) => setSelectedCourse(e.target.value)}
                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
                 required
               >
-                <option value="">Select Course</option>
+                <option value="">{t('ជ្រើសរើសមុខវិជ្ជា', 'Select Course')}</option>
                 {(Array.isArray(courses) ? courses : []).map((course) => (
                   <option key={course.id} value={course.id}>
                     {course.course_name} ({course.course_code})
@@ -115,7 +117,7 @@ const ManageAttendance = () => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Attendance Date</label>
+              <label className="block text-sm font-medium text-gray-700">{t('កាលបរិច្ឆេទវត្តមាន', 'Attendance Date')}</label>
               <input
                 type="date"
                 value={attendanceDate}
@@ -131,10 +133,10 @@ const ManageAttendance = () => {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Student
+                    {t('សិស្ស', 'Student')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
+                    {t('ស្ថានភាព', 'Status')}
                   </th>
                 </tr>
               </thead>
@@ -150,9 +152,9 @@ const ManageAttendance = () => {
                         onChange={(e) => handleAttendanceChange(student.id, e.target.value)}
                         className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
                       >
-                        <option value="Present">Present</option>
-                        <option value="Absent">Absent</option>
-                        <option value="Late">Late</option>
+                        <option value="Present">{t('វត្តមាន (Present)', 'Present')}</option>
+                        <option value="Absent">{t('អវត្តមាន (Absent)', 'Absent')}</option>
+                        <option value="Late">{t('យឺត (Late)', 'Late')}</option>
                       </select>
                     </td>
                   </tr>
@@ -167,7 +169,7 @@ const ManageAttendance = () => {
               disabled={loading}
               className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
             >
-              {loading ? 'Saving...' : 'Save Attendance'}
+              {loading ? t('កំពុងរក្សាទុក...', 'Saving...') : t('រក្សាទុកវត្តមាន', 'Save Attendance')}
             </button>
           </div>
         </form>

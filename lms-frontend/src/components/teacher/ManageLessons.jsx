@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
+import { useLanguage } from '../../context/LanguageContext';
 import {
   BookOpenIcon,
   PlusIcon,
@@ -20,6 +21,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function ManageLessons() {
+  const { t, language } = useLanguage();
   const [lessons, setLessons] = useState([]);
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -88,7 +90,7 @@ export default function ManageLessons() {
       const coursesData = response.data.data || response.data || [];
       setCourses(Array.isArray(coursesData) ? coursesData : []);
     } catch (error) {
-      toast.error('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ', 'Cannot fetch courses data'));
       setCourses([]);
     }
   };
@@ -99,7 +101,7 @@ export default function ManageLessons() {
       const lessonsData = response.data.data || response.data || [];
       setLessons(Array.isArray(lessonsData) ? lessonsData : []);
     } catch (error) {
-      toast.error('មិនអាចទាញយកទិន្នន័យមេរៀនបានទេ');
+      toast.error(t('មិនអាចទាញយកទិន្នន័យមេរៀនបានទេ', 'Cannot fetch lessons data'));
       setLessons([]);
     }
   };
@@ -144,7 +146,6 @@ export default function ManageLessons() {
     setShowAddModal(true);
   };
 
-  // កែសម្រួល handleSubmit ថ្មីដើម្បីរុញទាំងអក្សរ និងឯកសារ
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -159,19 +160,16 @@ export default function ManageLessons() {
     try {
       let currentLessonId = null;
 
-      // ជំហានទី១៖ បង្កើត ឬ កែប្រែមេរៀន (បញ្ជូនទិន្នន័យជាអក្សរ)
       if (editingLesson) {
         await api.put(`/teacher/lessons/${editingLesson.id}`, payload);
         currentLessonId = editingLesson.id;
-        toast.success('បានកែប្រែមេរៀនដោយជោគជ័យ');
+        toast.success(t('បានកែប្រែមេរៀនដោយជោគជ័យ', 'Lesson updated successfully'));
       } else {
         const response = await api.post('/teacher/lessons', payload);
-        // ចាប់យក ID របស់មេរៀនដែលទើបនឹងបង្កើតថ្មី 
         currentLessonId = response.data?.lesson?.id || response.data?.id; 
-        toast.success('បានបន្ថែមមេរៀនដោយជោគជ័យ');
+        toast.success(t('បានបន្ថែមមេរៀនដោយជោគជ័យ', 'Lesson created successfully'));
       }
 
-      // ជំហានទី២៖ ផ្ទុកឡើងឯកសារ (ប្រសិនបើមាន)
       if (selectedFiles.length > 0 && currentLessonId) {
         for (const file of selectedFiles) {
           const filePayload = new FormData();
@@ -184,12 +182,11 @@ export default function ManageLessons() {
              });
           } catch (fileError) {
              console.error('File upload failed for', file.name, fileError);
-             toast.error(`មិនអាចផ្ទុកឯកសារ ${file.name} ឡើងបានទេ`);
+             toast.error(t(`មិនអាចផ្ទុកឯកសារ ${file.name} ឡើងបានទេ`, `Failed to upload file ${file.name}`));
           }
         }
       }
 
-      // ជំហានទី៣៖ បញ្ចូលវីដេអូ YouTube (ប្រសិនបើមាន)
       if (youtubeVideo.url && youtubeVideo.title && currentLessonId) {
          const videoPayload = new FormData();
          videoPayload.append('lesson_id', currentLessonId);
@@ -202,7 +199,7 @@ export default function ManageLessons() {
             });
          } catch (videoError) {
             console.error('Video upload failed', videoError);
-            toast.error('មិនអាចបញ្ចូលវីដេអូបានទេ');
+            toast.error(t('មិនអាចបញ្ចូលវីដេអូបានទេ', 'Failed to upload video'));
          }
       }
 
@@ -216,7 +213,7 @@ export default function ManageLessons() {
       if (error.response?.data?.errors) {
         toast.error(Object.values(error.response.data.errors).flat().join('\n'));
       } else {
-        toast.error(error.response?.data?.message || 'ការរក្សាទុកមេរៀនបានបរាជ័យ');
+        toast.error(error.response?.data?.message || t('ការរក្សាទុកមេរៀនបានបរាជ័យ', 'Failed to save lesson'));
       }
     } finally {
       setIsSubmitting(false);
@@ -232,12 +229,12 @@ export default function ManageLessons() {
     if (!selectedLesson) return;
     try {
       await api.delete(`/teacher/lessons/${selectedLesson.id}`);
-      toast.success('បានលុបមេរៀនដោយជោគជ័យ');
+      toast.success(t('បានលុបមេរៀនដោយជោគជ័យ', 'Lesson deleted successfully'));
       setShowDeleteModal(false);
       setSelectedLesson(null);
       await fetchLessons();
     } catch (error) {
-      toast.error('មិនអាចលុបមេរៀនបានទេ');
+      toast.error(t('មិនអាចលុបមេរៀនបានទេ', 'Cannot delete lesson'));
     }
   };
 
@@ -255,10 +252,10 @@ export default function ManageLessons() {
       await api.post('/teacher/lessons/file', filePayload, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      toast.success('បានផ្ទុកឡើងឯកសារដោយជោគជ័យ');
+      toast.success(t('បានផ្ទុកឡើងឯកសារដោយជោគជ័យ', 'File uploaded successfully'));
       await fetchLessons();
     } catch (error) {
-      toast.error(error.response?.data?.message || 'ការផ្ទុកឡើងឯកសារបានបរាជ័យ');
+      toast.error(error.response?.data?.message || t('ការផ្ទុកឡើងឯកសារបានបរាជ័យ', 'Failed to upload file'));
     } finally {
       setUploadingFileId(null);
     }
@@ -266,13 +263,13 @@ export default function ManageLessons() {
 
   // Delete Lesson File
   const handleDeleteFile = async (fileId) => {
-    if (!window.confirm('តើអ្នកចង់លុបឯកសារនេះមែនទេ?')) return;
+    if (!window.confirm(t('តើអ្នកចង់លុបឯកសារនេះមែនទេ?', 'Are you sure you want to delete this file?'))) return;
     try {
       await api.delete(`/teacher/lessons/files/${fileId}`);
-      toast.success('បានលុបឯកសារដោយជោគជ័យ');
+      toast.success(t('បានលុបឯកសារដោយជោគជ័យ', 'File deleted successfully'));
       await fetchLessons();
     } catch (error) {
-      toast.error('មិនអាចលុបឯកសារបានទេ');
+      toast.error(t('មិនអាចលុបឯកសារបានទេ', 'Cannot delete file'));
     }
   };
 
@@ -281,7 +278,7 @@ export default function ManageLessons() {
     const file = e.target.files[0];
     if (!file) return;
     if (!videoTitle) {
-      toast.error('សូមបញ្ចូលចំណងជើងវីដេអូមុនពេលផ្ទុកឡើង');
+      toast.error(t('សូមបញ្ចូលចំណងជើងវីដេអូមុនពេលផ្ទុកឡើង', 'Please enter video title before uploading'));
       return;
     }
 
@@ -295,11 +292,11 @@ export default function ManageLessons() {
       await api.post('/teacher/lessons/video', videoPayload, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      toast.success('បានផ្ទុកឡើងវីដេអូដោយជោគជ័យ');
+      toast.success(t('បានផ្ទុកឡើងវីដេអូដោយជោគជ័យ', 'Video uploaded successfully'));
       setVideoTitle('');
       await fetchLessons();
     } catch (error) {
-      toast.error(error.response?.data?.message || 'ការផ្ទុកឡើងវីដេអូបានបរាជ័យ');
+      toast.error(error.response?.data?.message || t('ការផ្ទុកឡើងវីដេអូបានបរាជ័យ', 'Failed to upload video'));
     } finally {
       setUploadingVideoId(null);
     }
@@ -307,13 +304,13 @@ export default function ManageLessons() {
 
   // Delete Video
   const handleDeleteVideo = async (videoId) => {
-    if (!window.confirm('តើអ្នកចង់លុបវីដេអូនេះមែនទេ?')) return;
+    if (!window.confirm(t('តើអ្នកចង់លុបវីដេអូនេះមែនទេ?', 'Are you sure you want to delete this video?'))) return;
     try {
       await api.delete(`/teacher/lessons/videos/${videoId}`);
-      toast.success('បានលុបវីដេអូដោយជោគជ័យ');
+      toast.success(t('បានលុបវីដេអូដោយជោគជ័យ', 'Video deleted successfully'));
       await fetchLessons();
     } catch (error) {
-      toast.error('មិនអាចលុបវីដេអូបានទេ');
+      toast.error(t('មិនអាចលុបវីដេអូបានទេ', 'Cannot delete video'));
     }
   };
 
@@ -336,19 +333,19 @@ export default function ManageLessons() {
               <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
                 <BookOpenIcon className="h-6 w-6" />
               </span>
-              គ្រប់គ្រងមេរៀន
+              {t('គ្រប់គ្រងមេរៀន', 'Manage Lessons')}
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              បន្ថែមមេរៀន ក៏ដូចជាវីដេអូ និងឯកសារបង្រៀនសម្រាប់មុខវិជ្ជានីមួយៗ
-              <span className="ml-2 text-indigo-600 font-medium">({Array.isArray(lessons) ? lessons.length : 0} មេរៀន)</span>
+              {t('បន្ថែមមេរៀន ក៏ដូចជាវីដេអូ និងឯកសារបង្រៀនសម្រាប់មុខវិជ្ជានីមួយៗ', 'Add lessons, videos, and teaching materials for each course')}
+              <span className="ml-2 text-indigo-600 font-medium">({Array.isArray(lessons) ? lessons.length : 0} {t('មេរៀន', 'lessons')})</span>
             </p>
           </div>
           <button
             onClick={openAddModal}
-            className="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl shadow-sm hover:bg-indigo-700 transition-all hover:shadow-md"
+            className="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl shadow-sm hover:bg-indigo-700 transition-all hover:shadow-md cursor-pointer"
           >
             <PlusIcon className="h-5 w-5 mr-2" />
-            បន្ថែមមេរៀន
+            {t('បន្ថែមមេរៀន', 'Add Lesson')}
           </button>
         </div>
       </div>
@@ -360,7 +357,7 @@ export default function ManageLessons() {
             <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
             <input
               type="text"
-              placeholder="ស្វែងរកតាមចំណងជើង ឬការពិពណ៌នា..."
+              placeholder={t('ស្វែងរកតាមចំណងជើង ឬការពិពណ៌នា...', 'Search by title or description...')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
@@ -372,7 +369,7 @@ export default function ManageLessons() {
               onChange={(e) => setSelectedCourse(e.target.value)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
             >
-              <option value="">គ្រប់មុខវិជ្ជា</option>
+              <option value="">{t('គ្រប់មុខវិជ្ជា', 'All Courses')}</option>
               {Array.isArray(courses) && courses.map(course => (
                 <option key={course.id} value={course.id}>
                   {course.course_name} ({course.course_code})
@@ -389,11 +386,11 @@ export default function ManageLessons() {
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">No</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Files</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Videos</th>
-                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ល.រ', 'No')}</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ឈ្មោះមេរៀន', 'Lesson Title')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('ឯកសារ', 'Files')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('វីដេអូ', 'Videos')}</th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('សកម្មភាព', 'Actions')}</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
@@ -403,10 +400,10 @@ export default function ManageLessons() {
                     <div className="flex flex-col items-center">
                       <BookOpenIcon className="h-16 w-16 text-gray-300 mb-3" />
                       <p className="font-medium">
-                        {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានមេរៀននៅឡើយទេ'}
+                        {searchTerm ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found') : t('មិនទាន់មានមេរៀននៅឡើយទេ', 'No lessons available yet')}
                       </p>
                       <p className="text-sm text-gray-400 mt-1">
-                        {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមមេរៀន" ដើម្បីចាប់ផ្តើម'}
+                        {searchTerm ? t('សូមប្តូរពាក្យស្វែងរក', 'Please try a different search keyword') : t('ចុច "បន្ថែមមេរៀន" ដើម្បីចាប់ផ្តើម', 'Click "Add Lesson" to get started')}
                       </p>
                     </div>
                   </td>
@@ -431,10 +428,10 @@ export default function ManageLessons() {
                             {lesson.title}
                           </div>
                           <div className="text-xs text-indigo-600 font-medium mt-0.5">
-                            {lesson.course?.course_name || 'គ្មានមុខវិជ្ជា'} ({lesson.course?.course_code})
+                            {lesson.course?.course_name || t('គ្មានមុខវិជ្ជា', 'No Course')} ({lesson.course?.course_code})
                           </div>
                           <div className="text-xs text-gray-500 line-clamp-1 mt-1">
-                            {lesson.description || 'គ្មានការពិពណ៌នា'}
+                            {lesson.description || t('គ្មានការពិពណ៌នា', 'No Description')}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
@@ -454,21 +451,21 @@ export default function ManageLessons() {
                             <button
                               onClick={() => openEditModal(lesson)}
                               className="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-all"
-                              title="កែប្រែ"
+                              title={t('កែប្រែ', 'Edit')}
                             >
                               <PencilSquareIcon className="h-5 w-5" />
                             </button>
                             <button
                               onClick={() => handleDeleteClick(lesson)}
                               className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-xl transition-all"
-                              title="លុប"
+                              title={t('លុប', 'Delete')}
                             >
                               <TrashIcon className="h-5 w-5" />
                             </button>
                             <button
                               onClick={() => setExpandedLesson(isExpanded ? null : lesson.id)}
                               className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
-                              title={isExpanded ? 'បិទព័ត៌មានលម្អិត' : 'បង្ហាញព័ត៌មានលម្អិត'}
+                              title={isExpanded ? t('បិទព័ត៌មានលម្អិត', 'Hide Details') : t('បង្ហាញព័ត៌មានលម្អិត', 'Show Details')}
                             >
                               {isExpanded ? (
                                 <ChevronUpIcon className="h-5 w-5" />
@@ -489,11 +486,11 @@ export default function ManageLessons() {
                               <div>
                                 <h4 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-1.5 border-b pb-1.5">
                                   <DocumentIcon className="h-4 w-4 text-indigo-600" />
-                                  ឯកសារមេរៀន ({filesCount})
+                                  {t('ឯកសារមេរៀន', 'Lesson Files')} ({filesCount})
                                 </h4>
                                 <div className="space-y-2 mb-4 max-h-[200px] overflow-y-auto pr-1">
                                   {filesCount === 0 ? (
-                                    <p className="text-xs text-gray-400 italic">គ្មានឯកសារផ្ទុកឡើង</p>
+                                    <p className="text-xs text-gray-400 italic">{t('គ្មានឯកសារផ្ទុកឡើង', 'No uploaded files')}</p>
                                   ) : (
                                     Array.isArray(lesson.files) && lesson.files.map(file => (
                                       <div key={file.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs hover:shadow-xs transition text-xs">
@@ -508,8 +505,8 @@ export default function ManageLessons() {
                                         </a>
                                         <button
                                           onClick={() => handleDeleteFile(file.id)}
-                                          className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition"
-                                          title="លុបឯកសារ"
+                                          className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                                          title={t('លុបឯកសារ', 'Delete file')}
                                         >
                                           <TrashIcon className="h-4 w-4" />
                                         </button>
@@ -521,14 +518,14 @@ export default function ManageLessons() {
                                   <button
                                     onClick={() => fileInputRef.current?.click()}
                                     disabled={uploadingFileId === lesson.id}
-                                    className="inline-flex items-center justify-center px-4 py-2 border border-dashed border-indigo-300 hover:border-indigo-500 bg-white hover:bg-indigo-50/50 text-indigo-600 text-xs font-semibold rounded-xl transition"
+                                    className="inline-flex items-center justify-center px-4 py-2 border border-dashed border-indigo-300 hover:border-indigo-500 bg-white hover:bg-indigo-50/50 text-indigo-600 text-xs font-semibold rounded-xl transition cursor-pointer"
                                   >
                                     {uploadingFileId === lesson.id ? (
                                       <ArrowPathIcon className="h-4 w-4 animate-spin mr-1.5" />
                                     ) : (
                                       <PaperClipIcon className="h-4 w-4 mr-1.5" />
                                     )}
-                                    ផ្ទុកឡើងឯកសារ
+                                    {t('ផ្ទុកឡើងឯកសារ', 'Upload File')}
                                   </button>
                                   <input
                                     ref={fileInputRef}
@@ -544,11 +541,11 @@ export default function ManageLessons() {
                               <div>
                                 <h4 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-1.5 border-b pb-1.5">
                                   <VideoCameraIcon className="h-4 w-4 text-purple-600" />
-                                  វីដេអូបង្រៀន ({videosCount})
+                                  {t('វីដេអូបង្រៀន', 'Teaching Videos')} ({videosCount})
                                 </h4>
                                 <div className="space-y-2 mb-4 max-h-[200px] overflow-y-auto pr-1">
                                   {videosCount === 0 ? (
-                                    <p className="text-xs text-gray-400 italic">គ្មានវីដេអូផ្ទុកឡើង</p>
+                                    <p className="text-xs text-gray-400 italic">{t('គ្មានវីដេអូផ្ទុកឡើង', 'No uploaded videos')}</p>
                                   ) : (
                                     Array.isArray(lesson.videos) && lesson.videos.map(video => (
                                       <div key={video.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs hover:shadow-xs transition text-xs">
@@ -563,8 +560,8 @@ export default function ManageLessons() {
                                         </a>
                                         <button
                                           onClick={() => handleDeleteVideo(video.id)}
-                                          className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition"
-                                          title="លុបវីដេអូ"
+                                          className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                                          title={t('លុបវីដេអូ', 'Delete video')}
                                         >
                                           <TrashIcon className="h-4 w-4" />
                                         </button>
@@ -576,7 +573,7 @@ export default function ManageLessons() {
                                   <div className="flex gap-2">
                                     <input
                                       type="text"
-                                      placeholder="ចំណងជើងវីដេអូ..."
+                                      placeholder={t('ចំណងជើងវីដេអូ...', 'Video title...')}
                                       value={videoTitle}
                                       onChange={(e) => setVideoTitle(e.target.value)}
                                       className="flex-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500"
@@ -584,14 +581,14 @@ export default function ManageLessons() {
                                     <button
                                       onClick={() => videoFileInputRef.current?.click()}
                                       disabled={uploadingVideoId === lesson.id || !videoTitle}
-                                      className="inline-flex items-center justify-center px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition disabled:opacity-40"
+                                      className="inline-flex items-center justify-center px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition disabled:opacity-40 cursor-pointer"
                                     >
                                       {uploadingVideoId === lesson.id ? (
                                         <ArrowPathIcon className="h-3.5 w-3.5 animate-spin mr-1" />
                                       ) : (
                                         <VideoCameraIcon className="h-3.5 w-3.5 mr-1" />
                                       )}
-                                      ផ្ទុកឡើង
+                                      {t('ផ្ទុកឡើង', 'Upload')}
                                     </button>
                                   </div>
                                   <input
@@ -625,7 +622,7 @@ export default function ManageLessons() {
                 <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
                   <BookOpenIcon className="h-5 w-5" />
                 </span>
-                {editingLesson ? 'កែប្រែមេរៀន' : 'បន្ថែមមេរៀនថ្មី'}
+                {editingLesson ? t('កែប្រែមេរៀន', 'Edit Lesson') : t('បន្ថែមមេរៀនថ្មី', 'Add New Lesson')}
               </h2>
               <button
                 onClick={() => setShowAddModal(false)}
@@ -640,7 +637,7 @@ export default function ManageLessons() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    មុខវិជ្ជា <span className="text-red-500">*</span>
+                    {t('មុខវិជ្ជា', 'Course')} <span className="text-red-500">*</span>
                   </label>
                   <select
                     name="course_id"
@@ -649,7 +646,7 @@ export default function ManageLessons() {
                     onChange={handleInputChange}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
                   >
-                    <option value="">ជ្រើសរើសមុខវិជ្ជា</option>
+                    <option value="">{t('ជ្រើសរើសមុខវិជ្ជា', 'Select Course')}</option>
                     {Array.isArray(courses) && courses.map(course => (
                       <option key={course.id} value={course.id}>
                         {course.course_name}
@@ -659,7 +656,7 @@ export default function ManageLessons() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    លំដាប់លំដោយ <span className="text-red-500">*</span>
+                    {t('លំដាប់លំដោយ', 'Lesson Order')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -676,7 +673,7 @@ export default function ManageLessons() {
               {/* Row 2: Title */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ចំណងជើងមេរៀន <span className="text-red-500">*</span>
+                  {t('ចំណងជើងមេរៀន', 'Lesson Title')} <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -684,7 +681,7 @@ export default function ManageLessons() {
                   required
                   value={formData.title}
                   onChange={handleInputChange}
-                  placeholder="ឧ. សេចក្តីផ្តើមអំពីកម្មវិធី..."
+                  placeholder={t('ឧ. សេចក្តីផ្តើមអំពីកម្មវិធី...', 'e.g., Introduction to Programming...')}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                 />
               </div>
@@ -692,14 +689,14 @@ export default function ManageLessons() {
               {/* Row 3: Description */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ការពិពណ៌នា
+                  {t('ការពិពណ៌នា', 'Description')}
                 </label>
                 <textarea
                   name="description"
                   rows={3}
                   value={formData.description}
                   onChange={handleInputChange}
-                  placeholder="ពិពណ៌នាអំពីមេរៀន..."
+                  placeholder={t('ពិពណ៌នាអំពីមេរៀន...', 'Describe the lesson...')}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
                 />
               </div>
@@ -707,13 +704,13 @@ export default function ManageLessons() {
               {/* Row 4: Upload Files */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ផ្ទុកឡើងឯកសារ (PDF, DOCX, ជាដើម)
+                  {t('ផ្ទុកឡើងឯកសារ (PDF, DOCX, ជាដើម)', 'Upload Files (PDF, DOCX, etc.)')}
                 </label>
                 <div className="flex items-center gap-3">
                   <label className="flex-1 cursor-pointer">
                     <div className="flex items-center justify-center px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-indigo-400 transition-all bg-gray-50 hover:bg-indigo-50/30">
                       <PaperClipIcon className="h-5 w-5 text-gray-400 mr-2" />
-                      <span className="text-sm text-gray-600">ជ្រើសរើសឯកសារ</span>
+                      <span className="text-sm text-gray-600">{t('ជ្រើសរើសឯកសារ', 'Select Files')}</span>
                       <input
                         type="file"
                         multiple
@@ -746,12 +743,12 @@ export default function ManageLessons() {
               <div className="border-t border-gray-100 pt-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   <VideoCameraIcon className="h-4 w-4 inline mr-1 text-purple-600" />
-                  វីដេអូ (YouTube URL)
+                  {t('វីដេអូ (YouTube URL)', 'Video (YouTube URL)')}
                 </label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <input
                     type="text"
-                    placeholder="ចំណងជើងវីដេអូ"
+                    placeholder={t('ចំណងជើងវីដេអូ', 'Video Title')}
                     value={youtubeVideo.title}
                     onChange={(e) => setYoutubeVideo({ ...youtubeVideo, title: e.target.value })}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
@@ -776,21 +773,21 @@ export default function ManageLessons() {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all"
+                  className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
                 >
-                  បោះបង់
+                  {t('បោះបង់', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-all shadow-sm hover:shadow-md flex items-center gap-2 disabled:opacity-50"
+                  className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-all shadow-sm hover:shadow-md flex items-center gap-2 disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmitting ? (
                     <ArrowPathIcon className="h-5 w-5 animate-spin" />
                   ) : (
                     <BookOpenIcon className="h-5 w-5" />
                   )}
-                  {editingLesson ? 'រក្សាទុក' : 'បង្កើតមេរៀន'}
+                  {editingLesson ? t('រក្សាទុក', 'Save Changes') : t('បង្កើតមេរៀន', 'Create Lesson')}
                 </button>
               </div>
             </form>
@@ -804,12 +801,12 @@ export default function ManageLessons() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 animate-fadeIn">
             <div className="flex items-center text-red-600 mb-4">
               <ExclamationTriangleIcon className="h-6 w-6 mr-2" />
-              <h3 className="text-lg font-bold">បញ្ជាក់ការលុប</h3>
+              <h3 className="text-lg font-bold">{t('បញ្ជាក់ការលុប', 'Confirm Deletion')}</h3>
             </div>
             <p className="text-sm text-gray-600 mb-6">
-              តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបមេរៀន «<span className="font-semibold text-gray-800">{selectedLesson?.title}</span>» នេះមែនទេ?
+              {t('តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបមេរៀន', 'Are you sure you want to delete lesson')} «<span className="font-semibold text-gray-800">{selectedLesson?.title}</span>» {t('នេះមែនទេ?', 'this lesson?')}
               <br />
-              <span className="text-red-500 text-xs font-semibold mt-1 block">* ឯកសារ និងវីដេអូទាំងអស់របស់មេរៀននេះនឹងត្រូវលុបចោលទាំងស្រុង។</span>
+              <span className="text-red-500 text-xs font-semibold mt-1 block">{t('* ឯកសារ និងវីដេអូទាំងអស់របស់មេរៀននេះនឹងត្រូវលុបចោលទាំងស្រុង។', '* All files and videos in this lesson will be permanently deleted.')}</span>
             </p>
             <div className="flex justify-end space-x-3">
               <button
@@ -817,15 +814,15 @@ export default function ManageLessons() {
                   setShowDeleteModal(false);
                   setSelectedLesson(null);
                 }}
-                className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all"
+                className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
-                បោះបង់
+                {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-4 py-2 text-sm text-white bg-red-600 rounded-xl hover:bg-red-700 transition-all shadow-sm"
+                className="px-4 py-2 text-sm text-white bg-red-600 rounded-xl hover:bg-red-700 transition-all shadow-sm cursor-pointer"
               >
-                លុបចោល
+                {t('លុបចោល', 'Delete')}
               </button>
             </div>
           </div>

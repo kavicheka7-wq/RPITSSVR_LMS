@@ -211,7 +211,7 @@ class AdminController extends Controller
     public function getSystemSettings()
     {
         return response()->json([
-            'site_name' => 'LMS College',
+            'site_name' => 'LMS RPITSSVR',
             'timezone' => 'UTC',
             'date_format' => 'Y-m-d',
             'time_format' => 'H:i',

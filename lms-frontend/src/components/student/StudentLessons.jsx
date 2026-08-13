@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
+import { useLanguage } from '../../context/LanguageContext';
 import {
   BookOpenIcon,
   ArrowPathIcon,
@@ -14,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const StudentLessons = () => {
+  const { t } = useLanguage();
   const [lessons, setLessons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,7 +39,7 @@ const StudentLessons = () => {
       const response = await api.get('/student/lessons');
       setLessons(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
-      toast.error('មិនអាចទាញយកព័ត៌មានមេរៀនបានទេ (Failed to fetch lessons)');
+      toast.error(t('មិនអាចទាញយកព័ត៌មានមេរៀនបានទេ', 'Failed to fetch lessons'));
     } finally {
       setLoading(false);
     }
@@ -57,13 +59,11 @@ const StudentLessons = () => {
     return '📄';
   };
 
-  // Get unique courses for the filter dropdown
   const courses = Array.from(new Set(lessons.map(l => l.course?.id).filter(Boolean))).map(id => {
     const lesson = lessons.find(l => l.course?.id === id);
     return lesson ? lesson.course : null;
   }).filter(Boolean);
 
-  // Filter lessons based on search query and course filter
   const filteredLessons = lessons.filter((lesson) => {
     const matchesSearch = 
       lesson.title?.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -75,13 +75,11 @@ const StudentLessons = () => {
     return matchesSearch && matchesCourse;
   });
 
-  const baseURL = api.defaults.baseURL.replace('/api', '');
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <ArrowPathIcon className="h-10 w-10 text-blue-900 animate-spin" />
-        <p className="text-sm text-gray-500 font-sans">កំពុងផ្ទុកព័ត៌មានមេរៀន... (Loading lessons catalogue...)</p>
+        <p className="text-sm text-gray-500 font-sans">{t('កំពុងផ្ទុកព័ត៌មានមេរៀន...', 'Loading lessons catalogue...')}</p>
       </div>
     );
   }
@@ -96,11 +94,11 @@ const StudentLessons = () => {
         
         <div className="relative z-10 space-y-2">
           <span className="text-xs font-bold text-yellow-400 bg-yellow-400/10 px-3 py-1 rounded-lg border border-yellow-400/20 uppercase tracking-wider">
-            បណ្ណាល័យមេរៀន (Lessons Catalogue)
+            {t('បណ្ណាល័យមេរៀន', 'Lessons Catalogue')}
           </span>
-          <h1 className="text-3xl font-extrabold tracking-tight">មេរៀន និងឯកសារមេរៀនទាំងអស់</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight">{t('មេរៀន និងឯកសារមេរៀនទាំងអស់', 'All Lessons & Course Materials')}</h1>
           <p className="text-blue-200 text-sm max-w-xl font-medium">
-            ស្វែងរក និងទាញយកមេរៀន វីដេអូបង្រៀន និងឯកសារជំនួយការសិក្សាពីគ្រប់មុខវិជ្ជា។ (Browse study files and video lectures.)
+            {t('ស្វែងរក និងទាញយកមេរៀន វីដេអូបង្រៀន និងឯកសារជំនួយការសិក្សាពីគ្រប់មុខវិជ្ជា។', 'Browse study files and video lectures for all your enrolled courses.')}
           </p>
         </div>
       </div>
@@ -113,7 +111,7 @@ const StudentLessons = () => {
           <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder="ស្វែងរកតាមចំណងជើង ឬកូដមុខវិជ្ជា... (Search lessons...)"
+            placeholder={t('ស្វែងរកតាមចំណងជើង ឬកូដមុខវិជ្ជា...', 'Search lessons...')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-11 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-950 transition-colors"
@@ -128,7 +126,7 @@ const StudentLessons = () => {
             onChange={(e) => setSelectedCourse(e.target.value)}
             className="w-full md:w-64 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-950 bg-white transition-colors font-semibold text-gray-700"
           >
-            <option value="all">មុខវិជ្ជាទាំងអស់ (All Courses)</option>
+            <option value="all">{t('មុខវិជ្ជាទាំងអស់', 'All Courses')}</option>
             {(Array.isArray(courses) ? courses : []).map((course) => (
               <option key={course.id} value={course.id}>
                 {course.course_code.toUpperCase()} - {course.course_name}
@@ -143,8 +141,8 @@ const StudentLessons = () => {
       {filteredLessons.length === 0 ? (
         <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-12 text-center text-gray-400 space-y-2">
           <FolderOpenIcon className="h-12 w-12 mx-auto text-gray-300" />
-          <h3 className="text-base font-bold text-gray-700">មិនរកឃើញមេរៀនឡើយទេ</h3>
-          <p className="text-xs text-gray-400">សាកល្បងស្វែងរកដោយប្រើពាក្យគន្លឹះផ្សេងទៀត ឬផ្លាស់ប្តូរតម្រងមុខវិជ្ជា។</p>
+          <h3 className="text-base font-bold text-gray-700">{t('មិនរកឃើញមេរៀនឡើយទេ', 'No lessons found')}</h3>
+          <p className="text-xs text-gray-400">{t('សាកល្បងស្វែងរកដោយប្រើពាក្យគន្លឹះផ្សេងទៀត ឬផ្លាស់ប្តូរតម្រងមុខវិជ្ជា។', 'Try using different keywords or filter by course.')}</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -172,12 +170,12 @@ const StudentLessons = () => {
                           {lesson.course?.course_code}
                         </span>
                         <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                          មេរៀនទី {lesson.lesson_order}
+                          {t('មេរៀនទី', 'Lesson')} {lesson.lesson_order}
                         </span>
                       </div>
                       <h4 className="font-bold text-gray-900 text-base mt-1.5">{lesson.title}</h4>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        មុខវិជ្ជា៖ {lesson.course?.course_name} &bull; បង្រៀនដោយ៖ {lesson.course?.teacher?.name || 'គ្រូបង្រៀន'}
+                        {t('មុខវិជ្ជា៖', 'Course:')} {lesson.course?.course_name} &bull; {t('បង្រៀនដោយ៖', 'Teacher:')} {lesson.course?.teacher?.name || t('គ្រូបង្រៀន', 'Teacher')}
                       </p>
                     </div>
                   </div>
@@ -198,7 +196,7 @@ const StudentLessons = () => {
                   <div className="px-6 py-5 border-t border-gray-100/50 bg-white space-y-6">
                     {lesson.description && (
                       <div className="space-y-1">
-                        <h5 className="text-xs font-bold text-gray-400 uppercase tracking-wider">សេចក្តីពិពណ៌នាមេរៀន (Description)</h5>
+                        <h5 className="text-xs font-bold text-gray-400 uppercase tracking-wider">{t('សេចក្តីពិពណ៌នាមេរៀន', 'Description')}</h5>
                         <p className="text-sm text-gray-600 leading-relaxed">{lesson.description}</p>
                       </div>
                     )}
@@ -206,9 +204,9 @@ const StudentLessons = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {/* Documents */}
                       <div className="space-y-3">
-                        <h5 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b pb-1.5">ឯកសារមេរៀន (Documents)</h5>
+                        <h5 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b pb-1.5">{t('ឯកសារមេរៀន', 'Documents')}</h5>
                         {filesCount === 0 ? (
-                          <p className="text-xs text-gray-400 italic">គ្មានឯកសារផ្ទុកឡើង</p>
+                          <p className="text-xs text-gray-400 italic">{t('គ្មានឯកសារផ្ទុកឡើង', 'No uploaded files')}</p>
                         ) : (
                           <div className="space-y-2">
                             {lesson.files.map((file) => (
@@ -222,7 +220,7 @@ const StudentLessons = () => {
                                   rel="noopener noreferrer"
                                   download={file.file_name}
                                   className="p-1.5 text-blue-900 hover:text-yellow-600 hover:bg-white rounded-xl border border-gray-200/50 shadow-2xs hover:shadow-xs transition"
-                                  title="ទាញយកឯកសារ"
+                                  title={t('ទាញយកឯកសារ', 'Download file')}
                                 >
                                   <ArrowDownTrayIcon className="h-4 w-4" />
                                 </a>
@@ -234,9 +232,9 @@ const StudentLessons = () => {
 
                       {/* Lecture Videos */}
                       <div className="space-y-3">
-                        <h5 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b pb-1.5">វីដេអូបង្រៀន (Lectures)</h5>
+                        <h5 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b pb-1.5">{t('វីដេអូបង្រៀន', 'Lectures')}</h5>
                         {videosCount === 0 ? (
-                          <p className="text-xs text-gray-400 italic">គ្មានវីដេអូផ្ទុកឡើង</p>
+                          <p className="text-xs text-gray-400 italic">{t('គ្មានវីដេអូផ្ទុកឡើង', 'No uploaded videos')}</p>
                         ) : (
                           <div className="space-y-2">
                             {lesson.videos.map((video) => (
@@ -249,10 +247,10 @@ const StudentLessons = () => {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 px-2.5 py-1.5 rounded-xl border border-purple-100 transition"
-                                  title="មើលវីដេអូ"
+                                  title={t('មើលវីដេអូ', 'Watch video')}
                                 >
                                   <PlayIcon className="h-3.5 w-3.5" />
-                                  មើលវីដេអូ
+                                  {t('មើលវីដេអូ', 'Watch')}
                                 </a>
                               </div>
                             ))}

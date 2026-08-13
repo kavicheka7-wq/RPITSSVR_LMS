@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Cache;
 
 class AdminStudentController extends Controller
 {
@@ -294,6 +295,98 @@ class AdminStudentController extends Controller
                 'message' => 'មានបញ្ហាក្នុងការលុបការចុះឈ្មោះមុខវិជ្ជា'
             ], 500);
         }
+    }
+
+    /**
+     * Get all students for export without pagination
+     * GET /admin/students/export-all
+     */
+    public function exportAll()
+    {
+        $students = Student::with(['department', 'user', 'role'])
+            ->orderBy('first_name')
+            ->get();
+
+        return response()->json([
+            'data' => $students,
+            'message' => 'បានទាញយកទិន្នន័យសិស្សទាំងអស់ដោយជោគជ័យ'
+        ]);
+    }
+
+    /**
+     * Import multiple students
+     * POST /admin/students/import
+     */
+    public function import(Request $request)
+    {
+        $request->validate([
+            'students' => 'required|array|min:1',
+            'students.*.first_name' => 'required|string|max:100',
+            'students.*.last_name' => 'required|string|max:100',
+            'students.*.email' => 'required|email',
+        ]);
+
+        $studentRole = Role::where('role_name', 'Student')->firstOrFail();
+        $importedCount = 0;
+        $skipped = [];
+
+        DB::transaction(function () use ($request, $studentRole, &$importedCount, &$skipped) {
+            foreach ($request->students as $index => $item) {
+                // Check duplicate email in users or students
+                $emailExists = User::where('email', $item['email'])->exists() || Student::where('email', $item['email'])->exists();
+                if ($emailExists) {
+                    $skipped[] = [
+                        'row' => $index + 1,
+                        'email' => $item['email'],
+                        'reason' => 'អ៊ីមែលនេះមានរួចហើយ (Email already exists)'
+                    ];
+                    continue;
+                }
+
+                $password = !empty($item['password']) ? $item['password'] : '12345678';
+                $gender = in_array($item['gender'] ?? '', ['Male', 'Female', 'Other']) ? $item['gender'] : 'Male';
+                $studyShift = in_array($item['study_shift'] ?? '', ['Monday-Friday', 'Saturday-Sunday']) ? $item['study_shift'] : 'Monday-Friday';
+                $status = in_array($item['status'] ?? '', ['active', 'inactive']) ? $item['status'] : 'active';
+
+                $user = User::create([
+                    'first_name' => $item['first_name'],
+                    'last_name' => $item['last_name'],
+                    'email' => $item['email'],
+                    'password' => Hash::make($password),
+                    'phone' => $item['phone'] ?? null,
+                    'gender' => $gender,
+                    'status' => $status,
+                    'role_id' => $studentRole->id,
+                ]);
+
+                Student::create([
+                    'user_id' => $user->id,
+                    'role_id' => $studentRole->id,
+                    'student_code' => !empty($item['student_code']) ? $item['student_code'] : $this->generateStudentCode(),
+                    'first_name' => $item['first_name'],
+                    'last_name' => $item['last_name'],
+                    'gender' => $gender,
+                    'date_of_birth' => !empty($item['date_of_birth']) ? $item['date_of_birth'] : null,
+                    'email' => $item['email'],
+                    'phone' => $item['phone'] ?? null,
+                    'department_id' => $item['department_id'] ?? null,
+                    'batch_year' => $item['batch_year'] ?? null,
+                    'degree_level' => $item['degree_level'] ?? null,
+                    'study_shift' => $studyShift,
+                    'address' => $item['address'] ?? null,
+                ]);
+
+                $importedCount++;
+            }
+        });
+
+        Cache::forget('admin_dashboard_stats');
+
+        return response()->json([
+            'message' => "នាំចូលសិស្សចំនួន {$importedCount} នាក់ដោយជោគជ័យ",
+            'imported_count' => $importedCount,
+            'skipped' => $skipped
+        ]);
     }
 
     private function generateStudentCode()

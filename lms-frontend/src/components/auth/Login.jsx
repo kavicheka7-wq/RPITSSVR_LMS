@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { toast } from 'react-toastify';
 import {
   EnvelopeIcon,
@@ -9,6 +10,7 @@ import {
   ArrowRightOnRectangleIcon,
   EyeIcon,
   EyeSlashIcon,
+  GlobeAltIcon,
 } from '@heroicons/react/24/outline';
 
 // Import logo image
@@ -20,6 +22,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
+  const { language, toggleLanguage, t } = useLanguage();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -28,13 +31,13 @@ const Login = () => {
     try {
       const result = await login(email, password);
       if (result.success) {
-        toast.success('ចូលប្រព័ន្ធដោយជោគជ័យ!');
+        toast.success(t('ចូលប្រព័ន្ធដោយជោគជ័យ!', 'Logged in successfully!'));
         navigate('/');
       } else {
-        toast.error(result.error || 'ការចូលប្រព័ន្ធបរាជ័យ');
+        toast.error(result.error || t('ការចូលប្រព័ន្ធបរាជ័យ', 'Login failed'));
       }
     } catch (error) {
-      toast.error('មានបញ្ហាក្នុងការចូលប្រព័ន្ធ');
+      toast.error(t('មានបញ្ហាក្នុងការចូលប្រព័ន្ធ', 'Error logging in'));
     } finally {
       setLoading(false);
     }
@@ -42,6 +45,17 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-blue-100 via-indigo-100/50 to-purple-100/50 py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+      {/* Language Toggle Fixed Top Right */}
+      <div className="absolute top-4 right-4 z-20">
+        <button
+          onClick={toggleLanguage}
+          className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-md hover:bg-white rounded-2xl border border-gray-200 shadow-lg text-gray-700 font-medium text-sm transition-all hover:scale-105"
+        >
+          <GlobeAltIcon className="h-5 w-5 text-blue-600" />
+          <span>{language === 'km' ? 'ខ្មែរ (KM)' : 'English (EN)'}</span>
+        </button>
+      </div>
+
       {/* Decorative circles with vibrant colors */}
       <div className="absolute top-0 -left-4 w-96 h-96 bg-linear-to-br from-blue-400/30 to-blue-600/20 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
       <div className="absolute top-0 -right-4 w-96 h-96 bg-linear-to-br from-emerald-400/30 to-emerald-600/20 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
@@ -53,10 +67,10 @@ const Login = () => {
           {/* Logo Section */}
           <div className="flex justify-center mb-5">
             <div className="relative">
-              <div className="absolute inset-0 bg-linear-to-rrom-blue-500 via-emerald-400 to-purple-500 rounded-full blur-2xl opacity-30 animate-pulse"></div>
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-emerald-400 to-purple-500 rounded-full blur-2xl opacity-30 animate-pulse"></div>
               <img
                 src={logo}
-                alt="វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង"
+                alt={t('វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង', 'Techo Sen Regional Poly-technic Institute Svay Rieng')}
                 className="h-32 w-auto object-contain relative drop-shadow-2xl hover:scale-110 transition-transform duration-300"
                 onError={(e) => {
                   e.target.style.display = 'none';
@@ -77,10 +91,10 @@ const Login = () => {
           {/* Institute Name - Vibrant colors */}
           <div className="mb-3">
             <h1 className="text-xl font-extrabold text-transparent bg-clip-text bg-linear-to-r from-blue-600 via-emerald-500 to-purple-600 tracking-wide leading-tight">
-              វិទ្យាស្ថានពហុបច្ចេកទេស
+              {t('វិទ្យាស្ថានពហុបច្ចេកទេស', 'Regional Poly-technic')}
             </h1>
             <h1 className="text-xl font-extrabold text-transparent bg-clip-text bg-linear-to-r from-blue-600 via-emerald-500 to-purple-600 tracking-wide leading-tight">
-              ភូមិភាគតេជោសែនស្វាយរៀង
+              {t('ភូមិភាគតេជោសែនស្វាយរៀង', 'Techo Sen Svay Rieng Institute')}
             </h1>
             <div className="flex justify-center mt-3">
               <div className="h-1.5 w-24 bg-linear-to-r from-blue-400 via-emerald-400 to-purple-400 rounded-full"></div>
@@ -88,10 +102,10 @@ const Login = () => {
           </div>
           
           <h2 className="text-3xl font-bold text-gray-800 mt-5">
-            ស្វាគមន៍ត្រឡប់មកវិញ
+            {t('ស្វាគមន៍ត្រឡប់មកវិញ', 'Welcome Back')}
           </h2>
           <p className="mt-2 text-sm text-gray-500">
-            ចូលប្រព័ន្ធដើម្បីបន្តការងាររបស់អ្នក
+            {t('ចូលប្រព័ន្ធដើម្បីបន្តការងាររបស់អ្នក', 'Sign in to continue to your account')}
           </p>
         </div>
         
@@ -99,7 +113,7 @@ const Login = () => {
           <div className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-1.5">
-                អ៊ីមែល
+                {t('អ៊ីមែល', 'Email')}
               </label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -114,14 +128,14 @@ const Login = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="appearance-none relative block w-full px-3 py-3.5 pl-10 border-2 border-gray-200 placeholder-gray-400 text-gray-900 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-300 bg-gray-50/70 hover:bg-white focus:bg-white shadow-sm hover:shadow-md"
-                  placeholder="អ៊ីមែលរបស់អ្នក"
+                  placeholder={t('អ៊ីមែលរបស់អ្នក', 'Enter your email')}
                 />
               </div>
             </div>
             
             <div>
               <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-1.5">
-                លេខសម្ងាត់
+                {t('លេខសម្ងាត់', 'Password')}
               </label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -136,13 +150,13 @@ const Login = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="appearance-none relative block w-full px-3 py-3.5 pl-10 pr-12 border-2 border-gray-200 placeholder-gray-400 text-gray-900 rounded-xl focus:outline-none focus:ring-4 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all duration-300 bg-gray-50/70 hover:bg-white focus:bg-white shadow-sm hover:shadow-md"
-                  placeholder="លេខសម្ងាត់របស់អ្នក"
+                  placeholder={t('លេខសម្ងាត់របស់អ្នក', 'Enter your password')}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
                   className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-emerald-600 transition-colors duration-300"
-                  aria-label={showPassword ? 'លាក់លេខសម្ងាត់' : 'បង្ហាញលេខសម្ងាត់'}
+                  aria-label={showPassword ? t('លាក់លេខសម្ងាត់', 'Hide password') : t('បង្ហាញលេខសម្ងាត់', 'Show password')}
                   tabIndex={-1}
                 >
                   {showPassword ? (
@@ -164,13 +178,13 @@ const Login = () => {
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded transition-colors duration-200"
               />
               <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-600 hover:text-gray-800 cursor-pointer transition-colors">
-                ចងចាំខ្ញុំ
+                {t('ចងចាំខ្ញុំ', 'Remember me')}
               </label>
             </div>
 
             <div className="text-sm">
               <a href="#" className="font-medium text-blue-600 hover:text-emerald-600 hover:underline transition-colors duration-200">
-                ភ្លេចលេខសម្ងាត់?
+                {t('ភ្លេចលេខសម្ងាត់?', 'Forgot password?')}
               </a>
             </div>
           </div>
@@ -190,10 +204,10 @@ const Login = () => {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    កំពុងចូលប្រព័ន្ធ...
+                    {t('កំពុងចូលប្រព័ន្ធ...', 'Signing in...')}
                   </>
                 ) : (
-                  'ចូលប្រព័ន្ធ'
+                  t('ចូលប្រព័ន្ធ', 'Sign In')
                 )}
               </span>
             </button>
@@ -201,9 +215,9 @@ const Login = () => {
 
           <div className="text-center">
             <p className="text-sm text-gray-600">
-              មិនទាន់មានគណនី?{' '}
+              {t('មិនទាន់មានគណនី?', "Don't have an account?")}{' '}
               <Link to="/register" className="font-semibold text-blue-600 hover:text-emerald-600 hover:underline transition-colors duration-200">
-                បង្កើតគណនីថ្មី
+                {t('បង្កើតគណនីថ្មី', 'Create new account')}
               </Link>
             </p>
           </div>
@@ -212,7 +226,7 @@ const Login = () => {
         {/* Footer */}
         <div className="text-center pt-4 border-t border-gray-200/50">
           <p className="text-xs text-gray-400">
-            &copy; {new Date().getFullYear()} វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង
+            &copy; {new Date().getFullYear()} {t('វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង', 'Techo Sen Regional Poly-technic Institute Svay Rieng')}
           </p>
         </div>
       </div>

@@ -86,7 +86,7 @@ const Sidebar = () => {
   }, []);
 
   return (
-    <aside className="w-64 bg-linear-to-b from-blue-950 via-blue-900 to-indigo-950 border-r border-blue-800/30 min-h-screen flex flex-col shadow-2xl relative overflow-hidden">
+    <aside className="hidden md:flex md:w-20 lg:w-64 bg-linear-to-b from-blue-950 via-blue-900 to-indigo-950 border-r border-blue-800/30 min-h-screen flex-col shadow-2xl relative overflow-hidden shrink-0 transition-all duration-300">
       
       {/* Decorative Background Elements - Gold accents */}
       <div className="absolute top-0 right-0 w-80 h-80 bg-yellow-500/5 rounded-full blur-3xl -mr-20 -mt-20"></div>
@@ -98,22 +98,22 @@ const Sidebar = () => {
       
       <div className="relative z-10 flex flex-col h-full">
         {/* Header Logo */}
-        <div className="px-5 pt-6 pb-3">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 bg-linear-to-br from-yellow-400 via-yellow-500 to-yellow-600 rounded-xl flex items-center justify-center shadow-lg shadow-yellow-500/30 border border-yellow-400/30">
+        <div className="px-3 lg:px-5 pt-6 pb-3">
+          <div className="flex items-center justify-center lg:justify-start gap-3">
+            <div className="h-12 w-12 bg-linear-to-br from-yellow-400 via-yellow-500 to-yellow-600 rounded-xl flex items-center justify-center shadow-lg shadow-yellow-500/30 border border-yellow-400/30 shrink-0">
               <AcademicCapIcon className="h-7 w-7 text-blue-950" />
             </div>
-            <div>
-              <p className="text-sm font-bold text-white tracking-wide">
-                LMS College
+            <div className="hidden lg:block min-w-0">
+              <p className="text-sm font-bold text-white tracking-wide truncate">
+                LMS RPITSSVR
               </p>
-              <p className="text-[10px] text-yellow-400/70 mt-0.5 tracking-wider">
-                {t('ប្រព័ន្ធគ្រប់គ្រងសិក្សា', 'Learning Management System')}
+              <p className="text-[10px] text-yellow-400/70 mt-0.5 tracking-wider truncate">
+                {t('ប្រព័ន្ធគ្រប់គ្រងការសិក្សា', 'Learning Management System')}
               </p>
             </div>
           </div>
           {section && (
-            <div className="mt-4 flex items-center gap-2">
+            <div className="mt-4 hidden lg:flex items-center gap-2">
               <div className="h-px flex-1 bg-linear-to-r from-yellow-500/20 to-transparent"></div>
               <p className="text-[10px] font-semibold tracking-[0.2em] text-yellow-400/60 uppercase whitespace-nowrap">
                 {section.label}
@@ -124,14 +124,14 @@ const Sidebar = () => {
         </div>
 
         {/* Navigation */}
-        <nav className="px-3 flex-1 mt-2 overflow-y-auto">
-          <div className="space-y-1">
+        <nav className="px-2 lg:px-3 flex-1 mt-2 overflow-y-auto">
+          <div className="space-y-1.5">
             {uniqueNavItems.map((item) => (
               <NavLink
                 key={`${item.path}-${item.name}`}
                 to={item.path}
                 className={({ isActive }) =>
-                  `group relative flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-300 ${
+                  `group relative flex items-center justify-center lg:justify-start gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-300 ${
                     isActive
                       ? 'bg-linear-to-r from-yellow-400 to-yellow-500 text-blue-950 shadow-lg shadow-yellow-500/30 scale-[1.02]'
                       : 'text-blue-200/70 hover:bg-blue-800/50 hover:text-yellow-300 hover:shadow-sm hover:scale-[1.01]'
@@ -155,15 +155,19 @@ const Sidebar = () => {
                       }`}
                       aria-hidden="true"
                     />
-                    <span className={`truncate transition-all duration-300 ${isActive ? 'text-blue-950 font-bold' : 'group-hover:text-yellow-300'}`}>
+                    <span className={`truncate hidden lg:inline transition-all duration-300 ${isActive ? 'text-blue-950 font-bold' : 'group-hover:text-yellow-300'}`}>
                       {item.name}
                     </span>
                     {isActive && (
-                      <span className="ml-auto flex items-center gap-1">
+                      <span className="ml-auto hidden lg:flex items-center gap-1">
                         <span className="h-1.5 w-1.5 rounded-full bg-blue-950 animate-pulse"></span>
                         <span className="h-1.5 w-1.5 rounded-full bg-blue-950/50 animate-pulse animation-delay-200"></span>
                       </span>
                     )}
+                    {/* Tablet Rail Hover Tooltip */}
+                    <span className="hidden md:group-hover:block lg:group-hover:hidden absolute left-full ml-3 px-3 py-1.5 bg-slate-900 text-yellow-300 text-xs font-bold rounded-xl shadow-2xl border border-yellow-500/30 whitespace-nowrap z-50 pointer-events-none">
+                      {item.name}
+                    </span>
                   </>
                 )}
               </NavLink>
@@ -172,19 +176,19 @@ const Sidebar = () => {
         </nav>
 
         {/* Footer Section - Gold themed */}
-        <div className="px-3 mt-4 pb-4">
-          <div className="relative overflow-hidden rounded-xl bg-linear-to-br from-yellow-500 via-yellow-400 to-yellow-600 p-4 border border-yellow-300/30 shadow-lg shadow-yellow-500/20">
+        <div className="px-2 lg:px-3 mt-4 pb-4">
+          <div className="relative overflow-hidden rounded-xl bg-linear-to-br from-yellow-500 via-yellow-400 to-yellow-600 p-3 lg:p-4 border border-yellow-300/30 shadow-lg shadow-yellow-500/20">
             <div className="absolute top-0 right-0 w-20 h-20 bg-blue-950/20 rounded-full blur-2xl"></div>
             <div className="absolute bottom-0 left-0 w-16 h-16 bg-white/10 rounded-full blur-xl"></div>
             
-            <div className="relative flex items-start gap-3">
+            <div className="relative flex items-center justify-center lg:justify-start gap-3">
               <div className="h-10 w-10 bg-blue-950/20 backdrop-blur-sm rounded-xl flex items-center justify-center border border-blue-950/20 shrink-0">
                 <AcademicCapIcon className="h-5 w-5 text-blue-950" />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-blue-950 truncate">LMS College</p>
-                <p className="text-[10px] text-blue-950/70 mt-0.5">
-                  {t('ប្រព័ន្ធគ្រប់គ្រងសិក្សា', 'Learning Management System')}
+              <div className="flex-1 min-w-0 hidden lg:block">
+                <p className="text-xs font-bold text-blue-950 truncate">LMS RPITSSVR</p>
+                <p className="text-[10px] text-blue-950/70 mt-0.5 truncate">
+                  {t('ប្រព័ន្ធគ្រប់គ្រងការសិក្សា', 'Learning Management System')}
                 </p>
                 <div className="mt-2 flex items-center gap-2">
                   <span className="inline-flex items-center gap-1.5 text-[10px] text-blue-950/80 font-medium">

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
+import { useLanguage } from '../../context/LanguageContext';
 import { BookOpenIcon, AcademicCapIcon, ArrowPathIcon, ExclamationCircleIcon, UserIcon } from '@heroicons/react/24/outline';
 
 const StudentCourses = () => {
+  const { t } = useLanguage();
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -41,11 +43,11 @@ const StudentCourses = () => {
                 <BookOpenIcon className="h-6 w-6 text-yellow-400" />
               </div>
               <h1 className="text-2xl font-bold text-white tracking-wide">
-                មុខវិជ្ជាសិក្សារបស់ខ្ញុំ
+                {t('មុខវិជ្ជាសិក្សារបស់ខ្ញុំ', 'My Enrolled Courses')}
               </h1>
             </div>
             <p className="text-sm text-blue-200/70 pl-13">
-              ចូលមើល និងតាមដានមុខវិជ្ជាសិក្សាសកម្មទាំងអស់របស់អ្នក (Browse and track all your active enrolled courses)
+              {t('ចូលមើល និងតាមដានមុខវិជ្ជាសិក្សាសកម្មទាំងអស់របស់អ្នក', 'Browse and track all your active enrolled courses')}
             </p>
           </div>
         </div>
@@ -54,15 +56,15 @@ const StudentCourses = () => {
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <ArrowPathIcon className="h-10 w-10 text-blue-900 animate-spin" />
-          <p className="text-sm font-medium text-gray-500 font-sans">កំពុងទាញយកទិន្នន័យ... (Loading your courses...)</p>
+          <p className="text-sm font-medium text-gray-500 font-sans">{t('កំពុងទាញយកទិន្នន័យ...', 'Loading your courses...')}</p>
         </div>
       ) : courses.length === 0 ? (
         <div className="bg-white border border-gray-100 rounded-3xl p-16 text-center text-gray-500 shadow-lg">
           <div className="max-w-md mx-auto space-y-4">
             <ExclamationCircleIcon className="h-12 w-12 text-gray-300 mx-auto" />
-            <h3 className="text-lg font-bold text-gray-800">មិនទាន់មានមុខវិជ្ជាសិក្សានៅឡើយទេ</h3>
+            <h3 className="text-lg font-bold text-gray-800">{t('មិនទាន់មានមុខវិជ្ជាសិក្សានៅឡើយទេ', 'No courses found')}</h3>
             <p className="text-sm text-gray-400">
-              អ្នកមិនទាន់បានចុះឈ្មោះចូលរៀនក្នុងមុខវិជ្ជាណាមួយសកម្មនៅឡើយទេ។ (You are not currently enrolled in any active courses)
+              {t('អ្នកមិនទាន់បានចុះឈ្មោះចូលរៀនក្នុងមុខវិជ្ជាណាមួយសកម្មនៅឡើយទេ។', 'You are not currently enrolled in any active courses')}
             </p>
           </div>
         </div>
@@ -73,21 +75,18 @@ const StudentCourses = () => {
               key={course.id}
               className="group bg-white rounded-3xl border border-gray-100 p-6 flex flex-col justify-between relative overflow-hidden shadow-sm"
             >
-              {/* Background accents */}
               <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-400/5 rounded-full blur-2xl"></div>
 
               <div className="space-y-4">
-                {/* Course icon & Code */}
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-yellow-600 bg-yellow-400/10 px-3 py-1.5 rounded-xl border border-yellow-400/20">
                     {course.course_code}
                   </span>
                   <span className="text-xs text-gray-400 font-medium">
-                    {course.credit} ឥណទាន (Credits)
+                    {course.credit} {t('ឥណទាន', 'Credits')}
                   </span>
                 </div>
 
-                {/* Title */}
                 <div className="space-y-1.5">
                   <h3 className="text-lg font-bold text-gray-900 line-clamp-2">
                     {course.course_name}
@@ -100,7 +99,6 @@ const StudentCourses = () => {
                 </div>
               </div>
 
-              {/* Footer details */}
               <div className="mt-6 pt-4 border-t border-gray-100/80 flex items-center justify-between">
                 <div className="flex items-center gap-2.5 text-xs text-gray-500 min-w-0">
                   <img
@@ -110,7 +108,7 @@ const StudentCourses = () => {
                   />
                   <div className="flex flex-col min-w-0">
                     <span className="font-bold text-gray-800 truncate" title={course.teacher?.name}>
-                      {course.teacher?.name || 'គ្រូបង្រៀន'}
+                      {course.teacher?.name || t('គ្រូបង្រៀន', 'Teacher')}
                     </span>
                     {course.teacher_profile?.specialization && (
                       <span className="text-[10px] text-gray-400 truncate">

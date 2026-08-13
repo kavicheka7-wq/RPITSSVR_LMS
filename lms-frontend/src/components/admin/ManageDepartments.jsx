@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
+import { useLanguage } from '../../context/LanguageContext';
 import { 
   PlusIcon, 
   PencilIcon, 
@@ -15,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const ManageDepartments = () => {
+  const { t } = useLanguage();
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -30,14 +32,13 @@ const ManageDepartments = () => {
   }, []);
 
   const fetchDepartments = async () => {
-    setLoading(true); // ដាក់ Loading ពេលចាប់ផ្ដើមទាញទិន្នន័យ
+    setLoading(true);
     try {
       const response = await api.get('/admin/departments');
       setDepartments(response.data.data || []);
-      console.log('Departments with counts:', response.data.data);
     } catch (error) {
       console.error('Error fetching departments:', error);
-      toast.error('មិនអាចទាញយកបញ្ជីដេប៉ាតឺម៉ង់បានទេ');
+      toast.error(t('មិនអាចទាញយកបញ្ជីដេប៉ាតឺម៉ង់បានទេ', 'Cannot fetch departments list'));
     } finally {
       setLoading(false);
     }
@@ -53,38 +54,37 @@ const ManageDepartments = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    const payload = {
-      name: formData.name,
-      description: formData.description,
-    };
-
     try {
-      let response;
+      const payload = {
+        department_name: formData.name,
+        description: formData.description
+      };
+
       if (editingDepartment) {
-        response = await api.put(`/admin/departments/${editingDepartment.id}`, payload);
-        toast.success('បានកែប្រែដេប៉ាតឺម៉ង់ដោយជោគជ័យ');
+        await api.put(`/admin/departments/${editingDepartment.id}`, payload);
+        toast.success(t('បានកែប្រែដេប៉ាតឺម៉ង់ដោយជោគជ័យ', 'Department updated successfully'));
       } else {
-        response = await api.post('/admin/departments', payload);
-        toast.success('បានបន្ថែមដេប៉ាតឺម៉ង់ថ្មីដោយជោគជ័យ');
+        await api.post('/admin/departments', payload);
+        toast.success(t('បានបន្ថែមដេប៉ាតឺម៉ង់ដោយជោគជ័យ', 'Department added successfully'));
       }
       setShowModal(false);
       resetForm();
       fetchDepartments();
     } catch (error) {
-      console.error('Submit error:', error.response?.data);
-      toast.error(error.response?.data?.message || 'ការធ្វើប្រតិបត្តិការបានបរាជ័យ');
+      console.error('Error saving department:', error);
+      toast.error(error.response?.data?.message || t('មិនអាចរក្សាទុកដេប៉ាតឺម៉ង់បានទេ', 'Cannot save department'));
     }
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('តើអ្នកប្រាកដថាចង់លុបដេប៉ាតឺម៉ង់នេះមែនទេ?')) {
+    if (window.confirm(t('តើអ្នកប្រាកដថាចង់លុបដេប៉ាតឺម៉ង់នេះមែនទេ?', 'Are you sure you want to delete this department?'))) {
       try {
         await api.delete(`/admin/departments/${id}`);
-        toast.success('បានលុបដេប៉ាតឺម៉ង់ដោយជោគជ័យ');
+        toast.success(t('បានលុបដេប៉ាតឺម៉ង់ដោយជោគជ័យ', 'Department deleted successfully'));
         fetchDepartments();
       } catch (error) {
-        toast.error(error.response?.data?.message || 'មិនអាចលុបដេប៉ាតឺម៉ង់បានទេ');
+        console.error('Error deleting department:', error);
+        toast.error(t('មិនអាចលុបដេប៉ាតឺម៉ង់បានទេ', 'Cannot delete department'));
       }
     }
   };
@@ -102,58 +102,48 @@ const ManageDepartments = () => {
     setShowModal(true);
   };
 
-  const openEditModal = (department) => {
-    setEditingDepartment(department);
+  const openEditModal = (dept) => {
+    setEditingDepartment(dept);
     setFormData({
-      name: department.name || department.department_name || '',
-      description: department.description || '',
+      name: dept.name || dept.department_name || '',
+      description: dept.description || '',
     });
     setShowModal(true);
   };
 
-  // Filter departments based on search
   const filteredDepartments = departments.filter(dept => {
-    const search = searchTerm.toLowerCase();
-    return (
-      (dept.name || dept.department_name || '').toLowerCase().includes(search) ||
-      (dept.description || '').toLowerCase().includes(search)
-    );
+    const name = dept.name || dept.department_name || '';
+    const desc = dept.description || '';
+    return name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+           desc.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
-  // Get random color for department icon
   const getDepartmentColor = (index) => {
-    const colors = [
-      'from-blue-500 to-blue-600',
-      'from-green-500 to-green-600',
-      'from-purple-500 to-purple-600',
-      'from-orange-500 to-orange-600',
-      'from-red-500 to-red-600',
-      'from-indigo-500 to-indigo-600',
-      'from-pink-500 to-pink-600',
-      'from-teal-500 to-teal-600',
+    const gradients = [
+      'from-blue-500 to-indigo-600',
+      'from-purple-500 to-pink-600',
+      'from-emerald-500 to-teal-600',
+      'from-amber-500 to-orange-600',
+      'from-rose-500 to-red-600',
+      'from-cyan-500 to-blue-600',
     ];
-    return colors[index % colors.length];
+    return gradients[index % gradients.length];
   };
-
-  const getTotalUsers = (dept) => {
-    return (dept.teachers_count || 0) + (dept.students_count || 0);
-  };
-
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
               <BuildingLibraryIcon className="h-6 w-6" />
             </span>
-            ដេប៉ាតឺម៉ង់
+            {t('ដេប៉ាតឺម៉ង់', 'Departments')}
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            គ្រប់គ្រងដេប៉ាតឺម៉ង់ទាំងអស់ក្នុងប្រព័ន្ធ
-            <span className="ml-2 text-indigo-600 font-medium">({departments.length} ដេប៉ាតឺម៉ង់)</span>
+            {t('គ្រប់គ្រងដេប៉ាតឺម៉ង់ទាំងអស់ក្នុងប្រព័ន្ធ', 'Manage all departments in the system')}
+            <span className="ml-2 text-indigo-600 font-medium">({departments.length} {t('ដេប៉ាតឺម៉ង់', 'departments')})</span>
           </p>
         </div>
         <button
@@ -161,7 +151,7 @@ const ManageDepartments = () => {
           className="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl shadow-sm hover:bg-indigo-700 transition-all hover:shadow-md"
         >
           <PlusIcon className="h-5 w-5 mr-2" />
-          បន្ថែមដេប៉ាតឺម៉ង់
+          {t('បន្ថែមដេប៉ាតឺម៉ង់', 'Add Department')}
         </button>
       </div>
 
@@ -172,7 +162,7 @@ const ManageDepartments = () => {
             <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
             <input
               type="text"
-              placeholder="ស្វែងរកដេប៉ាតឺម៉ង់..."
+              placeholder={t('ស្វែងរកដេប៉ាតឺម៉ង់...', 'Search departments...')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
@@ -181,7 +171,7 @@ const ManageDepartments = () => {
           <div className="flex items-center gap-4 text-sm text-gray-500">
             <div className="flex items-center gap-1">
               <span className="font-medium text-gray-700">{departments.length}</span>
-              <span>ដេប៉ាតឺម៉ង់</span>
+              <span>{t('ដេប៉ាតឺម៉ង់', 'Dept')}</span>
             </div>
             <div className="w-px h-6 bg-gray-200"></div>
             <div className="flex items-center gap-1">
@@ -189,7 +179,7 @@ const ManageDepartments = () => {
               <span className="font-medium text-gray-700">
                 {departments.reduce((acc, dept) => acc + (dept.teachers_count || 0), 0)}
               </span>
-              <span>គ្រូ</span>
+              <span>{t('គ្រូ', 'Teachers')}</span>
             </div>
             <div className="w-px h-6 bg-gray-200"></div>
             <div className="flex items-center gap-1">
@@ -197,7 +187,7 @@ const ManageDepartments = () => {
               <span className="font-medium text-gray-700">
                 {departments.reduce((acc, dept) => acc + (dept.students_count || 0), 0)}
               </span>
-              <span>សិស្ស</span>
+              <span>{t('សិស្ស', 'Students')}</span>
             </div>
             <div className="w-px h-6 bg-gray-200"></div>
             <div className="flex items-center gap-1">
@@ -205,40 +195,38 @@ const ManageDepartments = () => {
               <span className="font-medium text-gray-700">
                 {departments.reduce((acc, dept) => acc + (dept.courses_count || 0), 0)}
               </span>
-              <span>មុខវិជ្ជា</span>
+              <span>{t('មុខវិជ្ជា', 'Courses')}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* បន្ថែមផ្នែក Loading កណ្ដាលអេក្រង់ */}
       {loading ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 flex flex-col items-center justify-center">
           <div className="relative">
             <div className="h-20 w-20 rounded-full border-t-2 border-b-2 border-indigo-100"></div>
             <div className="absolute top-0 left-0 h-20 w-20 rounded-full border-t-2 border-indigo-600 animate-spin"></div>
           </div>
-          <p className="mt-6 text-base font-medium text-gray-600">កំពុងផ្ទុកទិន្នន័យដេប៉ាតឺម៉ង់...</p>
-          <p className="text-sm text-gray-400 mt-1">សូមរង់ចាំមួយភ្លែត</p>
+          <p className="mt-6 text-base font-medium text-gray-600">{t('កំពុងផ្ទុកទិន្នន័យដេប៉ាតឺម៉ង់...', 'Loading departments...')}</p>
+          <p className="text-sm text-gray-400 mt-1">{t('សូមរង់ចាំមួយភ្លែត', 'Please wait a moment')}</p>
         </div>
       ) : (
-        /* Departments Grid - បង្ហាញតែពេល Loading ចប់ */
         filteredDepartments.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
             <BuildingLibraryIcon className="h-16 w-16 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500 font-medium">
-              {searchTerm ? 'មិនឃើញលទ្ធផលស្វែងរក' : 'មិនទាន់មានដេប៉ាតឺម៉ង់នៅឡើយទេ'}
+              {searchTerm ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found') : t('មិនទាន់មានដេប៉ាតឺម៉ង់នៅឡើយទេ', 'No departments available yet')}
             </p>
             <p className="text-sm text-gray-400 mt-1">
-              {searchTerm ? 'សូមប្តូរពាក្យស្វែងរក' : 'ចុច "បន្ថែមដេប៉ាតឺម៉ង់" ដើម្បីចាប់ផ្តើម'}
+              {searchTerm ? t('សូមប្តូរពាក្យស្វែងរក', 'Try a different search term') : t('ចុច "បន្ថែមដេប៉ាតឺម៉ង់" ដើម្បីចាប់ផ្តើម', 'Click "Add Department" to start')}
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredDepartments.map((dept, index) => {
               const colorGradient = getDepartmentColor(index);
-              const deptName = dept.name || dept.department_name || 'មិនស្គាល់';
-              const deptDesc = dept.description || 'គ្មានការពិពណ៌នា';
+              const deptName = dept.name || dept.department_name || t('មិនស្គាល់', 'Unknown');
+              const deptDesc = dept.description || t('គ្មានការពិពណ៌នា', 'No description');
               const teacherCount = dept.teachers_count || 0;
               const studentCount = dept.students_count || 0;
               const courseCount = dept.courses_count || 0;
@@ -257,14 +245,14 @@ const ManageDepartments = () => {
                       <button
                         onClick={() => openEditModal(dept)}
                         className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                        title="កែប្រែ"
+                        title={t('កែប្រែ', 'Edit')}
                       >
                         <PencilIcon className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => handleDelete(dept.id)}
                         className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                        title="លុប"
+                        title={t('លុប', 'Delete')}
                       >
                         <TrashIcon className="h-4 w-4" />
                       </button>
@@ -284,27 +272,27 @@ const ManageDepartments = () => {
                         <AcademicCapIcon className="h-4 w-4 text-purple-500" />
                         <span className="font-medium text-gray-900">{teacherCount}</span>
                       </div>
-                      <p className="text-xs text-gray-400">គ្រូ</p>
+                      <p className="text-xs text-gray-400">{t('គ្រូ', 'Teachers')}</p>
                     </div>
                     <div className="text-center">
                       <div className="flex items-center justify-center gap-1 text-sm text-gray-600">
                         <UserGroupIcon className="h-4 w-4 text-green-500" />
                         <span className="font-medium text-gray-900">{studentCount}</span>
                       </div>
-                      <p className="text-xs text-gray-400">សិស្ស</p>
+                      <p className="text-xs text-gray-400">{t('សិស្ស', 'Students')}</p>
                     </div>
                     <div className="text-center">
                       <div className="flex items-center justify-center gap-1 text-sm text-gray-600">
                         <BookOpenIcon className="h-4 w-4 text-blue-500" />
                         <span className="font-medium text-gray-900">{courseCount}</span>
                       </div>
-                      <p className="text-xs text-gray-400">មុខវិជ្ជា</p>
+                      <p className="text-xs text-gray-400">{t('មុខវិជ្ជា', 'Courses')}</p>
                     </div>
                   </div>
 
                   <div className="mt-3 pt-2 border-t border-gray-50">
                     <div className="flex items-center justify-between text-xs text-gray-400">
-                      <span>អ្នកប្រើសរុប</span>
+                      <span>{t('អ្នកប្រើសរុប', 'Total Users')}</span>
                       <span className="font-medium text-gray-700">{totalUsers}</span>
                     </div>
                   </div>
@@ -315,7 +303,7 @@ const ManageDepartments = () => {
         )
       )}
 
-      {/* Modal - ប្ដូរពណ៌ផ្ទៃខាងក្រោយកុំឱ្យខ្មៅងងឹតពេក */}
+      {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 animate-scaleIn">
@@ -324,7 +312,7 @@ const ManageDepartments = () => {
                 <span className="bg-indigo-100 text-indigo-600 p-2 rounded-xl">
                   <BuildingLibraryIcon className="h-5 w-5" />
                 </span>
-                {editingDepartment ? 'កែប្រែដេប៉ាតឺម៉ង់' : 'បន្ថែមដេប៉ាតឺម៉ង់ថ្មី'}
+                {editingDepartment ? t('កែប្រែដេប៉ាតឺម៉ង់', 'Edit Department') : t('បន្ថែមដេប៉ាតឺម៉ង់ថ្មី', 'Add New Department')}
               </h2>
               <button
                 onClick={() => setShowModal(false)}
@@ -337,7 +325,7 @@ const ManageDepartments = () => {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ឈ្មោះដេប៉ាតឺម៉ង់ <span className="text-red-500">*</span>
+                  {t('ឈ្មោះដេប៉ាតឺម៉ង់', 'Department Name')} <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -346,13 +334,13 @@ const ManageDepartments = () => {
                   value={formData.name}
                   onChange={handleInputChange}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                  placeholder="បញ្ចូលឈ្មោះដេប៉ាតឺម៉ង់"
+                  placeholder={t('បញ្ចូលឈ្មោះដេប៉ាតឺម៉ង់', 'Enter department name')}
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  ការពិពណ៌នា
+                  {t('ការពិពណ៌នា', 'Description')}
                 </label>
                 <textarea
                   name="description"
