@@ -1,6 +1,5 @@
 <?php
 
-
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
@@ -18,23 +17,66 @@ use Illuminate\Support\Facades\Cache;
 
 class AdminStudentController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $students = Student::with(['department', 'user', 'role'])
-            ->orderBy('first_name')
-            ->get();
+        $perPage = $request->input('per_page', 15);
+        $search = $request->input('search');
 
+        // ✅ កែសម្រួល៖ select columns ចាំបាច់ និងប្រើ with() ត្រឹមត្រូវ
+        $query = Student::with([
+            'department:id,department_name',
+            'user:id,status,email',
+            'role:id,role_name'
+        ])->select([
+            'id', 'user_id', 'role_id', 'department_id',
+            'student_code', 'first_name', 'last_name', 'gender',
+            'date_of_birth', 'email', 'phone', 'profile_image',
+            'batch_year', 'degree_level', 'study_shift', 'address',
+            'created_at'
+        ]);
+
+        if (!empty($search)) {
+            // ✅ កែសម្រួល៖ ប្រើ LIKE '%search%' តែខាងចុង ដើម្បីឱ្យ Index ដំណើរការ
+            $query->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "{$search}%")
+                  ->orWhere('last_name', 'like', "{$search}%")
+                  ->orWhere('student_code', 'like', "{$search}%")
+                  ->orWhere('email', 'like', "{$search}%");
+            });
+        }
+
+        $students = $query->orderBy('id', 'desc')->paginate($perPage);
+
+        // នៅក្នុងអនុគមន៍ index(Request $request) នៃ AdminStudentController.php
+if ($request->filled('year')) {
+    $y = $request->input('year'); // ឧ. '1', '2', '3', '4'
+    $khmerNumerals = ['1' => '១', '2' => '២', '3' => '៣', '4' => '៤'];
+    $khNum = $khmerNumerals[$y] ?? $y;
+
+    $query->where(function ($q) use ($y, $khNum) {
+        $q->where('batch_year', $y)
+          ->orWhere('batch_year', $khNum)
+          ->orWhere('batch_year', 'LIKE', "%Year {$y}%")
+          ->orWhere('batch_year', 'LIKE', "%Year{$y}%")
+          ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី{$khNum}%")
+          ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី {$khNum}%")
+          ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី{$y}%");
+    });
+}
         return response()->json([
-            'data' => $students,
+            'data' => $students->items(),
+            'meta' => [
+                'current_page' => $students->currentPage(),
+                'last_page' => $students->lastPage(),
+                'per_page' => $students->perPage(),
+                'total' => $students->total(),
+            ],
             'message' => 'បានទាញយកបញ្ជីសិស្សដោយជោគជ័យ'
         ]);
     }
 
     public function store(Request $request)
     {
-        // ពិនិត្យមើលទិន្នន័យដែលបានផ្ញើ
-        \Log::info('Student Store Request:', $request->all());
-        
         $validated = $request->validate([
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
@@ -55,7 +97,6 @@ class AdminStudentController extends Controller
         ]);
 
         $student = DB::transaction(function () use ($validated, $request) {
-            // 1. Create user account
             $user = User::create([
                 'first_name' => $validated['first_name'],
                 'last_name' => $validated['last_name'],
@@ -67,16 +108,13 @@ class AdminStudentController extends Controller
                 'role_id' => $validated['role_id'],
             ]);
 
-            // 2. Handle profile image upload
             $profileImagePath = null;
             if ($request->hasFile('profile_image')) {
                 $file = $request->file('profile_image');
                 $filename = time() . '_' . $file->getClientOriginalName();
                 $profileImagePath = $file->storeAs('student_profiles', $filename, 'public');
-                \Log::info('Profile image uploaded:', ['path' => $profileImagePath]);
             }
 
-            // 3. Create student profile
             $student = Student::create([
                 'user_id' => $user->id,
                 'role_id' => $validated['role_id'],
@@ -95,10 +133,12 @@ class AdminStudentController extends Controller
                 'profile_image' => $profileImagePath,
             ]);
 
-            \Log::info('Student created:', ['student' => $student]);
-
             return $student->load(['department', 'user', 'role']);
         });
+
+        // ✅ លុប Cache ពេលបង្កើតសិស្សថ្មី
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         return response()->json([
             'message' => 'បានបង្កើតគណនីសិស្សដោយជោគជ័យ',
@@ -108,16 +148,13 @@ class AdminStudentController extends Controller
 
     public function update(Request $request, Student $student)
     {
-        \Log::info('Student Update Request:', $request->all());
-        
         $validated = $request->validate([
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
             'gender' => 'required|in:Male,Female,Other',
             'date_of_birth' => 'nullable|date',
             'email' => [
-                'required',
-                'email',
+                'required', 'email',
                 Rule::unique('users', 'email')->ignore($student->user_id),
                 Rule::unique('students', 'email')->ignore($student->id),
             ],
@@ -126,9 +163,7 @@ class AdminStudentController extends Controller
             'status' => 'nullable|in:active,inactive',
             'department_id' => 'nullable|exists:departments,id',
             'student_code' => [
-                'nullable',
-                'string',
-                'max:50',
+                'nullable', 'string', 'max:50',
                 Rule::unique('students', 'student_code')->ignore($student->id),
             ],
             'batch_year' => 'nullable|string|max:50',
@@ -140,7 +175,6 @@ class AdminStudentController extends Controller
         ]);
 
         DB::transaction(function () use ($validated, $request, $student) {
-            // Update User
             $userData = [
                 'first_name' => $validated['first_name'],
                 'last_name' => $validated['last_name'],
@@ -157,20 +191,16 @@ class AdminStudentController extends Controller
 
             $student->user->update($userData);
 
-            // Handle profile image upload
             $profileImagePath = $student->profile_image;
             if ($request->hasFile('profile_image')) {
-                // Delete old image if exists
                 if ($student->profile_image) {
                     Storage::disk('public')->delete($student->profile_image);
                 }
                 $file = $request->file('profile_image');
                 $filename = time() . '_' . $file->getClientOriginalName();
                 $profileImagePath = $file->storeAs('student_profiles', $filename, 'public');
-                \Log::info('Profile image updated:', ['path' => $profileImagePath]);
             }
 
-            // Update Student
             $student->update([
                 'student_code' => $validated['student_code'] ?? $student->student_code,
                 'first_name' => $validated['first_name'],
@@ -187,8 +217,6 @@ class AdminStudentController extends Controller
                 'role_id' => $validated['role_id'],
                 'profile_image' => $profileImagePath,
             ]);
-
-            \Log::info('Student updated:', ['student' => $student]);
         });
 
         return response()->json([
@@ -200,12 +228,16 @@ class AdminStudentController extends Controller
     public function destroy(Student $student)
     {
         $studentName = $student->first_name . ' ' . $student->last_name;
-        
+
         if ($student->profile_image) {
             Storage::disk('public')->delete($student->profile_image);
         }
-        
+
         $student->user->delete();
+
+        // ✅ លុប Cache ពេលលុបសិស្ស
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         return response()->json([
             'message' => "បានលុបគណនីសិស្ស '{$studentName}' ដោយជោគជ័យ"
@@ -218,6 +250,21 @@ class AdminStudentController extends Controller
             $enrollments = Enrollment::with('course.teacher')
                 ->where('student_id', $student->user_id)
                 ->get();
+
+            // ✅ ទាញយករូបភាពគ្រូពីតារាង teachers មកភ្ជាប់ បើក្នុង course.teacher គ្មានរូបភាព
+            $enrollments->each(function ($enrollment) {
+                $teacher = $enrollment->course?->teacher;
+                if ($teacher && empty($teacher->profile_image)) {
+                    $teacherRecord = DB::table('teachers')
+                        ->where('user_id', $teacher->id)
+                        ->orWhere('email', $teacher->email)
+                        ->first();
+
+                    if ($teacherRecord && !empty($teacherRecord->profile_image)) {
+                        $teacher->profile_image = $teacherRecord->profile_image;
+                    }
+                }
+            });
 
             return response()->json([
                 'data' => $enrollments,
@@ -252,7 +299,23 @@ class AdminStudentController extends Controller
                         'enrolled_date' => now(),
                         'status' => 'active',
                     ]);
-                    $enrolledCourses[] = $enrollment->load('course.teacher');
+                    
+                    $loadedEnrollment = $enrollment->load('course.teacher');
+                    
+                    // ✅ ភ្ជាប់រូបភាពគ្រូពីតារាង teachers ពេលចុះឈ្មោះមុខវិជ្ជាថ្មី
+                    $teacher = $loadedEnrollment->course?->teacher;
+                    if ($teacher && empty($teacher->profile_image)) {
+                        $teacherRecord = DB::table('teachers')
+                            ->where('user_id', $teacher->id)
+                            ->orWhere('email', $teacher->email)
+                            ->first();
+
+                        if ($teacherRecord && !empty($teacherRecord->profile_image)) {
+                            $teacher->profile_image = $teacherRecord->profile_image;
+                        }
+                    }
+
+                    $enrolledCourses[] = $loadedEnrollment;
                 }
             }
 
@@ -273,44 +336,108 @@ class AdminStudentController extends Controller
         }
     }
 
-    public function unenrollStudent(Student $student, $courseId)
-    {
-        try {
-            $deleted = Enrollment::where('student_id', $student->user_id)
-                ->where('course_id', $courseId)
-                ->delete();
-
-            if ($deleted) {
-                return response()->json([
-                    'message' => 'បានលុបការចុះឈ្មោះមុខវិជ្ជាដោយជោគជ័យ'
-                ]);
-            } else {
-                return response()->json([
-                    'message' => 'រកមិនឃើញការចុះឈ្មោះមុខវិជ្ជានេះទេ'
-                ], 404);
-            }
-        } catch (\Exception $e) {
-            \Log::error('Error unenrolling student: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការលុបការចុះឈ្មោះមុខវិជ្ជា'
-            ], 500);
-        }
-    }
-
     /**
      * Get all students for export without pagination
      * GET /admin/students/export-all
      */
-    public function exportAll()
+    public function exportAll(Request $request)
     {
-        $students = Student::with(['department', 'user', 'role'])
+        if ($request->query('format') === 'json') {
+            $students = [];
+            Student::with([
+                'department:id,department_name',
+                'user:id,status,email',
+                'role:id,role_name'
+            ])
+            ->select([
+                'id', 'user_id', 'role_id', 'department_id',
+                'student_code', 'first_name', 'last_name', 'gender',
+                'date_of_birth', 'email', 'phone',
+                'batch_year', 'degree_level', 'study_shift', 'address'
+            ])
             ->orderBy('first_name')
-            ->get();
+            ->chunk(500, function ($chunk) use (&$students) {
+                foreach ($chunk as $student) {
+                    $students[] = $student;
+                }
+            });
 
-        return response()->json([
-            'data' => $students,
-            'message' => 'បានទាញយកទិន្នន័យសិស្សទាំងអស់ដោយជោគជ័យ'
-        ]);
+            return response()->json([
+                'data' => $students,
+                'message' => 'បានទាញយកទិន្នន័យសិស្សទាំងអស់ដោយជោគជ័យ'
+            ]);
+        }
+
+        $filename = 'Students_List_' . date('Y-m-d') . '.csv';
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
+        ];
+
+        return response()->stream(function () {
+            $handle = fopen('php://output', 'w');
+            // Write UTF-8 BOM so Microsoft Excel correctly renders Khmer Unicode characters
+            fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
+
+            fputcsv($handle, [
+                'No',
+                'Student Code',
+                'First Name',
+                'Last Name',
+                'Gender',
+                'Email',
+                'Phone',
+                'Department',
+                'Batch Year',
+                'Degree Level',
+                'Study Shift',
+                'Address',
+                'Date of Birth',
+                'Status'
+            ]);
+
+            $index = 1;
+            Student::with([
+                'department:id,department_name',
+                'user:id,status,email',
+                'role:id,role_name'
+            ])
+            ->select([
+                'id', 'user_id', 'role_id', 'department_id',
+                'student_code', 'first_name', 'last_name', 'gender',
+                'date_of_birth', 'email', 'phone',
+                'batch_year', 'degree_level', 'study_shift', 'address'
+            ])
+            ->orderBy('first_name')
+            ->chunk(500, function ($students) use ($handle, &$index) {
+                foreach ($students as $s) {
+                    $gender = $s->gender === 'Male' ? 'ប្រុស (Male)' : ($s->gender === 'Female' ? 'ស្រី (Female)' : ($s->gender ?? ''));
+                    $status = ($s->user->status ?? $s->status) === 'active' ? 'សកម្ម (Active)' : 'អសកម្ម (Inactive)';
+
+                    fputcsv($handle, [
+                        $index++,
+                        $s->student_code ?? '',
+                        $s->first_name ?? '',
+                        $s->last_name ?? '',
+                        $gender,
+                        $s->email ?? '',
+                        $s->phone ?? '',
+                        $s->department->department_name ?? '',
+                        $s->batch_year ?? '',
+                        $s->degree_level ?? '',
+                        $s->study_shift ?? '',
+                        $s->address ?? '',
+                        $s->date_of_birth ?? '',
+                        $status
+                    ]);
+                }
+            });
+
+            fclose($handle);
+        }, 200, $headers);
     }
 
     /**
@@ -331,10 +458,15 @@ class AdminStudentController extends Controller
         $skipped = [];
 
         DB::transaction(function () use ($request, $studentRole, &$importedCount, &$skipped) {
+            // ✅ កែសម្រួល៖ ទាញ Emails ដែលមានរួច ក្នុង Query តែម្តង
+            $emails = collect($request->students)->pluck('email')->filter()->toArray();
+            $existingEmails = User::whereIn('email', $emails)->pluck('email')
+                ->merge(Student::whereIn('email', $emails)->pluck('email'))
+                ->unique()
+                ->toArray();
+
             foreach ($request->students as $index => $item) {
-                // Check duplicate email in users or students
-                $emailExists = User::where('email', $item['email'])->exists() || Student::where('email', $item['email'])->exists();
-                if ($emailExists) {
+                if (in_array($item['email'], $existingEmails)) {
                     $skipped[] = [
                         'row' => $index + 1,
                         'email' => $item['email'],
@@ -381,6 +513,7 @@ class AdminStudentController extends Controller
         });
 
         Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         return response()->json([
             'message' => "នាំចូលសិស្សចំនួន {$importedCount} នាក់ដោយជោគជ័យ",
@@ -394,5 +527,79 @@ class AdminStudentController extends Controller
         $year = date('Y');
         $count = Student::count() + 1;
         return 'STU-' . $year . '-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * ដំឡើងថ្នាក់សិស្ស (Bulk Promote Students)
+     */
+    public function promoteStudents(Request $request)
+    {
+        // ១. ត្រួតពិនិត្យទិន្នន័យដែលផ្ញើមកពី React
+        $request->validate([
+            'student_ids' => 'required|array|min:1',
+            'student_ids.*' => 'integer|exists:students,id', // ពិនិត្យថា ID ទាំងនេះពិតជាមានក្នុង Table students
+            'target_year' => 'required|string|max:50',
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            // ២. ធ្វើការ Update Field `batch_year` របស់សិស្សទាំងអស់ដែលបានបញ្ជូន ID មក
+            $promotedCount = Student::whereIn('id',$request->student_ids)
+                ->update([
+                    'batch_year' => $request->target_year,
+                    'updated_at' => now() // Update ម៉ោងបច្ចុប្បន្ន
+                ]);
+
+            DB::commit();
+
+            // ៣. បញ្ជូនសារជោគជ័យទៅកាន់ React វិញ
+            return response()->json([
+                'success' => true,
+                'message' => "បានដំឡើងថ្នាក់សិស្សចំនួន {$promotedCount} នាក់ ទៅកាន់ «{$request->target_year}» ដោយជោគជ័យ។",
+                'promoted_count' => $promotedCount
+            ], 200);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('ការដំឡើងថ្នាក់សិស្សបរាជ័យ៖ ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'មានបញ្ហាក្នុងការដំឡើងថ្នាក់សិស្ស។ សូមព្យាយាមម្តងទៀត។'
+            ], 500);
+        }
+    }
+
+    /**
+     * ដកការចុះឈ្មោះមុខវិជ្ជាចេញពីសិស្ស (Unenroll Course)
+     */
+    public function unenrollStudent(Student $student, $courseId)
+    {
+        try {
+            // ស្វែងរកទិន្នន័យដែលបានចុះឈ្មោះ ដោយផ្អែកលើ user_id របស់សិស្ស និង course_id
+            $enrollment = Enrollment::where('student_id', $student->user_id)
+                                    ->where('course_id', $courseId)
+                                    ->first();
+
+            if (!$enrollment) {
+                return response()->json(['message' => 'រកមិនឃើញទិន្នន័យនៃការចុះឈ្មោះនេះទេ'], 404);
+            }
+
+            // ធ្វើការលុប
+            $enrollment->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'បានលុបមុខវិជ្ជាចេញពីសិស្សដោយជោគជ័យ'
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Error unenrolling student course: ' . $e->getMessage());
+            
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការលុបមុខវិជ្ជាសិស្ស។ សូមព្យាយាមម្តងទៀត។'
+            ], 500);
+        }
     }
 }

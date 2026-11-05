@@ -81,10 +81,27 @@ class User extends Authenticatable
     }
     
     // Relationship: User has one Teacher profile.
-     
     public function teacher()
     {
         return $this->hasOne(Teacher::class, 'user_id');
+    }
+
+    // Relationship: Teacher profile alias for eager loading compatibility
+    public function teacherProfile()
+    {
+        return $this->hasOne(Teacher::class, 'user_id');
+    }
+
+    // Relationship: User has one Student profile
+    public function student()
+    {
+        return $this->hasOne(Student::class, 'user_id');
+    }
+
+    // Relationship: Student profile alias for eager loading compatibility
+    public function studentProfile()
+    {
+        return $this->hasOne(Student::class, 'user_id');
     }
 
     /**

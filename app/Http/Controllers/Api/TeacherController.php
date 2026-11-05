@@ -16,11 +16,13 @@ use App\Models\Attendance;
 use App\Models\Grade;
 use App\Models\QuizAttempt;
 use App\Models\User;
+use App\Models\Student;
 use App\Models\Enrollment;
 use App\Models\Teacher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class TeacherController extends Controller
@@ -28,20 +30,24 @@ class TeacherController extends Controller
     // --- Dashboard ---
     public function dashboard()
     {
-        $teacherId = $this->getTeacherId();
-        $userId = auth()->id();
+        $teacherIds = $this->getTeacherCourseIds();
 
-        $courses = Course::where(function ($query) use ($teacherId, $userId) {
-            $query->where('teacher_id', $teacherId)
-                  ->orWhere('teacher_id', $userId);
-        })
-        ->with(['department'])
-        ->withCount(['enrollments as students_count', 'lessons', 'assignments', 'quizzes'])
-        ->get();
-        
+        $courses = Course::whereIn('teacher_id', $teacherIds)
+            ->with(['department'])
+            ->withCount(['enrollments as students_count', 'lessons', 'assignments', 'quizzes'])
+            ->get();
+
         $courseIds = $courses->pluck('id')->toArray();
 
-        $totalStudents = Enrollment::whereIn('course_id', $courseIds)->distinct('student_id')->count('student_id');
+        $totalStudents = Enrollment::whereIn('course_id', $courseIds)
+            ->where(function ($q) {
+                $q->whereNull('status')
+                  ->orWhere('status', 'active')
+                  ->orWhere('status', '');
+            })
+            ->distinct('student_id')
+            ->count('student_id');
+
         $totalLessons = $courses->sum('lessons_count');
         $totalAssignments = $courses->sum('assignments_count');
         $totalQuizzes = $courses->sum('quizzes_count');
@@ -89,10 +95,8 @@ class TeacherController extends Controller
     }
 
     // ============================================
-    // PROFILE MANAGEMENT (បន្ថែមថ្មី)
+    // PROFILE MANAGEMENT
     // ============================================
-
-    // Get teacher profile
     public function getProfile()
     {
         $user = auth()->user();
@@ -113,13 +117,10 @@ class TeacherController extends Controller
         ]);
     }
 
-    
-
-    // Update teacher profile image
     public function updateProfileImage(Request $request)
     {
         $request->validate([
-            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:5120', // 5MB max
+            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:5120',
         ]);
 
         $user = auth()->user();
@@ -132,28 +133,22 @@ class TeacherController extends Controller
         }
 
         try {
-            // Delete old image if exists
             if ($teacher->profile_image) {
                 $oldPath = str_replace('storage/', '', $teacher->profile_image);
                 $oldPath = str_replace('/storage/', '', $oldPath);
-                
+
                 if (Storage::disk('public')->exists($oldPath)) {
                     Storage::disk('public')->delete($oldPath);
                 }
             }
 
-            // Store new image
             $image = $request->file('profile_image');
             $filename = 'teacher_' . $user->id . '_' . Str::random(10) . '.' . $image->getClientOriginalExtension();
             $path = $image->storeAs('teacher-profiles', $filename, 'public');
-            
-            // Update teacher record
+
             $teacher->update([
                 'profile_image' => $path,
             ]);
-
-            // Also update user if you want
-            // $user->update(['profile_image' => $path]);
 
             return response()->json([
                 'message' => 'Profile image updated successfully',
@@ -169,7 +164,6 @@ class TeacherController extends Controller
         }
     }
 
-    // Update teacher profile
     public function updateProfile(Request $request)
     {
         $user = auth()->user();
@@ -192,7 +186,6 @@ class TeacherController extends Controller
         ]);
 
         DB::transaction(function () use ($validated, $user, $teacher) {
-            // Update user
             if (isset($validated['first_name']) || isset($validated['last_name']) || isset($validated['email'])) {
                 $user->update([
                     'first_name' => $validated['first_name'] ?? $user->first_name,
@@ -201,7 +194,6 @@ class TeacherController extends Controller
                 ]);
             }
 
-            // Update teacher
             $teacher->update([
                 'first_name' => $validated['first_name'] ?? $teacher->first_name,
                 'last_name' => $validated['last_name'] ?? $teacher->last_name,
@@ -221,9 +213,6 @@ class TeacherController extends Controller
         ]);
     }
 
-    /**
-     * Get teacher ID for the authenticated user, or fallback to user ID.
-     */
     private function getTeacherId()
     {
         $user = auth()->user();
@@ -233,18 +222,31 @@ class TeacherController extends Controller
         return auth()->id();
     }
 
-    /**
-     * Query courses owned by the authenticated teacher.
-     */
+    private function getTeacherCourseIds()
+    {
+        $teacher = auth()->user()?->teacher;
+        return array_values(array_unique(array_filter([
+            $teacher ? (int) $teacher->id : null,
+            auth()->id() ? (int) auth()->id() : null,
+        ])));
+    }
+
     private function teacherCourseQuery()
     {
-        $teacherId = $this->getTeacherId();
-        $userId = auth()->id();
+        return Course::whereIn('teacher_id', $this->getTeacherCourseIds());
+    }
 
-        return Course::where(function ($query) use ($teacherId, $userId) {
-            $query->where('teacher_id', $teacherId)
-                  ->orWhere('teacher_id', $userId);
-        });
+    /**
+     * ទាញយកព័ត៌មានលម្អិតរបស់សិស្សពីតារាង students តាម user_id ឬ id
+     */
+    private function resolveStudentProfile($userOrId)
+    {
+        $uid = is_object($userOrId) ? $userOrId->id : $userOrId;
+        if (!$uid) return null;
+
+        return Student::where('user_id', $uid)
+            ->orWhere('id', $uid)
+            ->first();
     }
 
     // --- Classroom Management ---
@@ -270,7 +272,12 @@ class TeacherController extends Controller
 
             $validated['teacher_id'] = $this->getTeacherId();
 
-            $course = Course::create($validated);
+            $course = DB::transaction(function () use ($validated) {
+                return Course::create($validated);
+            });
+
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
 
             return response()->json([
                 'message' => 'បានបង្កើតមុខវិជ្ជាដោយជោគជ័យ',
@@ -310,6 +317,9 @@ class TeacherController extends Controller
 
             $course->update($validated);
 
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
+
             return response()->json([
                 'message' => 'បានកែប្រែមុខវិជ្ជាដោយជោគជ័យ',
                 'data' => $course->fresh(['department', 'teacher'])
@@ -333,7 +343,6 @@ class TeacherController extends Controller
         try {
             $course = $this->teacherCourseQuery()->findOrFail($id);
 
-            // Check if there are enrollments
             if ($course->enrollments()->exists()) {
                 return response()->json([
                     'message' => 'មិនអាចលុបមុខវិជ្ជាដែលមានសិស្សចុះឈ្មោះរៀនបានទេ'
@@ -342,6 +351,9 @@ class TeacherController extends Controller
 
             $courseName = $course->course_name;
             $course->delete();
+
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
 
             return response()->json([
                 'message' => "បានលុបមុខវិជ្ជា '{$courseName}' ដោយជោគជ័យ"
@@ -362,7 +374,11 @@ class TeacherController extends Controller
             $course = $this->teacherCourseQuery()->findOrFail($courseId);
 
             $students = $course->students()
-                ->wherePivot('status', 'active')
+                ->where(function ($q) {
+                    $q->whereNull('enrollments.status')
+                      ->orWhere('enrollments.status', 'active')
+                      ->orWhere('enrollments.status', '');
+                })
                 ->get();
 
             return response()->json($students);
@@ -377,7 +393,7 @@ class TeacherController extends Controller
     // --- Attendance Management ---
     public function getAttendance($courseId)
     {
-        $course = $this->teacherCourseQuery()->findOrFail($courseId);
+        $this->teacherCourseQuery()->findOrFail($courseId);
 
         $attendance = Attendance::with('student')
             ->where('course_id', $courseId)
@@ -392,7 +408,8 @@ class TeacherController extends Controller
         $validated = $request->validate([
             'course_id' => 'required|exists:courses,id',
             'student_id' => 'required|exists:users,id',
-            'status' => 'required|in:Present,Absent,Late',
+            'status' => 'required|in:Present,Absent,Late,Permission',
+            'late_time' => 'nullable|date_format:H:i',
             'attendance_date' => 'required|date',
         ]);
 
@@ -404,7 +421,10 @@ class TeacherController extends Controller
                 'course_id' => $validated['course_id'],
                 'attendance_date' => $validated['attendance_date'],
             ],
-            ['status' => $validated['status']]
+            [
+                'status' => $validated['status'],
+                'late_time' => $validated['late_time'] ?? null
+            ]
         );
 
         return response()->json([
@@ -420,7 +440,8 @@ class TeacherController extends Controller
             'attendance_date' => 'required|date',
             'attendance' => 'required|array',
             'attendance.*.student_id' => 'required|exists:users,id',
-            'attendance.*.status' => 'required|in:Present,Absent,Late',
+            'attendance.*.status' => 'required|in:Present,Absent,Late,Permission',
+            'attendance.*.late_time' => 'nullable|date_format:H:i',
         ]);
 
         $this->teacherCourseQuery()->findOrFail($validated['course_id']);
@@ -433,7 +454,10 @@ class TeacherController extends Controller
                         'course_id' => $validated['course_id'],
                         'attendance_date' => $validated['attendance_date'],
                     ],
-                    ['status' => $item['status']]
+                    [
+                        'status' => $item['status'],
+                        'late_time' => $item['late_time'] ?? null
+                    ]
                 );
             }
         });
@@ -449,6 +473,7 @@ class TeacherController extends Controller
         try {
             $course = $this->teacherCourseQuery()->findOrFail($courseId);
 
+            // ✅ ទាញយកតែសិស្សដែលបានចុះឈ្មោះរៀនក្នុងមុខវិជ្ជានេះពិតប្រាកដ
             $students = $course->students()
                 ->where(function ($q) {
                     $q->whereNull('enrollments.status')
@@ -461,38 +486,23 @@ class TeacherController extends Controller
                 $students = $course->students()->get();
             }
 
-            // Fallback 1: If course enrollments are empty, get students in course's department
-            if ($students->isEmpty() && $course->department_id) {
-                $deptStudentUserIds = \App\Models\Student::where('department_id', $course->department_id)
-                    ->pluck('user_id')
-                    ->filter();
-                if ($deptStudentUserIds->isNotEmpty()) {
-                    $students = \App\Models\User::whereIn('id', $deptStudentUserIds)->get();
-                }
-            }
-
-            // Fallback 2: Get students with grades, submissions or attempts for this course
             $assignments = Assignment::where('course_id', $courseId)->get();
             $quizzes = Quiz::where('course_id', $courseId)->get();
             $assignmentIds = $assignments->pluck('id');
             $quizIds = $quizzes->pluck('id');
 
+            // ប្រសិនបើតារាង enrollments ដាក់ student_id ជា students.id ជំនួសឱ្យ users.id
             if ($students->isEmpty()) {
-                $studentUserIds = Grade::where('course_id', $courseId)->pluck('student_id')
-                    ->merge(AssignmentSubmission::whereIn('assignment_id', $assignmentIds)->pluck('student_id'))
-                    ->merge(QuizAttempt::whereIn('quiz_id', $quizIds)->pluck('student_id'))
-                    ->unique()
-                    ->filter();
-
-                if ($studentUserIds->isNotEmpty()) {
-                    $students = \App\Models\User::whereIn('id', $studentUserIds)->get();
+                $rawEnrolledIds = Enrollment::where('course_id', $courseId)->pluck('student_id');
+                if ($rawEnrolledIds->isNotEmpty()) {
+                    $userIdsFromStudents = Student::whereIn('id', $rawEnrolledIds)
+                        ->orWhereIn('user_id', $rawEnrolledIds)
+                        ->pluck('user_id')
+                        ->filter();
+                    if ($userIdsFromStudents->isNotEmpty()) {
+                        $students = User::whereIn('id', $userIdsFromStudents)->get();
+                    }
                 }
-            }
-
-            // Fallback 3: Get all students with role 'Student'
-            if ($students->isEmpty()) {
-                $studentRoleId = \App\Models\Role::where('role_name', 'Student')->value('id') ?? 3;
-                $students = \App\Models\User::where('role_id', $studentRoleId)->get();
             }
 
             $grades = Grade::where('course_id', $courseId)->get()->keyBy('student_id');
@@ -507,7 +517,19 @@ class TeacherController extends Controller
                 ->get()
                 ->groupBy('student_id');
 
-            $result = $students->map(function ($student) use ($grades, $courseId, $assignments, $quizzes, $allSubmissions, $allAttempts) {
+            // Preload student profiles to avoid N+1 queries
+            $userIds = $students->pluck('id')->toArray();
+            $studentProfilesByUserId = Student::whereIn('user_id', $userIds)->get()->keyBy('user_id');
+
+            $result = $students->map(function ($student) use (
+                $grades,
+                $courseId,
+                $assignments,
+                $quizzes,
+                $allSubmissions,
+                $allAttempts,
+                $studentProfilesByUserId
+            ) {
                 $grade = $grades->get($student->id);
 
                 // Auto-calculate Assignment %
@@ -555,19 +577,21 @@ class TeacherController extends Controller
                 $quizScore = $grade && $grade->quiz_score !== null ? $grade->quiz_score : $autoQuizScore;
                 $midtermScore = $grade && $grade->midterm_score !== null ? $grade->midterm_score : null;
                 $finalScore = $grade && $grade->final_score !== null ? $grade->final_score : null;
-
                 $gradeLetter = $grade && $grade->grade_letter ? $grade->grade_letter : null;
 
-                // Retrieve student profile details
-                $studentProfile = \App\Models\Student::where('user_id', $student->id)->first();
-                $studentCode = $studentProfile && $studentProfile->student_code 
-                    ? $studentProfile->student_code 
+                // ✅ ទាញយកព័ត៌មានពេញលេញពីតារាង students (រួមទាំង gender, batch_year, study_shift)
+                $studentProfile = $studentProfilesByUserId->get($student->id) ?: Student::where('user_id', $student->id)->first();
+                $studentCode = $studentProfile && $studentProfile->student_code
+                    ? $studentProfile->student_code
                     : ('STU' . str_pad($student->id, 3, '0', STR_PAD_LEFT));
 
                 $studentFirstName = $student->first_name ?: ($studentProfile ? $studentProfile->first_name : '');
                 $studentLastName = $student->last_name ?: ($studentProfile ? $studentProfile->last_name : '');
                 $studentEmail = $student->email ?: ($studentProfile ? $studentProfile->email : '');
                 $profileImage = $student->profile_image ?: ($studentProfile ? $studentProfile->profile_image : null);
+                $gender = $studentProfile ? $studentProfile->gender : ($student->gender ?? '');
+                $batchYear = $studentProfile ? $studentProfile->batch_year : '';
+                $studyShift = $studentProfile && $studentProfile->study_shift ? $studentProfile->study_shift : 'Monday-Friday';
 
                 $fullName = trim($studentFirstName . ' ' . $studentLastName);
                 if (empty($fullName)) {
@@ -577,16 +601,24 @@ class TeacherController extends Controller
                 return [
                     'id' => $grade ? $grade->id : null,
                     'student_id' => $student->id,
+                    'student_record_id' => $studentProfile ? $studentProfile->id : $student->id,
                     'student_code' => $studentCode,
                     'student_name' => $fullName,
-                    'course_id' => (int)$courseId,
+                    'gender' => $gender,
+                    'batch_year' => $batchYear,
+                    'study_shift' => $studyShift,
+                    'course_id' => (int) $courseId,
                     'student' => [
                         'id' => $student->id,
+                        'user_id' => $student->id,
                         'name' => $fullName,
                         'first_name' => $studentFirstName,
                         'last_name' => $studentLastName,
+                        'gender' => $gender,
+                        'batch_year' => $batchYear,
+                        'study_shift' => $studyShift,
                         'email' => $studentEmail,
-                        'profile_image' => $profileImage
+                        'profile_image' => $profileImage,
                     ],
                     'assignment_score' => $assignScore,
                     'auto_assignment_score' => $autoAssignmentScore,
@@ -667,23 +699,17 @@ class TeacherController extends Controller
 
             $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
-            $assign = $validated['assignment_score'] ?? null;
-            $quiz = $validated['quiz_score'] ?? null;
-            $midterm = $validated['midterm_score'] ?? null;
-            $final = $validated['final_score'] ?? null;
-            $letter = $validated['grade_letter'] ?? null;
-
             $grade = Grade::updateOrCreate(
                 [
                     'student_id' => $validated['student_id'],
                     'course_id' => $validated['course_id'],
                 ],
                 [
-                    'assignment_score' => $assign,
-                    'quiz_score' => $quiz,
-                    'midterm_score' => $midterm,
-                    'final_score' => $final,
-                    'grade_letter' => $letter,
+                    'assignment_score' => $validated['assignment_score'] ?? null,
+                    'quiz_score' => $validated['quiz_score'] ?? null,
+                    'midterm_score' => $validated['midterm_score'] ?? null,
+                    'final_score' => $validated['final_score'] ?? null,
+                    'grade_letter' => $validated['grade_letter'] ?? null,
                 ]
             );
 
@@ -703,8 +729,13 @@ class TeacherController extends Controller
     public function getLessons(Request $request)
     {
         try {
+            $courseIds = $this->teacherCourseQuery()->pluck('id');
+
             $query = Lesson::with(['course', 'files', 'videos'])
-                ->where('created_by', auth()->id());
+                ->where(function ($q) use ($courseIds) {
+                    $q->whereIn('course_id', $courseIds)
+                      ->orWhere('created_by', auth()->id());
+                });
 
             if ($request->has('course_id') && !empty($request->course_id)) {
                 $query->where('course_id', $request->course_id);
@@ -734,7 +765,7 @@ class TeacherController extends Controller
 
         $validated['created_by'] = auth()->id();
         $validated['lesson_order'] = $validated['lesson_order'] ?? 0;
-        
+
         $lesson = Lesson::create($validated);
 
         return response()->json([
@@ -746,7 +777,11 @@ class TeacherController extends Controller
     public function updateLesson(Request $request, $id)
     {
         try {
-            $lesson = Lesson::where('created_by', auth()->id())->findOrFail($id);
+            $courseIds = $this->teacherCourseQuery()->pluck('id');
+            $lesson = Lesson::where(function ($q) use ($courseIds) {
+                $q->whereIn('course_id', $courseIds)
+                  ->orWhere('created_by', auth()->id());
+            })->findOrFail($id);
 
             $validated = $request->validate([
                 'course_id' => 'required|exists:courses,id',
@@ -779,15 +814,17 @@ class TeacherController extends Controller
     public function deleteLesson($id)
     {
         try {
-            $lesson = Lesson::where('created_by', auth()->id())->findOrFail($id);
+            $courseIds = $this->teacherCourseQuery()->pluck('id');
+            $lesson = Lesson::where(function ($q) use ($courseIds) {
+                $q->whereIn('course_id', $courseIds)
+                  ->orWhere('created_by', auth()->id());
+            })->findOrFail($id);
 
-            // Delete associated files from storage and DB
             foreach ($lesson->files as $file) {
                 Storage::disk('public')->delete($file->file_path);
                 $file->delete();
             }
 
-            // Delete associated videos from storage and DB
             foreach ($lesson->videos as $video) {
                 Storage::disk('public')->delete($video->video_url);
                 $video->delete();
@@ -813,8 +850,11 @@ class TeacherController extends Controller
             'file' => 'required|file|max:10240',
         ]);
 
-        Lesson::where('created_by', auth()->id())
-            ->findOrFail($request->lesson_id);
+        $courseIds = $this->teacherCourseQuery()->pluck('id');
+        Lesson::where(function ($q) use ($courseIds) {
+            $q->whereIn('course_id', $courseIds)
+              ->orWhere('created_by', auth()->id());
+        })->findOrFail($request->lesson_id);
 
         $file = $request->file('file');
         $filePath = $file->store('lesson_files', 'public');
@@ -836,14 +876,16 @@ class TeacherController extends Controller
     {
         try {
             $lessonFile = LessonFile::findOrFail($id);
-            
-            // Check if the lesson belongs to authenticated teacher
-            Lesson::where('created_by', auth()->id())->findOrFail($lessonFile->lesson_id);
-            
-            // Delete file from disk
+            $courseIds = $this->teacherCourseQuery()->pluck('id');
+
+            Lesson::where(function ($q) use ($courseIds) {
+                $q->whereIn('course_id', $courseIds)
+                  ->orWhere('created_by', auth()->id());
+            })->findOrFail($lessonFile->lesson_id);
+
             Storage::disk('public')->delete($lessonFile->file_path);
             $lessonFile->delete();
-            
+
             return response()->json([
                 'message' => 'បានលុបឯកសារដោយជោគជ័យ'
             ]);
@@ -860,15 +902,26 @@ class TeacherController extends Controller
         $request->validate([
             'lesson_id' => 'required|exists:lessons,id',
             'title' => 'required|string|max:255',
-            'video' => 'required|file|mimes:mp4,mov,avi,wmv|max:204800',
+            'video' => 'nullable|file|mimes:mp4,mov,avi,wmv|max:204800',
+            'video_url' => 'nullable|string',
             'duration' => 'nullable|string',
         ]);
 
-        Lesson::where('created_by', auth()->id())
-            ->findOrFail($request->lesson_id);
+        $courseIds = $this->teacherCourseQuery()->pluck('id');
+        Lesson::where(function ($q) use ($courseIds) {
+            $q->whereIn('course_id', $courseIds)
+              ->orWhere('created_by', auth()->id());
+        })->findOrFail($request->lesson_id);
 
-        $video = $request->file('video');
-        $filePath = $video->store('videos', 'public');
+        $filePath = '';
+        if ($request->hasFile('video')) {
+            $video = $request->file('video');
+            $filePath = $video->store('videos', 'public');
+        } elseif (!empty($request->video_url)) {
+            $filePath = $request->video_url;
+        } else {
+            return response()->json(['message' => 'សូមបញ្ចូលវីដេអូ ឬ តំណភ្ជាប់ YouTube'], 422);
+        }
 
         $videoRecord = Video::create([
             'lesson_id' => $request->lesson_id,
@@ -887,14 +940,16 @@ class TeacherController extends Controller
     {
         try {
             $video = Video::findOrFail($id);
-            
-            // Check if the lesson belongs to authenticated teacher
-            Lesson::where('created_by', auth()->id())->findOrFail($video->lesson_id);
-            
-            // Delete video from disk
+            $courseIds = $this->teacherCourseQuery()->pluck('id');
+
+            Lesson::where(function ($q) use ($courseIds) {
+                $q->whereIn('course_id', $courseIds)
+                  ->orWhere('created_by', auth()->id());
+            })->findOrFail($video->lesson_id);
+
             Storage::disk('public')->delete($video->video_url);
             $video->delete();
-            
+
             return response()->json([
                 'message' => 'បានលុបវីដេអូដោយជោគជ័យ'
             ]);
@@ -910,15 +965,40 @@ class TeacherController extends Controller
     public function getTeacherAssignments(Request $request)
     {
         try {
+            $courseIds = $this->teacherCourseQuery()->pluck('id');
+
             $query = Assignment::with(['course'])
                 ->withCount('submissions')
-                ->where('created_by', auth()->id());
+                ->where(function ($q) use ($courseIds) {
+                    $q->whereIn('course_id', $courseIds)
+                      ->orWhere('created_by', auth()->id());
+                });
 
             if ($request->has('course_id') && !empty($request->course_id)) {
                 $query->where('course_id', $request->course_id);
             }
 
-            $assignments = $query->orderBy('created_at', 'desc')->get();
+            if ($request->filled('search')) {
+                $search = $request->search;
+                $query->where('title', 'like', "%{$search}%");
+            }
+
+            $query->orderBy('created_at', 'desc');
+
+            if ($request->has('per_page') || $request->has('page')) {
+                $perPage = max(1, min((int) $request->input('per_page', 15), 100));
+                $paginated = $query->paginate($perPage);
+
+                return response()->json([
+                    'data' => $paginated->items(),
+                    'total' => $paginated->total(),
+                    'current_page' => $paginated->currentPage(),
+                    'last_page' => $paginated->lastPage(),
+                    'per_page' => $paginated->perPage(),
+                ]);
+            }
+
+            $assignments = $query->get();
 
             return response()->json($assignments);
         } catch (\Exception $e) {
@@ -941,10 +1021,12 @@ class TeacherController extends Controller
 
         $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
-        $validated['total_score'] = $validated['total_score'] ?? 100;
-        $validated['created_by'] = auth()->id();
+        $assignment = DB::transaction(function () use ($validated) {
+            $validated['total_score'] = $validated['total_score'] ?? 100;
+            $validated['created_by'] = auth()->id();
 
-        $assignment = Assignment::create($validated);
+            return Assignment::create($validated);
+        });
 
         return response()->json([
             'assignment' => $assignment->load('course'),
@@ -955,7 +1037,11 @@ class TeacherController extends Controller
     public function updateAssignment(Request $request, $id)
     {
         try {
-            $assignment = Assignment::where('created_by', auth()->id())->findOrFail($id);
+            $courseIds = $this->teacherCourseQuery()->pluck('id');
+            $assignment = Assignment::where(function ($q) use ($courseIds) {
+                $q->whereIn('course_id', $courseIds)
+                  ->orWhere('created_by', auth()->id());
+            })->findOrFail($id);
 
             $validated = $request->validate([
                 'course_id' => 'required|exists:courses,id',
@@ -989,9 +1075,12 @@ class TeacherController extends Controller
     public function deleteAssignment($id)
     {
         try {
-            $assignment = Assignment::where('created_by', auth()->id())->findOrFail($id);
+            $courseIds = $this->teacherCourseQuery()->pluck('id');
+            $assignment = Assignment::where(function ($q) use ($courseIds) {
+                $q->whereIn('course_id', $courseIds)
+                  ->orWhere('created_by', auth()->id());
+            })->findOrFail($id);
 
-            // Check if there are submissions
             if ($assignment->submissions()->exists()) {
                 return response()->json([
                     'message' => 'មិនអាចលុបកិច្ចការដែលមានសិស្សដាក់រួចហើយបានទេ'
@@ -1027,14 +1116,11 @@ class TeacherController extends Controller
         try {
             $assignment = Assignment::with(['course'])->findOrFail($assignmentId);
 
-            // Check teacher ownership
-            if ($assignment->created_by !== auth()->id()) {
-                $teacherId = $this->getTeacherId();
-                if (!$teacherId || $assignment->course->teacher_id !== $teacherId) {
-                    return response()->json([
-                        'message' => 'Unauthorized action'
-                    ], 403);
-                }
+            $teacherIds = $this->getTeacherCourseIds();
+            if ($assignment->created_by !== auth()->id() && !in_array((int) ($assignment->course->teacher_id ?? 0), $teacherIds)) {
+                return response()->json([
+                    'message' => 'Unauthorized action'
+                ], 403);
             }
 
             $submissions = AssignmentSubmission::with(['student:id,first_name,last_name,email,profile_image'])
@@ -1042,11 +1128,25 @@ class TeacherController extends Controller
                 ->orderBy('submitted_at', 'desc')
                 ->get()
                 ->map(function ($submission) {
+                    $stuProfile = $this->resolveStudentProfile($submission->student_id);
+                    $studentObj = $submission->student ? $submission->student->toArray() : [];
+
+                    if ($stuProfile) {
+                        $studentObj['gender'] = $stuProfile->gender ?? ($studentObj['gender'] ?? '');
+                        $studentObj['study_shift'] = $stuProfile->study_shift ?? 'Monday-Friday';
+                        $studentObj['batch_year'] = $stuProfile->batch_year ?? '';
+                        $studentObj['student_code'] = $stuProfile->student_code ?? '';
+                        if (empty($studentObj['profile_image']) && $stuProfile->profile_image) {
+                            $studentObj['profile_image'] = $stuProfile->profile_image;
+                        }
+                    }
+
                     return [
                         'id' => $submission->id,
                         'assignment_id' => $submission->assignment_id,
                         'student_id' => $submission->student_id,
-                        'student' => $submission->student,
+                        'study_shift' => $studentObj['study_shift'] ?? 'Monday-Friday',
+                        'student' => $studentObj,
                         'file_path' => $submission->file_path,
                         'file_url' => asset('storage/' . $submission->file_path),
                         'submitted_at' => $submission->submitted_at,
@@ -1075,14 +1175,11 @@ class TeacherController extends Controller
             $submission = AssignmentSubmission::with('assignment.course')->findOrFail($submissionId);
             $assignment = $submission->assignment;
 
-            // Check teacher ownership
-            if ($assignment->created_by !== auth()->id()) {
-                $teacherId = $this->getTeacherId();
-                if (!$teacherId || $assignment->course->teacher_id !== $teacherId) {
-                    return response()->json([
-                        'message' => 'Unauthorized action'
-                    ], 403);
-                }
+            $teacherIds = $this->getTeacherCourseIds();
+            if ($assignment->created_by !== auth()->id() && !in_array((int) ($assignment->course->teacher_id ?? 0), $teacherIds)) {
+                return response()->json([
+                    'message' => 'Unauthorized action'
+                ], 403);
             }
 
             $maxScore = $assignment->total_score ?? 100;
@@ -1117,7 +1214,7 @@ class TeacherController extends Controller
     public function getTeacherQuizzes(Request $request)
     {
         try {
-            $teacherIds = [$this->getTeacherId(), auth()->id()];
+            $teacherIds = $this->getTeacherCourseIds();
             $query = Quiz::with(['course', 'questions.options'])
                 ->withCount(['questions', 'attempts'])
                 ->whereHas('course', function ($query) use ($teacherIds) {
@@ -1128,7 +1225,27 @@ class TeacherController extends Controller
                 $query->where('course_id', $request->course_id);
             }
 
-            $quizzes = $query->orderBy('created_at', 'desc')->get();
+            if ($request->filled('search')) {
+                $search = $request->search;
+                $query->where('title', 'like', "%{$search}%");
+            }
+
+            $query->orderBy('created_at', 'desc');
+
+            if ($request->has('per_page') || $request->has('page')) {
+                $perPage = max(1, min((int) $request->input('per_page', 15), 100));
+                $paginated = $query->paginate($perPage);
+
+                return response()->json([
+                    'data' => $paginated->items(),
+                    'total' => $paginated->total(),
+                    'current_page' => $paginated->currentPage(),
+                    'last_page' => $paginated->lastPage(),
+                    'per_page' => $paginated->perPage(),
+                ]);
+            }
+
+            $quizzes = $query->get();
 
             return response()->json($quizzes);
         } catch (\Exception $e) {
@@ -1152,7 +1269,9 @@ class TeacherController extends Controller
 
         $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
-        $quiz = Quiz::create($validated);
+        $quiz = DB::transaction(function () use ($validated) {
+            return Quiz::create($validated);
+        });
 
         return response()->json([
             'quiz' => $quiz->load('course'),
@@ -1181,14 +1300,13 @@ class TeacherController extends Controller
 
             $importedQuizzes = [];
 
-            DB::transaction(function () use ($validated, $request, &$importedQuizzes) {
+            DB::transaction(function () use ($validated, &$importedQuizzes) {
                 foreach ($validated['quizzes'] as $quizData) {
                     $courseId = $quizData['course_id'] ?? $validated['course_id'] ?? null;
                     if (!$courseId) {
                         throw new \Exception('គ្រប់កម្រងសំណួរត្រូវមាន course_id ត្រឹមត្រូវ');
                     }
 
-                    // Verify teacher course ownership
                     $this->teacherCourseQuery()->findOrFail($courseId);
 
                     $now = now();
@@ -1250,7 +1368,7 @@ class TeacherController extends Controller
     public function updateQuiz(Request $request, $id)
     {
         try {
-            $teacherIds = [$this->getTeacherId(), auth()->id()];
+            $teacherIds = $this->getTeacherCourseIds();
             $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
                 $query->whereIn('teacher_id', $teacherIds);
             })->findOrFail($id);
@@ -1288,19 +1406,17 @@ class TeacherController extends Controller
     public function deleteQuiz($id)
     {
         try {
-            $teacherIds = [$this->getTeacherId(), auth()->id()];
+            $teacherIds = $this->getTeacherCourseIds();
             $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
                 $query->whereIn('teacher_id', $teacherIds);
             })->findOrFail($id);
 
-            // Check if there are attempts
             if ($quiz->attempts()->exists()) {
                 return response()->json([
                     'message' => 'មិនអាចលុបកម្រងសំណួរដែលមានសិស្សចូលរួមធ្វើរួចហើយបានទេ'
                 ], 400);
             }
 
-            // Delete questions and options in transaction
             DB::transaction(function () use ($quiz) {
                 foreach ($quiz->questions as $question) {
                     $question->options()->delete();
@@ -1331,8 +1447,8 @@ class TeacherController extends Controller
             'options.*.is_correct' => 'required|boolean',
         ]);
 
-        $teacherIds = [$this->getTeacherId(), auth()->id()];
-        $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
+        $teacherIds = $this->getTeacherCourseIds();
+        Quiz::whereHas('course', function ($query) use ($teacherIds) {
             $query->whereIn('teacher_id', $teacherIds);
         })->findOrFail($quizId);
 
@@ -1344,7 +1460,7 @@ class TeacherController extends Controller
                 'mark' => $validated['mark'],
             ]);
 
-            if (isset($validated['options']) && $validated['question_type'] === 'MCQ') {
+            if (isset($validated['options']) && in_array($validated['question_type'], ['MCQ', 'TrueFalse'])) {
                 foreach ($validated['options'] as $option) {
                     QuestionOption::create([
                         'question_id' => $q->id,
@@ -1367,14 +1483,12 @@ class TeacherController extends Controller
     {
         try {
             $question = Question::findOrFail($id);
-            
-            // Check if quiz belongs to teacher
-            $teacherIds = [$this->getTeacherId(), auth()->id()];
+
+            $teacherIds = $this->getTeacherCourseIds();
             $quiz = Quiz::whereHas('course', function ($query) use ($teacherIds) {
                 $query->whereIn('teacher_id', $teacherIds);
             })->findOrFail($question->quiz_id);
 
-            // Check if there are attempts on the quiz
             if ($quiz->attempts()->exists()) {
                 return response()->json([
                     'message' => 'មិនអាចលុបសំណួរក្នុងកម្រងសំណួរដែលសិស្សបានធ្វើរួចហើយទេ'
@@ -1412,7 +1526,7 @@ class TeacherController extends Controller
     public function getQuizResults($quizId)
     {
         try {
-            $teacherIds = [$this->getTeacherId(), auth()->id()];
+            $teacherIds = $this->getTeacherCourseIds();
             $quiz = Quiz::with('course')
                 ->whereHas('course', function ($query) use ($teacherIds) {
                     $query->whereIn('teacher_id', $teacherIds);
@@ -1423,11 +1537,25 @@ class TeacherController extends Controller
                 ->orderBy('submitted_at', 'desc')
                 ->get()
                 ->map(function ($attempt) {
+                    $stuProfile = $this->resolveStudentProfile($attempt->student_id);
+                    $studentObj = $attempt->student ? $attempt->student->toArray() : [];
+
+                    if ($stuProfile) {
+                        $studentObj['gender'] = $stuProfile->gender ?? ($studentObj['gender'] ?? '');
+                        $studentObj['study_shift'] = $stuProfile->study_shift ?? 'Monday-Friday';
+                        $studentObj['batch_year'] = $stuProfile->batch_year ?? '';
+                        $studentObj['student_code'] = $stuProfile->student_code ?? '';
+                        if (empty($studentObj['profile_image']) && $stuProfile->profile_image) {
+                            $studentObj['profile_image'] = $stuProfile->profile_image;
+                        }
+                    }
+
                     return [
                         'id' => $attempt->id,
                         'quiz_id' => $attempt->quiz_id,
                         'student_id' => $attempt->student_id,
-                        'student' => $attempt->student,
+                        'study_shift' => $studentObj['study_shift'] ?? 'Monday-Friday',
+                        'student' => $studentObj,
                         'score' => $attempt->score,
                         'started_at' => $attempt->started_at,
                         'submitted_at' => $attempt->submitted_at,

@@ -6,26 +6,68 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Course;
 use App\Models\Department;
-use App\Models\Teacher; // បន្ថែម Model Teacher
+use App\Models\Teacher;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class CourseController extends Controller
 {
     /**
-     * Display a listing of all courses
+     * Display a listing of all courses with pagination and search
      * GET /admin/courses
      */
-    public function index()
+    public function index(Request $request)
     {
         try {
-            $courses = Course::with(['department', 'teacher'])
-                ->orderBy('course_name')
-                ->get();
+            // ✅ កែសម្រួល៖ ប្រើ select columns ចាំបាច់ និង paginate
+            $query = Course::with([
+                'department:id,department_name',
+                'teacher:id,first_name,last_name'
+            ])->select([
+                'id', 'course_code', 'course_name', 'credit', 
+                'description', 'department_id', 'teacher_id', 'created_at'
+            ]);
+
+            // ✅ Option សម្រាប់ទាញយកទាំងអស់ (សម្រាប់ Dropdown/Select)
+            if ($request->boolean('all')) {
+                $courses = $query->orderBy('course_name')->get();
+                return response()->json([
+                    'data' => $courses,
+                    'message' => 'បានទាញយកបញ្ជីមុខវិជ្ជាទាំងអស់ដោយជោគជ័យ'
+                ]);
+            }
+
+            // ✅ បន្ថែម Search
+            if ($request->filled('search')) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('course_name', 'like', "{$search}%")
+                      ->orWhere('course_code', 'like', "{$search}%")
+                      ->orWhere('description', 'like', "{$search}%")
+                      ->orWhereHas('department', function ($dq) use ($search) {
+                          $dq->where('department_name', 'like', "{$search}%");
+                      })
+                      ->orWhereHas('teacher', function ($tq) use ($search) {
+                          $tq->where('first_name', 'like', "{$search}%")
+                             ->orWhere('last_name', 'like', "{$search}%");
+                      });
+                });
+            }
+
+            // ✅ កែសម្រួល៖ ប្រើ paginate ជំនួស get()
+            $courses = $query->orderBy('id', 'desc')
+                ->paginate($request->per_page ?? 15);
 
             return response()->json([
-                'data' => $courses,
+                'data' => $courses->items(),
+                'meta' => [
+                    'current_page' => $courses->currentPage(),
+                    'last_page' => $courses->lastPage(),
+                    'per_page' => $courses->perPage(),
+                    'total' => $courses->total(),
+                ],
                 'message' => 'បានទាញយកបញ្ជីមុខវិជ្ជាដោយជោគជ័យ'
             ]);
         } catch (\Exception $e) {
@@ -49,10 +91,14 @@ class CourseController extends Controller
                 'credit' => 'required|integer|min:1|max:6',
                 'description' => 'nullable|string',
                 'department_id' => 'required|exists:departments,id',
-                'teacher_id' => 'required|exists:teachers,id', // 🔴 កែមកប្រើ teachers
+                'teacher_id' => 'required|exists:teachers,id',
             ]);
 
             $course = Course::create($validated);
+
+            // ✅ លុប Cache ពេលបង្កើតមុខវិជ្ជាថ្មី
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
 
             return response()->json([
                 'message' => 'បានបង្កើតមុខវិជ្ជាដោយជោគជ័យ',
@@ -109,7 +155,7 @@ class CourseController extends Controller
                 'credit' => 'required|integer|min:1|max:6',
                 'description' => 'nullable|string',
                 'department_id' => 'required|exists:departments,id',
-                'teacher_id' => 'required|exists:teachers,id', // 🔴 កែមកប្រើ teachers
+                'teacher_id' => 'required|exists:teachers,id',
             ]);
 
             $course->update($validated);
@@ -147,6 +193,10 @@ class CourseController extends Controller
 
             $courseName = $course->course_name;
             $course->delete();
+
+            // ✅ លុប Cache ពេលលុបមុខវិជ្ជា
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
 
             return response()->json([
                 'message' => "បានលុបមុខវិជ្ជា '{$courseName}' ដោយជោគជ័យ"
@@ -195,7 +245,6 @@ class CourseController extends Controller
     public function getCoursesByTeacher($teacherId)
     {
         try {
-            // 🔴 កែមកទាញយកពីតារាង teachers ផ្ទាល់
             $teacher = Teacher::findOrFail($teacherId);
 
             $courses = Course::with(['department'])
@@ -263,28 +312,32 @@ class CourseController extends Controller
             $keyword = $request->query('q');
             
             if (empty($keyword)) {
-                return $this->index();
+                return $this->index($request);
             }
 
             $courses = Course::with(['department', 'teacher'])
-                ->where('course_name', 'LIKE', "%{$keyword}%")
-                ->orWhere('course_code', 'LIKE', "%{$keyword}%")
-                ->orWhere('description', 'LIKE', "%{$keyword}%")
+                ->where('course_name', 'LIKE', "{$keyword}%")
+                ->orWhere('course_code', 'LIKE', "{$keyword}%")
+                ->orWhere('description', 'LIKE', "{$keyword}%")
                 ->orWhereHas('department', function ($query) use ($keyword) {
-                    $query->where('department_name', 'LIKE', "%{$keyword}%");
+                    $query->where('department_name', 'LIKE', "{$keyword}%");
                 })
                 ->orWhereHas('teacher', function ($query) use ($keyword) {
-                    // ដំណើរការធម្មតាព្រោះតារាង teachers មាន first_name និង last_name
-                    $query->where('first_name', 'LIKE', "%{$keyword}%")
-                          ->orWhere('last_name', 'LIKE', "%{$keyword}%");
+                    $query->where('first_name', 'LIKE', "{$keyword}%")
+                          ->orWhere('last_name', 'LIKE', "{$keyword}%");
                 })
                 ->orderBy('course_name')
-                ->get();
+                ->paginate($request->per_page ?? 15);
 
             return response()->json([
-                'data' => $courses,
+                'data' => $courses->items(),
                 'keyword' => $keyword,
-                'total' => $courses->count(),
+                'meta' => [
+                    'current_page' => $courses->currentPage(),
+                    'last_page' => $courses->lastPage(),
+                    'per_page' => $courses->perPage(),
+                    'total' => $courses->total(),
+                ],
                 'message' => 'បានស្វែងរកមុខវិជ្ជាដោយជោគជ័យ'
             ]);
 

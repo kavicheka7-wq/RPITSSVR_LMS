@@ -18,15 +18,12 @@ class TeacherLessonController extends Controller
     private function getTeacherCoursesQuery()
     {
         $user = Auth::user();
-        $teacherId = ($user && $user->teacher) ? $user->teacher->id : null;
-        $userId = Auth::id();
+        $teacherIds = array_values(array_unique(array_filter([
+            ($user && $user->teacher) ? $user->teacher->id : null,
+            Auth::id()
+        ])));
 
-        return Course::where(function ($query) use ($teacherId, $userId) {
-            if ($teacherId) {
-                $query->where('teacher_id', $teacherId);
-            }
-            $query->orWhere('teacher_id', $userId);
-        });
+        return Course::whereIn('teacher_id', $teacherIds);
     }
 
     private function checkCourseOwnership($courseId)
@@ -38,7 +35,7 @@ class TeacherLessonController extends Controller
      * Get all lessons for the teacher's courses
      * GET /teacher/lessons
      */
-    public function index()
+    public function index(Request $request)
     {
         try {
             $courseIds = $this->getTeacherCoursesQuery()->pluck('id');
@@ -51,10 +48,41 @@ class TeacherLessonController extends Controller
                 ]);
             }
 
-            $lessons = Lesson::with(['course', 'files', 'videos'])
-                ->whereIn('course_id', $courseIds)
-                ->orderBy('lesson_order')
-                ->get();
+            $query = Lesson::with(['course', 'files', 'videos'])
+                ->whereIn('course_id', $courseIds);
+
+            // Filter by specific course if provided
+            if ($request->filled('course_id')) {
+                $query->where('course_id', $request->course_id);
+            }
+
+            // Search by title or description keyword
+            $searchTerm = $request->input('search', $request->input('q'));
+            if (!empty($searchTerm)) {
+                $query->where(function ($q) use ($searchTerm) {
+                    $q->where('title', 'like', "%{$searchTerm}%")
+                      ->orWhere('description', 'like', "%{$searchTerm}%");
+                });
+            }
+
+            $query->orderBy('lesson_order');
+
+            // Support server-side pagination if requested
+            if ($request->has('per_page') || $request->has('page')) {
+                $perPage = max(1, min((int) $request->input('per_page', 15), 100));
+                $paginated = $query->paginate($perPage);
+
+                return response()->json([
+                    'data' => $paginated->items(),
+                    'total' => $paginated->total(),
+                    'current_page' => $paginated->currentPage(),
+                    'last_page' => $paginated->lastPage(),
+                    'per_page' => $paginated->perPage(),
+                    'message' => 'បានទាញយកបញ្ជីមេរៀនដោយជោគជ័យ'
+                ]);
+            }
+
+            $lessons = $query->get();
 
             return response()->json([
                 'data' => $lessons,

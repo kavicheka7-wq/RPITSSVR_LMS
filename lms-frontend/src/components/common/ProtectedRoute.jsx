@@ -1,39 +1,86 @@
 // src/components/common/ProtectedRoute.jsx
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useLanguage } from '../../context/LanguageContext';
+
+// ✅ អានព័ត៌មាន User ពី LocalStorage ភ្លាមៗក្នុង 0ms ដើម្បីកុំឱ្យរាំងស្ទះទំព័រពេល Refresh ឬពេលសិស្សចូលច្រើន
+const readCachedUserSync = () => {
+  try {
+    const raw =
+      localStorage.getItem('user') || localStorage.getItem('auth_user');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.user || parsed?.data || parsed;
+  } catch {
+    return null;
+  }
+};
+
+// ✅ ស្រង់យកតួនាទីគោល ('admin' | 'teacher' | 'student') ឱ្យត្រឹមត្រូវគ្រប់ទម្រង់ API
+const normalizeRoleKey = (userObj) => {
+  if (!userObj) return '';
+  const rawRole =
+    userObj?.role?.role_name ||
+    userObj?.role?.name ||
+    userObj?.role_name ||
+    (typeof userObj?.role === 'string' ? userObj.role : '') ||
+    '';
+  const r = String(rawRole).trim().toLowerCase();
+
+  if (r.includes('admin')) return 'admin';
+  if (r.includes('teacher')) return 'teacher';
+  if (r.includes('student')) return 'student';
+  return r;
+};
 
 const ProtectedRoute = ({ allowedRoles }) => {
-  const { user, isAuthenticated, loading } = useAuth();
-  const { t } = useLanguage();
+  const { user: contextUser, isAuthenticated, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-14 w-14 border-2 border-primary-100 border-t-primary-600 mx-auto"></div>
-          <p className="mt-4 text-sm text-gray-500 font-medium">{t('កំពុងផ្ទៀងផ្ទាត់...', 'Authenticating...')}</p>
-        </div>
-      </div>
-    );
+  // ✅ ប្រើប្រាស់ User ពី Context ឬអានផ្ទាល់ពី LocalStorage ភ្លាមៗក្នុង 0 វិនាទី (មិនបាច់លោត Loading Spinner)
+  const effectiveUser = useMemo(
+    () => contextUser || readCachedUserSync(),
+    [contextUser]
+  );
+
+  const hasValidSession = Boolean(
+    isAuthenticated ||
+      (effectiveUser &&
+        (effectiveUser.id || effectiveUser.user_id || effectiveUser.email))
+  );
+
+  // បើកំពុងផ្ទុក ហើយមិនទាន់មានទិន្នន័យក្នុងម៉ាស៊ីនសោះ ទើបរង់ចាំបន្តិចដោយមិនលោតផ្ទាំងវិលរំខានភ្នែក
+  if (loading && !hasValidSession) {
+    return null;
   }
 
-  if (!isAuthenticated) {
+  if (!hasValidSession) {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles) {
-    const userRole = user?.role?.role_name || user?.role_name || user?.role;
-    const isAllowed = allowedRoles.some(
-      (role) => typeof userRole === 'string' && userRole.toLowerCase() === role.toLowerCase()
-    );
+  const userRoleKey = normalizeRoleKey(effectiveUser);
+
+  if (Array.isArray(allowedRoles) && allowedRoles.length > 0) {
+    const isAllowed = allowedRoles.some((allowed) => {
+      const target = String(allowed).trim().toLowerCase();
+      return userRoleKey === target || userRoleKey.includes(target);
+    });
+
     if (!isAllowed) {
-      return <Navigate to="/" replace />;
+      // បញ្ជូនទៅកាន់ Dashboard ត្រឹមត្រូវតាមតួនាទីពិតប្រាកដ (ការពារកុំឱ្យលោតវិលជុំ Infinite Redirect Loop)
+      if (userRoleKey === 'admin') {
+        return <Navigate to="/admin/dashboard" replace />;
+      }
+      if (userRoleKey === 'teacher') {
+        return <Navigate to="/teacher/dashboard" replace />;
+      }
+      if (userRoleKey === 'student') {
+        return <Navigate to="/student/dashboard" replace />;
+      }
+      return <Navigate to="/login" replace />;
     }
   }
 
   return <Outlet />;
 };
 
-export default ProtectedRoute;
+export default React.memo(ProtectedRoute);

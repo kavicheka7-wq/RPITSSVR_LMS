@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Cache;
 
 class ProfileController extends Controller
 {
@@ -36,6 +37,10 @@ class ProfileController extends Controller
             $user->profile_image = url('storage/' . $path);
             $user->save();
 
+            // Clear cached reports & dashboard stats
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
+
             return response()->json([
                 'message' => 'បានផ្លាស់ប្ដូររូបភាពដោយជោគជ័យ',
                 'profile_image' => $user->profile_image
@@ -64,6 +69,10 @@ class ProfileController extends Controller
         $user->email = $request->email;
         $user->phone = $request->phone;
         $user->save();
+
+        // Clear cached reports & dashboard stats
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         // ផ្ញើទិន្នន័យដែលកែប្រែរួចត្រឡប់ទៅ React វិញ
         return response()->json($user);
@@ -103,6 +112,10 @@ class ProfileController extends Controller
                 $teacher->save();
             }
 
+            // Clear cached reports & dashboard stats
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
+
             return response()->json([
                 'message' => 'បានផ្លាស់ប្ដូររូបភាពដោយជោគជ័យ',
                 'profile_image' => $imageUrl
@@ -141,6 +154,10 @@ class ProfileController extends Controller
             $teacher->save();
         }
 
+        // Clear cached reports & dashboard stats
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
+
         return response()->json($user);
     }
 
@@ -177,6 +194,10 @@ class ProfileController extends Controller
                 $student->profile_image = $imageUrl;
                 $student->save();
             }
+
+            // Clear cached reports & dashboard stats
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
 
             return response()->json([
                 'message' => 'បានផ្លាស់ប្ដូររូបភាពដោយជោគជ័យ',
@@ -215,6 +236,10 @@ class ProfileController extends Controller
             $student->phone = $request->phone;
             $student->save();
         }
+
+        // Clear cached reports & dashboard stats
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         return response()->json($user);
     }

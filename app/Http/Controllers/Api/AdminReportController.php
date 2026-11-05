@@ -16,6 +16,7 @@ use App\Models\Assignment;
 use App\Models\Role;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class AdminReportController extends Controller
 {
@@ -24,63 +25,73 @@ class AdminReportController extends Controller
      */
     public function getOverviewReport(Request $request)
     {
-        $totalStudents = Student::count();
-        if ($totalStudents === 0) {
+        // ✅ កែសម្រួល៖ ប្រើ Cache សម្រាប់ Overview Report (៥ នាទី)
+        $data = Cache::remember('admin_overview_report', 300, function () {
             $studentRole = Role::where('role_name', 'Student')->first();
-            $totalStudents = $studentRole ? User::where('role_id', $studentRole->id)->count() : User::count();
-        }
+            $totalStudents = Student::count();
+            if ($totalStudents === 0) {
+                $totalStudents = $studentRole ? User::where('role_id', $studentRole->id)->count() : 0;
+            }
 
-        $totalTeachers = Teacher::count();
-        $totalCourses = Course::count();
-        $totalDepartments = Department::count();
-        $totalEnrollments = Enrollment::count();
-        $totalLessons = Lesson::count();
-        $totalAssignments = Assignment::count();
+            $totalTeachers = Teacher::count();
+            $totalCourses = Course::count();
+            $totalDepartments = Department::count();
+            $totalEnrollments = Enrollment::count();
+            $totalLessons = Lesson::count();
+            $totalAssignments = Assignment::count();
 
-        // Overall Attendance Rate
-        $totalAttendances = Attendance::count();
-        $presentAttendances = Attendance::whereIn('status', ['present', 'Present'])->count();
-        $overallAttendanceRate = $totalAttendances > 0 
-            ? round(($presentAttendances / $totalAttendances) * 100, 1) 
-            : 100;
+            // ✅ កែសម្រួល៖ ប្រើ Query តែម្តងសម្រាប់ Attendance Rate
+            $attendanceStats = Attendance::selectRaw("
+                COUNT(*) as total,
+                SUM(CASE WHEN status IN ('present', 'Present') THEN 1 ELSE 0 END) as present
+            ")->first();
 
-        // Department breakdown
-        $departments = Department::withCount(['courses', 'students', 'teachers'])->get();
-        $departmentDistribution = $departments->map(function ($dept) {
+            $totalAttendances = $attendanceStats->total ?? 0;
+            $presentAttendances = $attendanceStats->present ?? 0;
+            $overallAttendanceRate = $totalAttendances > 0
+                ? round(($presentAttendances / $totalAttendances) * 100, 1)
+                : 100;
+
+            // ✅ កែសម្រួល៖ ប្រើ withCount ជំនួស get() + map()
+            $departments = Department::withCount(['courses', 'students', 'teachers'])->get();
+            $departmentDistribution = $departments->map(function ($dept) {
+                return [
+                    'id' => $dept->id,
+                    'department_name' => $dept->department_name,
+                    'department_code' => $dept->department_code,
+                    'students_count' => $dept->students_count ?? 0,
+                    'teachers_count' => $dept->teachers_count ?? 0,
+                    'courses_count' => $dept->courses_count ?? 0,
+                ];
+            });
+
+            // Recent 6 Months Enrollment Trend
+            $enrollmentTrend = Enrollment::select(
+                DB::raw("DATE_FORMAT(created_at, '%Y-%m') as month"),
+                DB::raw('count(*) as count')
+            )
+            ->where('created_at', '>=', now()->subMonths(6))
+            ->groupBy('month')
+            ->orderBy('month', 'asc')
+            ->get();
+
             return [
-                'id' => $dept->id,
-                'department_name' => $dept->department_name,
-                'department_code' => $dept->department_code,
-                'students_count' => $dept->students_count ?? 0,
-                'teachers_count' => $dept->teachers_count ?? 0,
-                'courses_count' => $dept->courses_count ?? 0,
+                'stats' => [
+                    'total_students' => $totalStudents,
+                    'total_teachers' => $totalTeachers,
+                    'total_courses' => $totalCourses,
+                    'total_departments' => $totalDepartments,
+                    'total_enrollments' => $totalEnrollments,
+                    'total_lessons' => $totalLessons,
+                    'total_assignments' => $totalAssignments,
+                    'overall_attendance_rate' => $overallAttendanceRate,
+                ],
+                'department_distribution' => $departmentDistribution->values()->all(),
+                'enrollment_trend' => $enrollmentTrend->values()->all(),
             ];
         });
 
-        // Recent 6 Months Enrollment Trend
-        $enrollmentTrend = Enrollment::select(
-            DB::raw("DATE_FORMAT(created_at, '%Y-%m') as month"),
-            DB::raw('count(*) as count')
-        )
-        ->where('created_at', '>=', now()->subMonths(6))
-        ->groupBy('month')
-        ->orderBy('month', 'asc')
-        ->get();
-
-        return response()->json([
-            'stats' => [
-                'total_students' => $totalStudents,
-                'total_teachers' => $totalTeachers,
-                'total_courses' => $totalCourses,
-                'total_departments' => $totalDepartments,
-                'total_enrollments' => $totalEnrollments,
-                'total_lessons' => $totalLessons,
-                'total_assignments' => $totalAssignments,
-                'overall_attendance_rate' => $overallAttendanceRate,
-            ],
-            'department_distribution' => $departmentDistribution,
-            'enrollment_trend' => $enrollmentTrend,
-        ]);
+        return response()->json($data);
     }
 
     /**
@@ -88,47 +99,65 @@ class AdminReportController extends Controller
      */
     public function getEnrollmentReport(Request $request)
     {
-        $query = Enrollment::with(['student', 'course.department']);
+        // ✅ កែសម្រួល៖ បង្កើត Base Query តែម្តង រួច Clone សម្រាប់រាប់ និង Paginate
+        $baseQuery = Enrollment::query();
 
         if ($request->filled('department_id')) {
-            $query->whereHas('course', function ($q) use ($request) {
+            $baseQuery->whereHas('course', function ($q) use ($request) {
                 $q->where('department_id', $request->department_id);
             });
         }
 
         if ($request->filled('course_id')) {
-            $query->where('course_id', $request->course_id);
+            $baseQuery->where('course_id', $request->course_id);
         }
 
         if ($request->filled('status')) {
-            $query->where('status', $request->status);
+            $baseQuery->where('status', $request->status);
         }
 
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->where(function ($q) use ($search) {
+            $baseQuery->where(function ($q) use ($search) {
                 $q->whereHas('student', function ($sq) use ($search) {
-                    $sq->where('first_name', 'like', "%{$search}%")
-                       ->orWhere('last_name', 'like', "%{$search}%")
-                       ->orWhere('email', 'like', "%{$search}%");
+                    $sq->where('first_name', 'like', "{$search}%")
+                       ->orWhere('last_name', 'like', "{$search}%")
+                       ->orWhere('email', 'like', "{$search}%");
                 })->orWhereHas('course', function ($cq) use ($search) {
-                    $cq->where('course_name', 'like', "%{$search}%")
-                       ->orWhere('course_code', 'like', "%{$search}%");
+                    $cq->where('course_name', 'like', "{$search}%")
+                       ->orWhere('course_code', 'like', "{$search}%");
                 });
             });
         }
 
-        $allMatching = $query->get();
+        // ✅ កែសម្រួល៖ រាប់ដោយប្រើ clone (មិនទាញទិន្នន័យទាំងអស់ចូល Memory)
+        $summary = [
+            'total' => (clone $baseQuery)->count(),
+            'active' => (clone $baseQuery)->where('status', 'active')->count(),
+            'completed' => (clone $baseQuery)->where('status', 'completed')->count(),
+            'dropped' => (clone $baseQuery)->whereIn('status', ['dropped', 'inactive', 'cancelled'])->count(),
+        ];
 
-        $activeCount = $allMatching->where('status', 'active')->count();
-        $completedCount = $allMatching->where('status', 'completed')->count();
-        $droppedCount = $allMatching->whereIn('status', ['dropped', 'inactive', 'cancelled'])->count();
+        // ✅ កែសម្រួល៖ ប្រើ with() សម្រាប់ Eager Loading ព្រមទាំង select columns ចាំបាច់
+        $paginated = $baseQuery
+            ->with([
+                'student:id,first_name,last_name,email',
+                'course:id,course_name,course_code,department_id',
+                'course.department:id,department_name',
+            ])
+            ->orderBy('created_at', 'desc')
+            ->paginate($request->per_page ?? 15);
 
-        $paginated = $query->orderBy('created_at', 'desc')->paginate($request->per_page ?? 15);
+        // ✅ កែសម្រួល៖ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1)
+        $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter();
+        $studentProfiles = Student::whereIn('user_id', $studentIds)
+            ->select('user_id', 'student_code')
+            ->get()
+            ->keyBy('user_id');
 
-        $items = collect($paginated->items())->map(function ($enr) {
+        $items = collect($paginated->items())->map(function ($enr) use ($studentProfiles) {
             $studentUser = $enr->student;
-            $studentProfile = Student::where('user_id', $enr->student_id)->first();
+            $studentProfile = $studentProfiles->get($enr->student_id);
 
             return [
                 'id' => $enr->id,
@@ -140,17 +169,14 @@ class AdminReportController extends Controller
                 'course_code' => $enr->course->course_code ?? 'N/A',
                 'department_name' => $enr->course->department->department_name ?? 'N/A',
                 'status' => $enr->status ?? 'active',
-                'enrolled_date' => $enr->enrolled_date ? $enr->enrolled_date->format('Y-m-d') : ($enr->created_at ? $enr->created_at->format('Y-m-d') : 'N/A'),
+                'enrolled_date' => $enr->enrolled_date
+                    ? $enr->enrolled_date->format('Y-m-d')
+                    : ($enr->created_at ? $enr->created_at->format('Y-m-d') : 'N/A'),
             ];
         });
 
         return response()->json([
-            'summary' => [
-                'total' => $allMatching->count(),
-                'active' => $activeCount,
-                'completed' => $completedCount,
-                'dropped' => $droppedCount,
-            ],
+            'summary' => $summary,
             'data' => $items,
             'meta' => [
                 'current_page' => $paginated->currentPage(),
@@ -166,72 +192,113 @@ class AdminReportController extends Controller
      */
     public function getAttendanceReport(Request $request)
     {
-        $query = Attendance::with(['student', 'course.department']);
+        // ✅ កែសម្រួល៖ បង្កើត Base Query តែម្តង
+        $baseQuery = Attendance::query();
 
         if ($request->filled('department_id')) {
-            $query->whereHas('course', function ($q) use ($request) {
+            $baseQuery->whereHas('course', function ($q) use ($request) {
                 $q->where('department_id', $request->department_id);
             });
         }
 
         if ($request->filled('course_id')) {
-            $query->where('course_id', $request->course_id);
+            $baseQuery->where('course_id', $request->course_id);
         }
 
         if ($request->filled('date_from')) {
-            $query->whereDate('attendance_date', '>=', $request->date_from);
+            $baseQuery->whereDate('attendance_date', '>=', $request->date_from);
         }
 
         if ($request->filled('date_to')) {
-            $query->whereDate('attendance_date', '<=', $request->date_to);
+            $baseQuery->whereDate('attendance_date', '<=', $request->date_to);
         }
 
-        $allRecords = $query->get();
-        $totalRecords = $allRecords->count();
+        // ✅ កែសម្រួល៖ ប្រើ Query តែម្តងសម្រាប់ Summary ទាំងអស់ (ជំនួស get() + count())
+        $summaryRaw = (clone $baseQuery)->selectRaw("
+            COUNT(*) as total_records,
+            SUM(CASE WHEN status IN ('present', 'Present') THEN 1 ELSE 0 END) as present,
+            SUM(CASE WHEN status IN ('absent', 'Absent') THEN 1 ELSE 0 END) as absent,
+            SUM(CASE WHEN status IN ('late', 'Late') THEN 1 ELSE 0 END) as late,
+            SUM(CASE WHEN status IN ('permission', 'Permission') THEN 1 ELSE 0 END) as permission
+        ")->first();
 
-        $presentCount = $allRecords->whereIn('status', ['present', 'Present'])->count();
-        $absentCount = $allRecords->whereIn('status', ['absent', 'Absent'])->count();
-        $lateCount = $allRecords->whereIn('status', ['late', 'Late'])->count();
-        $permissionCount = $allRecords->whereIn('status', ['permission', 'Permission'])->count();
+        $totalRecords = $summaryRaw->total_records ?? 0;
+        $presentCount = $summaryRaw->present ?? 0;
+        $absentCount = $summaryRaw->absent ?? 0;
+        $lateCount = $summaryRaw->late ?? 0;
+        $permissionCount = $summaryRaw->permission ?? 0;
 
         $rate = $totalRecords > 0 ? round(($presentCount / $totalRecords) * 100, 1) : 100;
 
-        // Course Breakdown
-        $courseBreakdown = Course::with('department')
+        // ✅ កែសម្រួល៖ ប្រើ withCount ជំនួស N+1 Query ក្នុង map()
+        // នេះជាចំណុចកែសម្រួលសំខាន់បំផុត!
+        $coursesQuery = Course::with(['department:id,department_name', 'teacher:id,first_name,last_name,profile_image'])
             ->when($request->filled('department_id'), function ($q) use ($request) {
                 $q->where('department_id', $request->department_id);
             })
             ->when($request->filled('course_id'), function ($q) use ($request) {
                 $q->where('id', $request->course_id);
+            });
+
+        // បង្កើត Subquery សម្រាប់ Attendance Counts
+        $attendanceSubquery = Attendance::selectRaw("
+            course_id,
+            COUNT(*) as total,
+            SUM(CASE WHEN status IN ('present', 'Present') THEN 1 ELSE 0 END) as present,
+            SUM(CASE WHEN status IN ('absent', 'Absent') THEN 1 ELSE 0 END) as absent,
+            SUM(CASE WHEN status IN ('late', 'Late') THEN 1 ELSE 0 END) as late,
+            SUM(CASE WHEN status IN ('permission', 'Permission') THEN 1 ELSE 0 END) as permission
+        ")->groupBy('course_id');
+
+        if ($request->filled('date_from')) {
+            $attendanceSubquery->whereDate('attendance_date', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $attendanceSubquery->whereDate('attendance_date', '<=', $request->date_to);
+        }
+
+        $courseBreakdown = $coursesQuery
+            ->leftJoinSub($attendanceSubquery, 'att_stats', function ($join) {
+                $join->on('courses.id', '=', 'att_stats.course_id');
             })
+            ->select([
+                'courses.id',
+                'courses.course_name',
+                'courses.course_code',
+                'courses.department_id',
+                'courses.teacher_id',
+                DB::raw('COALESCE(att_stats.total, 0) as total'),
+                DB::raw('COALESCE(att_stats.present, 0) as present'),
+                DB::raw('COALESCE(att_stats.absent, 0) as absent'),
+                DB::raw('COALESCE(att_stats.late, 0) as late'),
+                DB::raw('COALESCE(att_stats.permission, 0) as permission'),
+            ])
             ->get()
-            ->map(function ($course) use ($request) {
-                $attQ = Attendance::where('course_id', $course->id);
-
-                if ($request->filled('date_from')) {
-                    $attQ->whereDate('attendance_date', '>=', $request->date_from);
-                }
-                if ($request->filled('date_to')) {
-                    $attQ->whereDate('attendance_date', '<=', $request->date_to);
-                }
-
-                $cTotal = $attQ->count();
-                $cPresent = (clone $attQ)->whereIn('status', ['present', 'Present'])->count();
-                $cAbsent = (clone $attQ)->whereIn('status', ['absent', 'Absent'])->count();
-                $cLate = (clone $attQ)->whereIn('status', ['late', 'Late'])->count();
-                $cPermission = (clone $attQ)->whereIn('status', ['permission', 'Permission'])->count();
+            ->map(function ($course) {
+                $cTotal = $course->total;
+                $cPresent = $course->present;
                 $cRate = $cTotal > 0 ? round(($cPresent / $cTotal) * 100, 1) : 100;
+
+                $teacherName = $course->teacher
+                    ? trim(($course->teacher->first_name ?? '') . ' ' . ($course->teacher->last_name ?? ''))
+                    : null;
+
+                if (!$teacherName && isset($course->teacher->name)) {
+                    $teacherName = $course->teacher->name;
+                }
 
                 return [
                     'course_id' => $course->id,
                     'course_name' => $course->course_name,
                     'course_code' => $course->course_code,
                     'department_name' => $course->department->department_name ?? 'N/A',
+                    'teacher_name' => $teacherName ?: 'មិនស្គាល់គ្រូបង្រៀន',
+                    'teacher_image' => $course->teacher->profile_image ?? null,
                     'total' => $cTotal,
                     'present' => $cPresent,
-                    'absent' => $cAbsent,
-                    'late' => $cLate,
-                    'permission' => $cPermission,
+                    'absent' => $course->absent,
+                    'late' => $course->late,
+                    'permission' => $course->permission,
                     'rate' => $cRate,
                 ];
             });
@@ -254,47 +321,65 @@ class AdminReportController extends Controller
      */
     public function getAcademicReport(Request $request)
     {
-        $query = Grade::with(['student', 'course.department']);
+        // ✅ កែសម្រួល៖ បង្កើត Base Query តែម្តង
+        $baseQuery = Grade::query();
 
         if ($request->filled('department_id')) {
-            $query->whereHas('course', function ($q) use ($request) {
+            $baseQuery->whereHas('course', function ($q) use ($request) {
                 $q->where('department_id', $request->department_id);
             });
         }
 
         if ($request->filled('course_id')) {
-            $query->where('course_id', $request->course_id);
+            $baseQuery->where('course_id', $request->course_id);
         }
 
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->where(function ($q) use ($search) {
+            $baseQuery->where(function ($q) use ($search) {
                 $q->whereHas('student', function ($sq) use ($search) {
-                    $sq->where('first_name', 'like', "%{$search}%")
-                       ->orWhere('last_name', 'like', "%{$search}%");
+                    $sq->where('first_name', 'like', "{$search}%")
+                       ->orWhere('last_name', 'like', "{$search}%");
                 })->orWhereHas('course', function ($cq) use ($search) {
-                    $cq->where('course_name', 'like', "%{$search}%");
+                    $cq->where('course_name', 'like', "{$search}%");
                 });
             });
         }
 
-        $allGrades = $query->get();
+        // ✅ កែសម្រួល៖ ប្រើ Query តែម្តងសម្រាប់ Summary ទាំងអស់
+        $summaryRaw = (clone $baseQuery)->selectRaw("
+            COUNT(*) as total_graded,
+            AVG(assignment_score) as avg_assignment,
+            AVG(quiz_score) as avg_quiz,
+            AVG(final_score) as avg_final,
+            SUM(CASE WHEN grade_letter = 'A' THEN 1 ELSE 0 END) as grade_a,
+            SUM(CASE WHEN grade_letter = 'B' THEN 1 ELSE 0 END) as grade_b,
+            SUM(CASE WHEN grade_letter = 'C' THEN 1 ELSE 0 END) as grade_c,
+            SUM(CASE WHEN grade_letter = 'D' THEN 1 ELSE 0 END) as grade_d,
+            SUM(CASE WHEN grade_letter = 'F' THEN 1 ELSE 0 END) as grade_f
+        ")->first();
 
-        $gradeCounts = [
-            'A' => $allGrades->where('grade_letter', 'A')->count(),
-            'B' => $allGrades->where('grade_letter', 'B')->count(),
-            'C' => $allGrades->where('grade_letter', 'C')->count(),
-            'D' => $allGrades->where('grade_letter', 'D')->count(),
-            'F' => $allGrades->where('grade_letter', 'F')->count(),
-        ];
+        // ✅ កែសម្រួល៖ បន្ថែម Pagination សម្រាប់ទិន្នន័យតារាង
+        // ប៉ុន្តែ Summary ខាងលើគណនាពី Query ទាំងមូល (មិនមែនតែ Page បច្ចុប្បន្នទេ)
+        $paginated = (clone $baseQuery)
+            ->with([
+                'student:id,first_name,last_name,email',
+                'course:id,course_name,course_code,department_id',
+                'course.department:id,department_name',
+            ])
+            ->orderBy('id', 'desc')
+            ->paginate($request->per_page ?? 50);
 
-        $avgAssignment = round($allGrades->avg('assignment_score') ?? 0, 1);
-        $avgQuiz = round($allGrades->avg('quiz_score') ?? 0, 1);
-        $avgFinal = round($allGrades->avg('final_score') ?? 0, 1);
+        // ✅ កែសម្រួល៖ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1)
+        $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter();
+        $studentProfiles = Student::whereIn('user_id', $studentIds)
+            ->select('user_id', 'student_code')
+            ->get()
+            ->keyBy('user_id');
 
-        $gradeList = $allGrades->map(function ($g) {
+        $gradeList = collect($paginated->items())->map(function ($g) use ($studentProfiles) {
             $studentUser = $g->student;
-            $studentProfile = Student::where('user_id', $g->student_id)->first();
+            $studentProfile = $studentProfiles->get($g->student_id);
 
             return [
                 'id' => $g->id,
@@ -312,13 +397,25 @@ class AdminReportController extends Controller
 
         return response()->json([
             'summary' => [
-                'total_graded' => $allGrades->count(),
-                'avg_assignment' => $avgAssignment,
-                'avg_quiz' => $avgQuiz,
-                'avg_final' => $avgFinal,
-                'grade_distribution' => $gradeCounts,
+                'total_graded' => $summaryRaw->total_graded ?? 0,
+                'avg_assignment' => round($summaryRaw->avg_assignment ?? 0, 1),
+                'avg_quiz' => round($summaryRaw->avg_quiz ?? 0, 1),
+                'avg_final' => round($summaryRaw->avg_final ?? 0, 1),
+                'grade_distribution' => [
+                    'A' => $summaryRaw->grade_a ?? 0,
+                    'B' => $summaryRaw->grade_b ?? 0,
+                    'C' => $summaryRaw->grade_c ?? 0,
+                    'D' => $summaryRaw->grade_d ?? 0,
+                    'F' => $summaryRaw->grade_f ?? 0,
+                ],
             ],
             'data' => $gradeList,
+            'meta' => [
+                'current_page' => $paginated->currentPage(),
+                'last_page' => $paginated->lastPage(),
+                'per_page' => $paginated->perPage(),
+                'total' => $paginated->total(),
+            ],
         ]);
     }
 }

@@ -1,5 +1,5 @@
-// src/App.jsx - Reload trigger
-import React from 'react';
+// src/App.jsx
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -14,14 +14,14 @@ import Register from './components/auth/Register';
 
 // Admin Components
 import AdminDashboard from './components/admin/AdminDashboard';
-// import ManageUsers from './components/admin/ManageUsers';
 import ManageTeachers from './components/admin/ManageTeachers';
-import ManageStudents from './components/admin/ManageStudents';
 import ManageCourses from './components/admin/ManageCourses';
 import ManageDepartments from './components/admin/ManageDepartments';
 import AdminReports from './components/admin/AdminReports';
-// import SystemSettings from './components/admin/SystemSettings';
-;
+import ManageStudentsYear1 from './components/admin/ManageStudentsYear1';
+import ManageStudentsYear2 from './components/admin/ManageStudentsYear2';
+import ManageStudentsYear3 from './components/admin/ManageStudentsYear3';
+import ManageStudentsYear4 from './components/admin/ManageStudentsYear4';
 
 // Teacher Components
 import TeacherDashboard from './components/teacher/TeacherDashboard';
@@ -31,16 +31,7 @@ import TeacherManageQuizzes from './components/teacher/TeacherManageQuizzes';
 import ManageLessons from './components/teacher/ManageLessons';
 import TeacherManageStudents from './components/teacher/TeacherManageStudents';
 import TeacherManageGrades from './components/teacher/TeacherManageGrades';
-// import ManageClassroom from './components/teacher/ManageClassroom';
-// import CreateStudent from './components/teacher/CreateStudent';
 import ManageAttendance from './components/teacher/ManageAttendance';
-// import ManageScores from './components/teacher/ManageScores';
-// import CreateMajor from './components/teacher/CreateMajor';
-// import CreateSubject from './components/teacher/CreateSubject';
-// import UploadAssignment from './components/teacher/UploadAssignment';
-// import UploadHomework from './components/teacher/UploadHomework';
-// import UploadVideo from './components/teacher/UploadVideo';
-// import OnlineExam from './components/teacher/OnlineExam';
 
 // Student Components
 import StudentDashboard from './components/student/StudentDashboard';
@@ -50,20 +41,46 @@ import StudentCourses from './components/student/StudentCourses';
 import StudentLessons from './components/student/StudentLessons';
 import StudentAssignments from './components/student/StudentAssignments';
 import StudentQuizzes from './components/student/StudentQuizzes';
-// import StudentUploadAssignment from './components/student/UploadAssignment';
-// import StudentUploadHomework from './components/student/UploadHomework';
 
 // Main App Content with routing
 const AppContent = () => {
   const { user, loading } = useAuth();
   const { t } = useLanguage();
 
+  // ✅ ចាប់សកម្មភាព Scroll គ្រប់ទីកន្លែង ដើម្បីបង្ហាញ Scrollbar តែពេលកំពុងអូស និងលាក់វិញពេលឈប់អូស
+  useEffect(() => {
+    let scrollTimer = null;
+
+    const handleScroll = (e) => {
+      document.documentElement.classList.add('is-scrolling');
+      if (e?.target && e.target.classList) {
+        e.target.classList.add('is-scrolling');
+      }
+
+      if (scrollTimer) clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        document.documentElement.classList.remove('is-scrolling');
+        document
+          .querySelectorAll('.is-scrolling')
+          .forEach((el) => el.classList.remove('is-scrolling'));
+      }, 750);
+    };
+
+    window.addEventListener('scroll', handleScroll, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll, { capture: true });
+      if (scrollTimer) clearTimeout(scrollTimer);
+    };
+  }, []);
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-slate-950">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">{t('កំពុងផ្ទុក...', 'Loading...')}</p>
+          <p className="mt-4 text-gray-600 dark:text-slate-400">
+            {t('កំពុងផ្ទុក...', 'Loading...')}
+          </p>
         </div>
       </div>
     );
@@ -71,12 +88,23 @@ const AppContent = () => {
 
   const getDashboardPath = () => {
     if (!user) return '/login';
-    const role = (user?.role?.role_name || user?.role_name || user?.role || '').toString().toLowerCase();
+    const role = (
+      user?.role?.role_name ||
+      user?.role_name ||
+      user?.role ||
+      ''
+    )
+      .toString()
+      .toLowerCase();
     switch (role) {
-      case 'admin': return '/admin/dashboard';
-      case 'teacher': return '/teacher/dashboard';
-      case 'student': return '/student/dashboard';
-      default: return '/login';
+      case 'admin':
+        return '/admin/dashboard';
+      case 'teacher':
+        return '/teacher/dashboard';
+      case 'student':
+        return '/student/dashboard';
+      default:
+        return '/login';
     }
   };
 
@@ -94,14 +122,22 @@ const AppContent = () => {
     );
   }
 
-  // User is logged in, show full layout with Navbar and Sidebar
+  // ✅ User is logged in: Navbar លាតពេញអេក្រង់ 100% នៅខាងលើ ហើយផ្ទៃខាងក្រោមជាអ្នក Scroll
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <div className="min-h-screen bg-gray-50">
-        <Navbar />
-        <div className="flex">
+      <div className="flex flex-col h-screen w-full overflow-hidden bg-gray-50 dark:bg-slate-950">
+        {/* 1. Navbar ពេញអេក្រង់ 100% ដល់គែមស្ដាំបំផុត គ្មាន Scrollbar មកបាំង */}
+        <div className="w-full shrink-0 z-40">
+          <Navbar />
+        </div>
+
+        {/* 2. ផ្ទៃខាងក្រោម Navbar (Sidebar + Main Content ដែលអាច Scroll បានយ៉ាងរលូន) */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
           <Sidebar />
-          <main className="flex-1 p-3 sm:p-6 pb-20 md:pb-6 min-w-0 overflow-x-hidden">
+          <main
+            id="app-main-scroll"
+            className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-20 md:pb-6 min-w-0"
+          >
             <Routes>
               {/* Redirect root to appropriate dashboard */}
               <Route path="/" element={<Navigate to={getDashboardPath()} replace />} />
@@ -109,12 +145,13 @@ const AppContent = () => {
               {/* Admin Routes */}
               <Route element={<ProtectedRoute allowedRoles={['Admin']} />}>
                 <Route path="/admin/dashboard" element={<AdminDashboard />} />
-                {/* <Route path="/admin/users" element={<ManageUsers />} /> */}
                 <Route path="/admin/courses" element={<ManageCourses />} />
                 <Route path="/admin/departments" element={<ManageDepartments />} />
-  
                 <Route path="/admin/teachers" element={<ManageTeachers />} />
-                <Route path="/admin/students" element={<ManageStudents />} />
+                <Route path="/admin/students/year-1" element={<ManageStudentsYear1 />} />
+                <Route path="/admin/students/year-2" element={<ManageStudentsYear2 />} />
+                <Route path="/admin/students/year-3" element={<ManageStudentsYear3 />} />
+                <Route path="/admin/students/year-4" element={<ManageStudentsYear4 />} />
                 <Route path="/admin/reports" element={<AdminReports />} />
               </Route>
 
@@ -142,8 +179,6 @@ const AppContent = () => {
                 <Route path="/student/grades" element={<ViewScores />} />
                 <Route path="/student/assignments" element={<StudentAssignments />} />
                 <Route path="/student/quizzes" element={<StudentQuizzes />} />
-                {/* <Route path="/student/assignments/upload" element={<StudentUploadAssignment />} />
-                <Route path="/student/homework/upload" element={<StudentUploadHomework />} /> */}
               </Route>
 
               {/* Fallback */}
@@ -151,6 +186,7 @@ const AppContent = () => {
             </Routes>
           </main>
         </div>
+
         <BottomNav />
         <ToastContainer position="bottom-right" />
       </div>
@@ -159,12 +195,11 @@ const AppContent = () => {
 };
 
 // Main App Component
-// Main App Component
 function App() {
   return (
     <AuthProvider>
-      <LanguageProvider> 
-      <AppContent />
+      <LanguageProvider>
+        <AppContent />
       </LanguageProvider>
     </AuthProvider>
   );

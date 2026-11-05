@@ -6,11 +6,20 @@
   --font-en: 'Inter', 'Outfit', sans-serif;
 }
 
+html,
 body {
   font-family: var(--font-km);
   background-color: #f8fafc;
   color: #0f172a;
   overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+html.dark,
+html.dark body {
+  background-color: #020617;
+  color: #f8fafc;
 }
 
 html[lang="en"] body {
@@ -21,23 +30,58 @@ html[lang="km"] body {
   font-family: var(--font-km);
 }
 
-/* Custom Scrollbar */
+/* ============================================================================
+   ✅ Smart Auto-Hide Scrollbar (គ្មានផ្ទៃពណ៌ប្រផេះបាំង Navbar និងលាក់ខ្លួនពេលឈប់ Scroll)
+   ============================================================================ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+html.is-scrolling *,
+.is-scrolling {
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+html.dark.is-scrolling *,
+html.dark .is-scrolling {
+  scrollbar-color: rgba(100, 116, 139, 0.55) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(241, 245, 249, 0.8);
+  background: transparent !important;
 }
 
+::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+
+/* ធម្មតា៖ លាក់ដុំ Scrollbar ឱ្យថ្លាទាំងស្រុង */
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background-color: transparent;
   border-radius: 9999px;
+  transition: background-color 0.25s ease;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+/* បង្ហាញដុំ Scrollbar តែនៅពេលកំពុងអូស (Scroll) ប៉ុណ្ណោះ */
+html.is-scrolling ::-webkit-scrollbar-thumb,
+.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.48);
+}
+
+html.dark.is-scrolling ::-webkit-scrollbar-thumb,
+html.dark .is-scrolling::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.6);
+}
+
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background-color: rgba(100, 116, 139, 0.85) !important;
 }
 
 /* Glassmorphism utility classes */

@@ -13,32 +13,50 @@ use Illuminate\Support\Facades\Auth;
 class TeacherCourseController extends Controller
 {
     /**
+     * ទាញយកបញ្ជី ID របស់គ្រូបង្រៀន (គាំទ្រទាំង teachers.id និង users.id)
+     */
+    private function getTeacherIds()
+    {
+        $user = Auth::user();
+        $teacher = $user ? $user->teacher : null;
+
+        return array_values(array_unique(array_filter([
+            $teacher ? (int) $teacher->id : null,
+            $user ? (int) $user->id : null,
+        ])));
+    }
+
+    /**
      * Get all courses taught by the logged-in teacher
      * GET /teacher/courses
      */
     public function index()
     {
         try {
-            $teacher = Auth::user()->teacher;
-            
-            if (!$teacher) {
+            $user = Auth::user();
+            $teacher = $user ? $user->teacher : null;
+            $teacherIds = $this->getTeacherIds();
+
+            if (empty($teacherIds)) {
                 return response()->json([
                     'message' => 'អ្នកមិនមែនជាគ្រូបង្រៀនទេ'
                 ], 403);
             }
 
-            // ==========================================
-            // កែប្រែ៖ ប្រើ $teacher->id ជំនួស Auth::id()
-            // ==========================================
             $courses = Course::with(['department'])
-                ->where('teacher_id', $teacher->id)
+                ->whereIn('teacher_id', $teacherIds)
                 ->orderBy('course_name')
                 ->get();
+
+            $teacherName = $teacher
+                ? trim($teacher->first_name . ' ' . $teacher->last_name)
+                : trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
 
             if ($courses->isEmpty()) {
                 return response()->json([
                     'data' => [],
                     'total' => 0,
+                    'teacher_name' => $teacherName,
                     'message' => 'អ្នកមិនទាន់មានមុខវិជ្ជាបង្រៀននៅឡើយទេ'
                 ]);
             }
@@ -65,7 +83,7 @@ class TeacherCourseController extends Controller
             return response()->json([
                 'data' => $coursesData,
                 'total' => $coursesData->count(),
-                'teacher_name' => $teacher->first_name . ' ' . $teacher->last_name,
+                'teacher_name' => $teacherName,
                 'message' => 'បានទាញយកបញ្ជីមុខវិជ្ជាដោយជោគជ័យ'
             ]);
 
@@ -84,15 +102,14 @@ class TeacherCourseController extends Controller
     public function show($courseId)
     {
         try {
-            $teacher = Auth::user()->teacher;
+            $teacherIds = $this->getTeacherIds();
 
-            if (!$teacher) {
+            if (empty($teacherIds)) {
                 return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
             }
 
-            // កែប្រែ៖ ប្រើ $teacher->id
             $course = Course::with(['department'])
-                ->where('teacher_id', $teacher->id)
+                ->whereIn('teacher_id', $teacherIds)
                 ->findOrFail($courseId);
 
             return response()->json([
@@ -129,24 +146,24 @@ class TeacherCourseController extends Controller
     public function getStats()
     {
         try {
-            $teacher = Auth::user()->teacher;
-            
-            if (!$teacher) {
+            $user = Auth::user();
+            $teacher = $user ? $user->teacher : null;
+            $teacherIds = $this->getTeacherIds();
+
+            if (empty($teacherIds)) {
                 return response()->json([
                     'message' => 'អ្នកមិនមែនជាគ្រូបង្រៀនទេ'
                 ], 403);
             }
 
-            // កែប្រែ៖ ប្រើ $teacher->id
-            $courses = Course::where('teacher_id', $teacher->id)->get();
+            $courses = Course::whereIn('teacher_id', $teacherIds)->get();
 
             $totalCourses = $courses->count();
             $totalCredits = $courses->sum('credit');
             $avgCredits = $totalCourses > 0 ? round($totalCredits / $totalCourses, 1) : 0;
 
-            // កែប្រែ៖ ប្រើ $teacher->id ក្នុង Closure
-            $departmentStats = Department::withCount(['courses' => function ($query) use ($teacher) {
-                    $query->where('teacher_id', $teacher->id);
+            $departmentStats = Department::withCount(['courses' => function ($query) use ($teacherIds) {
+                    $query->whereIn('teacher_id', $teacherIds);
                 }])
                 ->having('courses_count', '>', 0)
                 ->get()
@@ -158,12 +175,16 @@ class TeacherCourseController extends Controller
                     ];
                 });
 
+            $teacherName = $teacher
+                ? trim($teacher->first_name . ' ' . $teacher->last_name)
+                : trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
+
             return response()->json([
                 'total_courses' => $totalCourses,
                 'total_credits' => $totalCredits,
                 'avg_credits' => $avgCredits,
                 'department_stats' => $departmentStats,
-                'teacher_name' => $teacher->first_name . ' ' . $teacher->last_name,
+                'teacher_name' => $teacherName,
                 'message' => 'បានទាញយកស្ថិតិមុខវិជ្ជាដោយជោគជ័យ'
             ]);
 
@@ -183,9 +204,9 @@ class TeacherCourseController extends Controller
     {
         try {
             $keyword = $request->query('q');
-            $teacher = Auth::user()->teacher;
+            $teacherIds = $this->getTeacherIds();
 
-            if (!$teacher) {
+            if (empty($teacherIds)) {
                 return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
             }
 
@@ -193,9 +214,8 @@ class TeacherCourseController extends Controller
                 return $this->index();
             }
 
-            // កែប្រែ៖ ប្រើ $teacher->id
             $courses = Course::with(['department'])
-                ->where('teacher_id', $teacher->id)
+                ->whereIn('teacher_id', $teacherIds)
                 ->where(function ($query) use ($keyword) {
                     $query->where('course_name', 'LIKE', "%{$keyword}%")
                           ->orWhere('course_code', 'LIKE', "%{$keyword}%")
@@ -218,6 +238,7 @@ class TeacherCourseController extends Controller
                     'department' => $course->department ? [
                         'id' => $course->department->id,
                         'name' => $course->department->department_name,
+                        'department_name' => $course->department->department_name,
                     ] : null,
                 ];
             });

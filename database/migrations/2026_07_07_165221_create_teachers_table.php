@@ -27,7 +27,7 @@ return new class extends Migration
             // ព័ត៌មានវិជ្ជាជីវៈ (សំខាន់សម្រាប់ TVET)
 
             $table->string('specialization', 255)->nullable(); // ឯកទេស (ឧ. Network, Web Development)
-            $table->enum('employment_type', ['Full-time'])->default('Full-time'); // គ្រូពេញម៉ោង ឬក្រៅម៉ោង
+            $table->enum('employment_type', ['Full-time', 'Part-time', 'Contract'])->default('Full-time'); // គ្រូពេញម៉ោង ឬក្រៅម៉ោង
             
             $table->timestamps();
         });

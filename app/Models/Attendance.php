@@ -16,6 +16,7 @@ class Attendance extends Model
         'student_id',
         'course_id',
         'attendance_date',
+        'late_time',
         'status',
     ];
 

@@ -1,5 +1,4 @@
 <?php
-// app/Http/Controllers/Api/AdminTeacherController.php
 
 namespace App\Http\Controllers\Api;
 
@@ -12,7 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
-use Illuminate\Support\Facades\Cache; // បន្ថែមការហៅ Cache មកប្រើប្រាស់
+use Illuminate\Support\Facades\Cache;
 
 class AdminTeacherController extends Controller
 {
@@ -20,16 +19,42 @@ class AdminTeacherController extends Controller
      * Display a listing of all teachers
      * GET /admin/teachers
      */
-    public function index(Request $request) // បន្ថែម Request សម្រាប់ទទួលយក per_page
+    public function index(Request $request)
     {
-        $perPage = $request->per_page ?? 10; // កំណត់ចំនួនកំណត់ត្រាក្នុងមួយទំព័រ (លំនាំដើម ១០)
+        $perPage = $request->per_page ?? 15;
 
-        $teachers = Teacher::with(['department', 'user', 'role'])
-            ->orderBy('first_name')
-            ->paginate($perPage); // ប្ដូរពី get() ទៅជា paginate() ដើម្បីកុំឱ្យយឺតពេលមានទិន្នន័យច្រើន
+        // ✅ កែសម្រួល៖ select columns ចាំបាច់ និង search support
+        $query = Teacher::with([
+            'department:id,department_name',
+            'user:id,status,email',
+            'role:id,role_name'
+        ])->select([
+            'id', 'user_id', 'role_id', 'department_id',
+            'teacher_code', 'first_name', 'last_name', 'gender',
+            'date_of_birth', 'email', 'phone', 'profile_image',
+            'specialization', 'employment_type', 'created_at'
+        ]);
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "{$search}%")
+                  ->orWhere('last_name', 'like', "{$search}%")
+                  ->orWhere('teacher_code', 'like', "{$search}%")
+                  ->orWhere('email', 'like', "{$search}%");
+            });
+        }
+
+        $teachers = $query->orderBy('first_name')->paginate($perPage);
 
         return response()->json([
-            'data' => $teachers,
+            'data' => $teachers->items(),
+            'meta' => [
+                'current_page' => $teachers->currentPage(),
+                'last_page' => $teachers->lastPage(),
+                'per_page' => $teachers->perPage(),
+                'total' => $teachers->total(),
+            ],
             'message' => 'បានទាញយកបញ្ជីគ្រូបង្រៀនដោយជោគជ័យ'
         ]);
     }
@@ -55,11 +80,9 @@ class AdminTeacherController extends Controller
             'employment_type' => 'nullable|in:Full-time,Part-time,Contract',
         ]);
 
-        // Get Teacher role
         $teacherRole = Role::where('role_name', 'Teacher')->firstOrFail();
 
         $teacher = DB::transaction(function () use ($validated, $teacherRole) {
-            // 1. Create user account
             $user = User::create([
                 'first_name' => $validated['first_name'],
                 'last_name' => $validated['last_name'],
@@ -68,13 +91,12 @@ class AdminTeacherController extends Controller
                 'phone' => $validated['phone'] ?? null,
                 'gender' => $validated['gender'] ?? null,
                 'status' => $validated['status'] ?? 'active',
-                'role_id' => $teacherRole->id,  // កំណត់ role ក្នុង users
+                'role_id' => $teacherRole->id,
             ]);
 
-            // 2. Create teacher profile (with role_id)
             $teacher = Teacher::create([
                 'user_id' => $user->id,
-                'role_id' => $teacherRole->id,  // រក្សា role_id ក្នុង teachers
+                'role_id' => $teacherRole->id,
                 'teacher_code' => $validated['teacher_code'] ?? $this->generateTeacherCode(),
                 'first_name' => $validated['first_name'],
                 'last_name' => $validated['last_name'],
@@ -84,14 +106,14 @@ class AdminTeacherController extends Controller
                 'phone' => $validated['phone'] ?? null,
                 'department_id' => $validated['department_id'] ?? null,
                 'specialization' => $validated['specialization'] ?? null,
-                'employment_type' => $validated['employment_type'] ?? 'Full-time','Part-time','Contract',
+                'employment_type' => $validated['employment_type'] ?? 'Full-time',
             ]);
 
             return $teacher->load(['department', 'user', 'role']);
         });
 
-        // លុប Cache ពេលមានការបង្កើតគ្រូថ្មី ដើម្បីឱ្យ Dashboard ធ្វើបច្ចុប្បន្នភាពទិន្នន័យ
         Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         return response()->json([
             'message' => 'បានបង្កើតគណនីគ្រូបង្រៀនដោយជោគជ័យ',
@@ -123,8 +145,7 @@ class AdminTeacherController extends Controller
             'gender' => 'nullable|in:Male,Female,Other',
             'date_of_birth' => 'nullable|date',
             'email' => [
-                'required',
-                'email',
+                'required', 'email',
                 Rule::unique('users', 'email')->ignore($teacher->user_id),
                 Rule::unique('teachers', 'email')->ignore($teacher->id),
             ],
@@ -133,9 +154,7 @@ class AdminTeacherController extends Controller
             'status' => 'nullable|in:active,inactive',
             'department_id' => 'nullable|exists:departments,id',
             'teacher_code' => [
-                'nullable',
-                'string',
-                'max:50',
+                'nullable', 'string', 'max:50',
                 Rule::unique('teachers', 'teacher_code')->ignore($teacher->id),
             ],
             'specialization' => 'nullable|string|max:255',
@@ -143,7 +162,6 @@ class AdminTeacherController extends Controller
         ]);
 
         DB::transaction(function () use ($validated, $teacher) {
-            // Update User
             $userData = [
                 'first_name' => $validated['first_name'],
                 'last_name' => $validated['last_name'],
@@ -159,7 +177,6 @@ class AdminTeacherController extends Controller
 
             $teacher->user->update($userData);
 
-            // Update Teacher (keep role_id)
             $teacher->update([
                 'teacher_code' => $validated['teacher_code'] ?? $teacher->teacher_code,
                 'first_name' => $validated['first_name'],
@@ -187,12 +204,11 @@ class AdminTeacherController extends Controller
     public function destroy(Teacher $teacher)
     {
         $teacherName = $teacher->first_name . ' ' . $teacher->last_name;
-        
-        // Delete user (cascade will delete teacher)
+
         $teacher->user->delete();
 
-        // លុប Cache ពេលមានការលុបគ្រូចេញ ដើម្បីឱ្យ Dashboard ធ្វើបច្ចុប្បន្នភាពទិន្នន័យ
         Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         return response()->json([
             'message' => "បានលុបគណនីគ្រូបង្រៀន '{$teacherName}' ដោយជោគជ័យ"
@@ -203,16 +219,100 @@ class AdminTeacherController extends Controller
      * Get all teachers for export without pagination
      * GET /admin/teachers/export-all
      */
-    public function exportAll()
+    public function exportAll(Request $request)
     {
-        $teachers = Teacher::with(['department', 'user', 'role'])
+        if ($request->query('format') === 'json') {
+            $teachers = [];
+            Teacher::with([
+                'department:id,department_name',
+                'user:id,status,email',
+                'role:id,role_name'
+            ])
+            ->select([
+                'id', 'user_id', 'role_id', 'department_id',
+                'teacher_code', 'first_name', 'last_name', 'gender',
+                'date_of_birth', 'email', 'phone',
+                'specialization', 'employment_type'
+            ])
             ->orderBy('first_name')
-            ->get();
+            ->chunk(500, function ($chunk) use (&$teachers) {
+                foreach ($chunk as $teacher) {
+                    $teachers[] = $teacher;
+                }
+            });
 
-        return response()->json([
-            'data' => $teachers,
-            'message' => 'បានទាញយកទិន្នន័យគ្រូបង្រៀនទាំងអស់ដោយជោគជ័យ'
-        ]);
+            return response()->json([
+                'data' => $teachers,
+                'message' => 'បានទាញយកទិន្នន័យគ្រូបង្រៀនទាំងអស់ដោយជោគជ័យ'
+            ]);
+        }
+
+        $filename = 'Teachers_List_' . date('Y-m-d') . '.csv';
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
+        ];
+
+        return response()->stream(function () {
+            $handle = fopen('php://output', 'w');
+            // Write UTF-8 BOM so Microsoft Excel correctly renders Khmer Unicode characters
+            fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
+
+            fputcsv($handle, [
+                'No',
+                'Teacher Code',
+                'First Name',
+                'Last Name',
+                'Gender',
+                'Email',
+                'Phone',
+                'Department',
+                'Specialization',
+                'Employment Type',
+                'Date of Birth',
+                'Status'
+            ]);
+
+            $index = 1;
+            Teacher::with([
+                'department:id,department_name',
+                'user:id,status,email',
+                'role:id,role_name'
+            ])
+            ->select([
+                'id', 'user_id', 'role_id', 'department_id',
+                'teacher_code', 'first_name', 'last_name', 'gender',
+                'date_of_birth', 'email', 'phone',
+                'specialization', 'employment_type'
+            ])
+            ->orderBy('first_name')
+            ->chunk(500, function ($teachers) use ($handle, &$index) {
+                foreach ($teachers as $t) {
+                    $gender = $t->gender === 'Male' ? 'ប្រុស (Male)' : ($t->gender === 'Female' ? 'ស្រី (Female)' : ($t->gender ?? ''));
+                    $status = ($t->user->status ?? $t->status) === 'active' ? 'សកម្ម (Active)' : 'អសកម្ម (Inactive)';
+
+                    fputcsv($handle, [
+                        $index++,
+                        $t->teacher_code ?? '',
+                        $t->first_name ?? '',
+                        $t->last_name ?? '',
+                        $gender,
+                        $t->email ?? '',
+                        $t->phone ?? '',
+                        $t->department->department_name ?? '',
+                        $t->specialization ?? '',
+                        $t->employment_type ?? '',
+                        $t->date_of_birth ?? '',
+                        $status
+                    ]);
+                }
+            });
+
+            fclose($handle);
+        }, 200, $headers);
     }
 
     /**
@@ -233,10 +333,15 @@ class AdminTeacherController extends Controller
         $skipped = [];
 
         DB::transaction(function () use ($request, $teacherRole, &$importedCount, &$skipped) {
+            // ✅ កែសម្រួល៖ ទាញ Emails ដែលមានរួច ក្នុង Query តែម្តង
+            $emails = collect($request->teachers)->pluck('email')->filter()->toArray();
+            $existingEmails = User::whereIn('email', $emails)->pluck('email')
+                ->merge(Teacher::whereIn('email', $emails)->pluck('email'))
+                ->unique()
+                ->toArray();
+
             foreach ($request->teachers as $index => $item) {
-                // Check duplicate email in users or teachers
-                $emailExists = User::where('email', $item['email'])->exists() || Teacher::where('email', $item['email'])->exists();
-                if ($emailExists) {
+                if (in_array($item['email'], $existingEmails)) {
                     $skipped[] = [
                         'row' => $index + 1,
                         'email' => $item['email'],
@@ -281,6 +386,7 @@ class AdminTeacherController extends Controller
         });
 
         Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         return response()->json([
             'message' => "នាំចូលគ្រូបង្រៀនចំនួន {$importedCount} នាក់ដោយជោគជ័យ",

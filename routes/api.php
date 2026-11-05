@@ -1,4 +1,3 @@
-
 <?php
 
 use App\Http\Controllers\Api\AuthController;
@@ -23,25 +22,30 @@ use App\Models\Course; // សូមប្រាកដថាអ្នកមាន
 use App\Models\Lesson; // សូមប្រាកដថាអ្នកមាន Model នេះ
 use App\Models\LessonFile; // សូមប្រាកដថាអ្នកមាន Model នេះ
 use App\Models\Video; // សូមប្រាកដថាអ្នកមាន Model នេះ
+
 Route::get('/roles', function () {
-    // ជម្រើសទី១៖ ប្រសិនបើអ្នកបានបង្កើត Table roles និងមានទិន្នន័យក្នុង Database រួចរាល់
-    return response()->json(Role::all());
-    
-    // ---------------------------------------------------------
-    // ជម្រើសទី២ (💡 ណែនាំសម្រាប់ការសាកល្បង)៖ 
-    // ប្រសិនបើអ្នកមិនទាន់មាន Table នៅក្នុង Database ទេ 
-    // អ្នកអាច Comment ជម្រើសទី១ រួចប្រើទិន្នន័យសប្បនិម្មិត (Mock Data) នេះសិន ដើម្បីឱ្យ Frontend លោតទិន្នន័យបាន៖
-    /*
+    $roles = Role::withCount('users')->get();
+    $adminRole = $roles->first(function ($r) {
+        return stripos($r->role_name ?? $r->name ?? '', 'admin') !== false;
+    });
+    $hasAdmin = $adminRole ? ($adminRole->users_count > 0) : (\App\Models\User::where('role_id', 1)->exists());
+
     return response()->json([
-        ['id' => 1, 'role_name' => 'Admin'],
-        ['id' => 2, 'role_name' => 'Teacher'],
-        ['id' => 3, 'role_name' => 'Student'],
+        'data' => $roles,
+        'has_admin' => $hasAdmin,
+        'admin_exists' => $hasAdmin,
     ]);
-    */
 });
+
 // Public routes
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/verify-2fa', [AuthController::class, 'verifyTwoFactor']);
+Route::post('/resend-2fa', [AuthController::class, 'resendTwoFactor']);
+Route::post('/forgot-password/send-otp', [AuthController::class, 'sendPasswordResetOtp']);
+Route::post('/forgot-password/verify-otp', [AuthController::class, 'verifyPasswordResetOtp']);
+Route::post('/forgot-password/reset', [AuthController::class, 'resetPasswordWithOtp']);
+Route::post('/check-telegram-link', [\App\Http\Controllers\Api\AuthController::class, 'checkTelegramLink']);
 
 // Check file existence route (returns 200 OK with exists boolean)
 Route::get('/check-file-exists', function (\Illuminate\Http\Request $request) {
@@ -126,6 +130,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/users', [AdminController::class, 'createUser']);
         Route::put('/users/{id}', [AdminController::class, 'updateUser']);
         Route::delete('/users/{id}', [AdminController::class, 'deleteUser']);
+        
 
         // Course management
         Route::get('/courses', [CourseController::class, 'index']);
@@ -133,7 +138,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/courses/{course}', [CourseController::class, 'update']);
         Route::delete('/courses/{course}', [CourseController::class, 'destroy']);
 
-      // Teacher management
+        // Teacher management
         Route::get('teachers/export-all', [AdminTeacherController::class, 'exportAll']);
         Route::post('teachers/import', [AdminTeacherController::class, 'import']);
         Route::get('teachers/', [AdminTeacherController::class, 'index']);
@@ -152,15 +157,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/students/{student}/enrollments', [AdminStudentController::class, 'getEnrollments']);
         Route::post('/students/{student}/enrollments', [AdminStudentController::class, 'enrollStudent']);
         Route::delete('/students/{student}/enrollments/{courseId}', [AdminStudentController::class, 'unenrollStudent']);
-
+        // Route សម្រាប់ឡើងថ្នាក់សិស្ស (Promote Students)
+        Route::post('/students/promote', [AdminStudentController::class, 'promoteStudents']);
   
         // Department management
         Route::get('/departments', [DepartmentController::class, 'index']);
         Route::post('/departments', [DepartmentController::class, 'store']);
         Route::put('/departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('/departments/{department}', [DepartmentController::class, 'destroy']);
-
-       
 
         // System
         Route::get('/stats', [AdminController::class, 'getStats']);
@@ -194,6 +198,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Attendance & Course Students
         Route::get('/courses/{courseId}/students', [TeacherController::class, 'getCourseStudents']);
         Route::get('/courses/{courseId}/attendance', [TeacherController::class, 'getAttendance']);
+        Route::get('/attendance/{courseId}', [TeacherController::class, 'getAttendance']);
         Route::post('/attendance', [TeacherController::class, 'markAttendance']);
         Route::post('/attendance/bulk', [TeacherController::class, 'bulkMarkAttendance']);
         
@@ -246,7 +251,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/departments', [DepartmentController::class, 'store']);
         Route::put('/departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('/departments/{department}', [DepartmentController::class, 'destroy']);
-
     });
 
     // Student routes
@@ -254,11 +258,12 @@ Route::middleware('auth:sanctum')->group(function () {
         // Dashboard
         Route::get('/dashboard', [StudentController::class, 'dashboard']);
         
-        // Courses
+        // Courses & Lessons
         Route::get('/courses', [StudentController::class, 'getMyCourses']);
         Route::get('/courses/{courseId}', [StudentController::class, 'getCourseDetails']);
         Route::get('/courses/{courseId}/lessons', [StudentController::class, 'getCourseLessons']);
         Route::get('/lessons', [StudentController::class, 'getAllLessons']);
+        Route::get('/lessons/read-file', [StudentController::class, 'readLessonFile']);
         
         // Attendance
         Route::get('/attendance', [StudentController::class, 'getAttendance']);

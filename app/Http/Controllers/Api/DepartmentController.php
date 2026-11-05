@@ -10,6 +10,7 @@ use App\Models\Course;
 use App\Models\Teacher;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Cache;
 
 class DepartmentController extends Controller
 {
@@ -19,30 +20,30 @@ class DepartmentController extends Controller
      */
     public function index()
     {
-        $departments = Department::select(
+        $departments = Department::select([
                 'id', 
                 'department_name',
                 'description',
                 'created_at',
                 'updated_at'
-            )
+            ])
+            ->withCount(['teachers', 'students', 'courses'])
             ->orderBy('department_name')
             ->get()
             ->map(function ($department) {
-                // រាប់ចំនួនគ្រូ សិស្ស និងមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់
-                $teacherCount = Teacher::where('department_id', $department->id)->count();
-                $studentCount = Student::where('department_id', $department->id)->count();
-                $courseCount = Course::where('department_id', $department->id)->count();
-                
+                $teachersCount = (int) $department->teachers_count;
+                $studentsCount = (int) $department->students_count;
+                $coursesCount = (int) $department->courses_count;
+
                 return [
                     'id' => $department->id,
                     'name' => $department->department_name,
                     'department_name' => $department->department_name,
                     'description' => $department->description,
-                    'teachers_count' => $teacherCount,
-                    'students_count' => $studentCount,
-                    'courses_count' => $courseCount,
-                    'users_count' => $teacherCount + $studentCount,
+                    'teachers_count' => $teachersCount,
+                    'students_count' => $studentsCount,
+                    'courses_count' => $coursesCount,
+                    'users_count' => $teachersCount + $studentsCount,
                     'created_at' => $department->created_at,
                     'updated_at' => $department->updated_at,
                 ];
@@ -62,6 +63,10 @@ class DepartmentController extends Controller
             'department_name' => $validated['name'],
             'description' => $validated['description'] ?? null,
         ]);
+
+        // ✅ Clear cached reports & dashboard stats
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         return response()->json([
             'message' => 'Department created successfully',
@@ -95,10 +100,15 @@ class DepartmentController extends Controller
             'description' => $validated['description'] ?? null,
         ]);
 
-        // ទាញយកចំនួនថ្មី
-        $teacherCount = Teacher::where('department_id', $department->id)->count();
-        $studentCount = Student::where('department_id', $department->id)->count();
-        $courseCount = Course::where('department_id', $department->id)->count();
+        // ✅ Clear cached reports & dashboard stats
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
+
+        // ទាញយកចំនួនថ្មីតាមរយៈ loadCount
+        $department->loadCount(['teachers', 'students', 'courses']);
+        $teacherCount = (int) $department->teachers_count;
+        $studentCount = (int) $department->students_count;
+        $courseCount = (int) $department->courses_count;
 
         return response()->json([
             'message' => 'Department updated successfully',
@@ -118,17 +128,19 @@ class DepartmentController extends Controller
     public function destroy(Department $department)
     {
         // ពិនិត្យមើលថាតើមានគ្រូ សិស្ស ឬមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់នេះដែរឬទេ
-        $teacherCount = Teacher::where('department_id', $department->id)->count();
-        $studentCount = Student::where('department_id', $department->id)->count();
-        $courseCount = Course::where('department_id', $department->id)->count();
+        $department->loadCount(['teachers', 'students', 'courses']);
         
-        if ($teacherCount > 0 || $studentCount > 0 || $courseCount > 0) {
+        if ($department->teachers_count > 0 || $department->students_count > 0 || $department->courses_count > 0) {
             return response()->json([
                 'message' => 'មិនអាចលុបដេប៉ាតឺម៉ង់ដែលមានគ្រូ សិស្ស ឬមុខវិជ្ជាបានទេ'
             ], 400);
         }
 
         $department->delete();
+
+        // ✅ Clear cached reports & dashboard stats
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         return response()->json([
             'message' => 'Department deleted successfully'
