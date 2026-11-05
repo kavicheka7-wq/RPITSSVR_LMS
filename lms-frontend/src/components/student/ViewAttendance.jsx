@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { toast } from 'react-toastify';
 import { useLanguage } from '../../context/LanguageContext';
 import {
   DocumentCheckIcon,
@@ -313,11 +312,6 @@ const ViewAttendance = () => {
           return;
         }
         console.error('Error fetching student attendance:', error);
-        if ((STUDENT_ATT_MEM_CACHE.attendance || []).length === 0) {
-          toast.error(
-            t('មិនអាចទាញយកទិន្នន័យវត្តមានបានទេ', 'Failed to fetch attendance')
-          );
-        }
       }
     };
 
@@ -326,7 +320,7 @@ const ViewAttendance = () => {
       isMounted = false;
       controller.abort();
     };
-  }, [page, perPage, currentStudentId, t]);
+  }, [page, perPage, currentStudentId]);
 
   // ============================================================================
   // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ព័ត៌មានសិស្ស កាលបរិច្ឆេទខ្មែរសុទ្ធ និងការច្រោះទិន្នន័យ
