@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -769,7 +768,7 @@ export default function ManageLessons() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបមេរៀន និងផ្ទុកហ្វាល់ (ភ្ជាប់កណ្ដឹង)
+  // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបមេរៀន និងផ្ទុកហ្វាល់ (ភ្ជាប់តែកណ្ដឹង)
   // ============================================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -793,9 +792,6 @@ export default function ManageLessons() {
       if (editingLesson) {
         await api.put(`/teacher/lessons/${editingLesson.id}`, payload);
         currentLessonId = editingLesson.id;
-        toast.success(
-          t('បានកែប្រែមេរៀនដោយជោគជ័យ!', 'Lesson updated successfully!')
-        );
 
         pushLocalNotification({
           titleKm: 'បានកែប្រែមេរៀន',
@@ -811,9 +807,6 @@ export default function ManageLessons() {
           response.data?.lesson?.id ||
           response.data?.data?.id ||
           response.data?.id;
-        toast.success(
-          t('បានបង្កើតមេរៀនថ្មីដោយជោគជ័យ!', 'New lesson created successfully!')
-        );
 
         pushLocalNotification({
           titleKm: 'បានបន្ថែមមេរៀនថ្មី',
@@ -865,14 +858,6 @@ export default function ManageLessons() {
       await fetchLessons();
     } catch (error) {
       console.error('Submit error:', error);
-      if (error.response?.data?.errors) {
-        toast.error(Object.values(error.response.data.errors).flat().join('\n'));
-      } else {
-        toast.error(
-          error.response?.data?.message ||
-            t('ការរក្សាទុកមេរៀនបានបរាជ័យ', 'Failed to save lesson')
-        );
-      }
     } finally {
       setIsSubmitting(false);
     }
@@ -909,9 +894,6 @@ export default function ManageLessons() {
 
     try {
       await api.delete(`/teacher/lessons/${deletedId}`);
-      toast.success(
-        t('បានលុបមេរៀនដោយជោគជ័យ!', 'Lesson deleted successfully!')
-      );
 
       pushLocalNotification({
         titleKm: 'បានលុបមេរៀន',
@@ -934,7 +916,7 @@ export default function ManageLessons() {
           JSON.stringify(previousLessons)
         );
       } catch (e) {}
-      toast.error(t('មិនអាចលុបមេរៀនបានទេ', 'Cannot delete lesson'));
+      console.error('Cannot delete lesson:', error);
     }
   };
 
@@ -954,9 +936,6 @@ export default function ManageLessons() {
       await api.post('/teacher/lessons/file', filePayload, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success(
-        t('បានផ្ទុកឡើងឯកសារដោយជោគជ័យ!', 'File uploaded successfully!')
-      );
       await fetchLessons();
 
       pushLocalNotification({
@@ -968,10 +947,7 @@ export default function ManageLessons() {
         link: '/teacher/lessons',
       });
     } catch (error) {
-      toast.error(
-        error.response?.data?.message ||
-          t('ការផ្ទុកឡើងឯកសារបានបរាជ័យ', 'Failed to upload file')
-      );
+      console.error('Failed to upload file:', error);
     } finally {
       setUploadingFileId(null);
       e.target.value = '';
@@ -991,12 +967,6 @@ export default function ManageLessons() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!videoTitle.trim()) {
-      toast.warning(
-        t(
-          'សូមបញ្ចូលចំណងជើងវីដេអូមុនពេលផ្ទុកឡើង',
-          'Please enter video title before uploading'
-        )
-      );
       e.target.value = '';
       return;
     }
@@ -1014,9 +984,6 @@ export default function ManageLessons() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setVideoTitle('');
-      toast.success(
-        t('បានផ្ទុកឡើងវីដេអូដោយជោគជ័យ!', 'Video uploaded successfully!')
-      );
       await fetchLessons();
 
       pushLocalNotification({
@@ -1028,10 +995,7 @@ export default function ManageLessons() {
         link: '/teacher/lessons',
       });
     } catch (error) {
-      toast.error(
-        error.response?.data?.message ||
-          t('ការផ្ទុកឡើងវីដេអូបានបរាជ័យ', 'Failed to upload video')
-      );
+      console.error('Failed to upload video:', error);
     } finally {
       setUploadingVideoId(null);
       e.target.value = '';
@@ -1041,12 +1005,6 @@ export default function ManageLessons() {
   // ✅ Add Video URL + បញ្ជូនសារទៅកាន់កណ្ដឹង
   const handleAddVideoUrl = async (lessonId) => {
     if (!videoTitle.trim() || !videoUrlInput.trim()) {
-      toast.warning(
-        t(
-          'សូមបញ្ចូលទាំងចំណងជើង និងតំណភ្ជាប់វីដេអូ',
-          'Please enter both video title and URL'
-        )
-      );
       return;
     }
 
@@ -1064,9 +1022,6 @@ export default function ManageLessons() {
       });
       setVideoTitle('');
       setVideoUrlInput('');
-      toast.success(
-        t('បានភ្ជាប់តំណវីដេអូដោយជោគជ័យ!', 'Video link attached successfully!')
-      );
       await fetchLessons();
 
       pushLocalNotification({
@@ -1078,10 +1033,7 @@ export default function ManageLessons() {
         link: '/teacher/lessons',
       });
     } catch (error) {
-      toast.error(
-        error.response?.data?.message ||
-          t('មិនអាចភ្ជាប់តំណវីដេអូបានទេ', 'Failed to attach video URL')
-      );
+      console.error('Failed to attach video URL:', error);
     } finally {
       setUploadingVideoId(null);
     }
@@ -1123,7 +1075,6 @@ export default function ManageLessons() {
 
       try {
         await api.delete(`/teacher/lessons/files/${id}`);
-        toast.success(t('បានលុបឯកសារដោយជោគជ័យ!', 'File deleted successfully!'));
 
         pushLocalNotification({
           titleKm: 'បានលុបឯកសារមេរៀន',
@@ -1142,7 +1093,7 @@ export default function ManageLessons() {
             JSON.stringify(previousLessons)
           );
         } catch (e) {}
-        toast.error(t('មិនអាចលុបឯកសារបានទេ', 'Cannot delete file'));
+        console.error('Cannot delete file:', error);
       }
     } else if (type === 'video') {
       setLessons((prev) => {
@@ -1165,7 +1116,6 @@ export default function ManageLessons() {
 
       try {
         await api.delete(`/teacher/lessons/videos/${id}`);
-        toast.success(t('បានលុបវីដេអូដោយជោគជ័យ!', 'Video deleted successfully!'));
 
         pushLocalNotification({
           titleKm: 'បានលុបវីដេអូមេរៀន',
@@ -1184,7 +1134,7 @@ export default function ManageLessons() {
             JSON.stringify(previousLessons)
           );
         } catch (e) {}
-        toast.error(t('មិនអាចលុបវីដេអូបានទេ', 'Cannot delete video'));
+        console.error('Cannot delete video:', error);
       }
     }
   };
@@ -1246,9 +1196,6 @@ export default function ManageLessons() {
 
   const handleExportLessonsExcel = () => {
     if (filteredLessons.length === 0) {
-      toast.warning(
-        t('គ្មានទិន្នន័យមេរៀនសម្រាប់នាំចេញទេ', 'No lessons to export')
-      );
       return;
     }
 
@@ -1327,13 +1274,7 @@ export default function ManageLessons() {
       `Teacher_Lessons${yearSuffix}${courseSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
     );
 
-    toast.success(
-      t(
-        'បាននាំចេញបញ្ជីមេរៀនទៅជា Excel ដោយជោគជ័យ!',
-        'Lessons exported to Excel successfully!'
-      )
-    );
-
+    // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
     pushLocalNotification({
       titleKm: 'បាននាំចេញបញ្ជីមេរៀនទៅ Excel',
       titleEn: 'Lessons Exported to Excel',

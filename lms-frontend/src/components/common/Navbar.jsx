@@ -44,9 +44,9 @@ import {
   ArrowPathIcon,
   PaperAirplaneIcon,
   CheckBadgeIcon,
+  ExclamationCircleIcon,
 } from '@heroicons/react/24/outline';
 import api from '../../services/api';
-import { toast } from 'react-toastify';
 import logo from '../../assets/image/PRIT.png';
 
 // ✅ ហៅ Component កណ្ដឹងជូនដំណឹងពីហ្វាល់ NotificationBell.jsx មកប្រើ
@@ -65,6 +65,50 @@ const readCachedUserSync = () => {
     return parsed?.user || parsed?.data || parsed;
   } catch {
     return null;
+  }
+};
+
+// ✅ អនុគមន៍សម្រាប់បញ្ជូនសារជូនដំណឹងចូលទៅកាន់រូបកណ្ដឹង (NotificationBell) ដោយមិនប្រើ Toast លោតលើអេក្រង់
+const pushLocalNotification = (notif) => {
+  try {
+    const userObjStr =
+      localStorage.getItem('auth_user') || localStorage.getItem('user');
+    let uid = 'default';
+    let role = 'admin';
+    if (userObjStr) {
+      const userObj = JSON.parse(userObjStr);
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
+        const rName =
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'admin';
+        role = rName.toString().toLowerCase();
+      }
+    }
+
+    const keysToUpdate = Array.from(
+      new Set([`lms_notifs_admin_${uid}`, `lms_notifs_${role}_${uid}`])
+    );
+
+    const newNotif = {
+      id: `local_act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      time: new Date().toISOString(),
+      read: false,
+      ...notif,
+    };
+
+    keysToUpdate.forEach((key) => {
+      const saved = localStorage.getItem(key);
+      const existing = saved ? JSON.parse(saved) : [];
+      const updated = [newNotif, ...existing].slice(0, 40);
+      localStorage.setItem(key, JSON.stringify(updated));
+    });
+
+    window.dispatchEvent(new Event('lms_notifications_sync_event'));
+  } catch (e) {
+    console.error('Local notification error:', e);
   }
 };
 
@@ -120,10 +164,11 @@ const Navbar = () => {
   const [avatarError, setAvatarError] = useState(false);
   const [logoError, setLogoError] = useState(false);
   const [instantAvatarPreview, setInstantAvatarPreview] = useState(null);
+  const [passwordFormError, setPasswordFormError] = useState('');
 
   const userEmail = useMemo(() => user?.email || '', [user?.email]);
 
-  // ✅ States សម្រាប់គ្រប់គ្រងការភ្ជាប់ Telegram នៅក្នុង Settings Modal (អានពី Cache ភ្លាមៗក្នុង 0ms)
+  // ✅ States សម្រាប់គ្រប់គ្រងការភ្ជាប់ និងការប្ដូរ Telegram នៅក្នុង Settings Modal
   const [isTelegramLinked, setIsTelegramLinked] = useState(() =>
     Boolean(user?.telegram_linked || user?.telegram_chat_id)
   );
@@ -350,7 +395,7 @@ const Navbar = () => {
     [user]
   );
 
-  // ✅ ទាញយកស្ថានភាព និងលីងភ្ជាប់ Telegram ទុកមុននៅផ្ទៃខាងក្រោយ (Background Prefetch)
+  // ✅ ទាញយកស្ថានភាព និងតំណភ្ជាប់ Telegram (ទាញយក telegram_link_url ជានិច្ច ដើម្បីអាចចុចប្ដូរ Telegram ថ្មីបានគ្រប់ពេល)
   const syncTelegramStatus = useCallback(async () => {
     if (!userEmail) return;
     try {
@@ -359,13 +404,7 @@ const Navbar = () => {
           ? await checkTelegramLinkStatus(userEmail)
           : (await api.post('/check-telegram-link', { email: userEmail })).data;
 
-      if (res?.linked) {
-        setIsTelegramLinked(true);
-        setWaitingTelegramLink(false);
-        const updatedUser = { ...user, telegram_linked: true };
-        setUser(updatedUser);
-        syncUserToStorage(updatedUser);
-      } else if (res?.telegram_link_url) {
+      if (res?.telegram_link_url) {
         setTelegramLinkUrl(res.telegram_link_url);
         try {
           sessionStorage.setItem(
@@ -374,30 +413,34 @@ const Navbar = () => {
           );
         } catch {}
       }
+
+      if (res?.linked) {
+        setIsTelegramLinked(true);
+        setWaitingTelegramLink(false);
+        const updatedUser = { ...user, telegram_linked: true };
+        setUser(updatedUser);
+        syncUserToStorage(updatedUser);
+      }
     } catch {}
   }, [userEmail, checkTelegramLinkStatus, user, setUser, syncUserToStorage]);
 
   useEffect(() => {
-    if (!userEmail || isTelegramLinked || telegramLinkUrl) return;
+    if (!userEmail || telegramLinkUrl) return;
     const timer = setTimeout(() => {
       syncTelegramStatus();
     }, 300);
     return () => clearTimeout(timer);
-  }, [userEmail, isTelegramLinked, telegramLinkUrl, syncTelegramStatus]);
+  }, [userEmail, telegramLinkUrl, syncTelegramStatus]);
 
   useEffect(() => {
-    if (isSettingsModalOpen && !isTelegramLinked) {
+    if (isSettingsModalOpen) {
       syncTelegramStatus();
     }
-  }, [isSettingsModalOpen, isTelegramLinked, syncTelegramStatus]);
+  }, [isSettingsModalOpen, syncTelegramStatus]);
 
+  // ✅ ពិនិត្យស្វ័យប្រវត្តិរៀងរាល់ ៣ វិនាទីម្ដង នៅពេលអ្នកប្រើចុចប៊ូតុងភ្ជាប់ ឬប្ដូរ Telegram ថ្មីក្នុង Settings Modal
   useEffect(() => {
-    if (
-      !isSettingsModalOpen ||
-      isTelegramLinked ||
-      !waitingTelegramLink ||
-      !userEmail
-    ) {
+    if (!isSettingsModalOpen || !waitingTelegramLink || !userEmail) {
       return;
     }
 
@@ -409,18 +452,32 @@ const Navbar = () => {
             : (await api.post('/check-telegram-link', { email: userEmail }))
                 .data;
 
+        if (res?.telegram_link_url) {
+          setTelegramLinkUrl(res.telegram_link_url);
+          try {
+            sessionStorage.setItem(
+              getTelegramLinkCacheKey(userEmail),
+              res.telegram_link_url
+            );
+          } catch {}
+        }
+
         if (res?.linked) {
           setIsTelegramLinked(true);
           setWaitingTelegramLink(false);
           const updatedUser = { ...user, telegram_linked: true };
           setUser(updatedUser);
           syncUserToStorage(updatedUser);
-          toast.success(
-            t(
-              'បានភ្ជាប់គណនី Telegram ដោយជោគជ័យ!',
-              'Telegram account linked successfully!'
-            )
-          );
+
+          pushLocalNotification({
+            titleKm: 'បានភ្ជាប់គណនី Telegram ជោគជ័យ',
+            titleEn: 'Telegram Account Linked',
+            descKm:
+              'គណនី Telegram របស់អ្នកត្រូវបានភ្ជាប់ជាមួយប្រព័ន្ធរួចរាល់។',
+            descEn:
+              'Your Telegram account has been successfully linked to the system.',
+            category: 'system',
+          });
         }
       } catch {}
     }, 3000);
@@ -428,14 +485,12 @@ const Navbar = () => {
     return () => clearInterval(timer);
   }, [
     isSettingsModalOpen,
-    isTelegramLinked,
     waitingTelegramLink,
     userEmail,
     checkTelegramLinkStatus,
     user,
     setUser,
     syncUserToStorage,
-    t,
   ]);
 
   const dashboardPath = useMemo(() => {
@@ -622,6 +677,7 @@ const Navbar = () => {
       new_password: '',
       new_password_confirmation: '',
     });
+    setPasswordFormError('');
     setShowCurrentPassword(false);
     setShowNewPassword(false);
     setShowConfirmPassword(false);
@@ -631,6 +687,7 @@ const Navbar = () => {
   const closeSettingsModal = useCallback(() => {
     setIsSettingsModalOpen(false);
     setWaitingTelegramLink(false);
+    setPasswordFormError('');
     setPasswordData({
       current_password: '',
       new_password: '',
@@ -643,6 +700,7 @@ const Navbar = () => {
 
   const handlePasswordChange = (e) => {
     const { name, value } = e.target;
+    if (passwordFormError) setPasswordFormError('');
     setPasswordData((prev) => ({
       ...prev,
       [name]: value,
@@ -651,14 +709,16 @@ const Navbar = () => {
 
   const handlePasswordUpdate = async (e) => {
     e.preventDefault();
+    setPasswordFormError('');
+
     if (passwordData.new_password !== passwordData.new_password_confirmation) {
-      toast.error(
+      setPasswordFormError(
         t('ពាក្យសម្ងាត់ថ្មីមិនត្រូវគ្នា', 'New passwords do not match')
       );
       return;
     }
     if (passwordData.new_password.length < 6) {
-      toast.error(
+      setPasswordFormError(
         t(
           'ពាក្យសម្ងាត់ថ្មីត្រូវមានយ៉ាងតិច 6 តួ',
           'New password must be at least 6 characters'
@@ -676,9 +736,13 @@ const Navbar = () => {
       });
 
       if (response.data) {
-        toast.success(
-          t('បានកែប្រែពាក្យសម្ងាត់ដោយជោគជ័យ', 'Password updated successfully')
-        );
+        pushLocalNotification({
+          titleKm: 'បានផ្លាស់ប្ដូរពាក្យសម្ងាត់ជោគជ័យ',
+          titleEn: 'Password Changed Successfully',
+          descKm: 'ពាក្យសម្ងាត់គណនីរបស់អ្នកត្រូវបានធ្វើបច្ចុប្បន្នភាពរួចរាល់។',
+          descEn: 'Your account password has been updated successfully.',
+          category: 'security',
+        });
         closeSettingsModal();
       }
     } catch (error) {
@@ -686,7 +750,7 @@ const Navbar = () => {
       const errorMsg =
         error.response?.data?.message ||
         t('មិនអាចកែប្រែពាក្យសម្ងាត់បានទេ', 'Cannot update password');
-      toast.error(errorMsg);
+      setPasswordFormError(String(errorMsg));
     } finally {
       setIsSavingPassword(false);
     }
@@ -697,17 +761,7 @@ const Navbar = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      toast.error(
-        t('សូមជ្រើសរើសឯកសាររូបភាពប៉ុណ្ណោះ', 'Please select an image file only')
-      );
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error(
-        t('រូបភាពមិនអាចធំជាង 5MB', 'Image cannot be larger than 5MB')
-      );
+    if (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) {
       return;
     }
 
@@ -765,9 +819,13 @@ const Navbar = () => {
         }));
         setInstantAvatarPreview(null);
 
-        toast.success(
-          t('បានដូររូបភាពដោយជោគជ័យ', 'Profile image updated successfully')
-        );
+        pushLocalNotification({
+          titleKm: 'បានដូររូបថតប្រវត្តិរូប',
+          titleEn: 'Profile Photo Updated',
+          descKm: 'រូបថតប្រវត្តិរូបរបស់អ្នកត្រូវបានផ្លាស់ប្ដូរដោយជោគជ័យ។',
+          descEn: 'Your profile photo has been updated successfully.',
+          category: 'profile',
+        });
       }
     } catch (error) {
       console.error('Upload error:', error);
@@ -776,10 +834,6 @@ const Navbar = () => {
         ...prev,
         profile_image: profileImgUrl,
       }));
-      toast.error(
-        error.response?.data?.message ||
-          t('មិនអាចដូររូបភាពបានទេ', 'Cannot update profile image')
-      );
     } finally {
       if (e.target) e.target.value = null;
     }
@@ -788,7 +842,6 @@ const Navbar = () => {
   // ✅ រក្សាទុកការកែប្រែឈ្មោះ/ទូរស័ព្ទភ្លាមៗ (Optimistic Update)
   const handleProfileUpdate = async () => {
     if (!profileData.first_name.trim()) {
-      toast.warning(t('សូមបញ្ចូលនាមខ្លួន', 'Please enter first name'));
       return;
     }
 
@@ -831,18 +884,19 @@ const Navbar = () => {
         };
         setUser(updatedUser);
         syncUserToStorage(updatedUser);
-        toast.success(
-          t('បានកែប្រែព័ត៌មានដោយជោគជ័យ', 'Profile updated successfully')
-        );
+
+        pushLocalNotification({
+          titleKm: 'បានកែប្រែព័ត៌មានប្រវត្តិរូប',
+          titleEn: 'Profile Information Updated',
+          descKm: 'ព័ត៌មានផ្ទាល់ខ្លួនរបស់អ្នកត្រូវបានរក្សាទុកដោយជោគជ័យ។',
+          descEn: 'Your personal profile information has been saved.',
+          category: 'profile',
+        });
       }
     } catch (error) {
       console.error('Update error:', error);
       setUser(previousUser);
       syncUserToStorage(previousUser);
-      toast.error(
-        error.response?.data?.message ||
-          t('មិនអាចកែប្រែព័ត៌មានបានទេ', 'Cannot update profile')
-      );
     } finally {
       setIsSavingProfile(false);
     }
@@ -1734,7 +1788,7 @@ const Navbar = () => {
                   </div>
                 </section>
 
-                {/* ✅ ៣. ភ្ជាប់គណនី Telegram (បង្ហាញភ្លាមៗក្នុង 0ms ដោយសារ Prefetch) */}
+                {/* ✅ ៣. ភ្ជាប់ ឬប្ដូរគណនី Telegram (គាំទ្រការប្ដូរ Telegram ថ្មីគ្រប់ពេល) */}
                 <section className="pt-6 border-t border-gray-100">
                   <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <PaperAirplaneIcon className="h-5 w-5 text-sky-500 -rotate-45" />
@@ -1764,30 +1818,44 @@ const Navbar = () => {
                       </p>
                     </div>
 
-                    {isTelegramLinked ? (
-                      <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                        <CheckBadgeIcon className="h-4 w-4 text-emerald-600 shrink-0" />
-                        <span>{t('បានភ្ជាប់រួចរាល់', 'Connected')}</span>
-                      </span>
-                    ) : telegramLinkUrl ? (
-                      <a
-                        href={telegramLinkUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => setWaitingTelegramLink(true)}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm transition-colors shrink-0 cursor-pointer"
-                      >
-                        <PaperAirplaneIcon className="h-4 w-4 -rotate-45 shrink-0" />
-                        <span>
-                          {waitingTelegramLink
-                            ? t(
-                                'កំពុងរង់ចាំចុច Start...',
-                                'Waiting for Start...'
-                              )
-                            : t('ភ្ជាប់ Telegram', 'Connect Telegram')}
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {isTelegramLinked && (
+                        <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <CheckBadgeIcon className="h-4 w-4 text-emerald-600 shrink-0" />
+                          <span>{t('បានភ្ជាប់រួចរាល់', 'Connected')}</span>
                         </span>
-                      </a>
-                    ) : null}
+                      )}
+
+                      {telegramLinkUrl && (
+                        <a
+                          href={telegramLinkUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => setWaitingTelegramLink(true)}
+                          className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-colors cursor-pointer ${
+                            isTelegramLinked
+                              ? 'bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 shadow-2xs'
+                              : 'text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm'
+                          }`}
+                        >
+                          {waitingTelegramLink ? (
+                            <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0" />
+                          ) : (
+                            <PaperAirplaneIcon className="h-4 w-4 -rotate-45 shrink-0" />
+                          )}
+                          <span>
+                            {waitingTelegramLink
+                              ? t(
+                                  'សូមចុច Start ក្នុង Telegram...',
+                                  'Press Start in Telegram...'
+                                )
+                              : isTelegramLinked
+                              ? t('ប្ដូរ Telegram ថ្មី', 'Switch Telegram')
+                              : t('ភ្ជាប់ Telegram', 'Connect Telegram')}
+                          </span>
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </section>
 
@@ -1933,6 +2001,15 @@ const Navbar = () => {
                         </div>
                       </div>
                     </div>
+
+                    {passwordFormError && (
+                      <div className="flex items-start gap-1.5 text-rose-600 dark:text-rose-400 pt-1">
+                        <ExclamationCircleIcon className="h-4 w-4 shrink-0 mt-0.5 stroke-[2.2]" />
+                        <p className="text-xs font-bold leading-snug">
+                          {passwordFormError}
+                        </p>
+                      </div>
+                    )}
                   </form>
                 </section>
               </div>

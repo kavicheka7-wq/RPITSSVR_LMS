@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import { toast } from 'react-toastify';
 import api from '../../services/api';
 import {
   EnvelopeIcon,
@@ -24,6 +23,7 @@ import {
   PaperAirplaneIcon,
   ExclamationCircleIcon,
   KeyIcon,
+  ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 
 // ទាញយករូបសញ្ញា (Logo) របស់វិទ្យាស្ថាន
@@ -216,11 +216,10 @@ const Login = () => {
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
-  // ✅ ពិនិត្យស្វ័យប្រវត្តិរៀងរាល់ ៣ វិនាទីម្ដង នៅពេលអ្នកប្រើប្រាស់ចុចប៊ូតុងភ្ជាប់ Telegram
+  // ✅ ពិនិត្យស្វ័យប្រវត្តិរៀងរាល់ ៣ វិនាទីម្ដង នៅពេលអ្នកប្រើ ឬកូនក្រុមចុចប៊ូតុងភ្ជាប់/ប្ដូរ Telegram
   useEffect(() => {
     if (
       (step !== 'otp' && step !== 'forgot_otp') ||
-      telegramLinked ||
       !waitingTelegramStart ||
       !email
     ) {
@@ -236,15 +235,13 @@ const Login = () => {
           setTelegramLinked(true);
           setTelegramSent(true);
           setWaitingTelegramStart(false);
+          if (status?.telegram_link_url) {
+            setTelegramLinkUrl(status.telegram_link_url);
+          }
           setDevOtpCode(null);
           setOtpError('');
-          toast.success(
-            status.message ||
-              t(
-                'ភ្ជាប់ Telegram ជោគជ័យ! លេខកូដ ៦ ខ្ទង់ត្រូវបានផ្ញើចូល Telegram របស់អ្នកហើយ។',
-                'Telegram linked! A 6-digit code has been sent to your Telegram.'
-              )
-          );
+          setOtpDigits(['', '', '', '', '', '']);
+          lastSubmittedSignatureRef.current = '';
           focusFirstOtpInput();
         }
       } finally {
@@ -261,12 +258,10 @@ const Login = () => {
     };
   }, [
     step,
-    telegramLinked,
     waitingTelegramStart,
     email,
     checkTelegramLinkStatus,
     focusFirstOtpInput,
-    t,
   ]);
 
   // ✅ ត្រួតពិនិត្យមើលក្នុង LocalStorage ជាមុន (0ms) បើមិនទាន់មានទើបហៅ API `/roles`
@@ -369,6 +364,7 @@ const Login = () => {
     };
   }, []);
 
+  // ✅ រក្សាអ៊ីមែលឱ្យនៅដដែល ហើយសម្អាត និងដាក់ Focus លើប្រអប់ពាក្យសម្ងាត់ភ្លាមៗនៅពេលវាយខុស
   const applyFieldValidationError = useCallback(
     (resultObj, rawFallbackMsg = '') => {
       const apiErrors = resultObj?.errors || {};
@@ -448,7 +444,6 @@ const Login = () => {
       const cleanEmail = email.trim();
       const result = await login(cleanEmail, password);
       if (result.success) {
-        // ✅ រក្សាទុក ឬលុបអ៊ីមែលតាមប្រអប់ធីក «ចងចាំគណនី» ពេលគណនីត្រឹមត្រូវ
         syncRememberedEmail(cleanEmail, rememberMe);
         setFieldErrors({ email: '', password: '' });
 
@@ -464,13 +459,6 @@ const Login = () => {
           setWaitingTelegramStart(false);
           setDevOtpCode(result.dev_otp ? String(result.dev_otp) : null);
           setResendCooldown(60);
-          toast.info(
-            result.message ||
-              t(
-                'សូមបញ្ចូលលេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ដើម្បីចូលប្រព័ន្ធ!',
-                'Please enter the 6-digit verification code!'
-              )
-          );
           focusFirstOtpInput();
           return;
         }
@@ -478,7 +466,6 @@ const Login = () => {
         try {
           localStorage.setItem(ADMIN_SETUP_STORAGE_KEY, 'true');
         } catch {}
-        toast.success(t('ចូលប្រព័ន្ធដោយជោគជ័យ!', 'Logged in successfully!'));
         navigate(resolveTargetDashboardPath(result.user, result.role_name), {
           replace: true,
         });
@@ -513,10 +500,6 @@ const Login = () => {
           try {
             localStorage.setItem(ADMIN_SETUP_STORAGE_KEY, 'true');
           } catch {}
-          toast.success(
-            result.message ||
-              t('ចូលប្រព័ន្ធដោយជោគជ័យ!', 'Logged in successfully!')
-          );
           navigate(resolveTargetDashboardPath(result.user, detectedRoleName), {
             replace: true,
           });
@@ -603,14 +586,6 @@ const Login = () => {
       lastSubmittedSignatureRef.current = '';
       setResendCooldown(60);
       setStep('forgot_otp');
-
-      toast.info(
-        data.message ||
-          t(
-            'លេខកូដ ៦ ខ្ទង់សម្រាប់កំណត់ពាក្យសម្ងាត់ថ្មីត្រូវបានផ្ញើហើយ!',
-            'A 6-digit password reset code has been sent!'
-          )
-      );
       focusFirstOtpInput();
     } catch (err) {
       const errData = err?.response?.data || {};
@@ -645,13 +620,6 @@ const Login = () => {
           setConfirmNewPassword('');
           setResetPassError('');
           setStep('forgot_new_password');
-          toast.success(
-            data.message ||
-              t(
-                'ផ្ទៀងផ្ទាត់ជោគជ័យ! សូមបញ្ចូលពាក្យសម្ងាត់ថ្មីរបស់អ្នក។',
-                'Verified! Please enter your new password.'
-              )
-          );
           requestAnimationFrame(() => {
             newPasswordInputRef.current?.focus();
           });
@@ -730,23 +698,10 @@ const Login = () => {
           setUser(data.user);
         }
 
-        toast.success(
-          data.message ||
-            t(
-              'បានផ្លាស់ប្ដូរពាក្យសម្ងាត់ថ្មី និងចូលប្រព័ន្ធដោយជោគជ័យ!',
-              'Password updated and signed in successfully!'
-            )
-        );
         navigate(resolveTargetDashboardPath(data.user, detectedRoleName), {
           replace: true,
         });
       } else {
-        toast.success(
-          t(
-            'បានផ្លាស់ប្ដូរពាក្យសម្ងាត់ថ្មីដោយជោគជ័យ! សូមចូលប្រព័ន្ធ។',
-            'Password updated! Please sign in.'
-          )
-        );
         setPassword('');
         setStep('credentials');
       }
@@ -867,7 +822,6 @@ const Login = () => {
         }
         setDevOtpCode(data.dev_otp ? String(data.dev_otp) : null);
         setResendCooldown(60);
-        toast.success(data.message);
         focusFirstOtpInput();
       } else {
         const result = await resendTwoFactor(email.trim());
@@ -885,7 +839,6 @@ const Login = () => {
             setDevOtpCode(null);
           }
           setResendCooldown(60);
-          toast.success(result.message);
           focusFirstOtpInput();
         } else {
           setOtpError(
@@ -1936,23 +1889,38 @@ const Login = () => {
                   )}
                 </div>
 
-                {(!telegramLinked && telegramLinkUrl) ||
-                (devOtpCode && !telegramSent) ? (
+                {/* ✅ បង្ហាញប៊ូតុងភ្ជាប់ ឬប្ដូរ Telegram ថ្មីជានិច្ច ដើម្បីឱ្យកូនក្រុមអាចចុចភ្ជាប់ Telegram ផ្ទាល់ខ្លួនរបស់គាត់បានគ្រប់ពេល */}
+                {(telegramLinkUrl || (devOtpCode && !telegramSent)) && (
                   <div className="space-y-2.5">
-                    {!telegramLinked && telegramLinkUrl && (
+                    {telegramLinkUrl && (
                       <a
                         href={telegramLinkUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={() => setWaitingTelegramStart(true)}
-                        className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm transition-colors cursor-pointer"
+                        className={`flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-extrabold transition-colors cursor-pointer ${
+                          !telegramLinked
+                            ? 'text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm'
+                            : isDarkMode
+                            ? 'bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/30 text-sky-300'
+                            : 'bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700'
+                        }`}
                       >
-                        <PaperAirplaneIcon className="h-4 w-4 -rotate-45 shrink-0 stroke-[2.2]" />
+                        {waitingTelegramStart ? (
+                          <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0 stroke-[2.2]" />
+                        ) : (
+                          <PaperAirplaneIcon className="h-4 w-4 -rotate-45 shrink-0 stroke-[2.2]" />
+                        )}
                         <span>
                           {waitingTelegramStart
                             ? t(
                                 'សូមចុច Start ក្នុង Telegram...',
                                 'Press Start in Telegram...'
+                              )
+                            : telegramLinked
+                            ? t(
+                                'មិនទទួលបានកូដ? ចុចភ្ជាប់ ឬប្ដូរ Telegram ថ្មី',
+                                'Not receiving code? Re-link / Switch Telegram'
                               )
                             : t(
                                 'ទទួលលេខកូដតាម Telegram',
@@ -1997,7 +1965,7 @@ const Login = () => {
                       </div>
                     )}
                   </div>
-                ) : null}
+                )}
 
                 <div
                   className={`pt-3 border-t flex flex-col gap-2 text-center text-xs ${

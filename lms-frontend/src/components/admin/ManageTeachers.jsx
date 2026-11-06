@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import api from '../../services/api';
 import { getCachedDepartments, getCachedRoles, getCachedCourses } from '../../services/metadataService';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -21,8 +20,7 @@ import {
   Squares2X2Icon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ArrowPathIcon,
-  CameraIcon
+  ArrowPathIcon
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -249,7 +247,6 @@ const ManageTeachers = () => {
   const [editingTeacher, setEditingTeacher] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [previewImage, setPreviewImage] = useState(null);
 
   // ២. State និង Ref សម្រាប់គ្រប់គ្រងកាតដេប៉ាតឺម៉ង់ និងការអូសកាតឆ្វេង-ស្ដាំ
   const [selectedDepartment, setSelectedDepartment] = useState('all');
@@ -309,7 +306,6 @@ const ManageTeachers = () => {
     specialization: '',
     employment_type: '',
     date_of_birth: '',
-    profile_image: null,
   });
 
   // ============================================================================
@@ -655,14 +651,9 @@ const ManageTeachers = () => {
           return;
         }
         console.error('Error fetching teachers:', error);
-        if ((ADMIN_TEACHERS_MEM_CACHE.teachers || []).length === 0) {
-          toast.error(
-            t('មិនអាចទាញយកបញ្ជីគ្រូបង្រៀនបានទេ', 'Cannot fetch teachers list')
-          );
-        }
       }
     },
-    [page, perPage, debouncedSearch, currentAdminId, t]
+    [page, perPage, debouncedSearch, currentAdminId]
   );
 
   useEffect(() => {
@@ -677,63 +668,27 @@ const ManageTeachers = () => {
     });
   };
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setFormData({
-        ...formData,
-        profile_image: file
-      });
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPreviewImage(reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   // បង្កើតគណនីគ្រូថ្មី និងកែប្រែព័ត៌មានគ្រូដោយ Update State លើអេក្រង់ភ្លាមៗ
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    const hasFile = formData.profile_image instanceof File;
     const finalDepartmentId = formData.department_id || (selectedDepartment !== 'all' ? selectedDepartment : '');
     const matchedDept = departments.find(d => String(d.id) === String(finalDepartmentId));
 
     setIsSubmitting(true);
     try {
       if (editingTeacher) {
-        let response;
         const dataToUpdate = { ...formData, department_id: finalDepartmentId };
-        if (hasFile) {
-          const formDataToSend = new FormData();
-          Object.keys(dataToUpdate).forEach(key => {
-            if (key === 'profile_image') {
-              formDataToSend.append(key, dataToUpdate[key]);
-            } else if (dataToUpdate[key] !== null && dataToUpdate[key] !== undefined && dataToUpdate[key] !== '') {
-              formDataToSend.append(key, dataToUpdate[key]);
-            }
-          });
-          if (teacherRoleId) formDataToSend.append('role_id', teacherRoleId);
-          if (!dataToUpdate.password) formDataToSend.delete('password');
-          formDataToSend.append('_method', 'PUT');
-
-          response = await api.post(`/admin/teachers/${editingTeacher.id}`, formDataToSend, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          });
-        } else {
-          const payload = { ...dataToUpdate, role_id: teacherRoleId };
-          delete payload.profile_image;
-          if (!payload.password) delete payload.password;
-          response = await api.put(`/admin/teachers/${editingTeacher.id}`, payload);
-        }
+        const payload = { ...dataToUpdate, role_id: teacherRoleId };
+        if (!payload.password) delete payload.password;
+        const response = await api.put(`/admin/teachers/${editingTeacher.id}`, payload);
 
         const serverData = response.data?.data || response.data;
         const updatedTeacher = {
           ...editingTeacher,
           ...dataToUpdate,
           ...(serverData && typeof serverData === 'object' ? serverData : {}),
-          profile_image: serverData?.profile_image || previewImage || editingTeacher.profile_image,
+          profile_image: serverData?.profile_image || editingTeacher.profile_image,
           department: serverData?.department || matchedDept || editingTeacher.department,
           user: { ...(editingTeacher.user || {}), status: dataToUpdate.status },
         };
@@ -759,39 +714,21 @@ const ManageTeachers = () => {
           category: 'teacher',
           link: '/admin/teachers'
         });
-
-        toast.success(t('បានកែប្រែព័ត៌មានគ្រូបង្រៀនដោយជោគជ័យ!', 'Teacher updated successfully!'));
       } else {
-        let response;
         const dataToCreate = {
           ...formData,
           department_id: finalDepartmentId,
           employment_type: formData.employment_type || 'Full-time',
           status: formData.status || 'active',
         };
-        if (hasFile) {
-          const formDataToSend = new FormData();
-          Object.keys(dataToCreate).forEach(key => {
-            if (dataToCreate[key] !== null && dataToCreate[key] !== undefined && dataToCreate[key] !== '') {
-              formDataToSend.append(key, dataToCreate[key]);
-            }
-          });
-          if (teacherRoleId) formDataToSend.append('role_id', teacherRoleId);
-
-          response = await api.post('/admin/teachers', formDataToSend, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          });
-        } else {
-          const payload = { ...dataToCreate, role_id: teacherRoleId };
-          delete payload.profile_image;
-          response = await api.post('/admin/teachers', payload);
-        }
+        const payload = { ...dataToCreate, role_id: teacherRoleId };
+        const response = await api.post('/admin/teachers', payload);
 
         const serverData = response.data?.data || response.data;
         const newTeacher = {
           ...dataToCreate,
           ...(serverData && typeof serverData === 'object' ? serverData : { id: Date.now() }),
-          profile_image: serverData?.profile_image || previewImage || null,
+          profile_image: serverData?.profile_image || null,
           department: serverData?.department || matchedDept || null,
           user: { status: dataToCreate.status },
         };
@@ -826,19 +763,12 @@ const ManageTeachers = () => {
           category: 'teacher',
           link: '/admin/teachers'
         });
-
-        toast.success(t('បានបង្កើតគណនីគ្រូបង្រៀនថ្មីដោយជោគជ័យ!', 'Teacher created successfully!'));
       }
       setShowModal(false);
       resetForm();
       fetchTeachers(true);
     } catch (error) {
-      console.error('Submit error:', error.response?.data);
-      if (error.response?.data?.errors) {
-        toast.error(Object.values(error.response.data.errors).flat().join('\n'));
-      } else {
-        toast.error(error.response?.data?.message || t('ការធ្វើប្រតិបត្តិការបានបរាជ័យ', 'Operation failed'));
-      }
+      console.error('Submit error:', error.response?.data || error);
     } finally {
       setIsSubmitting(false);
     }
@@ -893,13 +823,12 @@ const ManageTeachers = () => {
         category: 'teacher',
         link: '/admin/teachers'
       });
-      toast.success(t('បានលុបគណនីគ្រូបង្រៀនដោយជោគជ័យ', 'Teacher deleted successfully'));
     } catch (error) {
+      console.error('Failed to delete teacher:', error);
       setTeachers(previousTeachers);
       setMeta(previousMeta);
       ADMIN_TEACHERS_MEM_CACHE.teachers = previousTeachers;
       ADMIN_TEACHERS_MEM_CACHE.meta = previousMeta;
-      toast.error(error.response?.data?.message || t('មិនអាចលុបគ្រូបង្រៀនបានទេ', 'Cannot delete teacher'));
     }
   };
 
@@ -918,9 +847,7 @@ const ManageTeachers = () => {
       specialization: '',
       employment_type: '',
       date_of_birth: '',
-      profile_image: null,
     });
-    setPreviewImage(null);
     setEditingTeacher(null);
   };
 
@@ -944,9 +871,7 @@ const ManageTeachers = () => {
       specialization: teacher.specialization || '',
       employment_type: teacher.employment_type || 'Full-time',
       date_of_birth: formatDateOnly(teacher.date_of_birth),
-      profile_image: null,
     });
-    setPreviewImage(teacher.profile_image ? getProfileImageUrl(teacher.profile_image) : null);
     setShowModal(true);
   };
 
@@ -1019,7 +944,6 @@ const ManageTeachers = () => {
   // ✅ នាំចេញបញ្ជីគ្រូបង្រៀនតាមដេប៉ាតឺម៉ង់ ដោយដាក់គ្រូដែលមានឈ្មោះមុន (លេខរៀងទី 1) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម
   const handleExportExcel = () => {
     if (!displayedTeachers || displayedTeachers.length === 0) {
-      toast.warning(t('គ្មានទិន្នន័យគ្រូបង្រៀនសម្រាប់នាំចេញទេ', 'No teachers to export'));
       return;
     }
 
@@ -1206,7 +1130,6 @@ const ManageTeachers = () => {
             });
 
           if (!nonEmptyRows || nonEmptyRows.length === 0) {
-            toast.warning(t('ឯកសារ Excel គ្មានទិន្នន័យគ្រូបង្រៀនទេ', 'Excel file contains no teacher data'));
             return;
           }
 
@@ -1294,7 +1217,6 @@ const ManageTeachers = () => {
           setImportPreview(parsedRows);
         } catch (err) {
           console.error('File parsing error:', err);
-          toast.error(t('មិនអាចអានឯកសារ Excel បានទេ សូមពិនិត្យមើលទម្រង់ឯកសារ', 'Cannot read Excel file, please check format'));
         } finally {
           e.target.value = null;
         }
@@ -1309,7 +1231,6 @@ const ManageTeachers = () => {
     const validItems = importPreview.filter(r => r.isValid).map(r => r.data);
 
     if (validItems.length === 0) {
-      toast.warning(t('គ្មានទិន្នន័យត្រឹមត្រូវសម្រាប់នាំចូលទេ', 'No valid data to import'));
       return;
     }
 
@@ -1333,20 +1254,12 @@ const ManageTeachers = () => {
         link: '/admin/teachers'
       });
 
-      toast.success(
-        t(
-          `បាននាំចូលទិន្នន័យគ្រូបង្រៀនចំនួន ${validItems.length} នាក់ដោយជោគជ័យ!`,
-          `Successfully imported ${validItems.length} teachers!`
-        )
-      );
-
       setShowImportModal(false);
       setImportPreview([]);
       setSelectedFileName('');
       fetchTeachers(true);
     } catch (error) {
       console.error('Import submit error:', error);
-      toast.error(error.response?.data?.message || t('ការនាំចូលទិន្នន័យបានបរាជ័យ', 'Failed to import data'));
     } finally {
       setIsImporting(false);
     }
@@ -1576,7 +1489,7 @@ const ManageTeachers = () => {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 7.4. តារាងបង្ហាញបញ្ជីឈ្មោះគ្រូបង្រៀន (Main Table Content - គ្មាន Skeleton) */}
+      {/* 7.4. តារាងបង្ហាញបញ្ជីឈ្មោះគ្រូបង្រៀន (Main Table Content - បន្ទាត់ស្រទន់ស្អាត) */}
       {/* ------------------------------------------------------------------ */}
       <div className="tch-surface-card bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
         <div className="tch-table-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-4">
@@ -1599,7 +1512,7 @@ const ManageTeachers = () => {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-100">
+          <table className="min-w-full border-collapse">
             <thead className="tch-table-head bg-gray-50 border-b border-gray-100">
               <tr>
                 <th className="px-4 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
@@ -1625,7 +1538,7 @@ const ManageTeachers = () => {
                 </th>
               </tr>
             </thead>
-            <tbody className="tch-table-body bg-white divide-y divide-gray-100">
+            <tbody className="tch-table-body bg-white">
               {displayedTeachers?.length === 0 ? (
                 <tr>
                   <td colSpan="7" className="px-4 py-16 text-center text-gray-500">
@@ -1840,46 +1753,6 @@ const ManageTeachers = () => {
             
             <div className="p-6 sm:p-8 overflow-y-auto flex-1">
               <form id="teacherForm" onSubmit={handleSubmit} className="space-y-5">
-                {/* ✅ កន្លែងជ្រើសរើសរូបថតគ្រូបង្រៀន (Profile Image Upload) */}
-                <div className="flex items-center gap-4 pb-2">
-                  <div className="relative h-16 w-16 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
-                    {previewImage ? (
-                      <img src={previewImage} alt="Preview" className="h-full w-full object-cover" />
-                    ) : (
-                      <AcademicCapIcon className="h-8 w-8 text-indigo-400" />
-                    )}
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="tch-label text-xs font-extrabold text-gray-700">
-                      {t('រូបថតគ្រូបង្រៀន (មិនบังคับ)', 'Profile Photo (Optional)')}
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <label className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 transition-all cursor-pointer">
-                        <CameraIcon className="h-4 w-4" />
-                        <span>{t('ជ្រើសរើសរូបថត', 'Choose Photo')}</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleFileChange}
-                          className="hidden"
-                        />
-                      </label>
-                      {previewImage && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPreviewImage(null);
-                            setFormData((prev) => ({ ...prev, profile_image: null }));
-                          }}
-                          className="text-xs font-bold text-rose-500 hover:text-rose-700 px-2 py-1 cursor-pointer"
-                        >
-                          {t('ដករូបចេញ', 'Remove')}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div>
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
@@ -2292,6 +2165,11 @@ const ManageTeachers = () => {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
+        .tch-table-row + .tch-table-row > td {
+          border-top: 1px solid #f1f5f9;
+        }
+
         html.dark .tch-page-bg {
           background-color: transparent !important;
         }
@@ -2357,20 +2235,19 @@ const ManageTeachers = () => {
           opacity: 0.6;
         }
 
-        /* តារាងគ្រូបង្រៀនក្នុងទម្រង់យប់ */
+        /* ✅ តារាងគ្រូបង្រៀន និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         html.dark .tch-table-head {
           background-color: #0f172a !important;
-          border-color: #334155 !important;
+          border-color: rgba(51, 65, 85, 0.7) !important;
         }
         html.dark .tch-table-head th {
           color: #94a3b8 !important;
         }
         html.dark .tch-table-body {
           background-color: #1e293b !important;
-          border-color: #334155 !important;
         }
-        html.dark .tch-table-body > tr + tr {
-          border-color: #334155 !important;
+        html.dark .tch-table-row + .tch-table-row > td {
+          border-top: 1px solid rgba(51, 65, 85, 0.55) !important;
         }
         html.dark .tch-table-row:hover {
           background-color: rgba(59, 130, 246, 0.08) !important;

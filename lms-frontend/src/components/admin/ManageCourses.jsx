@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import api from '../../services/api';
 import { getCachedDepartments, clearCoursesCache } from '../../services/metadataService';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -572,14 +571,9 @@ const ManageCourses = () => {
           return;
         }
         console.error('Error fetching courses:', error);
-        if ((ADMIN_COURSES_MEM_CACHE.courses || []).length === 0) {
-          toast.error(
-            t('មិនអាចទាញយកទិន្នន័យមុខវិជ្ជាបានទេ', 'Cannot fetch courses data')
-          );
-        }
       }
     },
-    [page, perPage, debouncedSearch, currentAdminId, t]
+    [page, perPage, debouncedSearch, currentAdminId]
   );
 
   useEffect(() => {
@@ -596,7 +590,7 @@ const ManageCourses = () => {
     }
   };
 
-  // បង្កើត ឬកែប្រែមុខវិជ្ជា ព្រមទាំងលោតសារ Toast និងចូលកណ្ដឹងស្វ័យប្រវត្តិ
+  // បង្កើត ឬកែប្រែមុខវិជ្ជា ព្រមទាំងបញ្ជូនសារចូលកណ្ដឹងស្វ័យប្រវត្តិ
   const handleSubmit = async (e) => {
     e.preventDefault();
     const finalDepartmentId = formData.department_id || (selectedDepartment !== 'all' ? selectedDepartment : '');
@@ -610,7 +604,6 @@ const ManageCourses = () => {
     };
 
     if (!payload.course_name || !payload.course_code || !payload.department_id || !payload.teacher_id) {
-      toast.error(t('សូមបំពេញព័ត៌មានឱ្យបានពេញលេញ', 'Please fill in all required fields'));
       return;
     }
 
@@ -652,8 +645,6 @@ const ManageCourses = () => {
           category: 'course',
           link: '/admin/courses'
         });
-
-        toast.success(t('បានកែប្រែមុខវិជ្ជាដោយជោគជ័យ!', 'Course updated successfully!'));
       } else {
         const response = await api.post('/admin/courses', payload);
         const serverData = response.data?.data || response.data;
@@ -695,8 +686,6 @@ const ManageCourses = () => {
           category: 'course',
           link: '/admin/courses'
         });
-
-        toast.success(t('បានបង្កើតមុខវិជ្ជាថ្មីដោយជោគជ័យ!', 'Course created successfully!'));
       }
       
       clearCoursesCache();
@@ -705,12 +694,6 @@ const ManageCourses = () => {
       fetchCourses(true);
     } catch (error) {
       console.error('Submit error:', error.response?.data);
-      if (error.response?.data?.errors) {
-        const errors = error.response.data.errors;
-        toast.error(Object.values(errors).flat().join('\n'));
-      } else {
-        toast.error(error.response?.data?.message || t('ការធ្វើប្រតិបត្តិការបានបរាជ័យ', 'Operation failed'));
-      }
     } finally {
       setIsSubmitting(false);
     }
@@ -721,7 +704,7 @@ const ManageCourses = () => {
     setShowDeleteModal(true);
   };
 
-  // លុបមុខវិជ្ជា ព្រមទាំងលោតសារ Toast និងចូលកណ្ដឹងស្វ័យប្រវត្តិ
+  // លុបមុខវិជ្ជា ព្រមទាំងបញ្ជូនសារចូលកណ្ដឹងស្វ័យប្រវត្តិ
   const confirmDelete = async () => {
     if (!courseToDelete) return;
 
@@ -766,13 +749,12 @@ const ManageCourses = () => {
         category: 'course',
         link: '/admin/courses'
       });
-      toast.success(t(`បានលុបមុខវិជ្ជា «${deletedName}» ដោយជោគជ័យ`, `Deleted course "${deletedName}" successfully`));
     } catch (error) {
+      console.error('Delete course error:', error);
       setCourses(previousCourses);
       setMeta(previousMeta);
       ADMIN_COURSES_MEM_CACHE.courses = previousCourses;
       ADMIN_COURSES_MEM_CACHE.meta = previousMeta;
-      toast.error(error.response?.data?.message || t('មិនអាចលុបមុខវិជ្ជាបានទេ', 'Cannot delete course'));
     }
   };
 
@@ -872,7 +854,6 @@ const ManageCourses = () => {
   // ✅ នាំចេញបញ្ជីមុខវិជ្ជាតាមដេប៉ាតឺម៉ង់ ដោយតម្រៀបមុខវិជ្ជាដែលមានឈ្មោះមុនឱ្យនៅខាងលើគេដេញចុះមកក្រោម
   const handleExportExcel = () => {
     if (!displayedCourses || displayedCourses.length === 0) {
-      toast.warning(t('គ្មានទិន្នន័យមុខវិជ្ជាសម្រាប់នាំចេញទេ', 'No courses to export'));
       return;
     }
 
@@ -912,8 +893,6 @@ const ManageCourses = () => {
       category: 'export',
       link: '/admin/courses'
     });
-
-    toast.success(t('បាននាំចេញបញ្ជីមុខវិជ្ជាទៅជា Excel ដោយជោគជ័យ!', 'Courses exported to Excel successfully!'));
   };
 
   // ✅ ទាញយកទម្រង់គំរូ Excel ដែលបំពេញឈ្មោះដេប៉ាតឺម៉ង់ដែលបានចុចចូលឱ្យស្រាប់ និងតម្រៀបមុខវិជ្ជាដែលមានឈ្មោះមុននៅខាងលើដេញចុះមកក្រោម
@@ -1041,7 +1020,6 @@ const ManageCourses = () => {
             });
 
           if (nonEmptyRows.length === 0) {
-            toast.warning(t('ឯកសារ Excel គ្មានទិន្នន័យមុខវិជ្ជាទេ', 'Excel file contains no course data'));
             return;
           }
 
@@ -1094,7 +1072,6 @@ const ManageCourses = () => {
           setImportPreview(parsedRows);
         } catch (err) {
           console.error('Course Excel parse error:', err);
-          toast.error(t('មិនអាចអានឯកសារ Excel បានទេ សូមពិនិត្យមើលទម្រង់ឯកសារ', 'Cannot read Excel file, please check format'));
         } finally {
           e.target.value = null;
         }
@@ -1106,7 +1083,6 @@ const ManageCourses = () => {
   const handleConfirmImport = async () => {
     const validItems = importPreview.filter(r => r.isValid).map(r => r.data);
     if (validItems.length === 0) {
-      toast.warning(t('គ្មានទិន្នន័យត្រឹមត្រូវសម្រាប់នាំចូលទេ', 'No valid data to import'));
       return;
     }
 
@@ -1116,7 +1092,6 @@ const ManageCourses = () => {
         validItems.map((coursePayload) => api.post('/admin/courses', coursePayload))
       );
       const successCount = results.filter(r => r.status === 'fulfilled').length;
-      const failCount = results.length - successCount;
 
       clearCoursesCache();
       try {
@@ -1136,22 +1111,6 @@ const ManageCourses = () => {
           category: 'import',
           link: '/admin/courses'
         });
-
-        toast.success(
-          t(
-            `បាននាំចូលមុខវិជ្ជាចំនួន ${successCount} ដោយជោគជ័យ!`,
-            `Successfully imported ${successCount} courses!`
-          )
-        );
-      }
-
-      if (failCount > 0) {
-        toast.warning(
-          t(
-            `មានមុខវិជ្ជាចំនួន ${failCount} មិនអាចនាំចូលបានទេ (អាចស្ទួនកូដមុខវិជ្ជា)`,
-            `${failCount} courses failed to import (possible duplicate code)`
-          )
-        );
       }
 
       setShowImportModal(false);
@@ -1159,7 +1118,7 @@ const ManageCourses = () => {
       setSelectedFileName('');
       fetchCourses(true);
     } catch (error) {
-      toast.error(t('ការនាំចូលមុខវិជ្ជាបានបរាជ័យ', 'Failed to import courses'));
+      console.error('Import courses error:', error);
     } finally {
       setIsImporting(false);
     }
@@ -1344,7 +1303,7 @@ const ManageCourses = () => {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 7.4. តារាងបង្ហាញបញ្ជីមុខវិជ្ជា (Main Table - គ្មាន Skeleton Loading)   */}
+      {/* 7.4. តារាងបង្ហាញបញ្ជីមុខវិជ្ជា (Main Table - បន្ទាត់ស្រទន់ស្អាតភ្នែក)    */}
       {/* ------------------------------------------------------------------ */}
       <div className="crs-surface-card bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
         <div className="crs-table-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-4">
@@ -1367,7 +1326,7 @@ const ManageCourses = () => {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-100">
+          <table className="min-w-full border-collapse">
             <thead className="crs-table-head bg-gray-50 border-b border-gray-100">
               <tr>
                 <th className="px-4 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
@@ -1390,7 +1349,7 @@ const ManageCourses = () => {
                 </th>
               </tr>
             </thead>
-            <tbody className="crs-table-body bg-white divide-y divide-gray-100">
+            <tbody className="crs-table-body bg-white">
               {displayedCourses.length === 0 ? (
                 <tr>
                   <td colSpan="6" className="px-4 py-16 text-center text-gray-500">
@@ -1436,7 +1395,6 @@ const ManageCourses = () => {
                       <td className="crs-text-secondary px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-600">
                         {getDepartmentDisplayName(matchedDeptObj)}
                       </td>
-                      {/* ✅ លុបរង្វង់ពណ៌ខៀវ/ស្វាយចេញ ហើយបង្ហាញតែឈ្មោះគ្រូបង្រៀនសុទ្ធ */}
                       <td className="px-4 py-4 whitespace-nowrap">
                         {teacher ? (
                           <span className="crs-text-primary text-sm font-bold text-gray-800">
@@ -1882,6 +1840,11 @@ const ManageCourses = () => {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
+        .crs-table-row + .crs-table-row > td {
+          border-top: 1px solid #f1f5f9;
+        }
+
         html.dark .crs-page-bg {
           background-color: transparent !important;
         }
@@ -1940,19 +1903,19 @@ const ManageCourses = () => {
           background-color: #0f172a !important;
         }
 
+        /* ✅ តារាងមុខវិជ្ជា និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         html.dark .crs-table-head {
           background-color: #0f172a !important;
-          border-color: #334155 !important;
+          border-color: rgba(51, 65, 85, 0.7) !important;
         }
         html.dark .crs-table-head th {
           color: #94a3b8 !important;
         }
         html.dark .crs-table-body {
           background-color: #1e293b !important;
-          border-color: #334155 !important;
         }
-        html.dark .crs-table-body > tr + tr {
-          border-color: #334155 !important;
+        html.dark .crs-table-row + .crs-table-row > td {
+          border-top: 1px solid rgba(51, 65, 85, 0.55) !important;
         }
         html.dark .crs-table-row:hover {
           background-color: rgba(59, 130, 246, 0.08) !important;

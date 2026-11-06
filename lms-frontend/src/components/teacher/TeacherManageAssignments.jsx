@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -1001,7 +1000,7 @@ export default function TeacherManageAssignments() {
   );
 
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបកិច្ចការ និងដាក់ពិន្ទុសិស្ស (ភ្ជាប់កណ្ដឹង)
+  // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបកិច្ចការ និងដាក់ពិន្ទុសិស្ស (ភ្ជាប់តែកណ្ដឹង)
   // ============================================================================
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -1045,20 +1044,11 @@ export default function TeacherManageAssignments() {
     e.preventDefault();
 
     if (!formData.due_date) {
-      toast.warning(
-        t(
-          'សូមជ្រើសរើសថ្ងៃ និងម៉ោងកំណត់ការដាក់កិច្ចការឱ្យបានពេញលេញ',
-          'Please select the assignment due date and time'
-        )
-      );
       return;
     }
 
     const dueMs = toComparableTimeMs(formData.due_date);
     if (isNaN(dueMs)) {
-      toast.warning(
-        t('ទម្រង់ថ្ងៃខែ និងម៉ោងមិនត្រឹមត្រូវទេ', 'Invalid date and time format')
-      );
       return;
     }
 
@@ -1113,10 +1103,6 @@ export default function TeacherManageAssignments() {
           return updated;
         });
 
-        toast.success(
-          t('បានកែប្រែកិច្ចការដោយជោគជ័យ!', 'Assignment updated successfully!')
-        );
-
         pushLocalNotification({
           titleKm: 'បានកែប្រែកិច្ចការសិស្ស',
           titleEn: 'Assignment Updated',
@@ -1153,13 +1139,6 @@ export default function TeacherManageAssignments() {
           return updated;
         });
 
-        toast.success(
-          t(
-            'បានបង្កើតកិច្ចការថ្មីដោយជោគជ័យ!',
-            'New assignment created successfully!'
-          )
-        );
-
         pushLocalNotification({
           titleKm: 'បានបង្កើតកិច្ចការថ្មី',
           titleEn: 'New Assignment Created',
@@ -1173,15 +1152,6 @@ export default function TeacherManageAssignments() {
       fetchAssignments();
     } catch (error) {
       console.error('Submit error:', error);
-      if (error.response?.data?.errors) {
-        const firstErr = Object.values(error.response.data.errors).flat()[0];
-        toast.error(firstErr || t('ទិន្នន័យមិនត្រឹមត្រូវ', 'Validation error'));
-      } else {
-        toast.error(
-          error.response?.data?.message ||
-            t('មានបញ្ហាក្នុងការរក្សាទុកកិច្ចការ', 'Failed to save assignment')
-        );
-      }
     } finally {
       setIsSubmitting(false);
     }
@@ -1220,9 +1190,6 @@ export default function TeacherManageAssignments() {
 
     try {
       await api.delete(`/teacher/assignments/${deletedId}`);
-      toast.success(
-        t('បានលុបកិច្ចការដោយជោគជ័យ!', 'Assignment deleted successfully!')
-      );
 
       pushLocalNotification({
         titleKm: 'បានលុបកិច្ចការសិស្ស',
@@ -1234,9 +1201,6 @@ export default function TeacherManageAssignments() {
       });
     } catch (error) {
       console.error('Delete assignment error:', error);
-      toast.error(
-        t('បរាជ័យក្នុងការលុបកិច្ចការ', 'Failed to delete assignment')
-      );
       setAssignments(previousAssignments);
       ASSIGNMENTS_MEM_CACHE.assignments = previousAssignments;
       try {
@@ -1393,13 +1357,6 @@ export default function TeacherManageAssignments() {
         return updatedSubs;
       });
 
-      toast.success(
-        t(
-          `បានរក្សាទុកពិន្ទុកិច្ចការរបស់សិស្ស «${studentName}» ដោយជោគជ័យ!`,
-          `Saved score for "${studentName}" successfully!`
-        )
-      );
-
       pushLocalNotification({
         titleKm: 'បានដាក់ពិន្ទុកិច្ចការសិស្ស',
         titleEn: 'Assignment Submission Graded',
@@ -1410,10 +1367,6 @@ export default function TeacherManageAssignments() {
       });
     } catch (error) {
       console.error('Save grade error:', error);
-      toast.error(
-        error.response?.data?.message ||
-          t('បរាជ័យក្នុងការរក្សាទុកពិន្ទុកិច្ចការ', 'Failed to save grade')
-      );
     } finally {
       setGradingData((prev) => ({
         ...prev,
@@ -1576,9 +1529,6 @@ export default function TeacherManageAssignments() {
   // ១. នាំចេញបញ្ជីកិច្ចការទៅជា Excel
   const handleExportAssignmentsExcel = () => {
     if (filteredAssignments.length === 0) {
-      toast.warning(
-        t('គ្មានទិន្នន័យកិច្ចការសម្រាប់នាំចេញទេ', 'No assignments to export')
-      );
       return;
     }
 
@@ -1628,13 +1578,6 @@ export default function TeacherManageAssignments() {
       `Teacher_Assignments${yearSuffix}${courseSuffix}${shiftSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
     );
 
-    toast.success(
-      t(
-        'បាននាំចេញបញ្ជីកិច្ចការទៅជា Excel ដោយជោគជ័យ!',
-        'Assignments exported to Excel successfully!'
-      )
-    );
-
     pushLocalNotification({
       titleKm: 'បាននាំចេញបញ្ជីកិច្ចការទៅ Excel',
       titleEn: 'Assignments Exported to Excel',
@@ -1648,12 +1591,6 @@ export default function TeacherManageAssignments() {
   // ✅ ២. នាំចេញតារាងពិន្ទុសិស្សដាក់កិច្ចការក្នុង Modal ទៅជា Excel
   const handleExportSubmissionsExcel = () => {
     if (!viewingAssignment || submissions.length === 0) {
-      toast.warning(
-        t(
-          'គ្មានទិន្នន័យសិស្សដាក់កិច្ចការសម្រាប់នាំចេញទេ',
-          'No submissions to export'
-        )
-      );
       return;
     }
 
@@ -1713,13 +1650,6 @@ export default function TeacherManageAssignments() {
     XLSX.writeFile(
       workbook,
       `Submissions_${safeTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`
-    );
-
-    toast.success(
-      t(
-        'បាននាំចេញបញ្ជីសិស្សដាក់កិច្ចការទៅជា Excel ជោគជ័យ!',
-        'Submissions exported to Excel successfully!'
-      )
     );
 
     pushLocalNotification({

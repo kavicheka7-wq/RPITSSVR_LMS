@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import api from '../../services/api';
 import { getCachedDepartments, getCachedRoles, getCachedCourses } from '../../services/metadataService';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style'; 
@@ -662,7 +661,6 @@ const ManageStudentsYear2 = () => {
   const handlePromoteSubmit = async (e) => {
     e.preventDefault();
     if (selectedStudents.length === 0 || !promoteTargetYear.trim()) {
-      toast.warning(t('សូមបំពេញជំនាន់/ឆ្នាំសិក្សាគោលដៅឱ្យបានត្រឹមត្រូវ', 'Please enter the target batch/year correctly'));
       return;
     }
     setIsPromoting(true);
@@ -695,18 +693,11 @@ const ManageStudentsYear2 = () => {
         localStorage.removeItem(CACHE_KEY_SHARED_STUDENTS);
       } catch (e) {}
 
-      toast.success(
-        t(
-          `បានដំឡើងសិស្សចំនួន ${countPromoted} នាក់ ទៅកាន់ «${targetStr}» ដោយជោគជ័យ!`,
-          `Successfully promoted ${countPromoted} students to "${targetStr}"!`
-        )
-      );
-
       pushLocalNotification({
         titleKm: 'បានឡើងឆ្នាំសិក្សាសិស្សជោគជ័យ',
         titleEn: 'Students Promoted Successfully',
-        descKm: `សិស្សចំនួន ${countPromoted} នាក់ ត្រូវបានផ្លាស់ប្តូរទៅកាន់ឆ្នាំសិក្សាថ្មី។`,
-        descEn: `${countPromoted} students have been successfully promoted to the new academic year.`,
+        descKm: `សិស្សចំនួន ${countPromoted} នាក់ ត្រូវបានផ្លាស់ប្តូរទៅកាន់ «${targetStr}» ដោយជោគជ័យ។`,
+        descEn: `${countPromoted} students have been successfully promoted to "${targetStr}".`,
         category: 'student',
         link: '/admin/students/year-3'
       });
@@ -716,7 +707,6 @@ const ManageStudentsYear2 = () => {
       setPromoteTargetYear('');
     } catch (error) {
       console.error('Promotion error:', error);
-      toast.error(error.response?.data?.message || t('បរាជ័យក្នុងការដំឡើងឆ្នាំសិក្សា', 'Failed to promote students'));
     } finally {
       setIsPromoting(false);
     }
@@ -864,14 +854,10 @@ const ManageStudentsYear2 = () => {
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return;
-        if ((ADMIN_STUDENTS_Y2_MEM_CACHE.students || []).length === 0) {
-          toast.error(
-            t('មិនអាចទាញយកទិន្នន័យសិស្សឆ្នាំទី២បានទេ', 'Cannot fetch Year 2 students data')
-          );
-        }
+        console.error(error);
       }
     },
-    [page, perPage, debouncedSearch, currentAdminId, t]
+    [page, perPage, debouncedSearch, currentAdminId]
   );
 
   useEffect(() => {
@@ -890,6 +876,7 @@ const ManageStudentsYear2 = () => {
 
     // ✅ ចាប់យកដេប៉ាតឺម៉ង់ដែលបានចុចចូលដោយស្វ័យប្រវត្តិនៅពេលបង្កើតសិស្សថ្មី
     const finalDepartmentId = formData.department_id || (selectedDepartment !== 'all' ? selectedDepartment : '');
+    const fullName = `${formData.first_name || ''} ${formData.last_name || ''}`.trim();
 
     try {
       if (editingStudent) {
@@ -921,6 +908,15 @@ const ManageStudentsYear2 = () => {
             } catch (e) {}
           }
           return newList;
+        });
+
+        pushLocalNotification({
+          titleKm: 'បានកែប្រែព័ត៌មានសិស្ស',
+          titleEn: 'Student Updated',
+          descKm: `ព័ត៌មានរបស់សិស្ស «${fullName}» ត្រូវបានកែប្រែដោយជោគជ័យ។`,
+          descEn: `Student "${fullName}" has been updated successfully.`,
+          category: 'student',
+          link: '/admin/students/year-2'
         });
       } else {
         const formDataToSend = new FormData();
@@ -954,16 +950,21 @@ const ManageStudentsYear2 = () => {
             return newList;
           });
         }
+
+        pushLocalNotification({
+          titleKm: 'បានបង្កើតគណនីសិស្សថ្មី',
+          titleEn: 'New Student Created',
+          descKm: `គណនីសិស្សឆ្នាំទី២ «${fullName}» ត្រូវបានបង្កើតចូលក្នុងប្រព័ន្ធជោគជ័យ។`,
+          descEn: `Year 2 student "${fullName}" has been created successfully.`,
+          category: 'student',
+          link: '/admin/students/year-2'
+        });
       }
       setShowModal(false);
       resetForm();
       fetchStudents(true);
     } catch (error) {
-      if (error.response?.data?.errors) {
-        toast.error(Object.values(error.response.data.errors).flat().join('\n'));
-      } else {
-        toast.error(error.response?.data?.message || t('ការធ្វើប្រតិបត្តិការបានបរាជ័យ', 'Operation failed'));
-      }
+      console.error('Submit student error:', error);
     }
   };
 
@@ -975,6 +976,7 @@ const ManageStudentsYear2 = () => {
   const confirmDelete = async () => {
     if (!studentToDelete) return;
     const deletedId = studentToDelete.id;
+    const deletedName = getStudentFullName(studentToDelete);
     const previousStudents = [...students];
     const previousMeta = { ...meta };
 
@@ -995,12 +997,21 @@ const ManageStudentsYear2 = () => {
 
     try {
       await api.delete(`/admin/students/${deletedId}`);
+
+      pushLocalNotification({
+        titleKm: 'បានលុបគណនីសិស្ស',
+        titleEn: 'Student Deleted',
+        descKm: `គណនីសិស្ស «${deletedName}» ត្រូវបានលុបចេញពីប្រព័ន្ធរួចរាល់។`,
+        descEn: `Student "${deletedName}" has been removed.`,
+        category: 'student',
+        link: '/admin/students/year-2'
+      });
     } catch (error) {
+      console.error('Failed to delete student:', error);
       setStudents(previousStudents);
       setMeta(previousMeta);
       ADMIN_STUDENTS_Y2_MEM_CACHE.students = previousStudents;
       ADMIN_STUDENTS_Y2_MEM_CACHE.meta = previousMeta;
-      toast.error(error.response?.data?.message || t('មិនអាចលុបសិស្សបានទេ', 'Cannot delete student'));
     }
   };
 
@@ -1074,7 +1085,7 @@ const ManageStudentsYear2 = () => {
       // ✅ កត់ត្រាដេប៉ាតឺម៉ង់នៃមុខវិជ្ជាដែលសិស្សកំពុងរៀនភ្លាមៗ
       syncStudentEnrolledDepts(student.id, fetchedEnrollments, fetchedCourses);
     } catch (error) {
-      toast.error(t('មិនអាចទាញយកព័ត៌មានចុះឈ្មោះបានទេ', 'Cannot fetch enrollment details'));
+      console.error('Cannot fetch enrollment details:', error);
     }
   };
 
@@ -1125,6 +1136,9 @@ const ManageStudentsYear2 = () => {
     if (!selectedStudent || selectedCoursesToEnroll.length === 0) return;
     setIsEnrollingCourses(true);
     try {
+      const countToEnroll = selectedCoursesToEnroll.length;
+      const studentName = getStudentFullName(selectedStudent);
+
       await api.post(`/admin/students/${selectedStudent.id}/enrollments`, {
         course_ids: selectedCoursesToEnroll,
       });
@@ -1133,15 +1147,18 @@ const ManageStudentsYear2 = () => {
       setStudentEnrollments(updatedEnrollments);
       // ✅ ធ្វើបច្ចុប្បន្នភាពដេប៉ាតឺម៉ង់របស់សិស្សភ្លាមៗ (បើរៀនមុខវិជ្ជាដេប៉ាតឺម៉ង់ទី ២ នឹងបង្ហាញឈ្មោះក្នុងដេប៉ាតឺម៉ង់ទី ២ ភ្លាម)
       syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
-      toast.success(
-        t(
-          `បានចុះឈ្មោះចំនួន ${selectedCoursesToEnroll.length} មុខវិជ្ជាដោយជោគជ័យ!`,
-          `Successfully enrolled in ${selectedCoursesToEnroll.length} courses!`
-        )
-      );
       setSelectedCoursesToEnroll([]);
+
+      pushLocalNotification({
+        titleKm: 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្ស',
+        titleEn: 'Student Courses Enrolled',
+        descKm: `បានចុះឈ្មោះមុខវិជ្ជាចំនួន ${countToEnroll} មុខវិជ្ជាជូនសិស្ស «${studentName}» ដោយជោគជ័យ។`,
+        descEn: `Enrolled "${studentName}" in ${countToEnroll} courses successfully.`,
+        category: 'student',
+        link: '/admin/students/year-2'
+      });
     } catch (error) {
-      toast.error(error.response?.data?.message || t('ការចុះឈ្មោះមុខវិជ្ជាបរាជ័យ', 'Failed to enroll courses'));
+      console.error('Failed to enroll courses:', error);
     } finally {
       setIsEnrollingCourses(false);
     }
@@ -1157,27 +1174,31 @@ const ManageStudentsYear2 = () => {
     );
 
     if (deptUnenrolled.length === 0) {
-      toast.info(t('សិស្សនេះបានចុះឈ្មោះគ្រប់មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់រួចហើយ', 'All department courses are already enrolled'));
       return;
     }
 
     setIsEnrollingCourses(true);
     try {
       const courseIds = deptUnenrolled.map((c) => Number(c.id));
+      const studentName = getStudentFullName(selectedStudent);
+
       await api.post(`/admin/students/${selectedStudent.id}/enrollments`, { course_ids: courseIds });
       const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
       const updatedEnrollments = enrollmentsRes.data.data || [];
       setStudentEnrollments(updatedEnrollments);
       syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
       setSelectedCoursesToEnroll([]);
-      toast.success(
-        t(
-          `បានដាក់បញ្ចូលមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់ទាំង ${courseIds.length} មុខវិជ្ជាជោគជ័យ!`,
-          `Enrolled all ${courseIds.length} department courses!`
-        )
-      );
+
+      pushLocalNotification({
+        titleKm: 'បានដាក់បញ្ចូលគ្រប់មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់',
+        titleEn: 'Enrolled All Department Courses',
+        descKm: `បានដាក់បញ្ចូលមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់ទាំង ${courseIds.length} មុខវិជ្ជាជូនសិស្ស «${studentName}» ជោគជ័យ។`,
+        descEn: `Enrolled all ${courseIds.length} department courses for "${studentName}".`,
+        category: 'student',
+        link: '/admin/students/year-2'
+      });
     } catch (error) {
-      toast.error(error.response?.data?.message || t('ការចុះឈ្មោះមុខវិជ្ជាបរាជ័យ', 'Failed to enroll courses'));
+      console.error('Failed to enroll courses:', error);
     } finally {
       setIsEnrollingCourses(false);
     }
@@ -1239,7 +1260,6 @@ const ManageStudentsYear2 = () => {
   const handleConfirmBulkEnroll = async (e) => {
     e.preventDefault();
     if (selectedStudents.length === 0 || bulkSelectedCourses.length === 0) {
-      toast.warning(t('សូមជ្រើសរើសមុខវិជ្ជាយ៉ាងតិច ១', 'Please select at least 1 course'));
       return;
     }
 
@@ -1275,13 +1295,6 @@ const ManageStudentsYear2 = () => {
         });
       }
 
-      toast.success(
-        t(
-          `បានចុះឈ្មោះ ${bulkSelectedCourses.length} មុខវិជ្ជា ជូនសិស្សទាំង ${selectedStudents.length} នាក់ដោយជោគជ័យ!`,
-          `Successfully enrolled ${selectedStudents.length} students into ${bulkSelectedCourses.length} courses!`
-        )
-      );
-
       pushLocalNotification({
         titleKm: 'បានចុះឈ្មោះមុខវិជ្ជាជាក្រុមជោគជ័យ',
         titleEn: 'Bulk Course Enrollment Completed',
@@ -1295,7 +1308,7 @@ const ManageStudentsYear2 = () => {
       setBulkSelectedCourses([]);
       setSelectedStudents([]);
     } catch (error) {
-      toast.error(t('មានបញ្ហាក្នុងការចុះឈ្មោះមុខវិជ្ជាជាក្រុម', 'Failed to bulk enroll courses'));
+      console.error('Failed to bulk enroll courses:', error);
     } finally {
       setIsBulkEnrolling(false);
     }
@@ -1311,7 +1324,7 @@ const ManageStudentsYear2 = () => {
       // ✅ ធ្វើបច្ចុប្បន្នភាពដេប៉ាតឺម៉ង់របស់សិស្សឡើងវិញពេលលុបមុខវិជ្ជាចេញ
       syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
     } catch (error) {
-      toast.error(error.response?.data?.message || t('បរាជ័យក្នុងការលុបការចុះឈ្មោះ', 'Failed to unenroll'));
+      console.error('Failed to unenroll:', error);
     } finally {
       setUnenrollTarget(null);
     }
@@ -1383,7 +1396,6 @@ const ManageStudentsYear2 = () => {
   // ✅ នាំចេញ Excel ដោយដាក់សិស្សដែលមានឈ្មោះមុន (លេខរៀងទី 1 ដំបូងគេ) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម
   const handleExportExcel = () => {
     if (displayedStudents.length === 0) {
-      toast.warning(t('គ្មានទិន្នន័យសិស្សសម្រាប់នាំចេញទេ', 'No students to export'));
       return;
     }
     const currentDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
@@ -1585,7 +1597,6 @@ const ManageStudentsYear2 = () => {
           });
 
         if (!nonEmptyRows || nonEmptyRows.length === 0) {
-          toast.warning(t('ឯកសារ Excel គ្មានទិន្នន័យសិស្សទេ', 'Excel file contains no student data'));
           return;
         }
 
@@ -1668,7 +1679,6 @@ const ManageStudentsYear2 = () => {
     if (!importPreview || importPreview.length === 0) return;
     const validItems = importPreview.filter(r => r.isValid).map(r => r.data);
     if (validItems.length === 0) {
-      toast.warning(t('គ្មានទិន្នន័យត្រឹមត្រូវសម្រាប់នាំចូលទេ', 'No valid data to import'));
       return;
     }
 
@@ -1697,7 +1707,6 @@ const ManageStudentsYear2 = () => {
       fetchStudents(true);
     } catch (error) {
       console.error('Import Error:', error);
-      toast.error(error.response?.data?.message || t('ការនាំចូលទិន្នន័យបានបរាជ័យ', 'Failed to import data'));
     } finally {
       setIsImporting(false);
     }
@@ -2040,7 +2049,7 @@ const ManageStudentsYear2 = () => {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-100">
+           <table className="min-w-full border-collapse">
               <thead className="std-table-head bg-gray-50 border-b border-gray-100">
                 <tr>
                   <th className="px-4 py-4 text-left whitespace-nowrap">
@@ -2083,7 +2092,7 @@ const ManageStudentsYear2 = () => {
                   </th>
                 </tr>
               </thead>
-              <tbody className="std-table-body bg-white divide-y divide-gray-100">
+              <tbody className="std-table-body bg-white">
                 {displayedStudents.length === 0 ? (
                   <tr>
                     <td colSpan="8" className="px-4 py-16 text-center text-gray-500">
@@ -3252,9 +3261,14 @@ const ManageStudentsYear2 = () => {
       {/* ==================================================================== */}
       {/* 📌 ផ្នែកទី ១០៖ CSS សម្រាប់កំណត់ពណ៌ទម្រង់យប់ (DARK MODE STYLING)         */}
       {/* ==================================================================== */}
-      <style>{`
+     <style>{`
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
+        .std-table-row + .std-table-row > td {
+          border-top: 1px solid #f1f5f9;
+        }
 
         html.dark .std-page-bg {
           background-color: transparent !important;
@@ -3345,10 +3359,10 @@ const ManageStudentsYear2 = () => {
           background-color: #334155 !important;
         }
 
-        /* តារាងសិស្សក្នុងទម្រង់យប់ */
+        /* ✅ តារាងសិស្ស និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         html.dark .std-table-head {
           background-color: #0f172a !important;
-          border-color: #334155 !important;
+          border-color: rgba(51, 65, 85, 0.7) !important;
         }
         html.dark .std-table-head th,
         html.dark .std-table-head span {
@@ -3356,10 +3370,9 @@ const ManageStudentsYear2 = () => {
         }
         html.dark .std-table-body {
           background-color: #1e293b !important;
-          border-color: #334155 !important;
         }
-        html.dark .std-table-body > tr {
-          border-color: #334155 !important;
+        html.dark .std-table-row + .std-table-row > td {
+          border-top: 1px solid rgba(51, 65, 85, 0.55) !important;
         }
         html.dark .std-table-row:hover {
           background-color: rgba(59, 130, 246, 0.08) !important;

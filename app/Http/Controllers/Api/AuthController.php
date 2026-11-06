@@ -94,7 +94,8 @@ class AuthController extends Controller
     }
 
     /**
-     * HELPER METHOD: កំណត់យក Telegram Chat ID ផ្ទាល់ខ្លួនរបស់អ្នកប្រើប្រាស់
+     * ✅ HELPER METHOD: កំណត់យក Telegram Chat ID ផ្ទាល់ខ្លួនរបស់អ្នកប្រើប្រាស់ម្នាក់ៗ
+     * (បានដកចេញនូវការទាញយក TELEGRAM_ADMIN_CHAT_ID ពី .env ដើម្បីកុំឱ្យលោតចូល Telegram ម្ចាស់កូដពេលកូនក្រុមតេស្ត)
      */
     private function resolveUserTelegramChatId(User $user): ?string
     {
@@ -105,12 +106,6 @@ class AuthController extends Controller
         $cachedChatId = Cache::get('lms_user_telegram_chat_id_' . $user->id);
         if (!empty($cachedChatId)) {
             return trim((string) $cachedChatId);
-        }
-
-        $roleName = strtolower(trim((string) ($user->role?->role_name ?? '')));
-        if ($roleName === 'admin' || (int) $user->role_id === 1) {
-            $adminChatId = env('TELEGRAM_ADMIN_CHAT_ID', env('TELEGRAM_DEFAULT_CHAT_ID'));
-            return !empty($adminChatId) ? trim((string) $adminChatId) : null;
         }
 
         return null;
@@ -162,9 +157,9 @@ class AuthController extends Controller
     }
 
     /**
-     * HELPER METHOD: បង្កើតតំណភ្ជាប់ Telegram Deep-Link សម្រាប់ឱ្យសិស្ស/គ្រូចុចភ្ជាប់ដោយខ្លួនឯងក្នុង ១ ចុច
+     * ✅ HELPER METHOD: បង្កើតតំណភ្ជាប់ Telegram Deep-Link សម្រាប់ឱ្យអ្នកប្រើ ឬកូនក្រុមចុចភ្ជាប់/ប្ដូរ Telegram មកទូរស័ព្ទខ្លួនឯងក្នុង ១ ចុច
      */
-    private function generateTelegramLinkUrl(User $user): ?string
+    private function generateTelegramLinkUrl(User $user, bool $forceNewToken = false): ?string
     {
         $botUsername = $this->resolveTelegramBotUsername();
         if (!$botUsername) {
@@ -172,7 +167,7 @@ class AuthController extends Controller
         }
 
         $tokenKey = 'lms_tg_user_link_token_' . $user->id;
-        $token = Cache::get($tokenKey);
+        $token = $forceNewToken ? null : Cache::get($tokenKey);
 
         if (!$token) {
             $token = $user->id . '_' . Str::lower(Str::random(10));
@@ -313,18 +308,19 @@ class AuthController extends Controller
 
         $shouldExposeDevOtp = !$telegramSent && !$mailSent;
 
+        // ✅ បង្កើត telegram_link_url ជានិច្ច ដើម្បីឱ្យកូនក្រុមអាចចុចប្ដូរ Telegram មកទូរស័ព្ទខ្លួនឯងបានគ្រប់ពេល
         return [
             'otp' => $shouldExposeDevOtp ? $otp : null,
             'mail_sent' => $mailSent,
             'telegram_sent' => $telegramSent,
             'telegram_linked' => $isTelegramLinked,
-            'telegram_link_url' => $isTelegramLinked ? null : $this->generateTelegramLinkUrl($user),
+            'telegram_link_url' => $this->generateTelegramLinkUrl($user, true),
             'delivery_channel' => $deliveryChannel,
         ];
     }
 
     /**
-     * ✅ មុខងារពិនិត្យ និងភ្ជាប់គណនី Telegram ដោយស្វ័យប្រវត្តិ ១០០% (Self-Service 1-Click Link)
+     * ✅ មុខងារពិនិត្យ និងភ្ជាប់/ប្ដូរគណនី Telegram ដោយស្វ័យប្រវត្តិ ១០០% (គាំទ្រការប្ដូរ Telegram ថ្មីពេលកូនក្រុមតេស្ត)
      */
     public function checkTelegramLink(Request $request)
     {
@@ -337,14 +333,6 @@ class AuthController extends Controller
             return response()->json(['linked' => false, 'message' => 'រកមិនឃើញគណនីនេះទេ'], 404);
         }
 
-        if ($this->resolveUserTelegramChatId($user) !== null) {
-            return response()->json([
-                'linked' => true,
-                'telegram_sent' => true,
-                'message' => 'គណនី Telegram ត្រូវបានភ្ជាប់រួចរាល់ហើយ!',
-            ]);
-        }
-
         $botToken = env('TELEGRAM_BOT_TOKEN');
         if (!$botToken) {
             return response()->json(['linked' => false]);
@@ -353,6 +341,7 @@ class AuthController extends Controller
         $expectedToken = Cache::get('lms_tg_user_link_token_' . $user->id);
 
         try {
+            // ១. ឆែកមើលសារ /start link_... ថ្មីៗពី Telegram Bot ជាមុនជានិច្ច (ដើម្បីគាំទ្រការប្ដូរ Telegram ថ្មីរបស់កូនក្រុម)
             $res = Http::timeout(5)->get("https://api.telegram.org/bot{$botToken}/getUpdates", [
                 'limit' => 50,
                 'allowed_updates' => json_encode(['message']),
@@ -361,8 +350,10 @@ class AuthController extends Controller
             if ($res->successful()) {
                 $updates = $res->json('result') ?? [];
                 $matchedChatId = null;
+                $matchedUpdateId = null;
 
                 foreach (array_reverse($updates) as $upd) {
+                    $updateId = $upd['update_id'] ?? null;
                     $text = trim((string) ($upd['message']['text'] ?? ''));
                     $chatId = $upd['message']['chat']['id'] ?? null;
 
@@ -374,38 +365,55 @@ class AuthController extends Controller
                         $incomingToken = $matches[1];
                         $mappedUserId = Cache::get('lms_tg_link_token_map_' . $incomingToken);
 
+                        // ការពារកុំឱ្យចាប់យកសារ /start ចាស់ដែលធ្លាប់ភ្ជាប់រួចហើយម្តងទៀត
+                        $alreadyProcessedKey = 'lms_tg_processed_update_' . $updateId;
+                        if (Cache::has($alreadyProcessedKey)) {
+                            continue;
+                        }
+
                         if (
                             ($expectedToken && $incomingToken === $expectedToken) ||
                             ($mappedUserId && (int) $mappedUserId === (int) $user->id) ||
                             str_starts_with($incomingToken, $user->id . '_')
                         ) {
                             $matchedChatId = (string) $chatId;
+                            $matchedUpdateId = $updateId;
                             break;
                         }
                     }
                 }
 
                 if ($matchedChatId) {
+                    if ($matchedUpdateId) {
+                        Cache::put('lms_tg_processed_update_' . $matchedUpdateId, true, now()->addHours(24));
+                    }
+
+                    // រក្សាទុក Chat ID ថ្មីរបស់កូនក្រុមជំនួស Chat ID ចាស់ក្នុង Database
                     $this->saveUserTelegramChatId($user, $matchedChatId);
 
-                    // ពិនិត្យមើលថាតើកំពុងស្ថិតក្នុងដំណាក់កាល Reset Password ឬ Login 2FA
+                    // លុប Token ចាស់ចោល និងបង្កើត Token ថ្មីសម្រាប់ពេលក្រោយ
+                    if ($expectedToken) {
+                        Cache::forget('lms_tg_link_token_map_' . $expectedToken);
+                    }
+                    Cache::forget('lms_tg_user_link_token_' . $user->id);
+
+                    // បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ថ្មីចូល Telegram ថ្មីរបស់កូនក្រុមភ្លាមៗតែម្ដង
                     $resetOtp = Cache::get('lms_pwd_reset_otp_' . $user->id);
                     if ($resetOtp) {
-                        $this->sendTelegramOtpAlert($user->fresh('role'), (string) $resetOtp, $request, 'reset');
+                        $newOtp = (string) random_int(100000, 999999);
+                        Cache::put('lms_pwd_reset_otp_' . $user->id, $newOtp, now()->addMinutes(5));
+                        $this->sendTelegramOtpAlert($user->fresh('role'), $newOtp, $request, 'reset');
                     } else {
-                        $cacheKey = 'lms_2fa_otp_' . $user->id;
-                        $otp = Cache::get($cacheKey);
-                        if (!$otp) {
-                            $otp = (string) random_int(100000, 999999);
-                            Cache::put($cacheKey, $otp, now()->addMinutes(5));
-                        }
-                        $this->sendTelegramOtpAlert($user->fresh('role'), (string) $otp, $request, '2fa');
+                        $newOtp = (string) random_int(100000, 999999);
+                        Cache::put('lms_2fa_otp_' . $user->id, $newOtp, now()->addMinutes(5));
+                        $this->sendTelegramOtpAlert($user->fresh('role'), $newOtp, $request, '2fa');
                     }
 
                     return response()->json([
                         'linked' => true,
                         'telegram_sent' => true,
                         'delivery_channel' => 'telegram',
+                        'telegram_link_url' => $this->generateTelegramLinkUrl($user, true),
                         'message' => 'ភ្ជាប់គណនី Telegram ជោគជ័យ! លេខកូដ ៦ ខ្ទង់ត្រូវបានផ្ញើចូល Telegram របស់អ្នកហើយ។',
                     ]);
                 }
@@ -414,6 +422,7 @@ class AuthController extends Controller
             Log::warning('checkTelegramLink polling error: ' . $e->getMessage());
         }
 
+        // បើមិនទាន់ឃើញចុច Start ថ្មីទេ ឱ្យរង់ចាំបន្តទៀត
         return response()->json([
             'linked' => false,
             'telegram_link_url' => $this->generateTelegramLinkUrl($user),

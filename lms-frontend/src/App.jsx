@@ -1,10 +1,8 @@
 // src/App.jsx
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { LanguageProvider, useLanguage } from './context/LanguageContext';
+import { LanguageProvider } from './context/LanguageContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import Navbar from './components/common/Navbar';
 import Sidebar from './components/common/Sidebar';
@@ -45,7 +43,6 @@ import StudentQuizzes from './components/student/StudentQuizzes';
 // Main App Content with routing
 const AppContent = () => {
   const { user, loading } = useAuth();
-  const { t } = useLanguage();
 
   // ✅ ចាប់សកម្មភាព Scroll គ្រប់ទីកន្លែង ដើម្បីបង្ហាញ Scrollbar តែពេលកំពុងអូស និងលាក់វិញពេលឈប់អូស
   useEffect(() => {
@@ -73,17 +70,8 @@ const AppContent = () => {
     };
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-slate-950">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-slate-400">
-            {t('កំពុងផ្ទុក...', 'Loading...')}
-          </p>
-        </div>
-      </div>
-    );
+  if (loading && !user) {
+    return null;
   }
 
   const getDashboardPath = () => {
@@ -117,7 +105,6 @@ const AppContent = () => {
           <Route path="/register" element={<Register />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
-        <ToastContainer position="bottom-right" />
       </Router>
     );
   }
@@ -148,6 +135,8 @@ const AppContent = () => {
                 <Route path="/admin/courses" element={<ManageCourses />} />
                 <Route path="/admin/departments" element={<ManageDepartments />} />
                 <Route path="/admin/teachers" element={<ManageTeachers />} />
+                <Route path="/admin/users" element={<Navigate to="/admin/students/year-1" replace />} />
+                <Route path="/admin/students" element={<Navigate to="/admin/students/year-1" replace />} />
                 <Route path="/admin/students/year-1" element={<ManageStudentsYear1 />} />
                 <Route path="/admin/students/year-2" element={<ManageStudentsYear2 />} />
                 <Route path="/admin/students/year-3" element={<ManageStudentsYear3 />} />
@@ -188,7 +177,6 @@ const AppContent = () => {
         </div>
 
         <BottomNav />
-        <ToastContainer position="bottom-right" />
       </div>
     </Router>
   );

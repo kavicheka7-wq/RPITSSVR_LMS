@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -1158,12 +1157,6 @@ export default function TeacherManageQuizzes() {
     e.preventDefault();
 
     if (!formData.start_date || !formData.end_date) {
-      toast.warning(
-        t(
-          'សូមជ្រើសរើសទាំងថ្ងៃចាប់ផ្តើម និងថ្ងៃបញ្ចប់ឱ្យបានពេញលេញ',
-          'Please select both start date and end date'
-        )
-      );
       return;
     }
 
@@ -1171,19 +1164,10 @@ export default function TeacherManageQuizzes() {
     const endMs = toComparableTimeMs(formData.end_date);
 
     if (isNaN(startMs) || isNaN(endMs)) {
-      toast.warning(
-        t('ទម្រង់ថ្ងៃខែ និងម៉ោងមិនត្រឹមត្រូវទេ', 'Invalid date and time format')
-      );
       return;
     }
 
     if (endMs <= startMs) {
-      toast.warning(
-        t(
-          '«ថ្ងៃបញ្ចប់» ត្រូវតែធំជាង «ថ្ងៃចាប់ផ្តើម»!',
-          'End date must be after start date!'
-        )
-      );
       return;
     }
 
@@ -1238,10 +1222,6 @@ export default function TeacherManageQuizzes() {
           return updated;
         });
 
-        toast.success(
-          t('បានកែប្រែកម្រងសំណួរដោយជោគជ័យ!', 'Quiz updated successfully!')
-        );
-
         pushLocalNotification({
           titleKm: 'បានកែប្រែកម្រងសំណួរ',
           titleEn: 'Quiz Updated',
@@ -1281,10 +1261,6 @@ export default function TeacherManageQuizzes() {
           return updated;
         });
 
-        toast.success(
-          t('បានបង្កើតកម្រងសំណួរថ្មីដោយជោគជ័យ!', 'New quiz created successfully!')
-        );
-
         pushLocalNotification({
           titleKm: 'បានបង្កើតកម្រងសំណួរថ្មី',
           titleEn: 'New Quiz Created',
@@ -1298,15 +1274,6 @@ export default function TeacherManageQuizzes() {
       fetchQuizzes();
     } catch (error) {
       console.error('Submit error:', error);
-      if (error.response?.data?.errors) {
-        const firstErr = Object.values(error.response.data.errors).flat()[0];
-        toast.error(firstErr || t('ទិន្នន័យមិនត្រឹមត្រូវ', 'Validation error'));
-      } else {
-        toast.error(
-          error.response?.data?.message ||
-            t('មានបញ្ហាក្នុងការរក្សាទុកកម្រងសំណួរ', 'Failed to save quiz')
-        );
-      }
     } finally {
       setIsSubmitting(false);
     }
@@ -1342,7 +1309,6 @@ export default function TeacherManageQuizzes() {
 
     try {
       await api.delete(`/teacher/quizzes/${deletedId}`);
-      toast.success(t('បានលុបកម្រងសំណួរដោយជោគជ័យ!', 'Quiz deleted successfully!'));
 
       pushLocalNotification({
         titleKm: 'បានលុបកម្រងសំណួរ',
@@ -1354,7 +1320,6 @@ export default function TeacherManageQuizzes() {
       });
     } catch (error) {
       console.error('Delete quiz error:', error);
-      toast.error(t('បរាជ័យក្នុងការលុបកម្រងសំណួរ', 'Failed to delete quiz'));
       setQuizzes(previousQuizzes);
       QUIZZES_MEM_CACHE.quizzes = previousQuizzes;
       try {
@@ -1372,9 +1337,6 @@ export default function TeacherManageQuizzes() {
 
   const handleAddQuestion = async (quizId) => {
     if (!questionText.trim()) {
-      toast.warning(
-        t('សូមបញ្ចូលខ្លឹមសារសំណួរជាមុនសិន', 'Please enter question content')
-      );
       return;
     }
 
@@ -1384,22 +1346,10 @@ export default function TeacherManageQuizzes() {
         (opt) => opt.option_text.trim() !== ''
       );
       if (filledOptions.length < 2) {
-        toast.warning(
-          t(
-            'សូមបំពេញជម្រើសចម្លើយយ៉ាងតិច ២ ជម្រើស',
-            'Please provide at least 2 options'
-          )
-        );
         return;
       }
       const hasCorrect = filledOptions.some((opt) => opt.is_correct);
       if (!hasCorrect) {
-        toast.warning(
-          t(
-            'សូមជ្រើសរើសចម្លើយដែលត្រឹមត្រូវចំនួន ១',
-            'Please select the correct answer'
-          )
-        );
         return;
       }
       options = filledOptions;
@@ -1462,10 +1412,6 @@ export default function TeacherManageQuizzes() {
       { option_text: '', is_correct: false },
     ]);
 
-    toast.success(
-      t('បានបន្ថែមសំណួរថ្មីដោយជោគជ័យ!', 'Question added successfully!')
-    );
-
     try {
       const res = await api.post(`/teacher/quizzes/${quizId}/questions`, payload);
       const savedQuestion = res.data?.question || res.data?.data || res.data;
@@ -1510,10 +1456,6 @@ export default function TeacherManageQuizzes() {
       console.error('Add question error:', error);
       setQuizzes(previousQuizzes);
       QUIZZES_MEM_CACHE.quizzes = previousQuizzes;
-      toast.error(
-        error.response?.data?.message ||
-          t('បរាជ័យក្នុងការបន្ថែមសំណួរ', 'Failed to add question')
-      );
     }
   };
 
@@ -1552,9 +1494,6 @@ export default function TeacherManageQuizzes() {
 
     try {
       await api.delete(`/teacher/quizzes/questions/${questionId}`);
-      toast.success(
-        t('បានលុបសំណួរដោយជោគជ័យ!', 'Question deleted successfully!')
-      );
 
       pushLocalNotification({
         titleKm: 'បានលុបសំណួរចេញពីកម្រងសំណួរ',
@@ -1566,7 +1505,6 @@ export default function TeacherManageQuizzes() {
       });
     } catch (error) {
       console.error('Delete question error:', error);
-      toast.error(t('បរាជ័យក្នុងការលុបសំណួរ', 'Failed to delete question'));
       setQuizzes(previousQuizzes);
       QUIZZES_MEM_CACHE.quizzes = previousQuizzes;
       try {
@@ -1661,7 +1599,6 @@ export default function TeacherManageQuizzes() {
         setJsonContent(JSON.stringify(parsed, null, 2));
       } catch (err) {
         console.error('Invalid JSON format:', err);
-        toast.error(t('ទម្រង់ឯកសារ JSON មិនត្រឹមត្រូវទេ', 'Invalid JSON format'));
         setParsedQuizzes([]);
       }
     };
@@ -1677,9 +1614,6 @@ export default function TeacherManageQuizzes() {
         ? String(modalAvailableCourses[0].id)
         : '');
     if (!targetCourse) {
-      toast.warning(
-        t('សូមជ្រើសរើសមុខវិជ្ជាជាមុនសិន', 'Please select a course first')
-      );
       return;
     }
 
@@ -1697,13 +1631,6 @@ export default function TeacherManageQuizzes() {
 
       await api.post('/teacher/quizzes/import', payload);
 
-      toast.success(
-        t(
-          `បាននាំចូលកម្រងសំណួរចំនួន ${parsedQuizzes.length} ដោយជោគជ័យ!`,
-          `Successfully imported ${parsedQuizzes.length} quizzes!`
-        )
-      );
-
       pushLocalNotification({
         titleKm: 'បាននាំចូលកម្រងសំណួរពី JSON',
         titleEn: 'Quizzes Imported from JSON',
@@ -1720,10 +1647,6 @@ export default function TeacherManageQuizzes() {
       await fetchQuizzes();
     } catch (error) {
       console.error('Import error:', error);
-      toast.error(
-        error.response?.data?.message ||
-          t('ការនាំចូលកម្រងសំណួរបានបរាជ័យ', 'Failed to import quizzes')
-      );
     } finally {
       setIsImporting(false);
     }
@@ -1878,9 +1801,6 @@ export default function TeacherManageQuizzes() {
   // ✅ ១. នាំចេញបញ្ជីកម្រងសំណួរទៅជា Excel (.xlsx)
   const handleExportQuizzesExcel = () => {
     if (filteredQuizzes.length === 0) {
-      toast.warning(
-        t('គ្មានទិន្នន័យកម្រងសំណួរសម្រាប់នាំចេញទេ', 'No quizzes to export')
-      );
       return;
     }
 
@@ -1934,13 +1854,6 @@ export default function TeacherManageQuizzes() {
       `Teacher_Quizzes${yearSuffix}${courseSuffix}${shiftSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
     );
 
-    toast.success(
-      t(
-        'បាននាំចេញបញ្ជីកម្រងសំណួរទៅជា Excel ដោយជោគជ័យ!',
-        'Quizzes exported to Excel successfully!'
-      )
-    );
-
     pushLocalNotification({
       titleKm: 'បាននាំចេញបញ្ជីកម្រងសំណួរទៅ Excel',
       titleEn: 'Quizzes Exported to Excel',
@@ -1954,9 +1867,6 @@ export default function TeacherManageQuizzes() {
   // ✅ ២. នាំចេញលទ្ធផលប្រឡងរបស់សិស្សក្នុង Modal ទៅជាឯកសារ Excel (.xlsx)
   const handleExportQuizResultsExcel = () => {
     if (!viewingQuiz || filteredSubmissions.length === 0) {
-      toast.warning(
-        t('គ្មានទិន្នន័យលទ្ធផលប្រឡងសម្រាប់នាំចេញទេ', 'No quiz results to export')
-      );
       return;
     }
 
@@ -2010,13 +1920,6 @@ export default function TeacherManageQuizzes() {
     XLSX.writeFile(
       workbook,
       `Quiz_Results_${safeTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`
-    );
-
-    toast.success(
-      t(
-        'បាននាំចេញលទ្ធផលប្រឡងទៅជា Excel ដោយជោគជ័យ!',
-        'Quiz results exported to Excel!'
-      )
     );
 
     pushLocalNotification({

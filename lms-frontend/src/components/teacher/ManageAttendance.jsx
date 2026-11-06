@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -903,9 +902,6 @@ const ManageAttendance = () => {
           : student
       )
     );
-    toast.info(
-      t('បានកំណត់សិស្សទាំងអស់ជា «វត្តមាន»', 'Marked all students as Present')
-    );
   };
 
   // ✅ រក្សាទុកវត្តមានតាមវេនសិក្សាដែលកំពុងបង្ហាញ
@@ -990,17 +986,11 @@ const ManageAttendance = () => {
         return next;
       });
 
-      toast.success(
-        t(
-          'បានរក្សាទុកវត្តមានសិស្សដោយជោគជ័យ!',
-          'Student attendance saved successfully!'
-        )
-      );
-
       const shiftNoteKm = isSpecificShiftSelected
         ? ` (${getStudyShiftLabel(selectedShift)})`
         : '';
 
+      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
       pushLocalNotification({
         titleKm: 'បានកត់ត្រាវត្តមានសិស្សជោគជ័យ',
         titleEn: 'Student Attendance Saved',
@@ -1011,13 +1001,6 @@ const ManageAttendance = () => {
       });
     } catch (error) {
       console.error('Failed to mark attendance:', error);
-      toast.error(
-        error.response?.data?.message ||
-          t(
-            'មានបញ្ហាក្នុងការរក្សាទុកវត្តមានសិស្ស',
-            'Failed to save student attendance'
-          )
-      );
     } finally {
       setIsSubmitting(false);
     }
@@ -1086,9 +1069,6 @@ const ManageAttendance = () => {
 
   const handleExportExcel = () => {
     if (filteredStudents.length === 0) {
-      toast.warning(
-        t('គ្មានទិន្នន័យសិស្សសម្រាប់នាំចេញទេ', 'No students data to export')
-      );
       return;
     }
 
@@ -1163,19 +1143,13 @@ const ManageAttendance = () => {
       `Attendance${yearSuffix}${courseSuffix}${shiftSuffix}_${attendanceDate}.xlsx`
     );
 
-    toast.success(
-      t(
-        'បាននាំចេញបញ្ជីវត្តមានទៅជា Excel ដោយជោគជ័យ!',
-        'Attendance exported to Excel successfully!'
-      )
-    );
-
     const exportScopeKm = activeCourseObj
       ? `មុខវិជ្ជា «${activeCourseObj.course_name}»`
       : selectedYear !== 'all'
       ? getYearTextLabel(selectedYear)
       : 'ទាំងអស់';
 
+    // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
     pushLocalNotification({
       titleKm: 'បាននាំចេញវត្តមានសិស្សទៅ Excel',
       titleEn: 'Attendance Exported to Excel',
@@ -1790,7 +1764,7 @@ const ManageAttendance = () => {
                                     {getGenderLabel(student.gender)}
                                   </span>
                                 )}
-                                {/* ✅ បង្ហាញផ្លាកវេនសិក្សាតែនៅពេលស្ថិតក្នុង «គ្រប់វេនសិក្សា» ប៉ុណ្ណោះ (ពេលចុចចូល ចន្ទ-សុក្រ ឬ សៅរ៍-អាទិត្យ នឹងលាក់ចេញ) */}
+                                {/* ✅ បង្ហាញផ្លាកវេនសិក្សាតែនៅពេលស្ថិតក្នុង «គ្រប់វេនសិក្សា» ប៉ុណ្ណោះ */}
                                 {!isSpecificShiftSelected && (
                                   <span
                                     className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${

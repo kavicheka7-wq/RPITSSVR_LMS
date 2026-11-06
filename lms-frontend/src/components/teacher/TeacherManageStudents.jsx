@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -855,9 +854,6 @@ const TeacherManageStudents = () => {
   // នាំចេញ Excel
   const handleExportExcel = () => {
     if (!filteredStudents || filteredStudents.length === 0) {
-      toast.warning(
-        t('គ្មានទិន្នន័យសិស្សសម្រាប់នាំចេញទេ', 'No students data to export')
-      );
       return;
     }
 
@@ -919,13 +915,6 @@ const TeacherManageStudents = () => {
     XLSX.writeFile(
       workbook,
       `My_Department_Students${yearSuffix}${courseSuffix}${shiftSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
-    );
-
-    toast.success(
-      t(
-        'បាននាំចេញបញ្ជីសិស្សទៅជា Excel ដោយជោគជ័យ!',
-        'Students list exported to Excel successfully!'
-      )
     );
 
     const exportScopeKm = activeCourseObj
@@ -1441,7 +1430,7 @@ const TeacherManageStudents = () => {
                                 <span className="tstd-text-primary text-sm font-extrabold text-gray-900">
                                   {student.first_name} {student.last_name}
                                 </span>
-                                {/* ✅ បង្ហាញស្លាកតែចំពោះសិស្សណាដែលមិនទាន់បានចុះឈ្មោះមុខវិជ្ជារបស់គ្រូដែល Login ប៉ុណ្ណោះ (បើចុះឈ្មោះហើយមិនដាក់អ្វីទេ) */}
+                                {/* ✅ បង្ហាញស្លាកតែចំពោះសិស្សណាដែលមិនទាន់បានចុះឈ្មោះមុខវិជ្ជារបស់គ្រូដែល Login ប៉ុណ្ណោះ */}
                                 {!isEnrolledWithMe && (
                                   <span
                                     className="tstd-badge-unassigned inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-50/90 text-amber-700 border border-dashed border-amber-300"

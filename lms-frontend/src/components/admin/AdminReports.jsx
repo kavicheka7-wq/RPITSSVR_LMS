@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import api from '../../services/api';
 import { getCachedDepartments, getCachedCourses } from '../../services/metadataService';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -928,7 +927,6 @@ const AdminReports = () => {
     }
 
     if (exportRows.length === 0) {
-      toast.warning(t('គ្មានទិន្នន័យសម្រាប់នាំចេញទៅ Excel ទេ', 'No data available to export to Excel'));
       return;
     }
 

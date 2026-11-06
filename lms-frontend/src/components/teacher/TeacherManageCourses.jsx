@@ -1,7 +1,6 @@
 // src/components/teacher/TeacherManageCourses.jsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../../services/api';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -298,9 +297,6 @@ const TeacherManageCourses = () => {
 
   const handleExportExcel = () => {
     if (filteredCourses.length === 0) {
-      toast.warning(
-        t('គ្មានទិន្នន័យមុខវិជ្ជាសម្រាប់នាំចេញទេ', 'No courses to export')
-      );
       return;
     }
 
@@ -363,13 +359,6 @@ const TeacherManageCourses = () => {
     XLSX.writeFile(
       workbook,
       `My_Teaching_Courses_${new Date().toISOString().slice(0, 10)}.xlsx`
-    );
-
-    toast.success(
-      t(
-        'បាននាំចេញបញ្ជីមុខវិជ្ជាទៅជា Excel ដោយជោគជ័យ!',
-        'Courses exported to Excel successfully!'
-      )
     );
 
     pushLocalNotification({

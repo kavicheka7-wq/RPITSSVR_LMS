@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../../services/api';
 import { clearDepartmentsCache } from '../../services/metadataService';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { 
@@ -204,14 +203,9 @@ const ManageDepartments = () => {
         }
       } catch (error) {
         console.error('Error fetching departments:', error);
-        if ((ADMIN_DEPTS_MEM_CACHE.departments || []).length === 0) {
-          toast.error(
-            t('មិនអាចទាញយកបញ្ជីដេប៉ាតឺម៉ង់បានទេ', 'Cannot fetch departments list')
-          );
-        }
       }
     },
-    [currentAdminId, t]
+    [currentAdminId]
   );
 
   useEffect(() => {
@@ -226,12 +220,11 @@ const ManageDepartments = () => {
     });
   };
 
-  // ✅ រក្សាទុកដេប៉ាតឺម៉ង់ថ្មី ឬការកែប្រែ រួចធ្វើបច្ចុប្បន្នភាពលើអេក្រង់ភ្លាមៗ
+  // ✅ រក្សាទុកដេប៉ាតឺម៉ង់ថ្មី ឬការកែប្រែ រួចធ្វើបច្ចុប្បន្នភាពលើអេក្រង់ភ្លាមៗ (ភ្ជាប់តែកណ្ដឹង)
   const handleSubmit = async (e) => {
     e.preventDefault();
     const cleanName = formData.name.trim();
     if (!cleanName) {
-      toast.warning(t('សូមបញ្ចូលឈ្មោះដេប៉ាតឺម៉ង់', 'Please enter department name'));
       return;
     }
 
@@ -262,7 +255,14 @@ const ManageDepartments = () => {
           return newList;
         });
 
-        toast.success(t('បានកែប្រែដេប៉ាតឺម៉ង់ដោយជោគជ័យ!', 'Department updated successfully!'));
+        pushLocalNotification({
+          titleKm: 'បានកែប្រែដេប៉ាតឺម៉ង់',
+          titleEn: 'Department Updated',
+          descKm: `ដេប៉ាតឺម៉ង់ «${cleanName}» ត្រូវបានកែប្រែដោយជោគជ័យ។`,
+          descEn: `Department "${cleanName}" has been updated successfully.`,
+          category: 'department',
+          link: '/admin/departments'
+        });
       } else {
         const response = await api.post('/admin/departments', payload);
         const serverData = response.data?.data || response.data;
@@ -293,8 +293,6 @@ const ManageDepartments = () => {
           category: 'department',
           link: '/admin/departments'
         });
-
-        toast.success(t('បានបង្កើតដេប៉ាតឺម៉ង់ថ្មីដោយជោគជ័យ!', 'Department created successfully!'));
       }
 
       clearDepartmentsCache();
@@ -303,11 +301,6 @@ const ManageDepartments = () => {
       fetchDepartments(true);
     } catch (error) {
       console.error('Error saving department:', error);
-      if (error.response?.data?.errors) {
-        toast.error(Object.values(error.response.data.errors).flat().join('\n'));
-      } else {
-        toast.error(error.response?.data?.message || t('ការរក្សាទុកដេប៉ាតឺម៉ង់បានបរាជ័យ', 'Failed to save department'));
-      }
     } finally {
       setIsSubmitting(false);
     }
@@ -318,7 +311,7 @@ const ManageDepartments = () => {
     setShowDeleteModal(true);
   };
 
-  // ✅ លុបដេប៉ាតឺម៉ង់ដោយប្រើ Optimistic UI Update
+  // ✅ លុបដេប៉ាតឺម៉ង់ដោយប្រើ Optimistic UI Update និងបញ្ជូនសារចូលកណ្ដឹង
   const confirmDelete = async () => {
     if (!selectedDepartment) return;
 
@@ -342,7 +335,15 @@ const ManageDepartments = () => {
     try {
       await api.delete(`/admin/departments/${deletedId}`);
       clearDepartmentsCache();
-      toast.success(t(`បានលុបដេប៉ាតឺម៉ង់ «${deletedName}» ដោយជោគជ័យ`, `Deleted department "${deletedName}" successfully`));
+
+      pushLocalNotification({
+        titleKm: 'បានលុបដេប៉ាតឺម៉ង់',
+        titleEn: 'Department Deleted',
+        descKm: `ដេប៉ាតឺម៉ង់ «${deletedName}» ត្រូវបានលុបចេញពីប្រព័ន្ធរួចរាល់។`,
+        descEn: `Department "${deletedName}" has been removed.`,
+        category: 'department',
+        link: '/admin/departments'
+      });
     } catch (error) {
       console.error('Error deleting department:', error);
       setDepartments(previousDepartments);
@@ -351,7 +352,6 @@ const ManageDepartments = () => {
         localStorage.setItem(getDeptsCacheKey(currentAdminId), JSON.stringify(previousDepartments));
         localStorage.setItem(CACHE_KEY_SHARED_DEPTS, JSON.stringify(previousDepartments));
       } catch (e) {}
-      toast.error(error.response?.data?.message || t('មិនអាចលុបដេប៉ាតឺម៉ង់បានទេ', 'Cannot delete department'));
     }
   };
 

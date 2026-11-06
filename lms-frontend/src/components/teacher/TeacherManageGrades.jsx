@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
@@ -1127,12 +1126,6 @@ const TeacherManageGrades = () => {
 
   const handleScoreChange = (studentId, field, rawValue) => {
     if (!isCourseSelected) {
-      toast.info(
-        t(
-          'សូមជ្រើសរើសមុខវិជ្ជាជាមុនសិន ដើម្បីបញ្ចូលពិន្ទុឱ្យសិស្ស',
-          'Please select a course first to input student scores'
-        )
-      );
       return;
     }
 
@@ -1181,9 +1174,6 @@ const TeacherManageGrades = () => {
 
   const handleAutoFill = () => {
     if (!isCourseSelected) {
-      toast.warning(
-        t('សូមជ្រើសរើសមុខវិជ្ជាជាមុនសិន', 'Please select a course first')
-      );
       return;
     }
     if (filteredScores.length === 0) return;
@@ -1236,24 +1226,11 @@ const TeacherManageGrades = () => {
       } catch (e) {}
       return updatedList;
     });
-
-    toast.info(
-      t(
-        'បានគណនា និងបំពេញពិន្ទុកិច្ចការ (20%) និងសំណួរខ្លី (20%) ដោយស្វ័យប្រវត្តិ!',
-        'Auto-filled assignment (20%) and quiz (20%) scores successfully!'
-      )
-    );
   };
 
   // ✅ រក្សាទុកពិន្ទុសិស្សម្នាក់ៗ + បម្លែងត្រឡប់ទៅមាត្រដ្ឋាន 100 សម្រាប់ Backend
   const saveSingleRow = async (item) => {
     if (!isCourseSelected) {
-      toast.warning(
-        t(
-          'សូមជ្រើសរើសមុខវិជ្ជាជាមុនសិន មុននឹងរក្សាទុកពិន្ទុ',
-          'Please select a course before saving grades'
-        )
-      );
       return;
     }
 
@@ -1288,13 +1265,6 @@ const TeacherManageGrades = () => {
         );
       } catch (e) {}
 
-      toast.success(
-        t(
-          `បានរក្សាទុកពិន្ទុរបស់សិស្ស «${item.student_name}» ដោយជោគជ័យ!`,
-          `Saved grades for "${item.student_name}" successfully!`
-        )
-      );
-
       const passResultKm =
         total === null ? 'រង់ចាំពិន្ទុ' : isPassed ? 'ជាប់' : 'ធ្លាក់';
 
@@ -1308,13 +1278,6 @@ const TeacherManageGrades = () => {
       });
     } catch (err) {
       console.error(err);
-      toast.error(
-        err.response?.data?.message ||
-          t(
-            'បរាជ័យក្នុងការរក្សាទុកពិន្ទុសិស្ស',
-            'Failed to save student grade'
-          )
-      );
     } finally {
       setSavingRowId(null);
     }
@@ -1324,12 +1287,6 @@ const TeacherManageGrades = () => {
   const handleSaveAll = async (e) => {
     if (e) e.preventDefault();
     if (!isCourseSelected) {
-      toast.warning(
-        t(
-          'សូមជ្រើសរើសមុខវិជ្ជាជាមុនសិន មុននឹងរក្សាទុកពិន្ទុ',
-          'Please select a course before saving grades'
-        )
-      );
       return;
     }
     if (filteredScores.length === 0) return;
@@ -1366,13 +1323,6 @@ const TeacherManageGrades = () => {
         );
       } catch (e) {}
 
-      toast.success(
-        t(
-          `បានរក្សាទុកពិន្ទុសិស្សទាំង ${filteredScores.length} នាក់ដោយជោគជ័យ!`,
-          `Successfully saved grades for ${filteredScores.length} students!`
-        )
-      );
-
       pushLocalNotification({
         titleKm: 'បានរក្សាទុកពិន្ទុសិស្សទាំងអស់ជោគជ័យ',
         titleEn: 'All Student Grades Saved',
@@ -1383,13 +1333,6 @@ const TeacherManageGrades = () => {
       });
     } catch (err) {
       console.error(err);
-      toast.error(
-        err.response?.data?.message ||
-          t(
-            'មានបញ្ហាក្នុងការរក្សាទុកពិន្ទុសិស្សទាំងអស់',
-            'Failed to save all grades'
-          )
-      );
     } finally {
       setSavingAll(false);
     }
@@ -1461,9 +1404,6 @@ const TeacherManageGrades = () => {
 
   const handleExportExcel = () => {
     if (!filteredScores || filteredScores.length === 0) {
-      toast.warning(
-        t('គ្មានទិន្នន័យពិន្ទុសិស្សសម្រាប់នាំចេញទេ', 'No grades data to export')
-      );
       return;
     }
 
@@ -1555,13 +1495,6 @@ const TeacherManageGrades = () => {
     XLSX.writeFile(
       workbook,
       `Grades${yearSuffix}${courseSuffix}${shiftSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
-    );
-
-    toast.success(
-      t(
-        'បាននាំចេញតារាងពិន្ទុទៅជា Excel ដោយជោគជ័យ!',
-        'Grades exported to Excel successfully!'
-      )
     );
 
     const exportScopeKm = activeCourseObj
