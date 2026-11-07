@@ -25,4 +25,4 @@ RUN composer install --optimize-autoloader
 RUN chmod -R 777 storage bootstrap/cache
 
 # 8. លុប Cache ចាស់ រត់ Migration និង Seed ដោយស្វ័យប្រវត្តិ រួចបញ្ឆេះ Server
-CMD sh -c "php artisan config:clear && php artisan migrate --force && php artisan db:seed --force && php artisan serve --host=0.0.0.0 --port=${PORT:-8080}"
+CMD sh -c "php artisan config:clear ; php artisan migrate --force ; php artisan serve --host=0.0.0.0 --port=${PORT:-8080}"
