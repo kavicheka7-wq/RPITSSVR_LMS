@@ -1,4 +1,8 @@
-providers = ["php"]
+
+    providers = ["php"]
+
+[variables]
+PHP_VERSION = "8.4"
 
 [phases.build]
 cmds = [
