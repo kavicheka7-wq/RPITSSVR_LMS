@@ -17,8 +17,8 @@ WORKDIR /app
 # 5. Copy កូដចូលក្នុង Server
 COPY . /app
 
-# 6. ដំឡើង Composer Packages
-RUN composer install --no-dev --optimize-autoloader
+# 6. ដំឡើង Composer Packages (លុប --no-dev ចេញដើម្បីឱ្យស្គាល់ Faker ពេល Seed ទិន្នន័យ)
+RUN composer install --optimize-autoloader
 
 # 7. កំណត់សិទ្ធិលើថត Storage និង Cache ឱ្យដំណើរការបានពេញលេញ
 RUN chmod -R 777 storage bootstrap/cache
