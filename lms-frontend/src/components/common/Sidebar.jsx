@@ -26,7 +26,7 @@ const Sidebar = () => {
 
   // State និង Ref សម្រាប់គ្រប់គ្រងផ្ទាំងម៉ឺនុយរង (Dropdown / Popover)
   const [openPopover, setOpenPopover] = useState(() => {
-    return location.pathname.startsWith('/admin/students') ? '/admin/students' : null;
+    return location.pathname.startsWith('/students') ? '/students' : null;
   });
   const popoverRef = useRef(null);
   const spacerRef = useRef(null);
@@ -65,61 +65,61 @@ const Sidebar = () => {
 
   // បើកទុកដោយស្វ័យប្រវត្តិនៅលើកុំព្យូទ័រ ពេលកំពុងស្ថិតក្នុងទំព័រគ្រប់គ្រងសិស្ស
   useEffect(() => {
-    if (location.pathname.startsWith('/admin/students') && window.innerWidth >= 1024) {
-      setOpenPopover('/admin/students');
-    } else if (!location.pathname.startsWith('/admin/students')) {
+    if (location.pathname.startsWith('/students') && window.innerWidth >= 1024) {
+      setOpenPopover('/students');
+    } else if (!location.pathname.startsWith('/students')) {
       setOpenPopover(null);
     }
   }, [location.pathname, location.search]);
 
   // ==========================================
-  // NAVIGATION CONFIGURATION
+  // NAVIGATION CONFIGURATION (CLEAN URLS)
   // ==========================================
   const NAV_CONFIG = {
     Admin: {
       label: t('អ្នកគ្រប់គ្រង', 'Administrator'),
       items: [
-        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/admin/dashboard' },
-        { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/admin/departments' },
-        { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/admin/teachers' },
-        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/admin/courses' },
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
+        { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/departments' },
+        { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/teachers' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
         {
           name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
           icon: UserGroupIcon,
-          path: '/admin/students',
+          path: '/students',
           children: [
-            { name: t('ឆ្នាំទី១', 'Year 1'), path: '/admin/students/year-1', year: 'Year 1' },
-            { name: t('ឆ្នាំទី២', 'Year 2'), path: '/admin/students/year-2', year: 'Year 2' },
-            { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/admin/students/year-3', year: 'Year 3' },
-            { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/admin/students/year-4', year: 'Year 4' },
+            { name: t('ឆ្នាំទី១', 'Year 1'), path: '/students/year-1', year: 'Year 1' },
+            { name: t('ឆ្នាំទី២', 'Year 2'), path: '/students/year-2', year: 'Year 2' },
+            { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/students/year-3', year: 'Year 3' },
+            { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/students/year-4', year: 'Year 4' },
           ],
         },
-        { name: t('របាយការណ៍', 'Reports'), icon: ChartBarIcon, path: '/admin/reports' },
+        { name: t('របាយការណ៍', 'Reports'), icon: ChartBarIcon, path: '/reports' },
       ],
     },
     Teacher: {
       label: t('គ្រូបង្រៀន', 'Teacher'),
       items: [
-        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/teacher/dashboard' },
-        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/teacher/courses' },
-        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/teacher/lessons' },
-        { name: t('សិស្ស', 'Students'), icon: UsersIcon, path: '/teacher/students' },
-        { name: t('វត្តមានសិស្ស', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/teacher/attendance' },
-        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/teacher/grades' },
-        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/teacher/assignments' },
-        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/teacher/quizzes' },
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
+        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
+        { name: t('សិស្ស', 'Students'), icon: UsersIcon, path: '/students' },
+        { name: t('វត្តមានសិស្ស', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
+        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
+        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
+        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
       ],
     },
     Student: {
       label: t('សិស្ស', 'Student'),
       items: [
-        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/student/dashboard' },
-        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/student/courses' },
-        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/student/lessons' },
-        { name: t('វត្តមាន', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/student/attendance' },
-        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/student/grades' },
-        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/student/assignments' },
-        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/student/quizzes' },
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
+        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
+        { name: t('វត្តមាន', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
+        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
+        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
+        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
       ],
     },
   };
@@ -286,7 +286,7 @@ const Sidebar = () => {
                           {item.children.map((sub) => {
                             const isSubActive =
                               location.pathname === sub.path ||
-                              (location.pathname === '/admin/students' &&
+                              (location.pathname === '/students' &&
                                 currentYearParam === sub.year);
 
                             return (

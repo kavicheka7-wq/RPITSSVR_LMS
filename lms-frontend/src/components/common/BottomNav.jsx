@@ -13,10 +13,10 @@ import {
   FolderIcon,
 } from '@heroicons/react/24/outline';
 
-// ✅ អនុគមន៍ចាប់យកតួនាទីអ្នកប្រើប្រាស់ភ្លាមៗក្នុង 0ms (គាំទ្រទាំង Context, LocalStorage និង URL Path)
-const resolveRoleSync = (contextUser, hasRoleFn, pathname = '') => {
+// ✅ អនុគមន៍ចាប់យកតួនាទីអ្នកប្រើប្រាស់ភ្លាមៗក្នុង 0ms (គាំទ្រទាំង Context, LocalStorage និង role_id)
+const resolveRoleSync = (contextUser, hasRoleFn) => {
   let u = contextUser;
-  if (!u || (!u.role && !u.role_name)) {
+  if (!u || (!u.role && !u.role_name && !u.role_id)) {
     try {
       const raw =
         localStorage.getItem('user') || localStorage.getItem('auth_user');
@@ -35,20 +35,15 @@ const resolveRoleSync = (contextUser, hasRoleFn, pathname = '') => {
     '';
   const r = rawRole.toString().toLowerCase();
 
-  if (r.includes('admin')) return 'admin';
-  if (r.includes('teacher')) return 'teacher';
-  if (r.includes('student')) return 'student';
+  if (r.includes('admin') || u?.role_id === 1) return 'admin';
+  if (r.includes('teacher') || u?.role_id === 2) return 'teacher';
+  if (r.includes('student') || u?.role_id === 3) return 'student';
 
   if (typeof hasRoleFn === 'function') {
     if (hasRoleFn('Admin')) return 'admin';
     if (hasRoleFn('Teacher')) return 'teacher';
     if (hasRoleFn('Student')) return 'student';
   }
-
-  const p = (pathname || '').toLowerCase();
-  if (p.startsWith('/admin')) return 'admin';
-  if (p.startsWith('/teacher')) return 'teacher';
-  if (p.startsWith('/student')) return 'student';
 
   return '';
 };
@@ -60,41 +55,41 @@ const BottomNav = () => {
 
   // ✅ កំណត់តួនាទីភ្លាមៗក្នុង 0 វិនាទី
   const currentRole = useMemo(
-    () => resolveRoleSync(user, hasRole, location.pathname),
-    [user, hasRole, location.pathname]
+    () => resolveRoleSync(user, hasRole),
+    [user, hasRole]
   );
 
   const isStudent = currentRole === 'student';
 
-  // ✅ គណនាបញ្ជីម៉ឺនុយទាំង ៥ ដោយប្រើ useMemo ដើម្បីល្បឿនលឿនបំផុត
+  // ✅ គណនាបញ្ជីម៉ឺនុយទាំង ៥ ដោយប្រើ Clean URLs
   const navItems = useMemo(() => {
     if (currentRole === 'admin') {
       return [
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/admin/dashboard',
+          path: '/dashboard',
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/admin/courses',
+          path: '/courses',
         },
         {
           name: t('គ្រូ', 'Teachers'),
           icon: AcademicCapIcon,
-          path: '/admin/teachers',
+          path: '/teachers',
         },
         {
           name: t('សិស្ស', 'Students'),
           icon: UserGroupIcon,
-          path: '/admin/students/year-1',
-          matchPrefix: '/admin/students',
+          path: '/students/year-1',
+          matchPrefix: '/students',
         },
         {
           name: t('របាយការណ៍', 'Reports'),
           icon: ChartBarIcon,
-          path: '/admin/reports',
+          path: '/reports',
         },
       ];
     }
@@ -104,28 +99,28 @@ const BottomNav = () => {
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/teacher/dashboard',
+          path: '/dashboard',
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/teacher/courses',
+          path: '/courses',
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
-          path: '/teacher/lessons',
+          path: '/lessons',
         },
         {
           name: t('វត្តមាន', 'Attendance'),
           icon: ClipboardDocumentListIcon,
-          path: '/teacher/attendance',
+          path: '/attendance',
         },
         {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
-          path: '/teacher/grades',
-          matchPaths: ['/teacher/grades', '/teacher/scores'],
+          path: '/grades',
+          matchPaths: ['/grades', '/scores'],
         },
       ];
     }
@@ -135,28 +130,28 @@ const BottomNav = () => {
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/student/dashboard',
+          path: '/dashboard',
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/student/courses',
+          path: '/courses',
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
-          path: '/student/lessons',
+          path: '/lessons',
         },
         {
           name: t('វត្តមាន', 'Attendance'),
           icon: ClipboardDocumentListIcon,
-          path: '/student/attendance',
+          path: '/attendance',
         },
         {
           name: t('ពិន្ទុ', 'Scores'),
           icon: ChartBarIcon,
-          path: '/student/grades',
-          matchPaths: ['/student/grades', '/student/scores'],
+          path: '/grades',
+          matchPaths: ['/grades', '/scores'],
         },
       ];
     }

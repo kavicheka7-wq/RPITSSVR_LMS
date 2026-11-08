@@ -1,4 +1,4 @@
-// src/components/auth/Login.jsx
+// src/components/auth/Login.jsx (បន្ទាត់ទី 1 ដល់ 55)
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -39,21 +39,9 @@ const checkIsNightTime = () => {
   return hour >= 18 || hour < 6;
 };
 
-// ✅ កំណត់ផ្លូវទៅកាន់ Dashboard ផ្ទាល់តាមតួនាទី ដើម្បីកុំឱ្យខាតពេល Redirect ២ តង់តាម '/'
-const resolveTargetDashboardPath = (userObj, fallbackRoleName = '') => {
-  const rawRole =
-    userObj?.role?.role_name ||
-    userObj?.role?.name ||
-    userObj?.role_name ||
-    (typeof userObj?.role === 'string' ? userObj.role : '') ||
-    fallbackRoleName ||
-    '';
-  const r = String(rawRole).trim().toLowerCase();
-
-  if (r.includes('admin')) return '/admin/dashboard';
-  if (r.includes('teacher')) return '/teacher/dashboard';
-  if (r.includes('student')) return '/student/dashboard';
-  return '/';
+// ✅ កំណត់ផ្លូវទៅកាន់ '/dashboard' រួមតែមួយគត់ ដើម្បីលាក់តួនាទី (/admin, /teacher, /student) ពីរបារ URL
+const resolveTargetDashboardPath = () => {
+  return '/dashboard';
 };
 
 const Login = () => {

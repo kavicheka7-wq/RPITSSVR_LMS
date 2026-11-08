@@ -154,7 +154,7 @@ const Navbar = () => {
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openMobileSubMenu, setOpenMobileSubMenu] = useState(() =>
-    location.pathname.startsWith('/admin/students') ? '/admin/students' : null
+    location.pathname.startsWith('/students') ? '/students' : null
   );
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -202,8 +202,8 @@ const Navbar = () => {
   // ✅ បិទម៉ឺនុយទូរស័ព្ទដោយស្វ័យប្រវត្តិរាល់ពេលផ្លាស់ប្តូរទំព័រ
   useEffect(() => {
     setIsMobileMenuOpen(false);
-    if (location.pathname.startsWith('/admin/students')) {
-      setOpenMobileSubMenu('/admin/students');
+    if (location.pathname.startsWith('/students')) {
+      setOpenMobileSubMenu('/students');
     }
   }, [location.pathname]);
 
@@ -309,25 +309,26 @@ const Navbar = () => {
   const isStudent = useMemo(
     () =>
       (typeof hasRole === 'function' && hasRole('Student')) ||
-      String(userRoleRaw).toLowerCase().includes('student'),
-    [hasRole, userRoleRaw]
+      String(userRoleRaw).toLowerCase().includes('student') ||
+      user?.role_id === 3,
+    [hasRole, userRoleRaw, user?.role_id]
   );
 
   const getRoleName = useCallback(
     (roleName) => {
       const r = (roleName || '').toString().toLowerCase();
       if (language === 'km') {
-        if (r.includes('admin')) return 'អ្នកគ្រប់គ្រង';
-        if (r.includes('teacher')) return 'គ្រូបង្រៀន';
-        if (r.includes('student')) return 'សិស្ស';
+        if (r.includes('admin') || user?.role_id === 1) return 'អ្នកគ្រប់គ្រង';
+        if (r.includes('teacher') || user?.role_id === 2) return 'គ្រូបង្រៀន';
+        if (r.includes('student') || user?.role_id === 3) return 'សិស្ស';
         return roleName;
       }
-      if (r.includes('admin')) return 'Administrator';
-      if (r.includes('teacher')) return 'Teacher';
-      if (r.includes('student')) return 'Student';
+      if (r.includes('admin') || user?.role_id === 1) return 'Administrator';
+      if (r.includes('teacher') || user?.role_id === 2) return 'Teacher';
+      if (r.includes('student') || user?.role_id === 3) return 'Student';
       return roleName;
     },
-    [language]
+    [language, user?.role_id]
   );
 
   const resolveImageUrl = useCallback((rawPath) => {
@@ -493,13 +494,8 @@ const Navbar = () => {
     syncUserToStorage,
   ]);
 
-  const dashboardPath = useMemo(() => {
-    const role = String(userRoleRaw).toLowerCase();
-    if (role.includes('admin')) return '/admin/dashboard';
-    if (role.includes('teacher')) return '/teacher/dashboard';
-    if (role.includes('student')) return '/student/dashboard';
-    return '/';
-  }, [userRoleRaw]);
+  // ✅ ប្រើប្រាស់ផ្លូវរួមស្អាតតែមួយ '/dashboard' សម្រាប់គ្រប់តួនាទីទាំងអស់
+  const dashboardPath = '/dashboard';
 
   const userCreatedAtFormatted = useMemo(() => {
     if (user?.created_at) {
@@ -515,133 +511,134 @@ const Navbar = () => {
     return '—';
   }, [user?.created_at, language]);
 
+  // ✅ បញ្ជីម៉ឺនុយសម្រាប់ទូរស័ព្ទ (ប្រើប្រាស់ Clean URLs ដូចគ្នានឹង Sidebar)
   const navItems = useMemo(() => {
     const role = String(userRoleRaw).toLowerCase();
-    if (role.includes('admin')) {
+    if (role.includes('admin') || user?.role_id === 1) {
       return [
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/admin/dashboard',
+          path: '/dashboard',
         },
         {
           name: t('ដេប៉ាតឺម៉ង់', 'Departments'),
           icon: BuildingLibraryIcon,
-          path: '/admin/departments',
+          path: '/departments',
         },
         {
           name: t('គ្រូបង្រៀន', 'Teachers'),
           icon: AcademicCapIcon,
-          path: '/admin/teachers',
+          path: '/teachers',
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/admin/courses',
+          path: '/courses',
         },
         {
           name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
           icon: UserGroupIcon,
-          path: '/admin/students',
+          path: '/students',
           children: [
-            { name: t('ឆ្នាំទី១', 'Year 1'), path: '/admin/students/year-1' },
-            { name: t('ឆ្នាំទី២', 'Year 2'), path: '/admin/students/year-2' },
-            { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/admin/students/year-3' },
-            { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/admin/students/year-4' },
+            { name: t('ឆ្នាំទី១', 'Year 1'), path: '/students/year-1' },
+            { name: t('ឆ្នាំទី២', 'Year 2'), path: '/students/year-2' },
+            { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/students/year-3' },
+            { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/students/year-4' },
           ],
         },
         {
           name: t('របាយការណ៍', 'Reports'),
           icon: ChartBarIcon,
-          path: '/admin/reports',
+          path: '/reports',
         },
       ];
     }
-    if (role.includes('teacher')) {
+    if (role.includes('teacher') || user?.role_id === 2) {
       return [
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/teacher/dashboard',
+          path: '/dashboard',
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/teacher/courses',
+          path: '/courses',
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
-          path: '/teacher/lessons',
+          path: '/lessons',
         },
         {
           name: t('សិស្ស', 'Students'),
           icon: UsersIcon,
-          path: '/teacher/students',
+          path: '/students',
         },
         {
           name: t('វត្តមានសិស្ស', 'Attendance'),
           icon: ClipboardDocumentListIcon,
-          path: '/teacher/attendance',
+          path: '/attendance',
         },
         {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
-          path: '/teacher/grades',
+          path: '/grades',
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
           icon: DocumentArrowUpIcon,
-          path: '/teacher/assignments',
+          path: '/assignments',
         },
         {
           name: t('កម្រងសំណួរ', 'Quizzes'),
           icon: PencilSquareIcon,
-          path: '/teacher/quizzes',
+          path: '/quizzes',
         },
       ];
     }
-    if (role.includes('student')) {
+    if (role.includes('student') || user?.role_id === 3) {
       return [
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/student/dashboard',
+          path: '/dashboard',
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/student/courses',
+          path: '/courses',
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
-          path: '/student/lessons',
+          path: '/lessons',
         },
         {
           name: t('វត្តមាន', 'Attendance'),
           icon: ClipboardDocumentListIcon,
-          path: '/student/attendance',
+          path: '/attendance',
         },
         {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
-          path: '/student/grades',
+          path: '/grades',
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
           icon: DocumentArrowUpIcon,
-          path: '/student/assignments',
+          path: '/assignments',
         },
         {
           name: t('កម្រងសំណួរ', 'Quizzes'),
           icon: PencilSquareIcon,
-          path: '/student/quizzes',
+          path: '/quizzes',
         },
       ];
     }
     return [];
-  }, [userRoleRaw, t]);
+  }, [userRoleRaw, user?.role_id, t]);
 
   // ==========================================================================
   // 📌 ផ្នែកទី ៤៖ អនុគមន៍គ្រប់គ្រងការកែប្រែប្រវត្តិរូប រូបភាព និងពាក្យសម្ងាត់ (0ms Optimistic UI)
@@ -779,9 +776,9 @@ const Navbar = () => {
 
       const role = String(userRoleRaw).toLowerCase();
       let endpoint = '/user/profile/update-image';
-      if (role.includes('teacher')) {
+      if (role.includes('teacher') || user?.role_id === 2) {
         endpoint = '/teacher/profile/update-image';
-      } else if (role.includes('student')) {
+      } else if (role.includes('student') || user?.role_id === 3) {
         endpoint = '/student/profile/update-image';
       }
 
@@ -868,9 +865,9 @@ const Navbar = () => {
     try {
       const role = String(userRoleRaw).toLowerCase();
       let endpoint = '/user/profile/update';
-      if (role.includes('teacher')) {
+      if (role.includes('teacher') || user?.role_id === 2) {
         endpoint = '/teacher/profile/update';
-      } else if (role.includes('student')) {
+      } else if (role.includes('student') || user?.role_id === 3) {
         endpoint = '/student/profile/update';
       }
 

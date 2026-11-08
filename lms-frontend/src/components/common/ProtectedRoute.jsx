@@ -16,7 +16,7 @@ const readCachedUserSync = () => {
   }
 };
 
-// ✅ ស្រង់យកតួនាទីគោល ('admin' | 'teacher' | 'student') ឱ្យត្រឹមត្រូវគ្រប់ទម្រង់ API
+// ✅ ស្រង់យកតួនាទីគោល ('admin' | 'teacher' | 'student') ឱ្យត្រឹមត្រូវគ្រប់ទម្រង់ API និង role_id
 const normalizeRoleKey = (userObj) => {
   if (!userObj) return '';
   const rawRole =
@@ -27,9 +27,9 @@ const normalizeRoleKey = (userObj) => {
     '';
   const r = String(rawRole).trim().toLowerCase();
 
-  if (r.includes('admin')) return 'admin';
-  if (r.includes('teacher')) return 'teacher';
-  if (r.includes('student')) return 'student';
+  if (r.includes('admin') || userObj?.role_id === 1) return 'admin';
+  if (r.includes('teacher') || userObj?.role_id === 2) return 'teacher';
+  if (r.includes('student') || userObj?.role_id === 3) return 'student';
   return r;
 };
 
@@ -66,15 +66,13 @@ const ProtectedRoute = ({ allowedRoles }) => {
     });
 
     if (!isAllowed) {
-      // បញ្ជូនទៅកាន់ Dashboard ត្រឹមត្រូវតាមតួនាទីពិតប្រាកដ (ការពារកុំឱ្យលោតវិលជុំ Infinite Redirect Loop)
-      if (userRoleKey === 'admin') {
-        return <Navigate to="/admin/dashboard" replace />;
-      }
-      if (userRoleKey === 'teacher') {
-        return <Navigate to="/teacher/dashboard" replace />;
-      }
-      if (userRoleKey === 'student') {
-        return <Navigate to="/student/dashboard" replace />;
+      // ✅ បញ្ជូនទៅកាន់ '/dashboard' រួមតែមួយគត់ (Clean URL) ប្រសិនបើមានតួនាទីត្រឹមត្រូវ
+      if (
+        userRoleKey === 'admin' ||
+        userRoleKey === 'teacher' ||
+        userRoleKey === 'student'
+      ) {
+        return <Navigate to="/dashboard" replace />;
       }
       return <Navigate to="/login" replace />;
     }

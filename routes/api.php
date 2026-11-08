@@ -14,14 +14,14 @@ use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\TeacherStudentController;
 use App\Http\Controllers\Api\TeacherCourseController;
 use App\Http\Controllers\Api\TeacherLessonController;
-use App\Models\Role; // សូមប្រាកដថាអ្នកមាន Model នេះ
-use App\Models\Department; // សូមប្រាកដថាអ្នកមាន Model នេះ
-use App\Models\Teacher; // សូមប្រាកដថាអ្នកមាន Model នេះ
-use App\Models\Student; // សូមប្រាកដថាអ្នកមាន Model នេះ
-use App\Models\Course; // សូមប្រាកដថាអ្នកមាន Model នេះ
-use App\Models\Lesson; // សូមប្រាកដថាអ្នកមាន Model នេះ
-use App\Models\LessonFile; // សូមប្រាកដថាអ្នកមាន Model នេះ
-use App\Models\Video; // សូមប្រាកដថាអ្នកមាន Model នេះ
+use App\Models\Role;
+use App\Models\Department;
+use App\Models\Teacher;
+use App\Models\Student;
+use App\Models\Course;
+use App\Models\Lesson;
+use App\Models\LessonFile;
+use App\Models\Video;
 
 Route::get('/roles', function () {
     $roles = Role::withCount('users')->get();
@@ -45,17 +45,17 @@ Route::post('/resend-2fa', [AuthController::class, 'resendTwoFactor']);
 Route::post('/forgot-password/send-otp', [AuthController::class, 'sendPasswordResetOtp']);
 Route::post('/forgot-password/verify-otp', [AuthController::class, 'verifyPasswordResetOtp']);
 Route::post('/forgot-password/reset', [AuthController::class, 'resetPasswordWithOtp']);
-Route::post('/check-telegram-link', [\App\Http\Controllers\Api\AuthController::class, 'checkTelegramLink']);
+Route::post('/check-telegram-link', [AuthController::class, 'checkTelegramLink']);
 
-// Check file existence route (returns 200 OK with exists boolean)
+// ✅ Check file existence route (Secured against Path Traversal '../')
 Route::get('/check-file-exists', function (\Illuminate\Http\Request $request) {
     $path = $request->query('path');
-    if (!$path) {
-        return response()->json(['exists' => false, 'message' => 'Path parameter is required']);
+    if (!$path || str_contains($path, '..')) {
+        return response()->json(['exists' => false, 'message' => 'Invalid path parameter']);
     }
 
     $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', $path);
-    $cleanPath = ltrim($cleanPath, '/');
+    $cleanPath = ltrim($cleanPath, '/\\');
 
     $exists = \Illuminate\Support\Facades\Storage::disk('public')->exists($cleanPath) ||
               file_exists(storage_path('app/public/' . $cleanPath)) ||
@@ -64,15 +64,15 @@ Route::get('/check-file-exists', function (\Illuminate\Http\Request $request) {
     return response()->json(['exists' => (bool)$exists]);
 });
 
-// Download file route (Forces Content-Disposition: attachment)
+// ✅ Download file route (Secured against Path Traversal '../')
 Route::get('/download-file', function (\Illuminate\Http\Request $request) {
     $path = $request->query('path');
-    if (!$path) {
-        return response()->json(['message' => 'Path parameter is required'], 400);
+    if (!$path || str_contains($path, '..')) {
+        return response()->json(['message' => 'Invalid path parameter'], 400);
     }
 
     $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', $path);
-    $cleanPath = ltrim($cleanPath, '/');
+    $cleanPath = ltrim($cleanPath, '/\\');
 
     $fullPath = null;
     if (\Illuminate\Support\Facades\Storage::disk('public')->exists($cleanPath)) {
@@ -98,9 +98,10 @@ Route::get('/download-file', function (\Illuminate\Http\Request $request) {
     }
 
     $filename = basename($fullPath);
+    $origin = $request->headers->get('Origin') ?: '*';
 
     return response()->download($fullPath, $filename, [
-        'Access-Control-Allow-Origin' => '*',
+        'Access-Control-Allow-Origin' => $origin,
         'Access-Control-Expose-Headers' => 'Content-Disposition',
     ]);
 });
@@ -109,18 +110,12 @@ Route::get('/download-file', function (\Illuminate\Http\Request $request) {
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'user']);
-    // Route សម្រាប់ទទួលការ Upload រូបភាពរបស់ User ទូទៅ (និង Admin)
     Route::post('/user/profile/update-image', [ProfileController::class, 'updateImage']);
-    // នេះជា Route ថ្មីសម្រាប់ Update ព័ត៌មាន (ឈ្មោះ, អ៊ីមែល, លេខទូរស័ព្ទ)
     Route::put('/user/profile/update', [ProfileController::class, 'update']);
-    // Route សម្រាប់ Teacher
     Route::post('/teacher/profile/update-image', [ProfileController::class, 'updateTeacherImage']);
     Route::put('/teacher/profile/update', [ProfileController::class, 'updateTeacher']);
-    // Route សម្រាប់ Student
     Route::post('/student/profile/update-image', [ProfileController::class, 'updateStudentImage']);
     Route::put('/student/profile/update', [ProfileController::class, 'updateStudent']);
-
-    // បន្ថែម Route ថ្មីនេះសម្រាប់ដូរ Password
     Route::put('/user/update-password', [ProfileController::class, 'updatePassword']);
 
     // Admin routes
@@ -130,7 +125,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/users', [AdminController::class, 'createUser']);
         Route::put('/users/{id}', [AdminController::class, 'updateUser']);
         Route::delete('/users/{id}', [AdminController::class, 'deleteUser']);
-        
 
         // Course management
         Route::get('/courses', [CourseController::class, 'index']);
@@ -145,7 +139,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('teachers/', [AdminTeacherController::class, 'store']);
         Route::put('teachers/{teacher}', [AdminTeacherController::class, 'update']);
         Route::delete('teachers/{teacher}', [AdminTeacherController::class, 'destroy']);
-        
 
         // Student management
         Route::get('/students/export-all', [AdminStudentController::class, 'exportAll']);
@@ -157,9 +150,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/students/{student}/enrollments', [AdminStudentController::class, 'getEnrollments']);
         Route::post('/students/{student}/enrollments', [AdminStudentController::class, 'enrollStudent']);
         Route::delete('/students/{student}/enrollments/{courseId}', [AdminStudentController::class, 'unenrollStudent']);
-        // Route សម្រាប់ឡើងថ្នាក់សិស្ស (Promote Students)
         Route::post('/students/promote', [AdminStudentController::class, 'promoteStudents']);
-  
+
         // Department management
         Route::get('/departments', [DepartmentController::class, 'index']);
         Route::post('/departments', [DepartmentController::class, 'store']);
@@ -182,13 +174,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('teacher')->middleware('role:Teacher')->group(function () {
         // Dashboard
         Route::get('/dashboard', [TeacherController::class, 'dashboard']);
-        
+
         // Courses
         Route::get('/courses', [TeacherCourseController::class, 'index']);
         Route::get('/courses/stats', [TeacherCourseController::class, 'getStats']);
         Route::get('/courses/search', [TeacherCourseController::class, 'search']);
         Route::get('/courses/{courseId}', [TeacherCourseController::class, 'show']);
-        
+
         // Students
         Route::get('/students', [TeacherStudentController::class, 'index']);
         Route::get('/students/count', [TeacherStudentController::class, 'getCount']);
@@ -201,12 +193,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/attendance/{courseId}', [TeacherController::class, 'getAttendance']);
         Route::post('/attendance', [TeacherController::class, 'markAttendance']);
         Route::post('/attendance/bulk', [TeacherController::class, 'bulkMarkAttendance']);
-        
+
         // Scores
         Route::get('/courses/{courseId}/scores', [TeacherController::class, 'getScores']);
         Route::post('/scores', [TeacherController::class, 'storeGrade']);
         Route::put('/scores', [TeacherController::class, 'updateScores']);
-        
+
         // Lessons
         Route::get('/lessons', [TeacherLessonController::class, 'index']);
         Route::post('/lessons', [TeacherLessonController::class, 'store']);
@@ -214,18 +206,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/lessons/{lesson}', [TeacherLessonController::class, 'update']);
         Route::delete('/lessons/{lesson}', [TeacherLessonController::class, 'destroy']);
         Route::post('/lessons/reorder', [TeacherLessonController::class, 'reorder']);
-        
+
         // Lesson Files
         Route::post('/lessons/file', [TeacherLessonController::class, 'uploadFile']);
         Route::delete('/lessons/files/{fileId}', [TeacherLessonController::class, 'deleteFile']);
-        
+
         // Lesson Videos
         Route::post('/lessons/video', [TeacherLessonController::class, 'uploadVideo']);
         Route::delete('/lessons/videos/{videoId}', [TeacherLessonController::class, 'deleteVideo']);
-        
+
         // Get lessons by course
         Route::get('/courses/{courseId}/lessons', [TeacherLessonController::class, 'getLessonsByCourse']);
-        
+
         // Assignments
         Route::get('/assignments', [TeacherController::class, 'getTeacherAssignments']);
         Route::get('/courses/{courseId}/assignments', [TeacherController::class, 'getAssignments']);
@@ -234,7 +226,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/assignments/{id}', [TeacherController::class, 'deleteAssignment']);
         Route::get('/assignments/{assignmentId}/submissions', [TeacherController::class, 'getAssignmentSubmissions']);
         Route::put('/submissions/{submissionId}/grade', [TeacherController::class, 'gradeSubmission']);
-        
+
         // Quizzes
         Route::get('/quizzes', [TeacherController::class, 'getTeacherQuizzes']);
         Route::get('/courses/{courseId}/quizzes', [TeacherController::class, 'getQuizzes']);
@@ -257,30 +249,30 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('student')->middleware('role:Student')->group(function () {
         // Dashboard
         Route::get('/dashboard', [StudentController::class, 'dashboard']);
-        
+
         // Courses & Lessons
         Route::get('/courses', [StudentController::class, 'getMyCourses']);
         Route::get('/courses/{courseId}', [StudentController::class, 'getCourseDetails']);
         Route::get('/courses/{courseId}/lessons', [StudentController::class, 'getCourseLessons']);
         Route::get('/lessons', [StudentController::class, 'getAllLessons']);
         Route::get('/lessons/read-file', [StudentController::class, 'readLessonFile']);
-        
+
         // Attendance
         Route::get('/attendance', [StudentController::class, 'getAttendance']);
         Route::get('/courses/{courseId}/attendance', [StudentController::class, 'getCourseAttendance']);
-        
+
         // Scores
         Route::get('/scores', [StudentController::class, 'getScores']);
         Route::get('/courses/{courseId}/scores', [StudentController::class, 'getCourseScores']);
-        
+
         // Assignments
         Route::get('/assignments', [StudentController::class, 'getAllAssignments']);
         Route::post('/assignments/submit', [StudentController::class, 'uploadAssignment']);
-        
+
         // Homework/File upload
         Route::post('/homework', [StudentController::class, 'uploadHomework']);
         Route::post('/videos', [StudentController::class, 'uploadVideo']);
-        
+
         // Quizzes
         Route::get('/quizzes', [StudentController::class, 'getAllQuizzes']);
         Route::get('/quizzes/{quizId}', [StudentController::class, 'getQuiz']);

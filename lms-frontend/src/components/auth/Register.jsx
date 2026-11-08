@@ -35,21 +35,9 @@ const checkIsNightTime = () => {
   return hour >= 18 || hour < 6;
 };
 
-// ✅ កំណត់ផ្លូវទៅកាន់ Dashboard ផ្ទាល់តាមតួនាទី
-const resolveTargetDashboardPath = (userObj, fallbackRoleName = 'Admin') => {
-  const rawRole =
-    userObj?.role?.role_name ||
-    userObj?.role?.name ||
-    userObj?.role_name ||
-    (typeof userObj?.role === 'string' ? userObj.role : '') ||
-    fallbackRoleName ||
-    '';
-  const r = String(rawRole).trim().toLowerCase();
-
-  if (r.includes('admin')) return '/admin/dashboard';
-  if (r.includes('teacher')) return '/teacher/dashboard';
-  if (r.includes('student')) return '/student/dashboard';
-  return '/admin/dashboard';
+// ✅ កំណត់ផ្លូវទៅកាន់ '/dashboard' រួមតែមួយគត់ សម្រាប់គ្រប់តួនាទី
+const resolveTargetDashboardPath = () => {
+  return '/dashboard';
 };
 
 const EMPTY_FIELD_ERRORS = Object.freeze({
@@ -344,7 +332,6 @@ const Register = () => {
         lower.includes('មានរួចហើយ');
 
       if (isEmailRelated) {
-        // ករណីខុស Email៖ រក្សា Email ទុកឱ្យកែ ហើយ Auto-Focus ចូលប្រអប់ Email
         setFieldErrors({
           ...EMPTY_FIELD_ERRORS,
           email: msg,
@@ -353,7 +340,6 @@ const Register = () => {
           emailInputRef.current?.focus();
         });
       } else {
-        // ករណីខុស Password៖ លុប Password ចោលស្វ័យប្រវត្តិ ហើយ Auto-Focus ចូលប្រអប់ Password
         setFieldErrors({
           ...EMPTY_FIELD_ERRORS,
           password: msg,
@@ -438,7 +424,8 @@ const Register = () => {
             'Initial Administrator account created successfully!'
           )
         );
-        navigate('/admin/dashboard', { replace: true });
+        // ✅ បញ្ជូនទៅកាន់ '/dashboard' ផ្ទាល់
+        navigate('/dashboard', { replace: true });
       } else {
         applyRegistrationValidationError(result);
       }
