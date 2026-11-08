@@ -264,15 +264,8 @@ const Login = () => {
     focusFirstOtpInput,
   ]);
 
-  // ✅ ត្រួតពិនិត្យមើលក្នុង LocalStorage ជាមុន (0ms) បើមិនទាន់មានទើបហៅ API `/roles`
+  // ✅ ត្រួតពិនិត្យផ្ទាល់ពី Server ជានិច្ច (មិនជាប់សោចាស់ក្នុង Browser)៖ បើមិនទាន់មានគណនី Admin ទេ ឱ្យលោតប៊ូតុង Register ភ្លាមៗ
   useEffect(() => {
-    try {
-      if (localStorage.getItem(ADMIN_SETUP_STORAGE_KEY) === 'true') {
-        setCanShowRegister(false);
-        return;
-      }
-    } catch {}
-
     let isMounted = true;
     const checkAdminStatus = async () => {
       try {
@@ -349,10 +342,11 @@ const Login = () => {
           return;
         }
 
+        // បើ API /roles មិនបានបញ្ជូនចំនួន users_count មកជាមួយទេ អនុញ្ញាតឱ្យបង្ហាញប៊ូតុង Register ដើម្បីកុំឱ្យជាប់គាំងពេលដាក់ Server ថ្មី
         try {
-          localStorage.setItem(ADMIN_SETUP_STORAGE_KEY, 'true');
+          localStorage.removeItem(ADMIN_SETUP_STORAGE_KEY);
         } catch {}
-        setCanShowRegister(false);
+        setCanShowRegister(true);
       } catch {
         if (isMounted) setCanShowRegister(false);
       }
