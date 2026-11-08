@@ -1,4 +1,4 @@
-// src/components/auth/Login.jsx (បន្ទាត់ទី 1 ដល់ 55)
+// src/components/auth/Login.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -39,9 +39,23 @@ const checkIsNightTime = () => {
   return hour >= 18 || hour < 6;
 };
 
-// ✅ កំណត់ផ្លូវទៅកាន់ '/dashboard' រួមតែមួយគត់ ដើម្បីលាក់តួនាទី (/admin, /teacher, /student) ពីរបារ URL
-const resolveTargetDashboardPath = () => {
-  return '/dashboard';
+// ✅ កំណត់ផ្លូវទៅកាន់ Dashboard ឱ្យត្រូវតាមតួនាទី (Admin, Teacher, Student)
+const resolveTargetDashboardPath = (userObj, fallbackRole = '') => {
+  const rawRole = (
+    userObj?.role?.role_name ||
+    userObj?.role?.name ||
+    userObj?.role_name ||
+    (typeof userObj?.role === 'string' ? userObj.role : '') ||
+    fallbackRole ||
+    ''
+  )
+    .toString()
+    .toLowerCase();
+
+  if (rawRole.includes('admin')) return '/admin/dashboard';
+  if (rawRole.includes('teacher')) return '/teacher/dashboard';
+  if (rawRole.includes('student')) return '/student/dashboard';
+  return '/';
 };
 
 const Login = () => {
@@ -79,7 +93,6 @@ const Login = () => {
   const [step, setStep] = useState('credentials');
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [detectedRoleName, setDetectedRoleName] = useState('');
-  const [devOtpCode, setDevOtpCode] = useState(null);
   const [telegramLinked, setTelegramLinked] = useState(false);
   const [telegramSent, setTelegramSent] = useState(false);
   const [telegramLinkUrl, setTelegramLinkUrl] = useState(null);
@@ -204,7 +217,7 @@ const Login = () => {
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
-  // ✅ ពិនិត្យស្វ័យប្រវត្តិរៀងរាល់ ៣ វិនាទីម្ដង នៅពេលអ្នកប្រើ ឬកូនក្រុមចុចប៊ូតុងភ្ជាប់/ប្ដូរ Telegram
+  // ✅ ពិនិត្យស្វ័យប្រវត្តិរៀងរាល់ ៣ វិនាទីម្ដង នៅពេលអ្នកប្រើចុចប៊ូតុងភ្ជាប់/ប្ដូរ Telegram
   useEffect(() => {
     if (
       (step !== 'otp' && step !== 'forgot_otp') ||
@@ -226,7 +239,6 @@ const Login = () => {
           if (status?.telegram_link_url) {
             setTelegramLinkUrl(status.telegram_link_url);
           }
-          setDevOtpCode(null);
           setOtpError('');
           setOtpDigits(['', '', '', '', '', '']);
           lastSubmittedSignatureRef.current = '';
@@ -445,7 +457,6 @@ const Login = () => {
           setTelegramSent(Boolean(result.telegram_sent));
           setTelegramLinkUrl(result.telegram_link_url || null);
           setWaitingTelegramStart(false);
-          setDevOtpCode(result.dev_otp ? String(result.dev_otp) : null);
           setResendCooldown(60);
           focusFirstOtpInput();
           return;
@@ -502,9 +513,6 @@ const Login = () => {
           setOtpError(String(errMsg));
           setOtpDigits(['', '', '', '', '', '']);
           lastSubmittedSignatureRef.current = '';
-          if (result.otp_expired) {
-            setDevOtpCode(null);
-          }
           focusFirstOtpInput();
         }
       } catch (err) {
@@ -569,7 +577,6 @@ const Login = () => {
       setTelegramSent(Boolean(data.telegram_sent));
       setTelegramLinkUrl(data.telegram_link_url || null);
       setWaitingTelegramStart(false);
-      setDevOtpCode(data.dev_otp ? String(data.dev_otp) : null);
       setOtpDigits(['', '', '', '', '', '']);
       lastSubmittedSignatureRef.current = '';
       setResendCooldown(60);
@@ -623,9 +630,6 @@ const Login = () => {
         setOtpError(String(errMsg));
         setOtpDigits(['', '', '', '', '', '']);
         lastSubmittedSignatureRef.current = '';
-        if (errData.otp_expired) {
-          setDevOtpCode(null);
-        }
         focusFirstOtpInput();
       } finally {
         setLoading(false);
@@ -808,7 +812,6 @@ const Login = () => {
         if (data.telegram_link_url) {
           setTelegramLinkUrl(data.telegram_link_url);
         }
-        setDevOtpCode(data.dev_otp ? String(data.dev_otp) : null);
         setResendCooldown(60);
         focusFirstOtpInput();
       } else {
@@ -820,11 +823,6 @@ const Login = () => {
           setTelegramSent(Boolean(result.telegram_sent));
           if (result.telegram_link_url) {
             setTelegramLinkUrl(result.telegram_link_url);
-          }
-          if (result.dev_otp) {
-            setDevOtpCode(String(result.dev_otp));
-          } else {
-            setDevOtpCode(null);
           }
           setResendCooldown(60);
           focusFirstOtpInput();
@@ -1877,81 +1875,44 @@ const Login = () => {
                   )}
                 </div>
 
-                {/* ✅ បង្ហាញប៊ូតុងភ្ជាប់ ឬប្ដូរ Telegram ថ្មីជានិច្ច ដើម្បីឱ្យកូនក្រុមអាចចុចភ្ជាប់ Telegram ផ្ទាល់ខ្លួនរបស់គាត់បានគ្រប់ពេល */}
-                {(telegramLinkUrl || (devOtpCode && !telegramSent)) && (
+                {/* ✅ បង្ហាញប៊ូតុងភ្ជាប់ ឬប្ដូរ Telegram ថ្មីជានិច្ច ដើម្បីឱ្យអ្នកប្រើអាចចុចភ្ជាប់ Telegram ផ្ទាល់ខ្លួនរបស់គាត់បានគ្រប់ពេល */}
+                {telegramLinkUrl && (
                   <div className="space-y-2.5">
-                    {telegramLinkUrl && (
-                      <a
-                        href={telegramLinkUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => setWaitingTelegramStart(true)}
-                        className={`flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-extrabold transition-colors cursor-pointer ${
-                          !telegramLinked
-                            ? 'text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm'
-                            : isDarkMode
-                            ? 'bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/30 text-sky-300'
-                            : 'bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700'
-                        }`}
-                      >
-                        {waitingTelegramStart ? (
-                          <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0 stroke-[2.2]" />
-                        ) : (
-                          <PaperAirplaneIcon className="h-4 w-4 -rotate-45 shrink-0 stroke-[2.2]" />
-                        )}
-                        <span>
-                          {waitingTelegramStart
-                            ? t(
-                                'សូមចុច Start ក្នុង Telegram...',
-                                'Press Start in Telegram...'
-                              )
-                            : telegramLinked
-                            ? t(
-                                'មិនទទួលបានកូដ? ចុចភ្ជាប់ ឬប្ដូរ Telegram ថ្មី',
-                                'Not receiving code? Re-link / Switch Telegram'
-                              )
-                            : t(
-                                'ទទួលលេខកូដតាម Telegram',
-                                'Get Code via Telegram'
-                              )}
-                        </span>
-                      </a>
-                    )}
-
-                    {devOtpCode && !telegramSent && (
-                      <div className="flex justify-center">
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={() => {
-                            setOtpError('');
-                            const chars = devOtpCode.slice(0, 6).split('');
-                            lastSubmittedSignatureRef.current = '';
-                            setOtpDigits([
-                              chars[0] || '',
-                              chars[1] || '',
-                              chars[2] || '',
-                              chars[3] || '',
-                              chars[4] || '',
-                              chars[5] || '',
-                            ]);
-                          }}
-                          className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-extrabold border transition-colors cursor-pointer disabled:opacity-50 ${
-                            isDarkMode
-                              ? 'bg-amber-500/15 border-amber-400/35 text-amber-300 hover:bg-amber-500/25'
-                              : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'
-                          }`}
-                        >
-                          <span>🔑 {t('លេខកូដ៖', 'Code:')}</span>
-                          <span className="text-sm font-black tracking-widest underline">
-                            {devOtpCode}
-                          </span>
-                          <span className="text-[10px] opacity-80">
-                            ({t('ចុចបំពេញ', 'Auto-fill')})
-                          </span>
-                        </button>
-                      </div>
-                    )}
+                    <a
+                      href={telegramLinkUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setWaitingTelegramStart(true)}
+                      className={`flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-extrabold transition-colors cursor-pointer ${
+                        !telegramLinked
+                          ? 'text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm'
+                          : isDarkMode
+                          ? 'bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/30 text-sky-300'
+                          : 'bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700'
+                      }`}
+                    >
+                      {waitingTelegramStart ? (
+                        <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0 stroke-[2.2]" />
+                      ) : (
+                        <PaperAirplaneIcon className="h-4 w-4 -rotate-45 shrink-0 stroke-[2.2]" />
+                      )}
+                      <span>
+                        {waitingTelegramStart
+                          ? t(
+                              'សូមចុច Start ក្នុង Telegram...',
+                              'Press Start in Telegram...'
+                            )
+                          : telegramLinked
+                          ? t(
+                              'មិនទទួលបានកូដ? ចុចភ្ជាប់ ឬប្ដូរ Telegram ថ្មី',
+                              'Not receiving code? Re-link / Switch Telegram'
+                            )
+                          : t(
+                              'ទទួលលេខកូដតាម Telegram',
+                              'Get Code via Telegram'
+                            )}
+                      </span>
+                    </a>
                   </div>
                 )}
 
@@ -1995,7 +1956,6 @@ const Login = () => {
                       );
                       setOtpDigits(['', '', '', '', '', '']);
                       setOtpError('');
-                      setDevOtpCode(null);
                       setWaitingTelegramStart(false);
                       lastSubmittedSignatureRef.current = '';
                     }}
