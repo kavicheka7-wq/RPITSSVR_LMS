@@ -236,7 +236,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ទៅកាន់ទាំង Email (ទម្រង់ផ្លូវការរបស់សាលា) និង Telegram របស់អ្នកប្រើប្រាស់ផ្ទាល់
+     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ទៅកាន់ទាំង Email (គាំទ្រ Brevo API, Google Script HTTPS Port 443 និង SMTP) និង Telegram
      */
     private function generateAndSendOtp(User $user, Request $request, string $purpose = '2fa'): array
     {
@@ -376,55 +376,120 @@ class AuthController extends Controller
         </html>
         ";
 
-        // ✅ កំណត់ Gmail SMTP ដោយផ្ទាល់ជាមួយ App Password ថ្មីដែលដំណើរការជោគជ័យ និងបិទ verify_peer
+        // ✅ ទាញយកការកំណត់អ៊ីមែលអ្នកផ្ញើ និង API Keys សម្រាប់ផ្ញើចេញតាម Port 443 លើ Railway
         $smtpUsername = trim((string) env('MAIL_USERNAME', 'kavicheka7@gmail.com'));
-        $smtpPassword = str_replace(' ', '', trim((string) env('MAIL_PASSWORD', 'pejzqdoohrqqbxbn')));
+        $smtpPassword = str_replace(' ', '', trim((string) env('MAIL_PASSWORD', 'cdezkfuqvznodtsp')));
         $smtpFromAddress = trim((string) env('MAIL_FROM_ADDRESS', $smtpUsername));
-        $smtpFromName = trim((string) env('MAIL_FROM_NAME', 'RPITSSVR LMS Official'));
+        $smtpFromName = trim((string) env('MAIL_FROM_NAME', 'RPITSSVR LMS'));
 
-        config([
-            'mail.default' => 'smtp',
-            'mail.mailers.smtp' => [
-                'transport' => 'smtp',
-                'host' => env('MAIL_HOST', 'smtp.gmail.com'),
-                'port' => (int) env('MAIL_PORT', 587),
-                'encryption' => env('MAIL_ENCRYPTION', 'tls'),
-                'username' => $smtpUsername,
-                'password' => $smtpPassword,
-                'timeout' => 15,
-                'stream' => [
-                    'ssl' => [
-                        'allow_self_signed' => true,
-                        'verify_peer' => false,
-                        'verify_peer_name' => false,
+        $googleScriptUrl = trim((string) env('GOOGLE_SCRIPT_MAIL_URL', ''));
+        $brevoApiKey = trim((string) env('BREVO_API_KEY', ''));
+
+        // ✅ ២.១. ផ្ញើតាមរយៈ Google Apps Script HTTPS (Port 443 - ប្រើ Gmail ផ្ទាល់ មិនជាប់ Block លើ Railway)
+        if (!$mailSent && !empty($googleScriptUrl)) {
+            try {
+                $res = Http::timeout(10)
+                    ->withOptions(['allow_redirects' => true])
+                    ->post($googleScriptUrl, [
+                        'to' => trim($user->email),
+                        'subject' => $subjectTitle,
+                        'html' => $htmlContent,
+                        'from_name' => $smtpFromName,
+                    ]);
+
+                if ($res->successful()) {
+                    $mailSent = true;
+                } else {
+                    $mailErrorMsg = 'Google Script HTTP ' . $res->status();
+                }
+            } catch (\Exception $e) {
+                $mailErrorMsg = $e->getMessage();
+                Log::warning('Google Script Mail Error: ' . $mailErrorMsg);
+            }
+        }
+
+        // ✅ ២.២. ឬផ្ញើតាមរយៈ Brevo HTTP API (Port 443 - មិនជាប់ Block លើ Railway)
+        if (!$mailSent && !empty($brevoApiKey)) {
+            try {
+                $recipientName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: 'User';
+                $res = Http::timeout(10)->withHeaders([
+                    'api-key' => $brevoApiKey,
+                    'accept' => 'application/json',
+                    'content-type' => 'application/json',
+                ])->post('https://api.brevo.com/v3/smtp/email', [
+                    'sender' => [
+                        'name' => $smtpFromName,
+                        'email' => $smtpFromAddress,
+                    ],
+                    'to' => [
+                        [
+                            'email' => trim($user->email),
+                            'name' => $recipientName,
+                        ],
+                    ],
+                    'subject' => $subjectTitle,
+                    'htmlContent' => $htmlContent,
+                ]);
+
+                if ($res->successful()) {
+                    $mailSent = true;
+                } else {
+                    $mailErrorMsg = 'Brevo API (' . $res->status() . '): ' . $res->body();
+                    Log::error('Brevo API Send Error for ' . $user->email . ': ' . $mailErrorMsg);
+                }
+            } catch (\Exception $e) {
+                $mailErrorMsg = $e->getMessage();
+                Log::warning('Brevo HTTP API Exception: ' . $mailErrorMsg);
+            }
+        }
+
+        // ✅ ២.៣. ប្រសិនបើនៅលើ Localhost ឬ Server ដែលបើក Port 587 ឱ្យប្រើ Gmail SMTP ធម្មតា
+        if (!$mailSent && empty($brevoApiKey) && empty($googleScriptUrl)) {
+            config([
+                'mail.default' => 'smtp',
+                'mail.mailers.smtp' => [
+                    'transport' => 'smtp',
+                    'host' => env('MAIL_HOST', 'smtp.gmail.com'),
+                    'port' => (int) env('MAIL_PORT', 587),
+                    'encryption' => env('MAIL_ENCRYPTION', 'tls'),
+                    'username' => $smtpUsername,
+                    'password' => $smtpPassword,
+                    'timeout' => 5,
+                    'stream' => [
+                        'ssl' => [
+                            'allow_self_signed' => true,
+                            'verify_peer' => false,
+                            'verify_peer_name' => false,
+                        ],
                     ],
                 ],
-            ],
-            'mail.from.address' => $smtpFromAddress,
-            'mail.from.name' => $smtpFromName,
-        ]);
+                'mail.from.address' => $smtpFromAddress,
+                'mail.from.name' => $smtpFromName,
+            ]);
 
-        try {
-            app('mail.manager')->forgetMailers();
-            Mail::mailer('smtp')->html($htmlContent, function ($message) use ($user, $subjectTitle, $smtpFromAddress, $smtpFromName) {
-                $message->from($smtpFromAddress, $smtpFromName)
-                        ->to(trim($user->email))
-                        ->subject($subjectTitle);
-            });
-            $mailSent = true;
+            try {
+                app('mail.manager')->forgetMailers();
+                Mail::mailer('smtp')->html($htmlContent, function ($message) use ($user, $subjectTitle, $smtpFromAddress, $smtpFromName) {
+                    $message->from($smtpFromAddress, $smtpFromName)
+                            ->to(trim($user->email))
+                            ->subject($subjectTitle);
+                });
+                $mailSent = true;
+            } catch (\Exception $e) {
+                $mailErrorMsg = $e->getMessage();
+                Log::error('OTP Email Send Error for ' . $user->email . ': ' . $mailErrorMsg);
+                $mailSent = false;
+            }
+        }
+
+        if ($mailSent) {
             $deliveryChannel = $telegramSent ? 'both' : 'email';
-        } catch (\Exception $e) {
-            $mailErrorMsg = $e->getMessage();
-            Log::error('OTP Email Send Error for ' . $user->email . ': ' . $mailErrorMsg);
-            $mailSent = false;
         }
 
         Log::info("6-Digit OTP ({$purpose}) for [{$user->email}] ({$rawRole}) via [{$deliveryChannel}]: {$otp}");
 
-        $shouldExposeDevOtp = !$telegramSent && !$mailSent;
-
         return [
-            'otp' => $shouldExposeDevOtp ? $otp : null,
+            'otp' => null,
             'mail_sent' => $mailSent,
             'mail_error' => $mailErrorMsg,
             'telegram_sent' => $telegramSent,
@@ -654,7 +719,7 @@ class AuthController extends Controller
             'telegram_linked' => $otpResult['telegram_linked'],
             'telegram_link_url' => $otpResult['telegram_link_url'],
             'delivery_channel' => $otpResult['delivery_channel'],
-            'dev_otp' => $otpResult['otp'],
+            'dev_otp' => null,
             'message' => $statusMessage,
         ]);
     }
@@ -808,7 +873,7 @@ class AuthController extends Controller
             'telegram_linked' => $otpResult['telegram_linked'],
             'telegram_link_url' => $otpResult['telegram_link_url'],
             'delivery_channel' => $otpResult['delivery_channel'],
-            'dev_otp' => $otpResult['otp'],
+            'dev_otp' => null,
             'message' => $resendMsg,
         ]);
     }
@@ -876,7 +941,7 @@ class AuthController extends Controller
             'telegram_sent' => $otpResult['telegram_sent'],
             'telegram_linked' => $otpResult['telegram_linked'],
             'telegram_link_url' => $otpResult['telegram_link_url'],
-            'dev_otp' => $otpResult['otp'],
+            'dev_otp' => null,
             'message' => $msg,
         ]);
     }
