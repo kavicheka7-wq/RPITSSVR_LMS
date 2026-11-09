@@ -305,12 +305,25 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ✅ កែលម្អ hasRole ឱ្យស្គាល់ទាំងឈ្មោះ Role និងលេខ role_id (1=Admin, 2=Teacher, 3=Student)
   const hasRole = (roleName) => {
-    if (!user) return false;
-    const userRole = user?.role?.role_name || user?.role_name || user?.role;
-    if (typeof userRole === 'string') {
-      return userRole.toLowerCase() === roleName.toLowerCase();
+    if (!user || !roleName) return false;
+    const target = String(roleName).trim().toLowerCase();
+    const userRole =
+      user?.role?.role_name ||
+      user?.role?.name ||
+      user?.role_name ||
+      (typeof user?.role === 'string' ? user.role : '');
+
+    if (userRole && String(userRole).trim().toLowerCase() === target) {
+      return true;
     }
+
+    const rid = Number(user?.role_id);
+    if (target === 'admin' && rid === 1) return true;
+    if (target === 'teacher' && rid === 2) return true;
+    if (target === 'student' && rid === 3) return true;
+
     return false;
   };
 

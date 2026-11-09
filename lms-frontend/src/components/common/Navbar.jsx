@@ -52,7 +52,8 @@ import logo from '../../assets/image/PRIT.png';
 import NotificationBell from './NotificationBell';
 
 const EMPTY_USER_OBJ = Object.freeze({});
-const getTelegramLinkCacheKey = (email) => `lms_tg_link_url_${email || 'default'}`;
+const getTelegramLinkCacheKey = (email) =>
+  `lms_tg_link_url_${email || 'default'}`;
 
 const readCachedUserSync = () => {
   try {
@@ -61,6 +62,15 @@ const readCachedUserSync = () => {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return parsed?.user || parsed?.data || parsed;
+  } catch {
+    return null;
+  }
+};
+
+const readCachedTeacherSync = () => {
+  try {
+    const raw = localStorage.getItem('teacher');
+    return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
@@ -82,6 +92,10 @@ const pushLocalNotification = (notif) => {
             ? u.role
             : u.role.role_name || u.role.name || 'admin';
         role = rName.toString().toLowerCase();
+      } else if (Number(u?.role_id) === 2) {
+        role = 'teacher';
+      } else if (Number(u?.role_id) === 3) {
+        role = 'student';
       }
     }
 
@@ -112,6 +126,7 @@ const pushLocalNotification = (notif) => {
 const Navbar = () => {
   const {
     user: contextUser,
+    teacher: contextTeacher,
     logout,
     setUser,
     hasRole,
@@ -124,6 +139,11 @@ const Navbar = () => {
   const user = useMemo(
     () => contextUser || readCachedUserSync() || EMPTY_USER_OBJ,
     [contextUser]
+  );
+
+  const teacherData = useMemo(
+    () => contextTeacher || readCachedTeacherSync() || user?.teacher || null,
+    [contextTeacher, user?.teacher]
   );
 
   const [isMobileViewport, setIsMobileViewport] = useState(() =>
@@ -146,7 +166,10 @@ const Navbar = () => {
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openMobileSubMenu, setOpenMobileSubMenu] = useState(() =>
-    location.pathname.startsWith('/admin/students') ? '/admin/students' : null
+    location.pathname.startsWith('/students') ||
+    location.pathname.startsWith('/admin/students')
+      ? '/students'
+      : null
   );
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -158,7 +181,15 @@ const Navbar = () => {
   const [instantAvatarPreview, setInstantAvatarPreview] = useState(null);
   const [passwordFormError, setPasswordFormError] = useState('');
 
-  const userEmail = useMemo(() => user?.email || '', [user?.email]);
+  const userEmail = useMemo(
+    () =>
+      user?.email ||
+      teacherData?.email ||
+      user?.teacher_email ||
+      user?.student?.email ||
+      '',
+    [user, teacherData]
+  );
 
   const [isTelegramLinked, setIsTelegramLinked] = useState(() =>
     Boolean(user?.telegram_linked || user?.telegram_chat_id)
@@ -192,8 +223,11 @@ const Navbar = () => {
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
-    if (location.pathname.startsWith('/admin/students')) {
-      setOpenMobileSubMenu('/admin/students');
+    if (
+      location.pathname.startsWith('/students') ||
+      location.pathname.startsWith('/admin/students')
+    ) {
+      setOpenMobileSubMenu('/students');
     }
   }, [location.pathname]);
 
@@ -201,15 +235,15 @@ const Navbar = () => {
     setAvatarError(false);
   }, [
     user?.profile_image,
-    user?.teacher?.profile_image,
+    teacherData?.profile_image,
     user?.student?.profile_image,
     instantAvatarPreview,
   ]);
 
   useEffect(() => {
-    if (user?.telegram_linked || user?.telegram_chat_id) {
-      setIsTelegramLinked(true);
-    }
+    setIsTelegramLinked(
+      Boolean(user?.telegram_linked || user?.telegram_chat_id)
+    );
   }, [user?.telegram_linked, user?.telegram_chat_id]);
 
   // ==========================================================================
@@ -242,12 +276,19 @@ const Navbar = () => {
     setIsDarkMode((prev) => !prev);
   }, []);
 
-  const syncUserToStorage = useCallback((updatedUserObj) => {
+  const syncUserToStorage = useCallback((updatedUserObj, updatedTeacherObj) => {
     try {
       const str = JSON.stringify(updatedUserObj);
       localStorage.setItem('user', str);
-      if (localStorage.getItem('auth_user')) {
-        localStorage.setItem('auth_user', str);
+      localStorage.setItem('auth_user', str);
+
+      if (updatedTeacherObj) {
+        localStorage.setItem('teacher', JSON.stringify(updatedTeacherObj));
+      } else if (updatedUserObj?.teacher) {
+        localStorage.setItem(
+          'teacher',
+          JSON.stringify(updatedUserObj.teacher)
+        );
       }
     } catch (e) {
       console.warn('Failed to sync user to localStorage:', e);
@@ -259,22 +300,22 @@ const Navbar = () => {
     setIsProfileModalOpen(false);
     setIsSettingsModalOpen(false);
 
-    try {
-      localStorage.removeItem('token');
-      localStorage.removeItem('teacher');
-      localStorage.removeItem('user');
-      localStorage.removeItem('auth_user');
-    } catch {}
+    if (typeof logout === 'function') {
+      logout();
+    } else {
+      try {
+        localStorage.removeItem('token');
+        localStorage.removeItem('teacher');
+        localStorage.removeItem('user');
+        localStorage.removeItem('auth_user');
+      } catch {}
 
-    if (typeof setUser === 'function') {
-      setUser(null);
+      if (typeof setUser === 'function') {
+        setUser(null);
+      }
     }
 
     navigate('/login', { replace: true });
-
-    if (typeof logout === 'function') {
-      logout();
-    }
   }, [logout, navigate, setUser]);
 
   const userRoleRaw = useMemo(
@@ -282,31 +323,48 @@ const Navbar = () => {
       user?.role?.role_name ||
       user?.role?.name ||
       user?.role_name ||
-      user?.role ||
+      (typeof user?.role === 'string' ? user.role : '') ||
       '',
     [user]
+  );
+
+  const isAdmin = useMemo(
+    () =>
+      (typeof hasRole === 'function' && hasRole('Admin')) ||
+      String(userRoleRaw).toLowerCase().includes('admin') ||
+      Number(user?.role_id) === 1,
+    [hasRole, userRoleRaw, user?.role_id]
+  );
+
+  const isTeacher = useMemo(
+    () =>
+      (typeof hasRole === 'function' && hasRole('Teacher')) ||
+      String(userRoleRaw).toLowerCase().includes('teacher') ||
+      Number(user?.role_id) === 2,
+    [hasRole, userRoleRaw, user?.role_id]
   );
 
   const isStudent = useMemo(
     () =>
       (typeof hasRole === 'function' && hasRole('Student')) ||
       String(userRoleRaw).toLowerCase().includes('student') ||
-      user?.role_id === 3,
+      Number(user?.role_id) === 3,
     [hasRole, userRoleRaw, user?.role_id]
   );
 
   const getRoleName = useCallback(
     (roleName) => {
       const r = (roleName || '').toString().toLowerCase();
+      const rid = Number(user?.role_id);
       if (language === 'km') {
-        if (r.includes('admin') || user?.role_id === 1) return 'អ្នកគ្រប់គ្រង';
-        if (r.includes('teacher') || user?.role_id === 2) return 'គ្រូបង្រៀន';
-        if (r.includes('student') || user?.role_id === 3) return 'សិស្ស';
+        if (r.includes('admin') || rid === 1) return 'អ្នកគ្រប់គ្រង';
+        if (r.includes('teacher') || rid === 2) return 'គ្រូបង្រៀន';
+        if (r.includes('student') || rid === 3) return 'សិស្ស';
         return roleName;
       }
-      if (r.includes('admin') || user?.role_id === 1) return 'Administrator';
-      if (r.includes('teacher') || user?.role_id === 2) return 'Teacher';
-      if (r.includes('student') || user?.role_id === 3) return 'Student';
+      if (r.includes('admin') || rid === 1) return 'Administrator';
+      if (r.includes('teacher') || rid === 2) return 'Teacher';
+      if (r.includes('student') || rid === 3) return 'Student';
       return roleName;
     },
     [language, user?.role_id]
@@ -332,99 +390,61 @@ const Navbar = () => {
     if (instantAvatarPreview) return instantAvatarPreview;
     const rawImg =
       user?.profile_image ||
+      teacherData?.profile_image ||
       user?.teacher?.profile_image ||
       user?.student?.profile_image;
     return rawImg ? resolveImageUrl(rawImg) : null;
-  }, [user, instantAvatarPreview, resolveImageUrl]);
+  }, [user, teacherData, instantAvatarPreview, resolveImageUrl]);
+
+  const resolvedFirstName = useMemo(
+    () =>
+      user?.first_name ||
+      teacherData?.first_name ||
+      user?.teacher_first_name ||
+      user?.student?.first_name ||
+      '',
+    [user, teacherData]
+  );
+
+  const resolvedLastName = useMemo(
+    () =>
+      user?.last_name ||
+      teacherData?.last_name ||
+      user?.teacher_last_name ||
+      user?.student?.last_name ||
+      '',
+    [user, teacherData]
+  );
 
   const userInitials = useMemo(() => {
-    const first =
-      (
-        user?.first_name ||
-        user?.teacher?.first_name ||
-        user?.student?.first_name ||
-        user?.name ||
-        ''
-      )?.trim()?.[0] || '';
-    const last =
-      (
-        user?.last_name ||
-        user?.teacher?.last_name ||
-        user?.student?.last_name ||
-        ''
-      )?.trim()?.[0] || '';
+    const first = (resolvedFirstName || user?.name || '')?.trim()?.[0] || '';
+    const last = (resolvedLastName || '')?.trim()?.[0] || '';
     return (first + last).toUpperCase() || 'U';
-  }, [user]);
+  }, [resolvedFirstName, resolvedLastName, user?.name]);
 
   const userDisplayName = useMemo(() => {
-    if (user?.first_name || user?.last_name) {
-      return `${user.first_name || ''} ${user.last_name || ''}`.trim();
-    }
-    if (user?.teacher?.first_name || user?.teacher?.last_name) {
-      return `${user.teacher.first_name || ''} ${user.teacher.last_name || ''}`.trim();
-    }
-    if (user?.student?.first_name || user?.student?.last_name) {
-      return `${user.student.first_name || ''} ${user.student.last_name || ''}`.trim();
+    if (resolvedFirstName || resolvedLastName) {
+      return `${resolvedFirstName} ${resolvedLastName}`.trim();
     }
     if (user?.name) {
       return user.name;
     }
-    return user?.email || 'User';
-  }, [user]);
+    return userEmail || 'User';
+  }, [resolvedFirstName, resolvedLastName, user?.name, userEmail]);
 
   const userPhone = useMemo(
-    () => user?.phone || user?.teacher?.phone || user?.student?.phone || '',
-    [user]
+    () =>
+      user?.phone ||
+      teacherData?.phone ||
+      user?.teacher_phone ||
+      user?.student?.phone ||
+      '',
+    [user, teacherData]
   );
 
-  const syncTelegramStatus = useCallback(async () => {
-    if (!userEmail) return;
-    try {
-      const res =
-        typeof checkTelegramLinkStatus === 'function'
-          ? await checkTelegramLinkStatus(userEmail)
-          : (await api.post('/check-telegram-link', { email: userEmail })).data;
-
-      if (res?.telegram_link_url) {
-        setTelegramLinkUrl(res.telegram_link_url);
-        try {
-          sessionStorage.setItem(
-            getTelegramLinkCacheKey(userEmail),
-            res.telegram_link_url
-          );
-        } catch {}
-      }
-
-      if (res?.linked) {
-        setIsTelegramLinked(true);
-        setWaitingTelegramLink(false);
-        const updatedUser = { ...user, telegram_linked: true };
-        setUser(updatedUser);
-        syncUserToStorage(updatedUser);
-      }
-    } catch {}
-  }, [userEmail, checkTelegramLinkStatus, user, setUser, syncUserToStorage]);
-
-  useEffect(() => {
-    if (!userEmail || telegramLinkUrl) return;
-    const timer = setTimeout(() => {
-      syncTelegramStatus();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [userEmail, telegramLinkUrl, syncTelegramStatus]);
-
-  useEffect(() => {
-    if (isSettingsModalOpen) {
-      syncTelegramStatus();
-    }
-  }, [isSettingsModalOpen, syncTelegramStatus]);
-
-  useEffect(() => {
-    if (!isSettingsModalOpen || !waitingTelegramLink || !userEmail) {
-      return;
-    }
-
-    const timer = setInterval(async () => {
+  const syncTelegramStatus = useCallback(
+    async (isPolling = false) => {
+      if (!userEmail) return;
       try {
         const res =
           typeof checkTelegramLinkStatus === 'function'
@@ -446,41 +466,56 @@ const Navbar = () => {
           setIsTelegramLinked(true);
           setWaitingTelegramLink(false);
           const updatedUser = { ...user, telegram_linked: true };
-          setUser(updatedUser);
+          if (typeof setUser === 'function') {
+            setUser(updatedUser);
+          }
           syncUserToStorage(updatedUser);
 
-          pushLocalNotification({
-            titleKm: 'បានភ្ជាប់គណនី Telegram ជោគជ័យ',
-            titleEn: 'Telegram Account Linked',
-            descKm:
-              'គណនី Telegram របស់អ្នកត្រូវបានភ្ជាប់ជាមួយប្រព័ន្ធរួចរាល់។',
-            descEn:
-              'Your Telegram account has been successfully linked to the system.',
-            category: 'system',
-          });
+          if (isPolling) {
+            pushLocalNotification({
+              titleKm: 'បានភ្ជាប់គណនី Telegram ជោគជ័យ',
+              titleEn: 'Telegram Account Linked',
+              descKm:
+                'គណនី Telegram របស់អ្នកត្រូវបានភ្ជាប់ជាមួយប្រព័ន្ធរួចរាល់។',
+              descEn:
+                'Your Telegram account has been successfully linked to the system.',
+              category: 'system',
+            });
+          }
         }
       } catch {}
+    },
+    [userEmail, checkTelegramLinkStatus, user, setUser, syncUserToStorage]
+  );
+
+  useEffect(() => {
+    if (!userEmail || telegramLinkUrl) return;
+    const timer = setTimeout(() => {
+      syncTelegramStatus(false);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [userEmail, telegramLinkUrl, syncTelegramStatus]);
+
+  useEffect(() => {
+    if (isSettingsModalOpen) {
+      syncTelegramStatus(false);
+    }
+  }, [isSettingsModalOpen, syncTelegramStatus]);
+
+  useEffect(() => {
+    if (!isSettingsModalOpen || !waitingTelegramLink || !userEmail) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      syncTelegramStatus(true);
     }, 3000);
 
     return () => clearInterval(timer);
-  }, [
-    isSettingsModalOpen,
-    waitingTelegramLink,
-    userEmail,
-    checkTelegramLinkStatus,
-    user,
-    setUser,
-    syncUserToStorage,
-  ]);
+  }, [isSettingsModalOpen, waitingTelegramLink, userEmail, syncTelegramStatus]);
 
-  // ✅ កំណត់ផ្លូវទៅកាន់ Dashboard ឱ្យស៊ីគ្នាជាមួយ Login.jsx និង App Routes
-  const dashboardPath = useMemo(() => {
-    const role = String(userRoleRaw).toLowerCase();
-    if (role.includes('admin') || user?.role_id === 1) return '/admin/dashboard';
-    if (role.includes('teacher') || user?.role_id === 2) return '/teacher/dashboard';
-    if (role.includes('student') || user?.role_id === 3) return '/student/dashboard';
-    return '/';
-  }, [userRoleRaw, user?.role_id]);
+  // ✅ ប្រើប្រាស់ Clean URL '/dashboard' ឱ្យស៊ីគ្នាជាមួយ Login.jsx និង Register.jsx
+  const dashboardPath = '/dashboard';
 
   const userCreatedAtFormatted = useMemo(() => {
     if (user?.created_at) {
@@ -496,154 +531,181 @@ const Navbar = () => {
     return '—';
   }, [user?.created_at, language]);
 
-  // ✅ បញ្ជីម៉ឺនុយសម្រាប់ទូរស័ព្ទ (ត្រូវគ្នាជាមួយផ្លូវពេញលេញរបស់ប្រព័ន្ធ)
+  // ✅ បញ្ជីម៉ឺនុយសម្រាប់ទូរស័ព្ទ (ប្រើ Clean URLs ស៊ីគ្នាជាមួយ Login.jsx & Register.jsx)
   const navItems = useMemo(() => {
-    const role = String(userRoleRaw).toLowerCase();
-    if (role.includes('admin') || user?.role_id === 1) {
+    if (isAdmin) {
       return [
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/admin/dashboard',
+          path: '/dashboard',
+          altPaths: ['/admin/dashboard'],
         },
         {
           name: t('ដេប៉ាតឺម៉ង់', 'Departments'),
           icon: BuildingLibraryIcon,
-          path: '/admin/departments',
+          path: '/departments',
+          altPaths: ['/admin/departments'],
         },
         {
           name: t('គ្រូបង្រៀន', 'Teachers'),
           icon: AcademicCapIcon,
-          path: '/admin/teachers',
+          path: '/teachers',
+          altPaths: ['/admin/teachers'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/admin/courses',
+          path: '/courses',
+          altPaths: ['/admin/courses'],
         },
         {
           name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
           icon: UserGroupIcon,
-          path: '/admin/students',
+          path: '/students',
+          altPaths: ['/admin/students'],
           children: [
-            { name: t('ឆ្នាំទី១', 'Year 1'), path: '/admin/students/year-1' },
-            { name: t('ឆ្នាំទី២', 'Year 2'), path: '/admin/students/year-2' },
-            { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/admin/students/year-3' },
-            { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/admin/students/year-4' },
+            {
+              name: t('ឆ្នាំទី១', 'Year 1'),
+              path: '/students/year-1',
+              altPath: '/admin/students/year-1',
+            },
+            {
+              name: t('ឆ្នាំទី២', 'Year 2'),
+              path: '/students/year-2',
+              altPath: '/admin/students/year-2',
+            },
+            {
+              name: t('ឆ្នាំទី៣', 'Year 3'),
+              path: '/students/year-3',
+              altPath: '/admin/students/year-3',
+            },
+            {
+              name: t('ឆ្នាំទី៤', 'Year 4'),
+              path: '/students/year-4',
+              altPath: '/admin/students/year-4',
+            },
           ],
         },
         {
           name: t('របាយការណ៍', 'Reports'),
           icon: ChartBarIcon,
-          path: '/admin/reports',
+          path: '/reports',
+          altPaths: ['/admin/reports'],
         },
       ];
     }
-    if (role.includes('teacher') || user?.role_id === 2) {
+    if (isTeacher) {
       return [
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/teacher/dashboard',
+          path: '/dashboard',
+          altPaths: ['/teacher/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/teacher/courses',
+          path: '/courses',
+          altPaths: ['/teacher/courses'],
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
-          path: '/teacher/lessons',
+          path: '/lessons',
+          altPaths: ['/teacher/lessons'],
         },
         {
           name: t('សិស្ស', 'Students'),
           icon: UsersIcon,
-          path: '/teacher/students',
+          path: '/students',
+          altPaths: ['/teacher/students'],
         },
         {
           name: t('វត្តមានសិស្ស', 'Attendance'),
           icon: ClipboardDocumentListIcon,
-          path: '/teacher/attendance',
+          path: '/attendance',
+          altPaths: ['/teacher/attendance'],
         },
         {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
-          path: '/teacher/grades',
+          path: '/grades',
+          altPaths: ['/teacher/grades'],
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
           icon: DocumentArrowUpIcon,
-          path: '/teacher/assignments',
+          path: '/assignments',
+          altPaths: ['/teacher/assignments'],
         },
         {
           name: t('កម្រងសំណួរ', 'Quizzes'),
           icon: PencilSquareIcon,
-          path: '/teacher/quizzes',
+          path: '/quizzes',
+          altPaths: ['/teacher/quizzes'],
         },
       ];
     }
-    if (role.includes('student') || user?.role_id === 3) {
+    if (isStudent) {
       return [
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/student/dashboard',
+          path: '/dashboard',
+          altPaths: ['/student/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/student/courses',
+          path: '/courses',
+          altPaths: ['/student/courses'],
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
-          path: '/student/lessons',
+          path: '/lessons',
+          altPaths: ['/student/lessons'],
         },
         {
           name: t('វត្តមាន', 'Attendance'),
           icon: ClipboardDocumentListIcon,
-          path: '/student/attendance',
+          path: '/attendance',
+          altPaths: ['/student/attendance'],
         },
         {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
-          path: '/student/grades',
+          path: '/grades',
+          altPaths: ['/student/grades'],
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
           icon: DocumentArrowUpIcon,
-          path: '/student/assignments',
+          path: '/assignments',
+          altPaths: ['/student/assignments'],
         },
         {
           name: t('កម្រងសំណួរ', 'Quizzes'),
           icon: PencilSquareIcon,
-          path: '/student/quizzes',
+          path: '/quizzes',
+          altPaths: ['/student/quizzes'],
         },
       ];
     }
     return [];
-  }, [userRoleRaw, user?.role_id, t]);
+  }, [isAdmin, isTeacher, isStudent, t]);
 
   const openProfileModal = useCallback(() => {
     setProfileData({
-      first_name:
-        user?.first_name ||
-        user?.teacher?.first_name ||
-        user?.student?.first_name ||
-        user?.name ||
-        '',
-      last_name:
-        user?.last_name ||
-        user?.teacher?.last_name ||
-        user?.student?.last_name ||
-        '',
+      first_name: resolvedFirstName || user?.name || '',
+      last_name: resolvedLastName || '',
       email: userEmail,
       phone: userPhone,
       profile_image: profileImgUrl,
     });
     setIsProfileModalOpen(true);
-  }, [user, userEmail, userPhone, profileImgUrl]);
+  }, [resolvedFirstName, resolvedLastName, user?.name, userEmail, userPhone, profileImgUrl]);
 
   const closeProfileModal = useCallback(() => {
     setIsProfileModalOpen(false);
@@ -755,11 +817,10 @@ const Navbar = () => {
       const formData = new FormData();
       formData.append('profile_image', file);
 
-      const role = String(userRoleRaw).toLowerCase();
       let endpoint = '/user/profile/update-image';
-      if (role.includes('teacher') || user?.role_id === 2) {
+      if (isTeacher) {
         endpoint = '/teacher/profile/update-image';
-      } else if (role.includes('student') || user?.role_id === 3) {
+      } else if (isStudent) {
         endpoint = '/student/profile/update-image';
       }
 
@@ -771,6 +832,8 @@ const Navbar = () => {
         const newImgPath =
           response.data.profile_image || response.data?.data?.profile_image;
         const updatedUser = { ...user };
+        let updatedTeacher = teacherData ? { ...teacherData } : null;
+
         if (newImgPath) {
           updatedUser.profile_image = newImgPath;
           if (updatedUser.teacher) {
@@ -778,6 +841,9 @@ const Navbar = () => {
               ...updatedUser.teacher,
               profile_image: newImgPath,
             };
+          }
+          if (updatedTeacher) {
+            updatedTeacher.profile_image = newImgPath;
           }
           if (updatedUser.student) {
             updatedUser.student = {
@@ -787,8 +853,10 @@ const Navbar = () => {
           }
         }
 
-        setUser(updatedUser);
-        syncUserToStorage(updatedUser);
+        if (typeof setUser === 'function') {
+          setUser(updatedUser);
+        }
+        syncUserToStorage(updatedUser, updatedTeacher);
 
         const resolvedServerUrl = resolveImageUrl(newImgPath);
         setProfileData((prev) => ({
@@ -830,37 +898,61 @@ const Navbar = () => {
     };
 
     const previousUser = { ...user };
+    const previousTeacher = teacherData ? { ...teacherData } : null;
+
+    const optimisticTeacher = teacherData
+      ? {
+          ...teacherData,
+          ...payload,
+          teacher_first_name: payload.first_name,
+          teacher_last_name: payload.last_name,
+          teacher_email: payload.email,
+          teacher_phone: payload.phone,
+        }
+      : null;
+
     const optimisticUser = {
       ...user,
       ...payload,
+      ...(isTeacher
+        ? {
+            teacher_first_name: payload.first_name,
+            teacher_last_name: payload.last_name,
+            teacher_email: payload.email,
+            teacher_phone: payload.phone,
+          }
+        : {}),
       teacher: user?.teacher ? { ...user.teacher, ...payload } : user?.teacher,
       student: user?.student ? { ...user.student, ...payload } : user?.student,
     };
 
-    setUser(optimisticUser);
-    syncUserToStorage(optimisticUser);
+    if (typeof setUser === 'function') {
+      setUser(optimisticUser);
+    }
+    syncUserToStorage(optimisticUser, optimisticTeacher);
     setIsEditing(false);
     setIsSavingProfile(true);
 
     try {
-      const role = String(userRoleRaw).toLowerCase();
       let endpoint = '/user/profile/update';
-      if (role.includes('teacher') || user?.role_id === 2) {
+      if (isTeacher) {
         endpoint = '/teacher/profile/update';
-      } else if (role.includes('student') || user?.role_id === 3) {
+      } else if (isStudent) {
         endpoint = '/student/profile/update';
       }
 
       const response = await api.put(endpoint, payload);
 
       if (response.data) {
-        const serverData = response.data?.data || response.data;
+        const serverData = response.data?.data || response.data?.user || response.data;
         const updatedUser = {
           ...optimisticUser,
           ...(typeof serverData === 'object' ? serverData : {}),
         };
-        setUser(updatedUser);
-        syncUserToStorage(updatedUser);
+        if (typeof setUser === 'function') {
+          setUser(updatedUser);
+        }
+        syncUserToStorage(updatedUser, optimisticTeacher);
 
         pushLocalNotification({
           titleKm: 'បានកែប្រែព័ត៌មានប្រវត្តិរូប',
@@ -872,8 +964,10 @@ const Navbar = () => {
       }
     } catch (error) {
       console.error('Update error:', error);
-      setUser(previousUser);
-      syncUserToStorage(previousUser);
+      if (typeof setUser === 'function') {
+        setUser(previousUser);
+      }
+      syncUserToStorage(previousUser, previousTeacher);
     } finally {
       setIsSavingProfile(false);
     }
@@ -1200,9 +1294,11 @@ const Navbar = () => {
                 {navItems.map((item) => {
                   const Icon = item.icon;
                   if (item.children) {
-                    const isParentActive = location.pathname.startsWith(
-                      item.path
-                    );
+                    const isParentActive =
+                      location.pathname.startsWith(item.path) ||
+                      (item.altPaths || []).some((alt) =>
+                        location.pathname.startsWith(alt)
+                      );
                     const isSubOpen = openMobileSubMenu === item.path;
                     return (
                       <div key={item.path} className="space-y-1">
@@ -1231,7 +1327,8 @@ const Navbar = () => {
                           <div className="pl-5 pr-2 py-1 space-y-1 border-l-2 border-blue-800/70 ml-5">
                             {item.children.map((sub) => {
                               const isSubActive =
-                                location.pathname === sub.path;
+                                location.pathname === sub.path ||
+                                location.pathname === sub.altPath;
                               return (
                                 <Link
                                   key={sub.path}
@@ -1256,14 +1353,23 @@ const Navbar = () => {
                     );
                   }
 
+                  const isItemActive =
+                    location.pathname === item.path ||
+                    location.pathname.startsWith(`${item.path}/`) ||
+                    (item.altPaths || []).some(
+                      (alt) =>
+                        location.pathname === alt ||
+                        location.pathname.startsWith(`${alt}/`)
+                    );
+
                   return (
                     <NavLink
                       key={item.path}
                       to={item.path}
                       onClick={() => setIsMobileMenuOpen(false)}
-                      className={({ isActive }) =>
+                      className={() =>
                         `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[15px] font-semibold transition-colors ${
-                          isActive
+                          isItemActive
                             ? isStudent
                               ? 'bg-white/15 text-white font-extrabold border border-indigo-400/45 shadow-md'
                               : 'bg-yellow-400 text-blue-950 font-extrabold shadow-md'
@@ -1273,18 +1379,14 @@ const Navbar = () => {
                         }`
                       }
                     >
-                      {({ isActive }) => (
-                        <>
-                          <Icon
-                            className={`h-5 w-5 shrink-0 ${
-                              isActive && isStudent ? 'text-yellow-400' : ''
-                            }`}
-                          />
-                          <span>{item.name}</span>
-                          {isActive && isStudent && (
-                            <span className="ml-auto h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.8)] shrink-0" />
-                          )}
-                        </>
+                      <Icon
+                        className={`h-5 w-5 shrink-0 ${
+                          isItemActive && isStudent ? 'text-yellow-400' : ''
+                        }`}
+                      />
+                      <span>{item.name}</span>
+                      {isItemActive && isStudent && (
+                        <span className="ml-auto h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.8)] shrink-0" />
                       )}
                     </NavLink>
                   );

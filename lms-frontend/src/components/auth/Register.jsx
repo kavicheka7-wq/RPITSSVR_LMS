@@ -33,28 +33,9 @@ const checkIsNightTime = () => {
   return hour >= 18 || hour < 6;
 };
 
-// ✅ កំណត់ផ្លូវទៅកាន់ Dashboard ឱ្យត្រូវតាមតួនាទីដូចក្នុង Login.jsx
-const resolveTargetDashboardPath = (userObj) => {
-  const rawRole = (
-    userObj?.role?.role_name ||
-    userObj?.role?.name ||
-    userObj?.role_name ||
-    (typeof userObj?.role === 'string' ? userObj.role : '') ||
-    ''
-  )
-    .toString()
-    .toLowerCase();
-
-  if (rawRole.includes('admin') || userObj?.role_id === 1 || String(userObj?.role_id) === '1') {
-    return '/admin/dashboard';
-  }
-  if (rawRole.includes('teacher') || userObj?.role_id === 2) {
-    return '/teacher/dashboard';
-  }
-  if (rawRole.includes('student') || userObj?.role_id === 3) {
-    return '/student/dashboard';
-  }
-  return '/admin/dashboard';
+// ✅ កំណត់ផ្លូវទៅកាន់ '/dashboard' រួមតែមួយគត់ (Clean URL លាក់ /admin, /teacher, /student)
+const resolveTargetDashboardPath = () => {
+  return '/dashboard';
 };
 
 const EMPTY_FIELD_ERRORS = Object.freeze({
@@ -410,6 +391,7 @@ const Register = () => {
           localStorage.setItem(ADMIN_SETUP_STORAGE_KEY, 'true');
         } catch {}
 
+        // ✅ បញ្ជូនទៅកាន់ '/dashboard' ផ្ទាល់តាមរយៈ resolveTargetDashboardPath
         navigate(resolveTargetDashboardPath(result.user), { replace: true });
       } else {
         applyRegistrationValidationError(result);

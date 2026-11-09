@@ -376,11 +376,11 @@ class AuthController extends Controller
         </html>
         ";
 
-        // កំណត់ Gmail SMTP ដោយផ្ទាល់ និងបិទ verify_peer ដើម្បីកុំឱ្យជាប់គាំង SSL Certificate លើ Local/Server
+        // ✅ កំណត់ Gmail SMTP ដោយផ្ទាល់ជាមួយ App Password ថ្មីដែលដំណើរការជោគជ័យ និងបិទ verify_peer
         $smtpUsername = trim((string) env('MAIL_USERNAME', 'kavicheka7@gmail.com'));
-        $smtpPassword = str_replace(' ', '', trim((string) env('MAIL_PASSWORD', 'cdezkfuqvznodtsp')));
+        $smtpPassword = str_replace(' ', '', trim((string) env('MAIL_PASSWORD', 'pejzqdoohrqqbxbn')));
         $smtpFromAddress = trim((string) env('MAIL_FROM_ADDRESS', $smtpUsername));
-        $smtpFromName = trim((string) env('MAIL_FROM_NAME', 'RPITSSVR LMS'));
+        $smtpFromName = trim((string) env('MAIL_FROM_NAME', 'RPITSSVR LMS Official'));
 
         config([
             'mail.default' => 'smtp',
@@ -538,6 +538,7 @@ class AuthController extends Controller
         ]);
     }
 
+    // ✅ ចុះឈ្មោះគណនី Admin ដំបូង រួចភ្ជាប់ទិន្នន័យ Role ត្រឡប់ទៅឱ្យ Frontend ភ្លាមៗ
     public function register(Request $request)
     {
         $request->validate([
@@ -557,10 +558,13 @@ class AuthController extends Controller
             'status' => 'active',
         ]);
 
+        $user->load('role:id,role_name');
         $token = $user->createToken('auth_token')->plainTextToken;
+        [$userData, $teacherData] = $this->buildUserAndTeacherPayload($user);
 
         return response()->json([
-            'user' => $user,
+            'user' => $userData,
+            'teacher' => $teacherData,
             'token' => $token,
             'message' => 'Registration successful'
         ], 201);
