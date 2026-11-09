@@ -95,7 +95,6 @@ class AuthController extends Controller
 
     /**
      * ✅ HELPER METHOD: កំណត់យក Telegram Chat ID ផ្ទាល់ខ្លួនរបស់អ្នកប្រើប្រាស់ម្នាក់ៗ
-     * (បានដកចេញនូវការទាញយក TELEGRAM_ADMIN_CHAT_ID ពី .env ដើម្បីកុំឱ្យលោតចូល Telegram ម្ចាស់កូដពេលកូនក្រុមតេស្ត)
      */
     private function resolveUserTelegramChatId(User $user): ?string
     {
@@ -222,7 +221,7 @@ class AuthController extends Controller
     }
 
     /**
-     * HELPER METHOD (Smart Priority OTP Channel សម្រាប់ទាំង 2FA និង Password Reset):
+     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ទៅកាន់ទាំង Email និង Telegram របស់អ្នកប្រើប្រាស់ម្នាក់ៗដែល Login ចូលផ្ទាល់
      */
     private function generateAndSendOtp(User $user, Request $request, string $purpose = '2fa'): array
     {
@@ -244,11 +243,12 @@ class AuthController extends Controller
 
         $telegramSent = false;
         $mailSent = false;
+        $mailErrorMsg = null;
         $deliveryChannel = 'none';
 
         $isTelegramLinked = $this->resolveUserTelegramChatId($user) !== null;
 
-        // ១. សាកល្បងផ្ញើទៅកាន់ Telegram ជាអាទិភាពទី ១
+        // ១. ផ្ញើទៅកាន់ Telegram របស់អ្នកប្រើប្រាស់ (ប្រសិនបើបានភ្ជាប់)
         if ($isTelegramLinked) {
             $telegramSent = $this->sendTelegramOtpAlert($user, $otp, $request, $purpose);
             if ($telegramSent) {
@@ -256,62 +256,83 @@ class AuthController extends Controller
             }
         }
 
-        // ២. ផ្ញើទៅកាន់ Email នៅពេលមិនទាន់ភ្ជាប់ Telegram (ឬករណីស្នើសុំប្ដូរពាក្យសម្ងាត់)
-        if (!$telegramSent || $purpose === 'reset') {
-            $purposeLabel = $purpose === 'reset'
-                ? 'សម្រាប់កំណត់ពាក្យសម្ងាត់ថ្មីរបស់អ្នក'
-                : 'សម្រាប់ចូលប្រើប្រាស់ប្រព័ន្ធរបស់អ្នក';
+        // ២. ផ្ញើទៅកាន់ Email របស់អ្នកប្រើប្រាស់ដែលកំពុង Login ជានិច្ច (គ្រប់ពេល Login និង Reset Password)
+        $purposeLabel = $purpose === 'reset'
+            ? 'សម្រាប់កំណត់ពាក្យសម្ងាត់ថ្មីរបស់អ្នក'
+            : 'សម្រាប់ចូលប្រើប្រាស់ប្រព័ន្ធរបស់អ្នក';
 
-            $subjectTitle = $purpose === 'reset'
-                ? 'លេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ (៦ ខ្ទង់) - RPITSSVR LMS'
-                : 'លេខកូដផ្ទៀងផ្ទាត់សុវត្ថិភាព 2FA (៦ ខ្ទង់) - RPITSSVR LMS';
+        $subjectTitle = $purpose === 'reset'
+            ? 'លេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ (៦ ខ្ទង់) - RPITSSVR LMS'
+            : 'លេខកូដផ្ទៀងផ្ទាត់សុវត្ថិភាព 2FA (៦ ខ្ទង់) - RPITSSVR LMS';
 
-            $htmlContent = "
-                <div style='font-family: \"Kantumruy Pro\", \"Battambang\", sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background: #ffffff;'>
-                    <h2 style='color: #1e3a8a; margin-bottom: 8px; font-size: 18px;'>វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR LMS)</h2>
-                    <p style='color: #334155; font-size: 14px;'>សួស្តី <strong>{$fullName}</strong> ({$roleName}),</p>
-                    <p style='color: #475569; font-size: 14px; line-height: 1.6;'>នេះគឺជាលេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ {$purposeLabel}៖</p>
-                    <div style='margin: 20px 0; padding: 18px; background: #eff6ff; border: 2px dashed #3b82f6; border-radius: 12px; text-align: center;'>
-                        <span style='font-size: 32px; font-weight: 900; letter-spacing: 8px; color: #1d4ed8;'>{$otp}</span>
-                    </div>
-                    <div style='background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 16px; font-size: 12px; color: #475569;'>
-                        <div><strong>🕒 ម៉ោងស្នើសុំ៖</strong> {$timeNow}</div>
-                        <div><strong>🌐 អាសយដ្ឋាន IP៖</strong> {$ipAddress}</div>
-                        <div><strong>💻 ឧបករណ៍៖</strong> {$userAgent}</div>
-                    </div>
-                    <p style='color: #e11d48; font-size: 12px; font-weight: bold; line-height: 1.5;'>⚠️ ប្រសិនបើអ្នកមិនបានធ្វើការស្នើសុំនេះទេ សូមកុំប្រាប់លេខកូដនេះទៅអ្នកដទៃដាច់ខាត។</p>
+        $htmlContent = "
+            <div style='font-family: \"Kantumruy Pro\", \"Battambang\", sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background: #ffffff;'>
+                <h2 style='color: #1e3a8a; margin-bottom: 8px; font-size: 18px;'>វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR LMS)</h2>
+                <p style='color: #334155; font-size: 14px;'>សួស្តី <strong>{$fullName}</strong> ({$roleName}),</p>
+                <p style='color: #475569; font-size: 14px; line-height: 1.6;'>នេះគឺជាលេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ {$purposeLabel}៖</p>
+                <div style='margin: 20px 0; padding: 18px; background: #eff6ff; border: 2px dashed #3b82f6; border-radius: 12px; text-align: center;'>
+                    <span style='font-size: 32px; font-weight: 900; letter-spacing: 8px; color: #1d4ed8;'>{$otp}</span>
                 </div>
-            ";
+                <div style='background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 16px; font-size: 12px; color: #475569;'>
+                    <div><strong>🕒 ម៉ោងស្នើសុំ៖</strong> {$timeNow}</div>
+                    <div><strong>🌐 អាសយដ្ឋាន IP៖</strong> {$ipAddress}</div>
+                    <div><strong>💻 ឧបករណ៍៖</strong> {$userAgent}</div>
+                </div>
+                <p style='color: #e11d48; font-size: 12px; font-weight: bold; line-height: 1.5;'>⚠️ ប្រសិនបើអ្នកមិនបានធ្វើការស្នើសុំនេះទេ សូមកុំប្រាប់លេខកូដនេះទៅអ្នកដទៃដាច់ខាត។</p>
+            </div>
+        ";
 
-            $mailerDriver = config('mail.default');
-            $mailUser = (string) config('mail.mailers.smtp.username', env('MAIL_USERNAME', ''));
-            $isPlaceholderMailer = empty($mailUser) || str_contains($mailUser, 'your_email@gmail.com');
-            $isDemoOrLocalEmail = preg_match('/@(example\.com|test\.com|localhost|lms\.local)$/i', $user->email);
+        // កំណត់ Gmail SMTP ដោយផ្ទាល់ និងបិទ verify_peer ដើម្បីកុំឱ្យជាប់គាំង SSL Certificate លើ Local/Server
+        $smtpUsername = trim((string) env('MAIL_USERNAME', 'kavicheka7@gmail.com'));
+        $smtpPassword = str_replace(' ', '', trim((string) env('MAIL_PASSWORD', 'cdezkfuqvznodtsp')));
+        $smtpFromAddress = trim((string) env('MAIL_FROM_ADDRESS', $smtpUsername));
+        $smtpFromName = trim((string) env('MAIL_FROM_NAME', 'RPITSSVR LMS'));
 
-            if (!$isPlaceholderMailer && !$isDemoOrLocalEmail && $mailerDriver !== 'log' && $mailerDriver !== 'array') {
-                try {
-                    Mail::html($htmlContent, function ($message) use ($user, $subjectTitle) {
-                        $message->to($user->email)->subject($subjectTitle);
-                    });
-                    $mailSent = true;
-                    if ($deliveryChannel === 'none') {
-                        $deliveryChannel = 'email';
-                    }
-                } catch (\Exception $e) {
-                    Log::error('OTP Email Send Error for ' . $user->email . ': ' . $e->getMessage());
-                    $mailSent = false;
-                }
-            }
+        config([
+            'mail.default' => 'smtp',
+            'mail.mailers.smtp' => [
+                'transport' => 'smtp',
+                'host' => env('MAIL_HOST', 'smtp.gmail.com'),
+                'port' => (int) env('MAIL_PORT', 587),
+                'encryption' => env('MAIL_ENCRYPTION', 'tls'),
+                'username' => $smtpUsername,
+                'password' => $smtpPassword,
+                'timeout' => 15,
+                'stream' => [
+                    'ssl' => [
+                        'allow_self_signed' => true,
+                        'verify_peer' => false,
+                        'verify_peer_name' => false,
+                    ],
+                ],
+            ],
+            'mail.from.address' => $smtpFromAddress,
+            'mail.from.name' => $smtpFromName,
+        ]);
+
+        try {
+            app('mail.manager')->forgetMailers();
+            Mail::mailer('smtp')->html($htmlContent, function ($message) use ($user, $subjectTitle, $smtpFromAddress, $smtpFromName) {
+                $message->from($smtpFromAddress, $smtpFromName)
+                        ->to(trim($user->email))
+                        ->subject($subjectTitle);
+            });
+            $mailSent = true;
+            $deliveryChannel = $telegramSent ? 'both' : 'email';
+        } catch (\Exception $e) {
+            $mailErrorMsg = $e->getMessage();
+            Log::error('OTP Email Send Error for ' . $user->email . ': ' . $mailErrorMsg);
+            $mailSent = false;
         }
 
         Log::info("6-Digit OTP ({$purpose}) for [{$user->email}] ({$roleName}) via [{$deliveryChannel}]: {$otp}");
 
         $shouldExposeDevOtp = !$telegramSent && !$mailSent;
 
-        // ✅ បង្កើត telegram_link_url ជានិច្ច ដើម្បីឱ្យកូនក្រុមអាចចុចប្ដូរ Telegram មកទូរស័ព្ទខ្លួនឯងបានគ្រប់ពេល
         return [
             'otp' => $shouldExposeDevOtp ? $otp : null,
             'mail_sent' => $mailSent,
+            'mail_error' => $mailErrorMsg,
             'telegram_sent' => $telegramSent,
             'telegram_linked' => $isTelegramLinked,
             'telegram_link_url' => $this->generateTelegramLinkUrl($user, true),
@@ -320,7 +341,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ មុខងារពិនិត្យ និងភ្ជាប់/ប្ដូរគណនី Telegram ដោយស្វ័យប្រវត្តិ ១០០% (គាំទ្រការប្ដូរ Telegram ថ្មីពេលកូនក្រុមតេស្ត)
+     * ✅ មុខងារពិនិត្យ និងភ្ជាប់/ប្ដូរគណនី Telegram ដោយស្វ័យប្រវត្តិ ១០០%
      */
     public function checkTelegramLink(Request $request)
     {
@@ -341,7 +362,6 @@ class AuthController extends Controller
         $expectedToken = Cache::get('lms_tg_user_link_token_' . $user->id);
 
         try {
-            // ១. ឆែកមើលសារ /start link_... ថ្មីៗពី Telegram Bot ជាមុនជានិច្ច (ដើម្បីគាំទ្រការប្ដូរ Telegram ថ្មីរបស់កូនក្រុម)
             $res = Http::timeout(5)->get("https://api.telegram.org/bot{$botToken}/getUpdates", [
                 'limit' => 50,
                 'allowed_updates' => json_encode(['message']),
@@ -365,7 +385,6 @@ class AuthController extends Controller
                         $incomingToken = $matches[1];
                         $mappedUserId = Cache::get('lms_tg_link_token_map_' . $incomingToken);
 
-                        // ការពារកុំឱ្យចាប់យកសារ /start ចាស់ដែលធ្លាប់ភ្ជាប់រួចហើយម្តងទៀត
                         $alreadyProcessedKey = 'lms_tg_processed_update_' . $updateId;
                         if (Cache::has($alreadyProcessedKey)) {
                             continue;
@@ -388,16 +407,13 @@ class AuthController extends Controller
                         Cache::put('lms_tg_processed_update_' . $matchedUpdateId, true, now()->addHours(24));
                     }
 
-                    // រក្សាទុក Chat ID ថ្មីរបស់កូនក្រុមជំនួស Chat ID ចាស់ក្នុង Database
                     $this->saveUserTelegramChatId($user, $matchedChatId);
 
-                    // លុប Token ចាស់ចោល និងបង្កើត Token ថ្មីសម្រាប់ពេលក្រោយ
                     if ($expectedToken) {
                         Cache::forget('lms_tg_link_token_map_' . $expectedToken);
                     }
                     Cache::forget('lms_tg_user_link_token_' . $user->id);
 
-                    // បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ថ្មីចូល Telegram ថ្មីរបស់កូនក្រុមភ្លាមៗតែម្ដង
                     $resetOtp = Cache::get('lms_pwd_reset_otp_' . $user->id);
                     if ($resetOtp) {
                         $newOtp = (string) random_int(100000, 999999);
@@ -422,7 +438,6 @@ class AuthController extends Controller
             Log::warning('checkTelegramLink polling error: ' . $e->getMessage());
         }
 
-        // បើមិនទាន់ឃើញចុច Start ថ្មីទេ ឱ្យរង់ចាំបន្តទៀត
         return response()->json([
             'linked' => false,
             'telegram_link_url' => $this->generateTelegramLinkUrl($user),
@@ -517,10 +532,12 @@ class AuthController extends Controller
 
         $otpResult = $this->generateAndSendOtp($user, $request, '2fa');
 
-        if ($otpResult['telegram_sent']) {
-            $statusMessage = 'លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ត្រូវបានផ្ញើទៅកាន់កម្មវិធី Telegram របស់អ្នកហើយ!';
+        if ($otpResult['telegram_sent'] && $otpResult['mail_sent']) {
+            $statusMessage = 'លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ត្រូវបានផ្ញើទៅកាន់ទាំង Telegram និងអ៊ីមែលរបស់អ្នកហើយ!';
         } elseif ($otpResult['mail_sent']) {
             $statusMessage = 'លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ត្រូវបានផ្ញើទៅកាន់អ៊ីមែលរបស់អ្នកហើយ!';
+        } elseif ($otpResult['telegram_sent']) {
+            $statusMessage = 'លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ត្រូវបានផ្ញើទៅកាន់កម្មវិធី Telegram របស់អ្នកហើយ!';
         } else {
             $statusMessage = 'សូមបញ្ចូលលេខកូដ ៦ ខ្ទង់ដើម្បីចូលប្រព័ន្ធ!';
         }
@@ -534,6 +551,7 @@ class AuthController extends Controller
             'requires_pin_verify' => $hasSecurityPin && !$isKnownDevice,
             'requires_pin_setup' => !$hasSecurityPin,
             'mail_sent' => $otpResult['mail_sent'],
+            'mail_error' => $otpResult['mail_error'] ?? null,
             'telegram_sent' => $otpResult['telegram_sent'],
             'telegram_linked' => $otpResult['telegram_linked'],
             'telegram_link_url' => $otpResult['telegram_link_url'],
@@ -675,16 +693,19 @@ class AuthController extends Controller
 
         $otpResult = $this->generateAndSendOtp($user, $request, '2fa');
 
-        if ($otpResult['telegram_sent']) {
-            $resendMsg = 'បានផ្ញើលេខកូដ ៦ ខ្ទង់ថ្មីទៅកាន់កម្មវិធី Telegram របស់អ្នកម្ដងទៀតហើយ!';
+        if ($otpResult['telegram_sent'] && $otpResult['mail_sent']) {
+            $resendMsg = 'បានផ្ញើលេខកូដ ៦ ខ្ទង់ថ្មីទៅកាន់ទាំង Telegram និងអ៊ីមែលរបស់អ្នកម្ដងទៀតហើយ!';
         } elseif ($otpResult['mail_sent']) {
             $resendMsg = 'បានផ្ញើលេខកូដ ៦ ខ្ទង់ថ្មីទៅកាន់អ៊ីមែលរបស់អ្នកម្ដងទៀតហើយ!';
+        } elseif ($otpResult['telegram_sent']) {
+            $resendMsg = 'បានផ្ញើលេខកូដ ៦ ខ្ទង់ថ្មីទៅកាន់កម្មវិធី Telegram របស់អ្នកម្ដងទៀតហើយ!';
         } else {
             $resendMsg = 'បានបង្កើតលេខកូដ ៦ ខ្ទង់ថ្មីរួចរាល់ហើយ!';
         }
 
         return response()->json([
             'mail_sent' => $otpResult['mail_sent'],
+            'mail_error' => $otpResult['mail_error'] ?? null,
             'telegram_sent' => $otpResult['telegram_sent'],
             'telegram_linked' => $otpResult['telegram_linked'],
             'telegram_link_url' => $otpResult['telegram_link_url'],
@@ -698,9 +719,6 @@ class AuthController extends Controller
     // 📌 មុខងារកំណត់ពាក្យសម្ងាត់ឡើងវិញដោយខ្លួនឯង (SELF-SERVICE PASSWORD RESET ៣ ជំហាន)
     // =========================================================================
 
-    /**
-     * ជំហានទី ១៖ ស្នើសុំលេខកូដ ៦ ខ្ទង់ដើម្បីកំណត់ពាក្យសម្ងាត់ឡើងវិញ (តាម Telegram និង Email)
-     */
     public function sendPasswordResetOtp(Request $request)
     {
         $request->validate([
@@ -741,10 +759,12 @@ class AuthController extends Controller
 
         $otpResult = $this->generateAndSendOtp($user, $request, 'reset');
 
-        if ($otpResult['telegram_sent']) {
-            $msg = 'លេខកូដ ៦ ខ្ទង់សម្រាប់កំណត់ពាក្យសម្ងាត់ថ្មីត្រូវបានផ្ញើទៅកាន់ Telegram របស់អ្នកហើយ!';
+        if ($otpResult['telegram_sent'] && $otpResult['mail_sent']) {
+            $msg = 'លេខកូដ ៦ ខ្ទង់សម្រាប់កំណត់ពាក្យសម្ងាត់ថ្មីត្រូវបានផ្ញើទៅកាន់ទាំង Telegram និងអ៊ីមែលរបស់អ្នកហើយ!';
         } elseif ($otpResult['mail_sent']) {
             $msg = 'លេខកូដ ៦ ខ្ទង់សម្រាប់កំណត់ពាក្យសម្ងាត់ថ្មីត្រូវបានផ្ញើទៅកាន់អ៊ីមែលរបស់អ្នកហើយ!';
+        } elseif ($otpResult['telegram_sent']) {
+            $msg = 'លេខកូដ ៦ ខ្ទង់សម្រាប់កំណត់ពាក្យសម្ងាត់ថ្មីត្រូវបានផ្ញើទៅកាន់ Telegram របស់អ្នកហើយ!';
         } else {
             $msg = 'សូមបញ្ចូលលេខកូដ ៦ ខ្ទង់ដើម្បីកំណត់ពាក្យសម្ងាត់ថ្មី!';
         }
@@ -754,6 +774,7 @@ class AuthController extends Controller
             'email' => $user->email,
             'role_name' => $user->role?->role_name ?? 'User',
             'mail_sent' => $otpResult['mail_sent'],
+            'mail_error' => $otpResult['mail_error'] ?? null,
             'telegram_sent' => $otpResult['telegram_sent'],
             'telegram_linked' => $otpResult['telegram_linked'],
             'telegram_link_url' => $otpResult['telegram_link_url'],
@@ -762,9 +783,6 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * ជំហានទី ២៖ ផ្ទៀងផ្ទាត់លេខកូដ ៦ ខ្ទង់ មុននឹងអនុញ្ញាតឱ្យដាក់ពាក្យសម្ងាត់ថ្មី
-     */
     public function verifyPasswordResetOtp(Request $request)
     {
         $request->validate([
@@ -820,7 +838,6 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // លុប OTP ចាស់ និងបង្កើតសោសម្ងាត់បណ្ដោះអាសន្ន (reset_token រយៈពេល ៥ នាទី) សម្រាប់ជំហានទី ៣
         Cache::forget($cacheKey);
         Cache::forget($attemptKey);
 
@@ -834,9 +851,6 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * ជំហានទី ៣៖ រក្សាទុកពាក្យសម្ងាត់ថ្មី ផ្ដាច់ឧបករណ៍ចាស់ៗ និងចូលប្រព័ន្ធដោយស្វ័យប្រវត្តិ
-     */
     public function resetPasswordWithOtp(Request $request)
     {
         $request->validate([
@@ -862,21 +876,17 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // ១. កែប្រែពាក្យសម្ងាត់ថ្មីក្នុង Database
         $user->password = Hash::make($request->password);
         $user->save();
 
-        // ២. សម្អាត Cache កូដសម្ងាត់ និងសោប្លុកគណនីទាំងអស់
         Cache::forget($tokenCacheKey);
         Cache::forget('lms_pwd_reset_otp_' . $user->id);
         Cache::forget('lms_pwd_reset_attempts_' . $user->id);
         Cache::forget('lms_pwd_reset_lockout_' . $user->id);
         Cache::forget('lms_login_lockout_' . md5(strtolower(trim($user->email)) . '_' . $request->ip()));
 
-        // ៣. ទាត់ឧបករណ៍ចាស់ៗចេញទាំងអស់ដើម្បីសុវត្ថិភាព
         $user->tokens()->delete();
 
-        // ៤. បង្កើត Token ថ្មីឱ្យគាត់ចូលប្រព័ន្ធភ្លាមៗតែម្ដង
         $token = $user->createToken('auth_token')->plainTextToken;
         [$userData, $teacherData] = $this->buildUserAndTeacherPayload($user);
 
