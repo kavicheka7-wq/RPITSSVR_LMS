@@ -8,34 +8,65 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Log;
 
 class ProfileController extends Controller
 {
+    /**
+     * HELPER: បំប្លែងរូបភាពទៅជា Base64 Data URI និងធានាថាជួរឈរក្នុង Database ជា LONGTEXT
+     */
+    private function convertImageToBase64($file): string
+    {
+        $mimeType = $file->getMimeType();
+        $base64Data = base64_encode(file_get_contents($file->getRealPath()));
+        return "data:{$mimeType};base64,{$base64Data}";
+    }
+
+    private function ensureLongTextColumns(): void
+    {
+        try {
+            DB::statement('ALTER TABLE users MODIFY profile_image LONGTEXT NULL');
+            if (Schema::hasColumn('teachers', 'profile_image')) {
+                DB::statement('ALTER TABLE teachers MODIFY profile_image LONGTEXT NULL');
+            }
+            if (Schema::hasColumn('students', 'profile_image')) {
+                DB::statement('ALTER TABLE students MODIFY profile_image LONGTEXT NULL');
+            }
+        } catch (\Exception $e) {
+            Log::warning('Could not alter profile_image column to LONGTEXT: ' . $e->getMessage());
+        }
+    }
+
     public function updateImage(Request $request)
     {
         // ត្រួតពិនិត្យឯកសារដែលផ្ញើមក
         $request->validate([
-            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif|max:5120',
+            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
         ]);
 
-        $user = Auth::user(); 
+        $user = Auth::user();
 
         if ($request->hasFile('profile_image')) {
             $file = $request->file('profile_image');
-            
-            // លុបរូបភាពចាស់ចេញពី Storage (បើមាន)
-            if ($user->profile_image) {
-                $oldImagePath = str_replace(url('storage') . '/', '', $user->profile_image);
-                Storage::disk('public')->delete($oldImagePath);
-            }
 
-            // បង្កើតឈ្មោះថ្មី និងរក្សាទុកក្នុង Folder profile_images
-            $filename = time() . '_' . $file->getClientOriginalName();
-            $path = $file->storeAs('profile_images', $filename, 'public');
+            // ធានាថាជួរឈរ profile_image អាចផ្ទុកអក្សរ Base64 វែងបាន
+            $this->ensureLongTextColumns();
+
+            // បំប្លែងរូបភាពទៅជា Base64 Data URI (ជាប់ជានិច្ចលើ Railway មិនបាត់ពេល Redeploy)
+            $dataUri = $this->convertImageToBase64($file);
 
             // Update ទីតាំងរូបភាពទៅក្នុងតារាង users
-            $user->profile_image = url('storage/' . $path);
+            $user->profile_image = $dataUri;
             $user->save();
+
+            // ប្រសិនបើគណនីនោះជាគ្រូ ឬសិស្ស ធ្វើបច្ចុប្បន្នភាពឱ្យស៊ីគ្នាផងដែរ
+            if ($user->role?->role_name === 'Teacher' && Schema::hasColumn('teachers', 'profile_image')) {
+                \App\Models\Teacher::where('user_id', $user->id)->update(['profile_image' => $dataUri]);
+            } elseif ($user->role?->role_name === 'Student' && Schema::hasColumn('students', 'profile_image')) {
+                \App\Models\Student::where('user_id', $user->id)->update(['profile_image' => $dataUri]);
+            }
 
             // Clear cached reports & dashboard stats
             Cache::forget('admin_dashboard_stats');
@@ -82,7 +113,7 @@ class ProfileController extends Controller
     public function updateTeacherImage(Request $request)
     {
         $request->validate([
-            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif|max:5120',
+            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
         ]);
 
         $user = Auth::user();
@@ -91,23 +122,16 @@ class ProfileController extends Controller
 
         if ($request->hasFile('profile_image')) {
             $file = $request->file('profile_image');
-            
-            // លុបរូបចាស់ចេញ
-            if ($teacher && $teacher->profile_image) {
-                $oldImagePath = str_replace(url('storage') . '/', '', $teacher->profile_image);
-                Storage::disk('public')->delete($oldImagePath);
-            }
 
-            $filename = time() . '_teacher_' . $file->getClientOriginalName();
-            $path = $file->storeAs('profile_images', $filename, 'public');
-            $imageUrl = url('storage/' . $path);
+            $this->ensureLongTextColumns();
+            $imageUrl = $this->convertImageToBase64($file);
 
             // Update ចូលតារាង users 
             $user->profile_image = $imageUrl;
             $user->save();
 
             // Update ចូលតារាង teachers ផងដែរ ដើម្បីឲ្យទិន្នន័យស៊ីគ្នា
-            if ($teacher) {
+            if ($teacher && Schema::hasColumn('teachers', 'profile_image')) {
                 $teacher->profile_image = $imageUrl;
                 $teacher->save();
             }
@@ -165,7 +189,7 @@ class ProfileController extends Controller
     public function updateStudentImage(Request $request)
     {
         $request->validate([
-            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif|max:5120',
+            'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
         ]);
 
         $user = Auth::user();
@@ -174,23 +198,16 @@ class ProfileController extends Controller
 
         if ($request->hasFile('profile_image')) {
             $file = $request->file('profile_image');
-            
-            // លុបរូបចាស់ចេញ
-            if ($student && $student->profile_image) {
-                $oldImagePath = str_replace(url('storage') . '/', '', $student->profile_image);
-                Storage::disk('public')->delete($oldImagePath);
-            }
 
-            $filename = time() . '_student_' . $file->getClientOriginalName();
-            $path = $file->storeAs('profile_images', $filename, 'public');
-            $imageUrl = url('storage/' . $path);
+            $this->ensureLongTextColumns();
+            $imageUrl = $this->convertImageToBase64($file);
 
             // Update ចូលតារាង users 
             $user->profile_image = $imageUrl;
             $user->save();
 
             // Update ចូលតារាង students ផងដែរ ដើម្បីឲ្យទិន្នន័យស៊ីគ្នា
-            if ($student) {
+            if ($student && Schema::hasColumn('students', 'profile_image')) {
                 $student->profile_image = $imageUrl;
                 $student->save();
             }
@@ -246,29 +263,29 @@ class ProfileController extends Controller
 
     // ៣. សម្រាប់ផ្លាស់ប្ដូរ Password
     public function updatePassword(Request $request)
-        {
-            // 1. Validate ទិន្នន័យដែលផ្ញើមកពី Frontend
-            $request->validate([
-                'current_password' => 'required',
-                'new_password' => 'required|min:6',
-            ]);
+    {
+        // 1. Validate ទិន្នន័យដែលផ្ញើមកពី Frontend
+        $request->validate([
+            'current_password' => 'required',
+            'new_password' => 'required|min:6',
+        ]);
 
-            $user = $request->user();
+        $user = $request->user();
 
-            // 2. ផ្ទៀងផ្ទាត់ពាក្យសម្ងាត់ចាស់ ថាតើត្រឹមត្រូវឬទេ
-            if (!Hash::check($request->current_password, $user->password)) {
-                return response()->json([
-                    'message' => 'ពាក្យសម្ងាត់បច្ចុប្បន្នមិនត្រឹមត្រូវទេ!'
-                ], 400);
-            }
-
-            // 3. កែប្រែពាក្យសម្ងាត់ថ្មីចូល Database
-            $user->update([
-                'password' => Hash::make($request->new_password)
-            ]);
-
+        // 2. ផ្ទៀងផ្ទាត់ពាក្យសម្ងាត់ចាស់ ថាតើត្រឹមត្រូវឬទេ
+        if (!Hash::check($request->current_password, $user->password)) {
             return response()->json([
-                'message' => 'បានផ្លាស់ប្ដូរពាក្យសម្ងាត់ដោយជោគជ័យ'
-            ]);
+                'message' => 'ពាក្យសម្ងាត់បច្ចុប្បន្នមិនត្រឹមត្រូវទេ!'
+            ], 400);
         }
+
+        // 3. កែប្រែពាក្យសម្ងាត់ថ្មីចូល Database
+        $user->update([
+            'password' => Hash::make($request->new_password)
+        ]);
+
+        return response()->json([
+            'message' => 'បានផ្លាស់ប្ដូរពាក្យសម្ងាត់ដោយជោគជ័យ'
+        ]);
+    }
 }

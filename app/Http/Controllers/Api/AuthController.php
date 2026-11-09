@@ -236,7 +236,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ទៅកាន់ទាំង Email (គាំទ្រ Brevo API, Google Script HTTPS Port 443 និង SMTP) និង Telegram
+     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ទៅកាន់ទាំង Email (មានរូបសញ្ញាវិទ្យាស្ថាន) និង Telegram
      */
     private function generateAndSendOtp(User $user, Request $request, string $purpose = '2fa'): array
     {
@@ -281,18 +281,33 @@ class AuthController extends Controller
             }
         }
 
-        // ២. រៀបចំទម្រង់ Email ផ្លូវការរបស់វិទ្យាស្ថាន (HTML Email Template)
+        // ២. រៀបចំទម្រង់ Email ផ្លូវការរបស់វិទ្យាស្ថាន (HTML Email Template ថ្មី មានរូបសញ្ញាវិទ្យាស្ថាន PRIT.png)
         $badgeTitle = $purpose === 'reset'
-            ? '🔐 សំណើកំណត់ពាក្យសម្ងាត់ឡើងវិញ (Password Reset)'
-            : '🛡️ ការផ្ទៀងផ្ទាត់សុវត្ថិភាពចូលប្រព័ន្ធ (2FA Security)';
+            ? '🔐 សំណើកំណត់ពាក្យសម្ងាត់ឡើងវិញ'
+            : '🛡️ ការផ្ទៀងផ្ទាត់សុវត្ថិភាពចូលប្រព័ន្ធ (2FA)';
 
         $purposeDescription = $purpose === 'reset'
             ? 'យើងខ្ញុំបានទទួលសំណើសុំផ្លាស់ប្ដូរពាក្យសម្ងាត់ថ្មីសម្រាប់គណនីរបស់អ្នក។ សូមប្រើប្រាស់លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ខាងក្រោមនេះដើម្បីកំណត់ពាក្យសម្ងាត់ថ្មី៖'
             : 'ដើម្បីធានាសុវត្ថិភាពគណនីសិក្សារបស់អ្នក សូមបញ្ចូលលេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ខាងក្រោមនេះ ទៅក្នុងផ្ទាំងចូលប្រព័ន្ធ (Login)៖';
 
+        // ✅ ចំណងជើង Subject ខ្លី ស្អាត និងគ្មានបង្ហាញលេខកូដ [xxxxxx] នៅខាងមុខឡើយ
         $subjectTitle = $purpose === 'reset'
-            ? "[{$otp}] លេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ - វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR LMS)"
-            : "[{$otp}] លេខកូដផ្ទៀងផ្ទាត់សុវត្ថិភាព 2FA - វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR LMS)";
+            ? 'RPITSSVR LMS - កំណត់ពាក្យសម្ងាត់ឡើងវិញ'
+            : 'RPITSSVR LMS - លេខកូដផ្ទៀងផ្ទាត់សុវត្ថិភាព';
+
+        // ✅ ទាញយកតំណភ្ជាប់រូបសញ្ញាវិទ្យាស្ថាន (PRIT.png) សម្រាប់បង្ហាញក្នុងអ៊ីមែល
+        $frontendBase = rtrim((string) env('FRONTEND_URL', 'https://lmsrpitssvr.site'), '/');
+        if (str_contains($frontendBase, 'localhost') || str_contains($frontendBase, '127.0.0.1')) {
+            $frontendBase = 'https://lmsrpitssvr.site';
+        }
+        $logoUrl = htmlspecialchars(
+            trim((string) env('MAIL_LOGO_URL', $frontendBase . '/PRIT.png')),
+            ENT_QUOTES,
+            'UTF-8'
+        );
+
+        // ✅ បំបែកខ្ទង់លេខកូដឱ្យមានចន្លោះស្មើគ្នាស្អាត និងមិនធ្លាក់ចុះបន្ទាត់ដាច់ខាត
+        $formattedOtp = implode(' ', str_split($otp));
 
         $htmlContent = "
         <!DOCTYPE html>
@@ -301,52 +316,61 @@ class AuthController extends Controller
             <meta charset='UTF-8'>
             <meta name='viewport' content='width=device-width, initial-scale=1.0'>
         </head>
-        <body style='margin: 0; padding: 24px 12px; background-color: #f1f5f9; font-family: \"Kantumruy Pro\", \"Battambang\", \"Khmer OS Siemreap\", Arial, sans-serif; color: #1e293b;'>
-            <div style='max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 20px; overflow: hidden; border: 1px solid #cbd5e1; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);'>
+        <body style='margin: 0; padding: 16px 10px; background-color: #f1f5f9; font-family: \"Kantumruy Pro\", \"Battambang\", \"Khmer OS Siemreap\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Arial, sans-serif; color: #1e293b;'>
+            <div style='max-width: 520px; margin: 0 auto; background-color: #ffffff; border-radius: 24px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);'>
                 
-                <!-- ក្បាលសំបុត្រផ្លូវការរបស់វិទ្យាស្ថាន -->
-                <div style='background: linear-gradient(135deg, #1e3a8a 0%, #312e81 55%, #4f46e5 100%); padding: 28px 24px; text-align: center; border-bottom: 4px solid #f59e0b;'>
-                    <div style='display: inline-block; padding: 5px 14px; background-color: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; color: #fde047; font-size: 12px; font-weight: bold; margin-bottom: 10px;'>
+                <!-- ក្បាលសំបុត្រផ្លូវការរបស់វិទ្យាស្ថាន (មាន Logo សាលា និងមិនដាច់ពាក្យលើទូរស័ព្ទ) -->
+                <div style='background: linear-gradient(135deg, #1e3a8a 0%, #312e81 55%, #4338ca 100%); padding: 26px 18px; text-align: center; border-bottom: 4px solid #f59e0b;'>
+                    
+                    <!-- ✅ រូបសញ្ញាវិទ្យាស្ថាន (School Logo) -->
+                    <div style='margin: 0 auto 12px auto; width: 72px; height: 72px; background-color: #ffffff; border-radius: 18px; padding: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); border: 2px solid rgba(253, 224, 71, 0.65);'>
+                        <img src='{$logoUrl}' alt='RPITSSVR Logo' width='60' height='60' style='width: 60px; height: 60px; object-fit: contain; display: block; margin: 0 auto; border: 0;' />
+                    </div>
+
+                    <div style='display: inline-block; padding: 5px 14px; background-color: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; color: #fde047; font-size: 11.5px; font-weight: bold; margin-bottom: 10px;'>
                         ប្រព័ន្ធគ្រប់គ្រងការសិក្សាតាមអនឡាញ • RPITSSVR LMS
                     </div>
-                    <h1 style='margin: 0; color: #ffffff; font-size: 19px; font-weight: 800; line-height: 1.5;'>
-                        វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង
-                    </h1>
-                    <p style='margin: 4px 0 0 0; color: #c7d2fe; font-size: 12px; font-weight: 600;'>
+                    <div style='margin: 0; color: #ffffff; font-size: 17px; font-weight: 800; line-height: 1.65;'>
+                        <div style='white-space: nowrap;'>វិទ្យាស្ថានពហុបច្ចេកទេស</div>
+                        <div style='color: #fde047; white-space: nowrap;'>ភូមិភាគតេជោសែនស្វាយរៀង</div>
+                    </div>
+                    <p style='margin: 6px 0 0 0; color: #c7d2fe; font-size: 11px; font-weight: 600; letter-spacing: 0.3px;'>
                         Regional Polytechnic Institute Techo Sen Svay Rieng
                     </p>
                 </div>
 
                 <!-- ខ្លឹមសារសំបុត្រ -->
-                <div style='padding: 28px 24px;'>
-                    <div style='margin-bottom: 16px; padding: 8px 14px; background-color: #eef2ff; border-left: 4px solid #4f46e5; border-radius: 8px; color: #312e81; font-size: 13px; font-weight: bold;'>
+                <div style='padding: 24px 20px;'>
+                    <div style='margin-bottom: 16px; padding: 9px 14px; background-color: #eef2ff; border-left: 4px solid #4f46e5; border-radius: 8px; color: #312e81; font-size: 13px; font-weight: bold;'>
                         {$badgeTitle}
                     </div>
 
-                    <p style='margin: 0 0 10px 0; font-size: 15px; color: #0f172a;'>
-                        គោរពជូន <strong>{$fullName}</strong> <span style='color: #4f46e5; font-size: 13px;'>({$roleKh})</span>,
+                    <p style='margin: 0 0 10px 0; font-size: 14.5px; color: #0f172a; line-height: 1.6;'>
+                        គោរពជូន <strong>{$fullName}</strong> <span style='color: #4f46e5; font-size: 12.5px; font-weight: bold;'>({$roleKh})</span>,
                     </p>
 
-                    <p style='margin: 0 0 22px 0; font-size: 14px; color: #475569; line-height: 1.7;'>
+                    <p style='margin: 0 0 20px 0; font-size: 13.5px; color: #475569; line-height: 1.7;'>
                         {$purposeDescription}
                     </p>
 
-                    <!-- ប្រអប់លេខកូដ ៦ ខ្ទង់ -->
-                    <div style='margin: 22px 0; padding: 22px 16px; background: linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%); border: 2px dashed #3b82f6; border-radius: 16px; text-align: center;'>
-                        <div style='font-size: 12px; font-weight: bold; color: #475569; margin-bottom: 8px;'>
+                    <!-- ✅ ប្រអប់លេខកូដ ៦ ខ្ទង់ រចនាថ្មី ស្អាតប្រណិត និងនៅលើជួរតែមួយជានិច្ច -->
+                    <div style='margin: 22px 0; padding: 24px 14px; background: linear-gradient(145deg, #0f172a 0%, #1e1b4b 100%); border: 2px solid #4f46e5; border-radius: 20px; text-align: center; box-shadow: 0 10px 25px rgba(49, 46, 129, 0.2);'>
+                        <div style='font-size: 12px; font-weight: bold; color: #cbd5e1; margin-bottom: 14px;'>
                             🔑 លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់របស់អ្នកគឺ៖
                         </div>
-                        <div style='font-size: 36px; font-weight: 900; letter-spacing: 10px; color: #1d4ed8; font-family: \"Courier New\", Courier, monospace; padding-left: 10px;'>
-                            {$otp}
+                        <div style='display: inline-block; background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(253, 224, 71, 0.4); border-radius: 14px; padding: 12px 22px; margin-bottom: 14px;'>
+                            <span style='font-size: 28px; font-weight: 900; letter-spacing: 4px; color: #fde047; font-family: \"Courier New\", Courier, monospace; white-space: nowrap; display: inline-block; line-height: 1.2;'>
+                                {$formattedOtp}
+                            </span>
                         </div>
-                        <div style='margin-top: 8px; font-size: 12px; color: #d97706; font-weight: bold;'>
+                        <div style='font-size: 12px; color: #38bdf8; font-weight: bold;'>
                             ⏳ សុពលភាពប្រើប្រាស់៖ ៥ នាទី
                         </div>
                     </div>
 
                     <!-- តារាងព័ត៌មានលម្អិតនៃការចូលប្រព័ន្ធ -->
-                    <div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; margin-bottom: 20px; font-size: 12.5px; color: #334155; line-height: 1.8;'>
-                        <div style='font-weight: bold; color: #0f172a; margin-bottom: 4px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;'>
+                    <div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px 16px; margin-bottom: 18px; font-size: 12px; color: #334155; line-height: 1.85;'>
+                        <div style='font-weight: bold; color: #0f172a; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px;'>
                             📋 ព័ត៌មានលម្អិតនៃការស្នើសុំ៖
                         </div>
                         <div><strong>📧 អ៊ីមែលគណនី៖</strong> {$safeEmail}</div>
@@ -356,18 +380,18 @@ class AuthController extends Controller
                     </div>
 
                     <!-- សារព្រមានសុវត្ថិភាព -->
-                    <div style='padding: 12px 14px; background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 10px; color: #be123c; font-size: 12px; font-weight: bold; line-height: 1.6;'>
+                    <div style='padding: 12px 14px; background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 12px; color: #be123c; font-size: 11.5px; font-weight: bold; line-height: 1.6;'>
                         ⚠️ សម្គាល់សុវត្ថិភាព៖ ប្រសិនបើអ្នកមិនបានធ្វើការស្នើសុំនេះទេ សូមរក្សាលេខកូដនេះជាសម្ងាត់ និងកុំប្រាប់ទៅអ្នកដទៃដាច់ខាត!
                     </div>
                 </div>
 
                 <!-- ផ្នែកខាងក្រោម (Footer) -->
-                <div style='background-color: #0f172a; padding: 18px 24px; text-align: center; color: #94a3b8; font-size: 11.5px; line-height: 1.6;'>
-                    <div style='color: #f8fafc; font-weight: bold; margin-bottom: 4px;'>
+                <div style='background-color: #0f172a; padding: 18px 16px; text-align: center; color: #94a3b8; font-size: 11px; line-height: 1.65;'>
+                    <div style='color: #fde047; font-weight: bold; margin-bottom: 4px;'>
                         «TVET ជំនាញពិត ជីវិតប្រសើរ! រៀនឱ្យចប់ ឱ្យចេះ ឱ្យមានការងារ»
                     </div>
                     <div>
-                        &copy; {$yearNow} វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR)។ រក្សាសិទ្ធិគ្រប់យ៉ាង។
+                        &copy; {$yearNow} វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR)
                     </div>
                 </div>
 
