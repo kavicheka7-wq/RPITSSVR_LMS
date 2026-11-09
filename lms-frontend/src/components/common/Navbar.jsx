@@ -49,13 +49,11 @@ import {
 import api from '../../services/api';
 import logo from '../../assets/image/PRIT.png';
 
-// ✅ ហៅ Component កណ្ដឹងជូនដំណឹងពីហ្វាល់ NotificationBell.jsx មកប្រើ
 import NotificationBell from './NotificationBell';
 
 const EMPTY_USER_OBJ = Object.freeze({});
 const getTelegramLinkCacheKey = (email) => `lms_tg_link_url_${email || 'default'}`;
 
-// ✅ អនុគមន៍អានព័ត៌មាន User ពី LocalStorage ភ្លាមៗក្នុង 0ms ដើម្បីកុំឱ្យ Navbar លោតភ្លឹបភ្លែតពេល Refresh
 const readCachedUserSync = () => {
   try {
     const raw =
@@ -68,7 +66,6 @@ const readCachedUserSync = () => {
   }
 };
 
-// ✅ អនុគមន៍សម្រាប់បញ្ជូនសារជូនដំណឹងចូលទៅកាន់រូបកណ្ដឹង (NotificationBell) ដោយមិនប្រើ Toast លោតលើអេក្រង់
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
@@ -113,9 +110,6 @@ const pushLocalNotification = (notif) => {
 };
 
 const Navbar = () => {
-  // ==========================================================================
-  // 📌 ផ្នែកទី ១៖ ការប្រកាស STATES និង REFS ទាំងអស់របស់ NAVBAR
-  // ==========================================================================
   const {
     user: contextUser,
     logout,
@@ -127,13 +121,11 @@ const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // ✅ ប្រើប្រាស់ព័ត៌មាន User ភ្លាមៗក្នុង 0 វិនាទី (គាំទ្រទាំង Context និង LocalStorage Fallback)
   const user = useMemo(
     () => contextUser || readCachedUserSync() || EMPTY_USER_OBJ,
     [contextUser]
   );
 
-  // ✅ ពិនិត្យទំហំអេក្រង់ដើម្បី Render <NotificationBell /> តែ ១ ប៉ុណ្ណោះ
   const [isMobileViewport, setIsMobileViewport] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth < 768 : false
   );
@@ -154,7 +146,7 @@ const Navbar = () => {
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openMobileSubMenu, setOpenMobileSubMenu] = useState(() =>
-    location.pathname.startsWith('/students') ? '/students' : null
+    location.pathname.startsWith('/admin/students') ? '/admin/students' : null
   );
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -168,7 +160,6 @@ const Navbar = () => {
 
   const userEmail = useMemo(() => user?.email || '', [user?.email]);
 
-  // ✅ States សម្រាប់គ្រប់គ្រងការភ្ជាប់ និងការប្ដូរ Telegram នៅក្នុង Settings Modal
   const [isTelegramLinked, setIsTelegramLinked] = useState(() =>
     Boolean(user?.telegram_linked || user?.telegram_chat_id)
   );
@@ -199,15 +190,13 @@ const Navbar = () => {
   });
   const fileInputRef = useRef(null);
 
-  // ✅ បិទម៉ឺនុយទូរស័ព្ទដោយស្វ័យប្រវត្តិរាល់ពេលផ្លាស់ប្តូរទំព័រ
   useEffect(() => {
     setIsMobileMenuOpen(false);
-    if (location.pathname.startsWith('/students')) {
-      setOpenMobileSubMenu('/students');
+    if (location.pathname.startsWith('/admin/students')) {
+      setOpenMobileSubMenu('/admin/students');
     }
   }, [location.pathname]);
 
-  // កំណត់ avatarError ទៅ false វិញរាល់ពេលរូបភាព user ផ្លាស់ប្តូរ
   useEffect(() => {
     setAvatarError(false);
   }, [
@@ -217,7 +206,6 @@ const Navbar = () => {
     instantAvatarPreview,
   ]);
 
-  // ធ្វើបច្ចុប្បន្នភាពស្ថានភាព Telegram ពី User Object
   useEffect(() => {
     if (user?.telegram_linked || user?.telegram_chat_id) {
       setIsTelegramLinked(true);
@@ -225,7 +213,7 @@ const Navbar = () => {
   }, [user?.telegram_linked, user?.telegram_chat_id]);
 
   // ==========================================================================
-  // 📌 ផ្នែកទី ២៖ មុខងារប្តូរពណ៌ផ្ទៃអេក្រង់ ថ្ងៃ-យប់ (LIGHT / DARK MODE)
+  // 📌 មុខងារប្តូរពណ៌ផ្ទៃអេក្រង់ ថ្ងៃ-យប់ (LIGHT / DARK MODE)
   // ==========================================================================
   const [isDarkMode, setIsDarkMode] = useState(() => {
     try {
@@ -254,9 +242,6 @@ const Navbar = () => {
     setIsDarkMode((prev) => !prev);
   }, []);
 
-  // ==========================================================================
-  // 📌 ផ្នែកទី ៣៖ អនុគមន៍ជំនួយដែលបានបង្កើនល្បឿនដោយ useMemo & useCallback
-  // ==========================================================================
   const syncUserToStorage = useCallback((updatedUserObj) => {
     try {
       const str = JSON.stringify(updatedUserObj);
@@ -269,13 +254,11 @@ const Navbar = () => {
     }
   }, []);
 
-  // ✅ មុខងារចាកចេញពីប្រព័ន្ធភ្លាមៗក្នុង 0 វិនាទី (ពីគ្រប់ទំព័រទាំងអស់ ដោយមិនលោតឆ្លងកាត់ Dashboard ឡើយ)
   const handleInstantLogout = useCallback(() => {
     setIsMobileMenuOpen(false);
     setIsProfileModalOpen(false);
     setIsSettingsModalOpen(false);
 
-    // ១. លុបទិន្នន័យគណនីចេញពី localStorage និង Context ភ្លាមៗក្នុង 0ms មុនពេល Navigate
     try {
       localStorage.removeItem('token');
       localStorage.removeItem('teacher');
@@ -287,10 +270,8 @@ const Navbar = () => {
       setUser(null);
     }
 
-    // ២. បញ្ជូនត្រង់ទៅកាន់ទំព័រ Login ភ្លាមៗ
     navigate('/login', { replace: true });
 
-    // ៣. ហៅ logout() ទៅកាន់ Backend នៅផ្ទៃខាងក្រោយដោយស្ងាត់ៗ
     if (typeof logout === 'function') {
       logout();
     }
@@ -396,7 +377,6 @@ const Navbar = () => {
     [user]
   );
 
-  // ✅ ទាញយកស្ថានភាព និងតំណភ្ជាប់ Telegram (ទាញយក telegram_link_url ជានិច្ច ដើម្បីអាចចុចប្ដូរ Telegram ថ្មីបានគ្រប់ពេល)
   const syncTelegramStatus = useCallback(async () => {
     if (!userEmail) return;
     try {
@@ -439,7 +419,6 @@ const Navbar = () => {
     }
   }, [isSettingsModalOpen, syncTelegramStatus]);
 
-  // ✅ ពិនិត្យស្វ័យប្រវត្តិរៀងរាល់ ៣ វិនាទីម្ដង នៅពេលអ្នកប្រើចុចប៊ូតុងភ្ជាប់ ឬប្ដូរ Telegram ថ្មីក្នុង Settings Modal
   useEffect(() => {
     if (!isSettingsModalOpen || !waitingTelegramLink || !userEmail) {
       return;
@@ -494,8 +473,14 @@ const Navbar = () => {
     syncUserToStorage,
   ]);
 
-  // ✅ ប្រើប្រាស់ផ្លូវរួមស្អាតតែមួយ '/dashboard' សម្រាប់គ្រប់តួនាទីទាំងអស់
-  const dashboardPath = '/dashboard';
+  // ✅ កំណត់ផ្លូវទៅកាន់ Dashboard ឱ្យស៊ីគ្នាជាមួយ Login.jsx និង App Routes
+  const dashboardPath = useMemo(() => {
+    const role = String(userRoleRaw).toLowerCase();
+    if (role.includes('admin') || user?.role_id === 1) return '/admin/dashboard';
+    if (role.includes('teacher') || user?.role_id === 2) return '/teacher/dashboard';
+    if (role.includes('student') || user?.role_id === 3) return '/student/dashboard';
+    return '/';
+  }, [userRoleRaw, user?.role_id]);
 
   const userCreatedAtFormatted = useMemo(() => {
     if (user?.created_at) {
@@ -511,7 +496,7 @@ const Navbar = () => {
     return '—';
   }, [user?.created_at, language]);
 
-  // ✅ បញ្ជីម៉ឺនុយសម្រាប់ទូរស័ព្ទ (ប្រើប្រាស់ Clean URLs ដូចគ្នានឹង Sidebar)
+  // ✅ បញ្ជីម៉ឺនុយសម្រាប់ទូរស័ព្ទ (ត្រូវគ្នាជាមួយផ្លូវពេញលេញរបស់ប្រព័ន្ធ)
   const navItems = useMemo(() => {
     const role = String(userRoleRaw).toLowerCase();
     if (role.includes('admin') || user?.role_id === 1) {
@@ -519,38 +504,38 @@ const Navbar = () => {
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/dashboard',
+          path: '/admin/dashboard',
         },
         {
           name: t('ដេប៉ាតឺម៉ង់', 'Departments'),
           icon: BuildingLibraryIcon,
-          path: '/departments',
+          path: '/admin/departments',
         },
         {
           name: t('គ្រូបង្រៀន', 'Teachers'),
           icon: AcademicCapIcon,
-          path: '/teachers',
+          path: '/admin/teachers',
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/courses',
+          path: '/admin/courses',
         },
         {
           name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
           icon: UserGroupIcon,
-          path: '/students',
+          path: '/admin/students',
           children: [
-            { name: t('ឆ្នាំទី១', 'Year 1'), path: '/students/year-1' },
-            { name: t('ឆ្នាំទី២', 'Year 2'), path: '/students/year-2' },
-            { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/students/year-3' },
-            { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/students/year-4' },
+            { name: t('ឆ្នាំទី១', 'Year 1'), path: '/admin/students/year-1' },
+            { name: t('ឆ្នាំទី២', 'Year 2'), path: '/admin/students/year-2' },
+            { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/admin/students/year-3' },
+            { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/admin/students/year-4' },
           ],
         },
         {
           name: t('របាយការណ៍', 'Reports'),
           icon: ChartBarIcon,
-          path: '/reports',
+          path: '/admin/reports',
         },
       ];
     }
@@ -559,42 +544,42 @@ const Navbar = () => {
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/dashboard',
+          path: '/teacher/dashboard',
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/courses',
+          path: '/teacher/courses',
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
-          path: '/lessons',
+          path: '/teacher/lessons',
         },
         {
           name: t('សិស្ស', 'Students'),
           icon: UsersIcon,
-          path: '/students',
+          path: '/teacher/students',
         },
         {
           name: t('វត្តមានសិស្ស', 'Attendance'),
           icon: ClipboardDocumentListIcon,
-          path: '/attendance',
+          path: '/teacher/attendance',
         },
         {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
-          path: '/grades',
+          path: '/teacher/grades',
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
           icon: DocumentArrowUpIcon,
-          path: '/assignments',
+          path: '/teacher/assignments',
         },
         {
           name: t('កម្រងសំណួរ', 'Quizzes'),
           icon: PencilSquareIcon,
-          path: '/quizzes',
+          path: '/teacher/quizzes',
         },
       ];
     }
@@ -603,46 +588,43 @@ const Navbar = () => {
         {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
-          path: '/dashboard',
+          path: '/student/dashboard',
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
-          path: '/courses',
+          path: '/student/courses',
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
-          path: '/lessons',
+          path: '/student/lessons',
         },
         {
           name: t('វត្តមាន', 'Attendance'),
           icon: ClipboardDocumentListIcon,
-          path: '/attendance',
+          path: '/student/attendance',
         },
         {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
-          path: '/grades',
+          path: '/student/grades',
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
           icon: DocumentArrowUpIcon,
-          path: '/assignments',
+          path: '/student/assignments',
         },
         {
           name: t('កម្រងសំណួរ', 'Quizzes'),
           icon: PencilSquareIcon,
-          path: '/quizzes',
+          path: '/student/quizzes',
         },
       ];
     }
     return [];
   }, [userRoleRaw, user?.role_id, t]);
 
-  // ==========================================================================
-  // 📌 ផ្នែកទី ៤៖ អនុគមន៍គ្រប់គ្រងការកែប្រែប្រវត្តិរូប រូបភាព និងពាក្យសម្ងាត់ (0ms Optimistic UI)
-  // ==========================================================================
   const openProfileModal = useCallback(() => {
     setProfileData({
       first_name:
@@ -753,7 +735,6 @@ const Navbar = () => {
     }
   };
 
-  // ✅ ដូររូបថតភ្លាមៗក្នុង 0 វិនាទី (Instant Blob Preview)
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -836,7 +817,6 @@ const Navbar = () => {
     }
   };
 
-  // ✅ រក្សាទុកការកែប្រែឈ្មោះ/ទូរស័ព្ទភ្លាមៗ (Optimistic Update)
   const handleProfileUpdate = async () => {
     if (!profileData.first_name.trim()) {
       return;
@@ -899,14 +879,8 @@ const Navbar = () => {
     }
   };
 
-  // ==========================================================================
-  // 📌 ផ្នែកទី ៥៖ ការបង្ហាញផ្ទាំង UI លើអេក្រង់ (MAIN RENDER JSX - 0ms Instant UI)
-  // ==========================================================================
   return (
     <>
-      {/* ------------------------------------------------------------------ */}
-      {/* 5.1. របារខាងលើសម្រាប់កុំព្យូទ័រ និងទូរស័ព្ទ (TOP NAVBAR)             */}
-      {/* ------------------------------------------------------------------ */}
       <nav
         className={`sticky top-0 z-50 shadow-xl transition-colors duration-200 border-b ${
           isStudent
@@ -916,7 +890,6 @@ const Navbar = () => {
       >
         <div className="px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
-            {/* ខាងឆ្វេង៖ រូបសញ្ញា (Logo) និងឈ្មោះប្រព័ន្ធ */}
             <div className="flex items-center">
               <Link
                 to={dashboardPath}
@@ -956,11 +929,9 @@ const Navbar = () => {
               </Link>
             </div>
 
-            {/* ខាងស្តាំសម្រាប់អេក្រង់កុំព្យូទ័រ ( Desktop Buttons ) */}
             <div className="hidden md:flex md:items-center space-x-3">
               {!isMobileViewport && <NotificationBell />}
 
-              {/* ប៊ូតុងប្តូរ ថ្ងៃ-យប់ */}
               <button
                 type="button"
                 onClick={toggleTheme}
@@ -986,7 +957,6 @@ const Navbar = () => {
                 )}
               </button>
 
-              {/* ប៊ូតុងប្តូរភាសា (Icon + អក្សរកាត់ KH / EN) */}
               <button
                 type="button"
                 onClick={toggleLanguage}
@@ -1005,7 +975,6 @@ const Navbar = () => {
                 </span>
               </button>
 
-              {/* រូបថតប្រវត្តិរូប (បើកភ្លាមៗក្នុង 0ms គ្មាន Transition Delay) */}
               <Menu as="div" className="relative ml-1.5">
                 <Menu.Button
                   className="group relative flex items-center justify-center rounded-full focus:outline-none cursor-pointer"
@@ -1031,7 +1000,7 @@ const Navbar = () => {
                   </div>
                 </Menu.Button>
 
-                <Menu.Items className="origin-top-right absolute right-0 mt-2.5 w-60 rounded-2xl shadow-2xl py-1.5 bg-white ring-1 ring-black/5 focus:outline-none overflow-hidden z-50 border border-gray-100">
+                <Menu.Items className="nav-menu-dropdown origin-top-right absolute right-0 mt-2.5 w-60 rounded-2xl shadow-2xl py-1.5 bg-white ring-1 ring-black/5 focus:outline-none overflow-hidden z-50 border border-gray-100">
                   <div
                     className={`nav-dropdown-header px-4 py-3 border-b border-gray-100 ${
                       isStudent
@@ -1095,7 +1064,7 @@ const Navbar = () => {
                           active
                             ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600'
                             : 'text-rose-500'
-                        } flex w-full items-center px-4 py-2.5 text-sm font-medium border-t border-gray-100 transition-colors cursor-pointer`}
+                        } nav-soft-divider flex w-full items-center px-4 py-2.5 text-sm font-medium border-t border-gray-100 transition-colors cursor-pointer`}
                       >
                         <ArrowRightOnRectangleIcon
                           className={`h-5 w-5 mr-3 ${
@@ -1110,7 +1079,6 @@ const Navbar = () => {
               </Menu>
             </div>
 
-            {/* ខាងស្តាំសម្រាប់អេក្រង់ទូរស័ព្ទ ( Mobile Header Buttons ) */}
             <div className="flex items-center md:hidden gap-1.5">
               {isMobileViewport && <NotificationBell isMobile={true} />}
 
@@ -1162,9 +1130,6 @@ const Navbar = () => {
           </div>
         </div>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* 5.2. ម៉ឺនុយទម្លាក់ចុះសម្រាប់អេក្រង់ទូរស័ព្ទ (MOBILE MENU DROPDOWN)  */}
-        {/* ---------------------------------------------------------------- */}
         {isMobileMenuOpen && (
           <div
             className={`md:hidden border-t backdrop-blur-md max-h-[85vh] overflow-y-auto ${
@@ -1376,7 +1341,7 @@ const Navbar = () => {
       </nav>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 5.3. ផ្ទាំង MODAL ប្រវត្តិរូប (PROFILE MODAL - បើកភ្លាមក្នុង 0ms)       */}
+      {/* ផ្ទាំង MODAL ប្រវត្តិរូប (PROFILE MODAL)                             */}
       {/* ------------------------------------------------------------------ */}
       <Dialog
         as="div"
@@ -1390,8 +1355,8 @@ const Navbar = () => {
         />
 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
-          <Dialog.Panel className="w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-            <div className="flex justify-between items-center p-6 sm:p-8 border-b border-gray-100 shrink-0">
+          <Dialog.Panel className="nav-modal-panel w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
+            <div className="nav-soft-divider flex justify-between items-center p-6 sm:p-8 border-b border-gray-100 shrink-0">
               <Dialog.Title
                 as="h3"
                 className="text-xl font-extrabold text-gray-900 flex items-center gap-3"
@@ -1617,7 +1582,7 @@ const Navbar = () => {
               )}
             </div>
 
-            <div className="p-6 sm:p-8 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50 shrink-0">
+            <div className="nav-soft-divider p-6 sm:p-8 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50 shrink-0">
               {!isEditing ? (
                 <>
                   <button
@@ -1667,7 +1632,7 @@ const Navbar = () => {
       </Dialog>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 5.4. ផ្ទាំង MODAL ការកំណត់ (SETTINGS MODAL - បើកភ្លាមក្នុង 0ms)        */}
+      {/* ផ្ទាំង MODAL ការកំណត់ (SETTINGS MODAL)                               */}
       {/* ------------------------------------------------------------------ */}
       <Dialog
         as="div"
@@ -1681,8 +1646,8 @@ const Navbar = () => {
         />
 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
-          <Dialog.Panel className="w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-            <div className="flex justify-between items-center p-6 sm:p-8 border-b border-gray-100 shrink-0">
+          <Dialog.Panel className="nav-modal-panel w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
+            <div className="nav-soft-divider flex justify-between items-center p-6 sm:p-8 border-b border-gray-100 shrink-0">
               <Dialog.Title
                 as="h3"
                 className="text-xl font-extrabold text-gray-900 flex items-center gap-3"
@@ -1746,7 +1711,7 @@ const Navbar = () => {
                 </section>
 
                 {/* ២. ជម្រើសពណ៌ផ្ទៃអេក្រង់ ថ្ងៃ-យប់ */}
-                <section className="pt-6 border-t border-gray-100">
+                <section className="nav-soft-divider pt-6 border-t border-gray-100">
                   <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     {isDarkMode ? (
                       <MoonIcon className="h-5 w-5 text-indigo-600" />
@@ -1785,8 +1750,8 @@ const Navbar = () => {
                   </div>
                 </section>
 
-                {/* ✅ ៣. ភ្ជាប់ ឬប្ដូរគណនី Telegram (គាំទ្រការប្ដូរ Telegram ថ្មីគ្រប់ពេល) */}
-                <section className="pt-6 border-t border-gray-100">
+                {/* ✅ ៣. ភ្ជាប់ ឬប្ដូរគណនី Telegram */}
+                <section className="nav-soft-divider pt-6 border-t border-gray-100">
                   <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <PaperAirplaneIcon className="h-5 w-5 text-sky-500 -rotate-45" />
                     {t(
@@ -1817,7 +1782,7 @@ const Navbar = () => {
 
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
                       {isTelegramLinked && (
-                        <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <span className="nav-connected-badge inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
                           <CheckBadgeIcon className="h-4 w-4 text-emerald-600 shrink-0" />
                           <span>{t('បានភ្ជាប់រួចរាល់', 'Connected')}</span>
                         </span>
@@ -1831,7 +1796,7 @@ const Navbar = () => {
                           onClick={() => setWaitingTelegramLink(true)}
                           className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-colors cursor-pointer ${
                             isTelegramLinked
-                              ? 'bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 shadow-2xs'
+                              ? 'nav-switch-tg-btn bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 shadow-2xs'
                               : 'text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm'
                           }`}
                         >
@@ -1857,7 +1822,7 @@ const Navbar = () => {
                 </section>
 
                 {/* ៤. ព័ត៌មានគណនី */}
-                <section className="pt-6 border-t border-gray-100">
+                <section className="nav-soft-divider pt-6 border-t border-gray-100">
                   <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <UserGroupIcon className="h-5 w-5 text-blue-600" />
                     {t('ព័ត៌មានគណនី', 'Account Information')}
@@ -1899,7 +1864,7 @@ const Navbar = () => {
                 </section>
 
                 {/* ៥. ផ្លាស់ប្តូរពាក្យសម្ងាត់ */}
-                <section className="pt-6 border-t border-gray-100">
+                <section className="nav-soft-divider pt-6 border-t border-gray-100">
                   <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <KeyIcon className="h-5 w-5 text-blue-600" />
                     {t('កែប្រែពាក្យសម្ងាត់', 'Change Password')}
@@ -2012,7 +1977,7 @@ const Navbar = () => {
               </div>
             </div>
 
-            <div className="p-6 sm:p-8 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
+            <div className="nav-soft-divider p-6 sm:p-8 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
                 onClick={closeSettingsModal}
@@ -2048,8 +2013,13 @@ const Navbar = () => {
         html.dark body, html.dark .bg-gray-50 { background-color: #0f172a !important; color: #f1f5f9 !important; }
         html.dark .bg-white { background-color: #1e293b !important; color: #f1f5f9 !important; }
         html.dark .bg-gray-50\\/50, html.dark .bg-gray-50\\/70, html.dark .bg-gray-50\\/30 { background-color: #0f172a !important; }
+        html.dark .nav-menu-dropdown, html.dark .nav-modal-panel { background-color: #1e293b !important; border-color: #334155 !important; }
+        html.dark .nav-soft-divider { border-color: rgba(51, 65, 85, 0.7) !important; }
         html.dark .nav-dropdown-header, html.dark .nav-icon-badge, html.dark .nav-role-pill, html.dark .nav-edit-box { background: rgba(30, 58, 138, 0.25) !important; border-color: rgba(59, 130, 246, 0.3) !important; color: #93c5fd !important; }
         html.dark .nav-status-banner { background: rgba(6, 78, 59, 0.25) !important; border-color: rgba(16, 185, 129, 0.3) !important; }
+        html.dark .nav-connected-badge { background-color: rgba(16, 185, 129, 0.15) !important; border-color: rgba(16, 185, 129, 0.35) !important; color: #34d399 !important; }
+        html.dark .nav-switch-tg-btn { background-color: #0f172a !important; border-color: rgba(56, 189, 248, 0.35) !important; color: #38bdf8 !important; }
+        html.dark .nav-switch-tg-btn:hover { background-color: rgba(56, 189, 248, 0.15) !important; }
         html.dark .nav-option-btn { background-color: #0f172a !important; border-color: #334155 !important; color: #cbd5e1 !important; }
         html.dark .nav-option-active { background-color: rgba(37, 99, 235, 0.2) !important; border-color: #3b82f6 !important; color: #60a5fa !important; }
         html.dark .text-gray-900, html.dark .text-gray-800 { color: #f8fafc !important; }

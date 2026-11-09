@@ -178,7 +178,7 @@ class AuthController extends Controller
     }
 
     /**
-     * HELPER METHOD: ផ្ញើលេខកូដ 2FA ឬលេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ (៦ ខ្ទង់) ទៅកាន់ Telegram Bot
+     * ✅ HELPER METHOD: ផ្ញើលេខកូដ 2FA ឬលេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ (៦ ខ្ទង់) ទៅកាន់ Telegram Bot (ទម្រង់ផ្លូវការ)
      */
     private function sendTelegramOtpAlert(User $user, string $otp, Request $request, string $purpose = '2fa'): bool
     {
@@ -189,28 +189,43 @@ class AuthController extends Controller
             return false;
         }
 
-        $fullName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: 'អ្នកប្រើប្រាស់';
-        $roleName = $user->role?->role_name ?? 'User';
-        $ip = $request->ip() ?? 'Unknown IP';
+        $fullName = htmlspecialchars(trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: 'អ្នកប្រើប្រាស់', ENT_QUOTES, 'UTF-8');
+        $rawRole = $user->role?->role_name ?? 'User';
+
+        $roleKh = match (strtolower($rawRole)) {
+            'admin' => 'អ្នកគ្រប់គ្រងប្រព័ន្ធ (Admin)',
+            'teacher' => 'គ្រូបច្ចេកទេស (Teacher)',
+            'student' => 'សិក្ខាកាម/និស្សិត (Student)',
+            default => htmlspecialchars($rawRole, ENT_QUOTES, 'UTF-8'),
+        };
+
+        $email = htmlspecialchars((string) $user->email, ENT_QUOTES, 'UTF-8');
+        $ip = htmlspecialchars((string) ($request->ip() ?? 'Unknown IP'), ENT_QUOTES, 'UTF-8');
         $time = now()->format('d-m-Y H:i:s');
 
-        $headerTitle = $purpose === 'reset'
-            ? "🔐 *RPITSSVR LMS - លេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ*"
-            : "🛡️ *RPITSSVR LMS - ផ្ទៀងផ្ទាត់សុវត្ថិភាព 2FA*";
+        $purposeTitle = $purpose === 'reset'
+            ? "🔐 <b>សំណើកំណត់ពាក្យសម្ងាត់ឡើងវិញ (Password Reset)</b>"
+            : "📌 <b>ការផ្ទៀងផ្ទាត់សុវត្ថិភាពចូលប្រព័ន្ធ (2FA)</b>";
 
-        $text = "{$headerTitle}\n\n"
-              . "👤 គណនី៖ *{$fullName}* ({$roleName})\n"
-              . "📧 អ៊ីមែល៖ `{$user->email}`\n"
-              . "🔑 លេខកូដ ៦ ខ្ទង់៖ *`{$otp}`*\n\n"
-              . "🌐 IP៖ `{$ip}`\n"
-              . "🕒 ម៉ោង៖ `{$time}`\n"
-              . "🔒 _សូមកុំប្រាប់លេខកូដនេះទៅអ្នកដទៃដាច់ខាត!_";
+        $text = "🏛️ <b>វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង</b>\n"
+              . "🛡️ <b>ប្រព័ន្ធគ្រប់គ្រងការសិក្សាតាមអនឡាញ (RPITSSVR LMS)</b>\n"
+              . "━━━━━━━━━━━━━━━━━━\n"
+              . "{$purposeTitle}\n\n"
+              . "👤 <b>គណនី៖</b> {$fullName} ({$roleKh})\n"
+              . "📧 <b>អ៊ីមែល៖</b> <code>{$email}</code>\n\n"
+              . "🔑 <b>លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់៖</b>\n"
+              . "👉 <code>{$otp}</code>  <i>(ចុចលើលេខកូដដើម្បីចម្លង)</i>\n\n"
+              . "⏳ <b>សុពលភាព៖</b> ៥ នាទី\n"
+              . "🌐 <b>អាសយដ្ឋាន IP៖</b> <code>{$ip}</code>\n"
+              . "🕒 <b>កាលបរិច្ឆេទ៖</b> <code>{$time}</code>\n"
+              . "━━━━━━━━━━━━━━━━━━\n"
+              . "⚠️ <i>សម្គាល់៖ សូមរក្សាលេខកូដនេះជាសម្ងាត់ និងកុំប្រាប់ទៅអ្នកដទៃដាច់ខាត!</i>";
 
         try {
             $response = Http::timeout(5)->post("https://api.telegram.org/bot{$botToken}/sendMessage", [
                 'chat_id' => $chatId,
                 'text' => $text,
-                'parse_mode' => 'Markdown',
+                'parse_mode' => 'HTML',
             ]);
 
             return $response->successful();
@@ -221,7 +236,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ទៅកាន់ទាំង Email និង Telegram របស់អ្នកប្រើប្រាស់ម្នាក់ៗដែល Login ចូលផ្ទាល់
+     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ទៅកាន់ទាំង Email (ទម្រង់ផ្លូវការរបស់សាលា) និង Telegram របស់អ្នកប្រើប្រាស់ផ្ទាល់
      */
     private function generateAndSendOtp(User $user, Request $request, string $purpose = '2fa'): array
     {
@@ -235,11 +250,21 @@ class AuthController extends Controller
         Cache::put($cacheKey, $otp, now()->addMinutes(5));
         Cache::forget($attemptKey);
 
-        $fullName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: 'អ្នកប្រើប្រាស់';
-        $roleName = $user->role?->role_name ?? 'User';
-        $ipAddress = $request->ip() ?? 'Unknown IP';
-        $userAgent = substr((string) $request->userAgent(), 0, 120) ?: 'Unknown Device';
+        $fullName = htmlspecialchars(trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: 'អ្នកប្រើប្រាស់', ENT_QUOTES, 'UTF-8');
+        $rawRole = $user->role?->role_name ?? 'User';
+
+        $roleKh = match (strtolower($rawRole)) {
+            'admin' => 'អ្នកគ្រប់គ្រងប្រព័ន្ធ (Admin)',
+            'teacher' => 'គ្រូបច្ចេកទេស (Teacher)',
+            'student' => 'សិក្ខាកាម/និស្សិត (Student)',
+            default => htmlspecialchars($rawRole, ENT_QUOTES, 'UTF-8'),
+        };
+
+        $safeEmail = htmlspecialchars((string) $user->email, ENT_QUOTES, 'UTF-8');
+        $ipAddress = htmlspecialchars((string) ($request->ip() ?? 'Unknown IP'), ENT_QUOTES, 'UTF-8');
+        $userAgent = htmlspecialchars(substr((string) $request->userAgent(), 0, 120) ?: 'Unknown Device', ENT_QUOTES, 'UTF-8');
         $timeNow = now()->format('d-m-Y H:i:s');
+        $yearNow = now()->format('Y');
 
         $telegramSent = false;
         $mailSent = false;
@@ -256,30 +281,99 @@ class AuthController extends Controller
             }
         }
 
-        // ២. ផ្ញើទៅកាន់ Email របស់អ្នកប្រើប្រាស់ដែលកំពុង Login ជានិច្ច (គ្រប់ពេល Login និង Reset Password)
-        $purposeLabel = $purpose === 'reset'
-            ? 'សម្រាប់កំណត់ពាក្យសម្ងាត់ថ្មីរបស់អ្នក'
-            : 'សម្រាប់ចូលប្រើប្រាស់ប្រព័ន្ធរបស់អ្នក';
+        // ២. រៀបចំទម្រង់ Email ផ្លូវការរបស់វិទ្យាស្ថាន (HTML Email Template)
+        $badgeTitle = $purpose === 'reset'
+            ? '🔐 សំណើកំណត់ពាក្យសម្ងាត់ឡើងវិញ (Password Reset)'
+            : '🛡️ ការផ្ទៀងផ្ទាត់សុវត្ថិភាពចូលប្រព័ន្ធ (2FA Security)';
+
+        $purposeDescription = $purpose === 'reset'
+            ? 'យើងខ្ញុំបានទទួលសំណើសុំផ្លាស់ប្ដូរពាក្យសម្ងាត់ថ្មីសម្រាប់គណនីរបស់អ្នក។ សូមប្រើប្រាស់លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ខាងក្រោមនេះដើម្បីកំណត់ពាក្យសម្ងាត់ថ្មី៖'
+            : 'ដើម្បីធានាសុវត្ថិភាពគណនីសិក្សារបស់អ្នក សូមបញ្ចូលលេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ខាងក្រោមនេះ ទៅក្នុងផ្ទាំងចូលប្រព័ន្ធ (Login)៖';
 
         $subjectTitle = $purpose === 'reset'
-            ? 'លេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ (៦ ខ្ទង់) - RPITSSVR LMS'
-            : 'លេខកូដផ្ទៀងផ្ទាត់សុវត្ថិភាព 2FA (៦ ខ្ទង់) - RPITSSVR LMS';
+            ? "[{$otp}] លេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ - វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR LMS)"
+            : "[{$otp}] លេខកូដផ្ទៀងផ្ទាត់សុវត្ថិភាព 2FA - វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR LMS)";
 
         $htmlContent = "
-            <div style='font-family: \"Kantumruy Pro\", \"Battambang\", sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background: #ffffff;'>
-                <h2 style='color: #1e3a8a; margin-bottom: 8px; font-size: 18px;'>វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR LMS)</h2>
-                <p style='color: #334155; font-size: 14px;'>សួស្តី <strong>{$fullName}</strong> ({$roleName}),</p>
-                <p style='color: #475569; font-size: 14px; line-height: 1.6;'>នេះគឺជាលេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ {$purposeLabel}៖</p>
-                <div style='margin: 20px 0; padding: 18px; background: #eff6ff; border: 2px dashed #3b82f6; border-radius: 12px; text-align: center;'>
-                    <span style='font-size: 32px; font-weight: 900; letter-spacing: 8px; color: #1d4ed8;'>{$otp}</span>
+        <!DOCTYPE html>
+        <html lang='km'>
+        <head>
+            <meta charset='UTF-8'>
+            <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+        </head>
+        <body style='margin: 0; padding: 24px 12px; background-color: #f1f5f9; font-family: \"Kantumruy Pro\", \"Battambang\", \"Khmer OS Siemreap\", Arial, sans-serif; color: #1e293b;'>
+            <div style='max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 20px; overflow: hidden; border: 1px solid #cbd5e1; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);'>
+                
+                <!-- ក្បាលសំបុត្រផ្លូវការរបស់វិទ្យាស្ថាន -->
+                <div style='background: linear-gradient(135deg, #1e3a8a 0%, #312e81 55%, #4f46e5 100%); padding: 28px 24px; text-align: center; border-bottom: 4px solid #f59e0b;'>
+                    <div style='display: inline-block; padding: 5px 14px; background-color: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; color: #fde047; font-size: 12px; font-weight: bold; margin-bottom: 10px;'>
+                        ប្រព័ន្ធគ្រប់គ្រងការសិក្សាតាមអនឡាញ • RPITSSVR LMS
+                    </div>
+                    <h1 style='margin: 0; color: #ffffff; font-size: 19px; font-weight: 800; line-height: 1.5;'>
+                        វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង
+                    </h1>
+                    <p style='margin: 4px 0 0 0; color: #c7d2fe; font-size: 12px; font-weight: 600;'>
+                        Regional Polytechnic Institute Techo Sen Svay Rieng
+                    </p>
                 </div>
-                <div style='background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 16px; font-size: 12px; color: #475569;'>
-                    <div><strong>🕒 ម៉ោងស្នើសុំ៖</strong> {$timeNow}</div>
-                    <div><strong>🌐 អាសយដ្ឋាន IP៖</strong> {$ipAddress}</div>
-                    <div><strong>💻 ឧបករណ៍៖</strong> {$userAgent}</div>
+
+                <!-- ខ្លឹមសារសំបុត្រ -->
+                <div style='padding: 28px 24px;'>
+                    <div style='margin-bottom: 16px; padding: 8px 14px; background-color: #eef2ff; border-left: 4px solid #4f46e5; border-radius: 8px; color: #312e81; font-size: 13px; font-weight: bold;'>
+                        {$badgeTitle}
+                    </div>
+
+                    <p style='margin: 0 0 10px 0; font-size: 15px; color: #0f172a;'>
+                        គោរពជូន <strong>{$fullName}</strong> <span style='color: #4f46e5; font-size: 13px;'>({$roleKh})</span>,
+                    </p>
+
+                    <p style='margin: 0 0 22px 0; font-size: 14px; color: #475569; line-height: 1.7;'>
+                        {$purposeDescription}
+                    </p>
+
+                    <!-- ប្រអប់លេខកូដ ៦ ខ្ទង់ -->
+                    <div style='margin: 22px 0; padding: 22px 16px; background: linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%); border: 2px dashed #3b82f6; border-radius: 16px; text-align: center;'>
+                        <div style='font-size: 12px; font-weight: bold; color: #475569; margin-bottom: 8px;'>
+                            🔑 លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់របស់អ្នកគឺ៖
+                        </div>
+                        <div style='font-size: 36px; font-weight: 900; letter-spacing: 10px; color: #1d4ed8; font-family: \"Courier New\", Courier, monospace; padding-left: 10px;'>
+                            {$otp}
+                        </div>
+                        <div style='margin-top: 8px; font-size: 12px; color: #d97706; font-weight: bold;'>
+                            ⏳ សុពលភាពប្រើប្រាស់៖ ៥ នាទី
+                        </div>
+                    </div>
+
+                    <!-- តារាងព័ត៌មានលម្អិតនៃការចូលប្រព័ន្ធ -->
+                    <div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; margin-bottom: 20px; font-size: 12.5px; color: #334155; line-height: 1.8;'>
+                        <div style='font-weight: bold; color: #0f172a; margin-bottom: 4px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;'>
+                            📋 ព័ត៌មានលម្អិតនៃការស្នើសុំ៖
+                        </div>
+                        <div><strong>📧 អ៊ីមែលគណនី៖</strong> {$safeEmail}</div>
+                        <div><strong>🕒 កាលបរិច្ឆេទ និងម៉ោង៖</strong> {$timeNow}</div>
+                        <div><strong>🌐 អាសយដ្ឋាន IP៖</strong> {$ipAddress}</div>
+                        <div><strong>💻 ឧបករណ៍៖</strong> {$userAgent}</div>
+                    </div>
+
+                    <!-- សារព្រមានសុវត្ថិភាព -->
+                    <div style='padding: 12px 14px; background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 10px; color: #be123c; font-size: 12px; font-weight: bold; line-height: 1.6;'>
+                        ⚠️ សម្គាល់សុវត្ថិភាព៖ ប្រសិនបើអ្នកមិនបានធ្វើការស្នើសុំនេះទេ សូមរក្សាលេខកូដនេះជាសម្ងាត់ និងកុំប្រាប់ទៅអ្នកដទៃដាច់ខាត!
+                    </div>
                 </div>
-                <p style='color: #e11d48; font-size: 12px; font-weight: bold; line-height: 1.5;'>⚠️ ប្រសិនបើអ្នកមិនបានធ្វើការស្នើសុំនេះទេ សូមកុំប្រាប់លេខកូដនេះទៅអ្នកដទៃដាច់ខាត។</p>
+
+                <!-- ផ្នែកខាងក្រោម (Footer) -->
+                <div style='background-color: #0f172a; padding: 18px 24px; text-align: center; color: #94a3b8; font-size: 11.5px; line-height: 1.6;'>
+                    <div style='color: #f8fafc; font-weight: bold; margin-bottom: 4px;'>
+                        «TVET ជំនាញពិត ជីវិតប្រសើរ! រៀនឱ្យចប់ ឱ្យចេះ ឱ្យមានការងារ»
+                    </div>
+                    <div>
+                        &copy; {$yearNow} វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR)។ រក្សាសិទ្ធិគ្រប់យ៉ាង។
+                    </div>
+                </div>
+
             </div>
+        </body>
+        </html>
         ";
 
         // កំណត់ Gmail SMTP ដោយផ្ទាល់ និងបិទ verify_peer ដើម្បីកុំឱ្យជាប់គាំង SSL Certificate លើ Local/Server
@@ -325,7 +419,7 @@ class AuthController extends Controller
             $mailSent = false;
         }
 
-        Log::info("6-Digit OTP ({$purpose}) for [{$user->email}] ({$roleName}) via [{$deliveryChannel}]: {$otp}");
+        Log::info("6-Digit OTP ({$purpose}) for [{$user->email}] ({$rawRole}) via [{$deliveryChannel}]: {$otp}");
 
         $shouldExposeDevOtp = !$telegramSent && !$mailSent;
 

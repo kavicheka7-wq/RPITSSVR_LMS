@@ -3,7 +3,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import { toast } from 'react-toastify';
 import api from '../../services/api';
 import {
   UserIcon,
@@ -24,7 +23,6 @@ import {
   ExclamationCircleIcon,
 } from '@heroicons/react/24/outline';
 
-// ទាញយករូបសញ្ញា (Logo) របស់វិទ្យាស្ថាន
 import logo from '../../assets/image/PRIT.png';
 
 const ADMIN_SETUP_STORAGE_KEY = 'lms_initial_admin_initialized';
@@ -35,9 +33,28 @@ const checkIsNightTime = () => {
   return hour >= 18 || hour < 6;
 };
 
-// ✅ កំណត់ផ្លូវទៅកាន់ '/dashboard' រួមតែមួយគត់ សម្រាប់គ្រប់តួនាទី
-const resolveTargetDashboardPath = () => {
-  return '/dashboard';
+// ✅ កំណត់ផ្លូវទៅកាន់ Dashboard ឱ្យត្រូវតាមតួនាទីដូចក្នុង Login.jsx
+const resolveTargetDashboardPath = (userObj) => {
+  const rawRole = (
+    userObj?.role?.role_name ||
+    userObj?.role?.name ||
+    userObj?.role_name ||
+    (typeof userObj?.role === 'string' ? userObj.role : '') ||
+    ''
+  )
+    .toString()
+    .toLowerCase();
+
+  if (rawRole.includes('admin') || userObj?.role_id === 1 || String(userObj?.role_id) === '1') {
+    return '/admin/dashboard';
+  }
+  if (rawRole.includes('teacher') || userObj?.role_id === 2) {
+    return '/teacher/dashboard';
+  }
+  if (rawRole.includes('student') || userObj?.role_id === 3) {
+    return '/student/dashboard';
+  }
+  return '/admin/dashboard';
 };
 
 const EMPTY_FIELD_ERRORS = Object.freeze({
@@ -58,18 +75,15 @@ const Register = () => {
     role_id: '1',
   });
 
-  // ✅ States សម្រាប់បង្ហាញស៊ុមពណ៌ក្រហម និងសារកំហុសនៅខាងក្រោមប្រអប់នីមួយៗ
   const [fieldErrors, setFieldErrors] = useState(EMPTY_FIELD_ERRORS);
   const [loading, setLoading] = useState(false);
 
-  // ✅ Refs សម្រាប់ Auto-Focus ទៅកាន់ប្រអប់ដែលខុសដោយស្វ័យប្រវត្តិ
   const firstNameInputRef = useRef(null);
   const lastNameInputRef = useRef(null);
   const emailInputRef = useRef(null);
   const passwordInputRef = useRef(null);
   const confirmPasswordInputRef = useRef(null);
 
-  // ✅ អានស្ថានភាព Admin Setup ពី localStorage ភ្លាមៗក្នុង 0ms
   const [isAlreadyInitialized, setIsAlreadyInitialized] = useState(() => {
     try {
       return localStorage.getItem(ADMIN_SETUP_STORAGE_KEY) === 'true';
@@ -85,16 +99,12 @@ const Register = () => {
   const { language, toggleLanguage, t } = useLanguage();
   const navigate = useNavigate();
 
-  // ✅ បើអ្នកប្រើប្រាស់បាន Login រួចហើយ (មិនទាន់ Logout) ឱ្យរត់ចូលទៅកាន់ Dashboard ភ្លាមៗក្នុង 0ms
   useEffect(() => {
     if (isAuthenticated && user) {
       navigate(resolveTargetDashboardPath(user), { replace: true });
     }
   }, [isAuthenticated, user, navigate]);
 
-  // ==========================================================================
-  // 📌 មុខងារប្តូរពណ៌ផ្ទៃអេក្រង់ ថ្ងៃ-យប់ ដោយស្វ័យប្រវត្តិ (AUTO BY TIME)
-  // ==========================================================================
   const [themePref, setThemePref] = useState('auto');
   const [isDarkMode, setIsDarkMode] = useState(() => checkIsNightTime());
 
@@ -137,15 +147,7 @@ const Register = () => {
     });
   }, []);
 
-  // ✅ ពិនិត្យមើលក្នុង LocalStorage ជាមុន (0ms) បើមិនទាន់មានទើបហៅ API `/roles`
   useEffect(() => {
-    try {
-      if (localStorage.getItem(ADMIN_SETUP_STORAGE_KEY) === 'true') {
-        setIsAlreadyInitialized(true);
-        return;
-      }
-    } catch {}
-
     let isMounted = true;
 
     const checkFirstTimeAdminSetup = async () => {
@@ -159,7 +161,6 @@ const Register = () => {
           ? data
           : [];
 
-        // ១. បើ Backend ប្រាប់ច្បាស់ថាមាន Admin រួចហើយ
         if (data.has_admin === true || data.admin_exists === true) {
           try {
             localStorage.setItem(ADMIN_SETUP_STORAGE_KEY, 'true');
@@ -168,7 +169,6 @@ const Register = () => {
           return;
         }
 
-        // ២. បើ Backend ប្រាប់ថាមិនទាន់មាន Admin
         if (data.has_admin === false || data.admin_exists === false) {
           try {
             localStorage.removeItem(ADMIN_SETUP_STORAGE_KEY);
@@ -192,7 +192,6 @@ const Register = () => {
           return;
         }
 
-        // ៣. ពិនិត្យមើលក្នុងបញ្ជី Roles ពី Database ផ្ទាល់
         const adminRole = rolesData.find((r) =>
           (r.role_name || r.name || '')
             .toString()
@@ -229,7 +228,6 @@ const Register = () => {
           return;
         }
 
-        // ៤. បើក្នុង Database មិនទាន់មាន Role Admin ទេ -> អនុញ្ញាតឱ្យបង្កើតគណនីដំបូង
         try {
           localStorage.removeItem(ADMIN_SETUP_STORAGE_KEY);
         } catch {}
@@ -248,7 +246,6 @@ const Register = () => {
     };
   }, []);
 
-  // បើប្រព័ន្ធធ្លាប់មាន Admin រួចហើយ ឱ្យបញ្ជូនទៅទំព័រ /login ដោយស្វ័យប្រវត្តិ
   useEffect(() => {
     if (isAlreadyInitialized) {
       const timer = setTimeout(() => {
@@ -272,9 +269,6 @@ const Register = () => {
     }
   };
 
-  // ✅ អនុគមន៍កំណត់សារកំហុស៖
-  // - បើខុស Password ➔ លុប Password ចោលស្វ័យប្រវត្តិ ហើយ Auto-Focus ចូលប្រអប់ Password
-  // - បើខុស Email ឬ ឈ្មោះ ➔ រក្សាអក្សរទុកឱ្យកែ ហើយ Auto-Focus ចូលប្រអប់នោះភ្លាមៗ
   const applyRegistrationValidationError = useCallback(
     (resultObj, rawFallbackMsg = '') => {
       const apiErrors = resultObj?.errors || {};
@@ -363,7 +357,6 @@ const Register = () => {
 
     setFieldErrors(EMPTY_FIELD_ERRORS);
 
-    // ១. ពិនិត្យប្រវែងពាក្យសម្ងាត់ (យ៉ាងតិច ៨ តួអក្សរ)
     if (formData.password.length < 8) {
       setFieldErrors({
         ...EMPTY_FIELD_ERRORS,
@@ -383,7 +376,6 @@ const Register = () => {
       return;
     }
 
-    // ២. ពិនិត្យការបញ្ជាក់ពាក្យសម្ងាត់ត្រូវគ្នាឬអត់
     if (formData.password !== formData.password_confirmation) {
       setFieldErrors({
         ...EMPTY_FIELD_ERRORS,
@@ -418,14 +410,7 @@ const Register = () => {
           localStorage.setItem(ADMIN_SETUP_STORAGE_KEY, 'true');
         } catch {}
 
-        toast.success(
-          t(
-            'បានបង្កើតគណនីអ្នកគ្រប់គ្រងដំបូងដោយជោគជ័យ!',
-            'Initial Administrator account created successfully!'
-          )
-        );
-        // ✅ បញ្ជូនទៅកាន់ '/dashboard' ផ្ទាល់
-        navigate('/dashboard', { replace: true });
+        navigate(resolveTargetDashboardPath(result.user), { replace: true });
       } else {
         applyRegistrationValidationError(result);
       }
@@ -448,7 +433,6 @@ const Register = () => {
           : 'bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 text-slate-900'
       }`}
     >
-      {/* ពន្លឺលម្អផ្ទៃខាងក្រោយ (Ambient Background Glows) */}
       <div
         className={`absolute -top-32 -left-32 w-96 h-96 rounded-full blur-[120px] pointer-events-none ${
           isDarkMode ? 'bg-blue-500/15' : 'bg-blue-400/25'
@@ -556,7 +540,6 @@ const Register = () => {
       {/* ================================================================== */}
       <div className="relative z-10 w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 items-center my-auto py-3">
         
-        {/* 📌 ផ្នែកខាងឆ្វេង៖ ពាក្យស្វាគមន៍ ឈ្មោះវិទ្យាស្ថានធំច្បាស់ និងពាក្យស្លោក TVET */}
         <div className="hidden lg:block lg:col-span-7 space-y-6">
           <div className="space-y-2.5">
             <p
@@ -671,7 +654,7 @@ const Register = () => {
           </div>
         </div>
 
-        {/* 📌 ផ្នែកខាងស្ដាំ៖ ប្រអប់បង្កើតគណនី Admin ដំបូង (0ms Instant Open) */}
+        {/* 📌 ផ្នែកខាងស្ដាំ៖ ប្រអប់បង្កើតគណនី Admin ដំបូង */}
         <div className="lg:col-span-5 flex justify-center lg:justify-end">
           <div
             className={`relative w-full max-w-[420px] rounded-[1.75rem] backdrop-blur-2xl border p-5 sm:p-6 overflow-hidden transition-colors duration-200 ${
@@ -686,7 +669,6 @@ const Register = () => {
               }`}
             ></div>
 
-            {/* រូបសញ្ញាវិទ្យាស្ថាន និងចំណងជើង */}
             <div className="relative z-10 flex flex-col items-center text-center mb-3.5">
               <div className="relative mb-2">
                 <div className="absolute -inset-1.5 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-2xl blur opacity-35"></div>
@@ -733,7 +715,6 @@ const Register = () => {
             </div>
 
             {isAlreadyInitialized ? (
-              /* ករណីប្រព័ន្ធធ្លាប់បង្កើត Admin រួចហើយ */
               <div className="relative z-10 text-center py-4 space-y-4">
                 <div
                   className={`mx-auto h-13 w-13 rounded-2xl flex items-center justify-center border ${
@@ -777,9 +758,7 @@ const Register = () => {
                 </Link>
               </div>
             ) : (
-              /* ទម្រង់បង្កើតគណនី Admin ដំបូង (បង្ហាញភ្លាមៗ 0ms គ្មាន Spinner) */
               <form className="relative z-10 space-y-3" onSubmit={handleSubmit}>
-                {/* ១. នាមខ្លួន និង នាមត្រកូល */}
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
                     <label
@@ -896,7 +875,6 @@ const Register = () => {
                   </div>
                 </div>
 
-                {/* ២. អាសយដ្ឋានអ៊ីមែល */}
                 <div>
                   <label
                     htmlFor="email"
@@ -957,7 +935,6 @@ const Register = () => {
                   )}
                 </div>
 
-                {/* ៣. ពាក្យសម្ងាត់ និង បញ្ជាក់ពាក្យសម្ងាត់ */}
                 <div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
@@ -1097,7 +1074,6 @@ const Register = () => {
                     </div>
                   </div>
 
-                  {/* ✅ បង្ហាញសារកំហុសពណ៌ក្រហមសម្រាប់ Password ឬ Confirm Password */}
                   {(fieldErrors.password ||
                     fieldErrors.password_confirmation) && (
                     <div className="flex items-start gap-1.5 mt-1.5 ml-1 text-rose-500 dark:text-rose-400">
@@ -1110,7 +1086,6 @@ const Register = () => {
                   )}
                 </div>
 
-                {/* ប៊ូតុងបង្កើតគណនី Admin ដំបូង */}
                 <button
                   type="submit"
                   disabled={loading}

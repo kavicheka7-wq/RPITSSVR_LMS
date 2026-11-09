@@ -18,7 +18,7 @@ const readStoredJson = (key) => {
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(() => localStorage.getItem('token'));
 
-  // ✅ អានទិន្នន័យ User និង Teacher ពី localStorage ភ្លាមៗក្នុង 0 វិនាទី (បើក Domain ភ្លាម ចូលដល់ Dashboard ភ្លាម)
+  // ✅ អានទិន្នន័យ User និង Teacher ពី localStorage ភ្លាមៗក្នុង 0 វិនាទី
   const [user, setUser] = useState(() => {
     const savedToken = localStorage.getItem('token');
     if (!savedToken) return null;
@@ -106,7 +106,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // ✅ ជំហានទី ១៖ ពិនិត្យ Email និង Password (បញ្ជូនទាំង errors object មកឱ្យ Login.jsx)
+  // ✅ ជំហានទី ១៖ ពិនិត្យ Email និង Password
   const login = async (email, password) => {
     try {
       const response = await api.post('/login', { email, password });
@@ -122,10 +122,12 @@ export const AuthProvider = ({ children }) => {
           has_security_pin: Boolean(data.has_security_pin),
           requires_pin_verify: Boolean(data.requires_pin_verify),
           requires_pin_setup: Boolean(data.requires_pin_setup),
-          mail_sent: data.mail_sent,
-          telegram_sent: data.telegram_sent,
+          mail_sent: Boolean(data.mail_sent),
+          mail_error: data.mail_error || null,
+          telegram_sent: Boolean(data.telegram_sent),
           telegram_linked: Boolean(data.telegram_linked),
           telegram_link_url: data.telegram_link_url || null,
+          delivery_channel: data.delivery_channel || 'none',
           dev_otp: data.dev_otp || null,
           message: data.message,
         };
@@ -221,15 +223,18 @@ export const AuthProvider = ({ children }) => {
   const resendTwoFactor = async (email) => {
     try {
       const response = await api.post('/resend-2fa', { email });
+      const data = response.data || {};
       return {
         success: true,
-        telegram_linked: Boolean(response.data?.telegram_linked),
-        telegram_sent: Boolean(response.data?.telegram_sent),
-        telegram_link_url: response.data?.telegram_link_url || null,
-        dev_otp: response.data?.dev_otp || null,
+        mail_sent: Boolean(data.mail_sent),
+        mail_error: data.mail_error || null,
+        telegram_linked: Boolean(data.telegram_linked),
+        telegram_sent: Boolean(data.telegram_sent),
+        telegram_link_url: data.telegram_link_url || null,
+        delivery_channel: data.delivery_channel || 'none',
+        dev_otp: data.dev_otp || null,
         message:
-          response.data?.message ||
-          'បានផ្ញើលេខកូដថ្មីទៅកាន់គណនីរបស់អ្នកហើយ!',
+          data.message || 'បានផ្ញើលេខកូដថ្មីទៅកាន់គណនីរបស់អ្នកហើយ!',
       };
     } catch (error) {
       return {
@@ -241,14 +246,17 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // ✅ ពិនិត្យស្ថានភាពភ្ជាប់ Telegram (គាំទ្រទាំង key `linked` និង `telegram_linked` ពី AuthController.php)
+  // ✅ ពិនិត្យស្ថានភាពភ្ជាប់ Telegram
   const checkTelegramLinkStatus = async (email) => {
     try {
       const response = await api.post('/check-telegram-link', { email });
       const data = response.data || {};
       return {
         linked: Boolean(data.linked ?? data.telegram_linked),
+        telegram_sent: Boolean(data.telegram_sent),
         telegram_link_url: data.telegram_link_url || null,
+        delivery_channel: data.delivery_channel || null,
+        dev_otp: data.dev_otp || null,
         message: data.message,
       };
     } catch {
@@ -256,7 +264,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // ✅ ចុះឈ្មោះគណនី Admin ដំបូង (បញ្ជូនទាំង errors object មកឱ្យ Register.jsx)
+  // ✅ ចុះឈ្មោះគណនី Admin ដំបូង
   const register = async (userData) => {
     try {
       const response = await api.post('/register', userData);
