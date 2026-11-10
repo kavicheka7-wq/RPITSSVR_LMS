@@ -1867,7 +1867,7 @@ const Navbar = () => {
                     ) : (
                       <SunIcon className="h-5 w-5 text-amber-500" />
                     )}
-                    {t('ទម្រង់ពណ៌អេក្រង់ (Theme Mode)', 'Theme Mode')}
+                    {t('ទម្រង់ពណ៌អេក្រង់', 'Theme Mode')}
                   </h4>
                   <div className="grid grid-cols-2 gap-4">
                     <button
@@ -1880,7 +1880,7 @@ const Navbar = () => {
                       }`}
                     >
                       <SunIcon className="h-5 w-5 text-amber-500" />
-                      <span>{t('ទម្រង់ថ្ងៃ (Light)', 'Light Mode')}</span>
+                      <span>{t('ទម្រង់ថ្ងៃ', 'Light Mode')}</span>
                       {!isDarkMode && <span className="text-blue-600">✓</span>}
                     </button>
                     <button
@@ -1893,7 +1893,7 @@ const Navbar = () => {
                       }`}
                     >
                       <MoonIcon className="h-5 w-5 text-indigo-600" />
-                      <span>{t('ទម្រង់យប់ (Dark)', 'Dark Mode')}</span>
+                      <span>{t('ទម្រង់យប់', 'Dark Mode')}</span>
                       {isDarkMode && <span className="text-blue-600">✓</span>}
                     </button>
                   </div>
