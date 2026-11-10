@@ -1496,10 +1496,7 @@ export default function ManageLessons() {
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder={t(
-                'ស្វែងរកតាមចំណងជើងមេរៀន ឬមុខវិជ្ជា...',
-                'Search by title or course...'
-              )}
+              placeholder=""
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="lsn-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
@@ -1920,10 +1917,7 @@ export default function ManageLessons() {
                                 <div className="lsn-video-input-box flex gap-2 p-1.5 bg-purple-50/50 border border-purple-100 rounded-2xl focus-within:ring-2 focus-within:ring-purple-300 transition-all">
                                   <input
                                     type="text"
-                                    placeholder={t(
-                                      'បញ្ចូលចំណងជើងវីដេអូ...',
-                                      'Enter video title...'
-                                    )}
+                                    placeholder=""
                                     value={videoTitle}
                                     onChange={(e) => setVideoTitle(e.target.value)}
                                     className="lsn-transparent-input flex-1 px-4 py-2.5 text-sm font-semibold border-none bg-transparent focus:outline-none focus:ring-0 text-gray-800 placeholder-gray-400"
@@ -1949,7 +1943,7 @@ export default function ManageLessons() {
                                 <div className="space-y-2">
                                   <input
                                     type="text"
-                                    placeholder={t('ចំណងជើងវីដេអូ...', 'Video title...')}
+                                    placeholder=""
                                     value={videoTitle}
                                     onChange={(e) => setVideoTitle(e.target.value)}
                                     className="lsn-input w-full px-3.5 py-2 text-xs font-semibold border border-purple-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -1957,7 +1951,7 @@ export default function ManageLessons() {
                                   <div className="flex gap-2">
                                     <input
                                       type="url"
-                                      placeholder="https://youtube.com/..."
+                                      placeholder=""
                                       value={videoUrlInput}
                                       onChange={(e) =>
                                         setVideoUrlInput(e.target.value)
@@ -2082,17 +2076,14 @@ export default function ManageLessons() {
                     required
                     value={formData.title}
                     onChange={handleInputChange}
-                    placeholder={t(
-                      'ឧ. សេចក្តីផ្តើមអំពីកម្មវិធី...',
-                      'e.g., Introduction to Programming...'
-                    )}
+                    placeholder=""
                     className="lsn-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                   />
                 </div>
 
                 <div>
                   <label className="lsn-label block text-sm font-bold text-gray-700 mb-1.5">
-                    {t('ការពិពណ៌នាសង្ខេប', 'Description')}
+                    {t('ការពណ៌នាសង្ខេប', 'Description')}
                   </label>
                   <textarea
                     name="description"
@@ -2158,7 +2149,7 @@ export default function ManageLessons() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <input
                       type="text"
-                      placeholder={t('ចំណងជើងវីដេអូ', 'Video Title')}
+                      placeholder=""
                       value={youtubeVideo.title}
                       onChange={(e) =>
                         setYoutubeVideo({ ...youtubeVideo, title: e.target.value })
@@ -2171,7 +2162,7 @@ export default function ManageLessons() {
                       </div>
                       <input
                         type="url"
-                        placeholder="https://youtube.com/..."
+                        placeholder=""
                         value={youtubeVideo.url}
                         onChange={(e) =>
                           setYoutubeVideo({ ...youtubeVideo, url: e.target.value })

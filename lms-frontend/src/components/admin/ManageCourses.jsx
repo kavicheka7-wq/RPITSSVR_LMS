@@ -1286,7 +1286,7 @@ const ManageCourses = () => {
           <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder={t('ស្វែងរកតាមឈ្មោះ កូដ ជំនាញ ឬគ្រូបង្រៀន...', 'Search by name, code, department, or teacher...')}
+            placeholder=""
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="crs-input w-full pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
@@ -1520,7 +1520,7 @@ const ManageCourses = () => {
                     value={formData.course_name}
                     onChange={handleInputChange}
                     className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                    placeholder={t('ឧ. គ្រឹះវិទ្យាសាស្ត្រកុំព្យូទ័រ', 'e.g. Computer Science Fundamentals')}
+                    placeholder=""
                   />
                 </div>
 
@@ -1536,7 +1536,7 @@ const ManageCourses = () => {
                       value={formData.course_code}
                       onChange={handleInputChange}
                       className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm font-mono"
-                      placeholder={t('ឧ. CS101', 'e.g. CS101')}
+                      placeholder=""
                     />
                   </div>
                   <div>

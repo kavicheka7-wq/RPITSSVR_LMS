@@ -1406,10 +1406,7 @@ const ManageAttendance = () => {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder={t(
-                  'ស្វែងរកសិស្ស (ឈ្មោះ ឬអត្តលេខ)...',
-                  'Search student (name or code)...'
-                )}
+                placeholder=""
                 className="att-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
               />
               {searchTerm && (

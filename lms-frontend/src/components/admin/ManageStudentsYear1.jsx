@@ -1913,7 +1913,7 @@ const ManageStudentsYear1 = () => {
           <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder={t('ស្វែងរកសិស្សឆ្នាំទី១ តាមឈ្មោះ អ៊ីមែល ទូរស័ព្ទ ឬអត្តលេខ...', 'Search Year 1 students by name, email, phone or code...')}
+            placeholder=""
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="std-input w-full pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
@@ -2350,7 +2350,7 @@ const ManageStudentsYear1 = () => {
                       value={formData.first_name}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder={t('ឧ. ដារ៉ា', 'e.g. Dara')}
+                      placeholder=""
                     />
                   </div>
 
@@ -2365,7 +2365,7 @@ const ManageStudentsYear1 = () => {
                       value={formData.last_name}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder={t('ឧ. សុខ', 'e.g. Sok')}
+                      placeholder=""
                     />
                   </div>
 
@@ -2393,7 +2393,7 @@ const ManageStudentsYear1 = () => {
                       value={formData.phone}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder="+855"
+                      placeholder=""
                     />
                   </div>
 
@@ -2407,7 +2407,7 @@ const ManageStudentsYear1 = () => {
                       value={formData.student_code}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder="STU-2026-0001"
+                      placeholder=""
                     />
                   </div>
 
@@ -2525,7 +2525,7 @@ const ManageStudentsYear1 = () => {
                       value={formData.address}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all resize-none shadow-sm"
-                      placeholder={t('អាសយដ្ឋានបច្ចុប្បន្ន...', 'Current address...')}
+                      placeholder=""
                     />
                   </div>
 
@@ -2662,7 +2662,7 @@ const ManageStudentsYear1 = () => {
                       type="text"
                       value={enrollCourseSearch}
                       onChange={(e) => setEnrollCourseSearch(e.target.value)}
-                      placeholder={t('ស្វែងរកឈ្មោះ ឬកូដមុខវិជ្ជា...', 'Search course name or code...')}
+                      placeholder=""
                       className="std-input w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-xs font-medium bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
                     />
                   </div>
@@ -2877,7 +2877,7 @@ const ManageStudentsYear1 = () => {
                       type="text"
                       value={bulkCourseSearch}
                       onChange={(e) => setBulkCourseSearch(e.target.value)}
-                      placeholder={t('វាយឈ្មោះ ឬកូដមុខវិជ្ជា...', 'Type course name or code...')}
+                      placeholder=""
                       className="std-input w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-xs font-medium bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
                     />
                   </div>

@@ -2165,10 +2165,7 @@ export default function TeacherManageQuizzes() {
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder={t(
-                'ស្វែងរកតាមចំណងជើងកម្រងសំណួរ...',
-                'Search by quiz title...'
-              )}
+              placeholder=""
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="quz-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
@@ -2981,10 +2978,7 @@ export default function TeacherManageQuizzes() {
                     required
                     value={formData.title}
                     onChange={handleInputChange}
-                    placeholder={t(
-                      'ឧ. តេស្តសាកល្បងឆមាសទី១',
-                      'e.g., Semester 1 Practice Quiz'
-                    )}
+                    placeholder=""
                     className="quz-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                   />
                 </div>

@@ -444,7 +444,7 @@ const ManageDepartments = () => {
           <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder={t('ស្វែងរកដេប៉ាតឺម៉ង់...', 'Search departments...')}
+            placeholder=""
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="dept-input w-full pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
@@ -624,7 +624,7 @@ const ManageDepartments = () => {
                     value={formData.name}
                     onChange={handleInputChange}
                     className="dept-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                    placeholder={t('ឧ. ព័ត៌មានវិទ្យា', 'e.g. Information Technology')}
+                    placeholder=""
                   />
                 </div>
 
