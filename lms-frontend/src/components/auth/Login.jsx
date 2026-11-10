@@ -193,7 +193,7 @@ const Login = () => {
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
-  // ✅ ពិនិត្យស្វ័យប្រវត្តិរៀងរាល់ ៣ វិនាទីម្ដង នៅពេលអ្នកប្រើចុចប៊ូតុងភ្ជាប់/ប្ដូរ Telegram
+  // ✅ ពិនិត្យស្វ័យប្រវត្តិរៀងរាល់ ៣ វិនាទីម្ដង នៅពេលអ្នកប្រើចុចប៊ូតុងភ្ជាប់ Telegram
   useEffect(() => {
     if (
       (step !== 'otp' && step !== 'forgot_otp') ||
@@ -212,9 +212,7 @@ const Login = () => {
           setTelegramLinked(true);
           setTelegramSent(true);
           setWaitingTelegramStart(false);
-          if (status?.telegram_link_url) {
-            setTelegramLinkUrl(status.telegram_link_url);
-          }
+          setTelegramLinkUrl(null);
           setOtpError('');
           setOtpDigits(['', '', '', '', '', '']);
           lastSubmittedSignatureRef.current = '';
@@ -775,9 +773,7 @@ const Login = () => {
         setMailSent(Boolean(data.mail_sent));
         setTelegramLinked(Boolean(data.telegram_linked));
         setTelegramSent(Boolean(data.telegram_sent));
-        if (data.telegram_link_url) {
-          setTelegramLinkUrl(data.telegram_link_url);
-        }
+        setTelegramLinkUrl(data.telegram_link_url || null);
         setResendCooldown(60);
         focusFirstOtpInput();
       } else {
@@ -788,9 +784,7 @@ const Login = () => {
           setMailSent(Boolean(result.mail_sent));
           setTelegramLinked(Boolean(result.telegram_linked));
           setTelegramSent(Boolean(result.telegram_sent));
-          if (result.telegram_link_url) {
-            setTelegramLinkUrl(result.telegram_link_url);
-          }
+          setTelegramLinkUrl(result.telegram_link_url || null);
           setResendCooldown(60);
           focusFirstOtpInput();
         } else {
@@ -1759,7 +1753,7 @@ const Login = () => {
                       <span>{getMaskedEmail(email)}</span>
                     </span>
 
-                    {mailSent && (
+                    {mailSent && !telegramSent && (
                       <span
                         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold border ${
                           isDarkMode
@@ -1844,21 +1838,15 @@ const Login = () => {
                   )}
                 </div>
 
-                {/* ✅ ប៊ូតុងភ្ជាប់ ឬប្ដូរ Telegram (គ្មានបង្ហាញលេខកូដ ៦ ខ្ទង់លើអេក្រង់ឡើយ) */}
-                {telegramLinkUrl && (
+                {/* ✅ បង្ហាញប៊ូតុងភ្ជាប់ Telegram តែនៅពេលគណនីនោះមិនទាន់បានភ្ជាប់ Telegram ប៉ុណ្ណោះ */}
+                {!telegramLinked && telegramLinkUrl && (
                   <div className="space-y-2.5">
                     <a
                       href={telegramLinkUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={() => setWaitingTelegramStart(true)}
-                      className={`flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-extrabold transition-colors cursor-pointer ${
-                        !telegramLinked
-                          ? 'text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm'
-                          : isDarkMode
-                          ? 'bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/30 text-sky-300'
-                          : 'bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700'
-                      }`}
+                      className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm transition-colors cursor-pointer"
                     >
                       {waitingTelegramStart ? (
                         <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0 stroke-[2.2]" />
@@ -1870,11 +1858,6 @@ const Login = () => {
                           ? t(
                               'សូមចុច Start ក្នុង Telegram...',
                               'Press Start in Telegram...'
-                            )
-                          : telegramLinked
-                          ? t(
-                              'មិនទទួលបានកូដ? ចុចភ្ជាប់ ឬប្ដូរ Telegram ថ្មី',
-                              'Not receiving code? Re-link / Switch Telegram'
                             )
                           : t(
                               'ទទួលលេខកូដតាម Telegram',

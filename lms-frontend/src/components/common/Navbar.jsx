@@ -45,6 +45,7 @@ import {
   PaperAirplaneIcon,
   CheckBadgeIcon,
   ExclamationCircleIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 import api from '../../services/api';
 import logo from '../../assets/image/PRIT.png';
@@ -202,6 +203,7 @@ const Navbar = () => {
     }
   });
   const [waitingTelegramLink, setWaitingTelegramLink] = useState(false);
+  const [isUnlinkingTelegram, setIsUnlinkingTelegram] = useState(false);
 
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -482,20 +484,65 @@ const Navbar = () => {
               category: 'system',
             });
           }
+        } else if (res?.linked === false) {
+          setIsTelegramLinked(false);
         }
       } catch {}
     },
     [userEmail, checkTelegramLinkStatus, user, setUser, syncUserToStorage]
   );
 
-  useEffect(() => {
-    if (!userEmail || telegramLinkUrl) return;
-    const timer = setTimeout(() => {
-      syncTelegramStatus(false);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [userEmail, telegramLinkUrl, syncTelegramStatus]);
+  // ✅ មុខងារផ្ដាច់គណនី Telegram ចេញពីប្រព័ន្ធ (ដើម្បីឱ្យលេខកូដ ៦ ខ្ទង់ត្រឡប់ទៅផ្ញើចូល Email វិញ)
+  const handleUnlinkTelegram = useCallback(async () => {
+    if (!userEmail || isUnlinkingTelegram) return;
+    setIsUnlinkingTelegram(true);
+    setWaitingTelegramLink(false);
 
+    try {
+      const response = await api.post('/check-telegram-link', {
+        email: userEmail,
+        action: 'unlink',
+      });
+      const data = response.data || {};
+
+      setIsTelegramLinked(false);
+      if (data.telegram_link_url) {
+        setTelegramLinkUrl(data.telegram_link_url);
+        try {
+          sessionStorage.setItem(
+            getTelegramLinkCacheKey(userEmail),
+            data.telegram_link_url
+          );
+        } catch {}
+      }
+
+      const updatedUser = {
+        ...user,
+        telegram_linked: false,
+        telegram_chat_id: null,
+      };
+      if (typeof setUser === 'function') {
+        setUser(updatedUser);
+      }
+      syncUserToStorage(updatedUser);
+
+      pushLocalNotification({
+        titleKm: 'បានផ្ដាច់គណនី Telegram ជោគជ័យ',
+        titleEn: 'Telegram Account Disconnected',
+        descKm:
+          'គណនី Telegram ត្រូវបានផ្ដាច់។ ចាប់ពីពេលនេះទៅ លេខកូដ ៦ ខ្ទង់នឹងផ្ញើចូល Email របស់អ្នកវិញ។',
+        descEn:
+          'Telegram disconnected. Verification codes will now be sent to your Email.',
+        category: 'security',
+      });
+    } catch (error) {
+      console.error('Unlink Telegram error:', error);
+    } finally {
+      setIsUnlinkingTelegram(false);
+    }
+  }, [userEmail, isUnlinkingTelegram, user, setUser, syncUserToStorage]);
+
+  // ✅ ហៅពិនិត្យតំណភ្ជាប់ Telegram តែនៅពេលដែលអ្នកប្រើប្រាស់បើកផ្ទាំងការកំណត់ (Settings Modal) ប៉ុណ្ណោះ
   useEffect(() => {
     if (isSettingsModalOpen) {
       syncTelegramStatus(false);
@@ -1852,7 +1899,7 @@ const Navbar = () => {
                   </div>
                 </section>
 
-                {/* ✅ ៣. ភ្ជាប់ ឬប្ដូរគណនី Telegram */}
+                {/* ✅ ៣. ភ្ជាប់ ឬផ្ដាច់គណនី Telegram (គ្មានប៊ូតុងប្ដូរ Telegram ថ្មីឡើយ) */}
                 <section className="nav-soft-divider pt-6 border-t border-gray-100">
                   <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <PaperAirplaneIcon className="h-5 w-5 text-sky-500 -rotate-45" />
@@ -1875,49 +1922,68 @@ const Navbar = () => {
                             )}
                       </p>
                       <p className="text-xs font-medium text-gray-500 mt-1">
-                        {t(
-                          'ទទួលលេខកូដសុវត្ថិភាព ៦ ខ្ទង់តាមរយៈ Telegram Bot រាល់ពេលចូលប្រព័ន្ធ។',
-                          'Receive 6-digit verification codes via Telegram Bot when signing in.'
-                        )}
+                        {isTelegramLinked
+                          ? t(
+                              'ប្រសិនបើអ្នកចង់ទទួលលេខកូដ ៦ ខ្ទង់តាម Email វិញ សូមចុចប៊ូតុង «ផ្ដាច់ Telegram»។',
+                              'To receive 6-digit codes via Email instead, click "Disconnect Telegram".'
+                            )
+                          : t(
+                              'ទទួលលេខកូដសុវត្ថិភាព ៦ ខ្ទង់តាមរយៈ Telegram Bot រាល់ពេលចូលប្រព័ន្ធ។',
+                              'Receive 6-digit verification codes via Telegram Bot when signing in.'
+                            )}
                       </p>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
-                      {isTelegramLinked && (
-                        <span className="nav-connected-badge inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          <CheckBadgeIcon className="h-4 w-4 text-emerald-600 shrink-0" />
-                          <span>{t('បានភ្ជាប់រួចរាល់', 'Connected')}</span>
-                        </span>
-                      )}
-
-                      {telegramLinkUrl && (
-                        <a
-                          href={telegramLinkUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={() => setWaitingTelegramLink(true)}
-                          className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-colors cursor-pointer ${
-                            isTelegramLinked
-                              ? 'nav-switch-tg-btn bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 shadow-2xs'
-                              : 'text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm'
-                          }`}
-                        >
-                          {waitingTelegramLink ? (
-                            <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0" />
-                          ) : (
-                            <PaperAirplaneIcon className="h-4 w-4 -rotate-45 shrink-0" />
-                          )}
-                          <span>
-                            {waitingTelegramLink
-                              ? t(
-                                  'សូមចុច Start ក្នុង Telegram...',
-                                  'Press Start in Telegram...'
-                                )
-                              : isTelegramLinked
-                              ? t('ប្ដូរ Telegram ថ្មី', 'Switch Telegram')
-                              : t('ភ្ជាប់ Telegram', 'Connect Telegram')}
+                      {isTelegramLinked ? (
+                        <>
+                          <span className="nav-connected-badge inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <CheckBadgeIcon className="h-4 w-4 text-emerald-600 shrink-0" />
+                            <span>{t('បានភ្ជាប់រួចរាល់', 'Connected')}</span>
                           </span>
-                        </a>
+
+                          <button
+                            type="button"
+                            onClick={handleUnlinkTelegram}
+                            disabled={isUnlinkingTelegram}
+                            className="nav-unlink-tg-btn inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-extrabold bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            {isUnlinkingTelegram ? (
+                              <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0" />
+                            ) : (
+                              <TrashIcon className="h-4 w-4 shrink-0" />
+                            )}
+                            <span>
+                              {isUnlinkingTelegram
+                                ? t('កំពុងផ្ដាច់...', 'Disconnecting...')
+                                : t('ផ្ដាច់ Telegram', 'Disconnect Telegram')}
+                            </span>
+                          </button>
+                        </>
+                      ) : (
+                        telegramLinkUrl && (
+                          <a
+                            href={telegramLinkUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => setWaitingTelegramLink(true)}
+                            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm transition-colors cursor-pointer"
+                          >
+                            {waitingTelegramLink ? (
+                              <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0" />
+                            ) : (
+                              <PaperAirplaneIcon className="h-4 w-4 -rotate-45 shrink-0" />
+                            )}
+                            <span>
+                              {waitingTelegramLink
+                                ? t(
+                                    'សូមចុច Start ក្នុង Telegram...',
+                                    'Press Start in Telegram...'
+                                  )
+                                : t('ភ្ជាប់ Telegram', 'Connect Telegram')}
+                            </span>
+                          </a>
+                        )
                       )}
                     </div>
                   </div>
@@ -2120,8 +2186,8 @@ const Navbar = () => {
         html.dark .nav-dropdown-header, html.dark .nav-icon-badge, html.dark .nav-role-pill, html.dark .nav-edit-box { background: rgba(30, 58, 138, 0.25) !important; border-color: rgba(59, 130, 246, 0.3) !important; color: #93c5fd !important; }
         html.dark .nav-status-banner { background: rgba(6, 78, 59, 0.25) !important; border-color: rgba(16, 185, 129, 0.3) !important; }
         html.dark .nav-connected-badge { background-color: rgba(16, 185, 129, 0.15) !important; border-color: rgba(16, 185, 129, 0.35) !important; color: #34d399 !important; }
-        html.dark .nav-switch-tg-btn { background-color: #0f172a !important; border-color: rgba(56, 189, 248, 0.35) !important; color: #38bdf8 !important; }
-        html.dark .nav-switch-tg-btn:hover { background-color: rgba(56, 189, 248, 0.15) !important; }
+        html.dark .nav-unlink-tg-btn { background-color: rgba(244, 63, 94, 0.15) !important; border-color: rgba(244, 63, 94, 0.35) !important; color: #fb7185 !important; }
+        html.dark .nav-unlink-tg-btn:hover { background-color: rgba(244, 63, 94, 0.25) !important; }
         html.dark .nav-option-btn { background-color: #0f172a !important; border-color: #334155 !important; color: #cbd5e1 !important; }
         html.dark .nav-option-active { background-color: rgba(37, 99, 235, 0.2) !important; border-color: #3b82f6 !important; color: #60a5fa !important; }
         html.dark .text-gray-900, html.dark .text-gray-800 { color: #f8fafc !important; }
