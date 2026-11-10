@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider } from './context/LanguageContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
@@ -39,6 +39,20 @@ import StudentCourses from './components/student/StudentCourses';
 import StudentLessons from './components/student/StudentLessons';
 import StudentAssignments from './components/student/StudentAssignments';
 import StudentQuizzes from './components/student/StudentQuizzes';
+
+// ✅ HELPER COMPONENT: អនុញ្ញាតឱ្យ Browser ចាប់យកឈ្មោះ Domain សុទ្ធ (/) ពេលវាយលើ Address Bar សិន ហើយពេលចុច Enter ចូលដល់ផ្ទាំង Dashboard ទើបលោតពាក្យ /dashboard មកតាមក្រោយ
+const RootDashboardEntry = ({ children }) => {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      navigate('/dashboard', { replace: true });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [navigate]);
+
+  return children;
+};
 
 // Main App Content with routing
 const AppContent = () => {
@@ -97,6 +111,12 @@ const AppContent = () => {
     return '/dashboard';
   };
 
+  const renderRoleDashboard = () => {
+    if (role === 'admin') return <AdminDashboard />;
+    if (role === 'teacher') return <TeacherDashboard />;
+    return <StudentDashboard />;
+  };
+
   // If user is not logged in, show auth pages without layout on clean root '/'
   if (!user) {
     return (
@@ -128,25 +148,17 @@ const AppContent = () => {
             className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-20 md:pb-6 min-w-0"
           >
             <Routes>
-              {/* Redirect root and /login to clean /dashboard */}
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              {/* ✅ ពេលវាយ Domain ចុច Enter ចូលដល់ផ្ទាំង Dashboard ទើបលោតពាក្យ /dashboard មក */}
+              <Route
+                path="/"
+                element={<RootDashboardEntry>{renderRoleDashboard()}</RootDashboardEntry>}
+              />
               <Route path="/login" element={<Navigate to="/dashboard" replace />} />
 
               {/* ========================================================== */}
               {/* 📌 ១. CLEAN UNIFIED ROUTES (គ្មាន /admin, /teacher, /student) */}
               {/* ========================================================== */}
-              <Route
-                path="/dashboard"
-                element={
-                  role === 'admin' ? (
-                    <AdminDashboard />
-                  ) : role === 'teacher' ? (
-                    <TeacherDashboard />
-                  ) : (
-                    <StudentDashboard />
-                  )
-                }
-              />
+              <Route path="/dashboard" element={renderRoleDashboard()} />
 
               <Route
                 path="/courses"
