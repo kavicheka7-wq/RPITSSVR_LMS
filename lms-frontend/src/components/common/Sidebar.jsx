@@ -1,5 +1,5 @@
 // src/components/common/Sidebar.jsx
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -24,6 +24,10 @@ const Sidebar = () => {
   const { t } = useLanguage();
   const location = useLocation();
 
+  // State និង Ref សម្រាប់គ្រប់គ្រងផ្ទាំងម៉ឺនុយរង (Dropdown / Popover)
+  const [openPopover, setOpenPopover] = useState(() => {
+    return location.pathname.startsWith('/students') ? '/students' : null;
+  });
   const popoverRef = useRef(null);
   const spacerRef = useRef(null);
 
@@ -44,93 +48,6 @@ const Sidebar = () => {
     return () => window.removeEventListener('resize', updatePosition);
   }, []);
 
-  // ==========================================
-  // NAVIGATION CONFIGURATION (CLEAN URLS)
-  // ==========================================
-  const NAV_CONFIG = useMemo(
-    () => ({
-      Admin: {
-        label: t('អ្នកគ្រប់គ្រង', 'Administrator'),
-        items: [
-          { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
-          { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/departments' },
-          { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/teachers' },
-          { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
-          {
-            name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
-            icon: UserGroupIcon,
-            path: '/students',
-            children: [
-              { name: t('ឆ្នាំទី១', 'Year 1'), path: '/students/year-1', year: 'Year 1' },
-              { name: t('ឆ្នាំទី២', 'Year 2'), path: '/students/year-2', year: 'Year 2' },
-              { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/students/year-3', year: 'Year 3' },
-              { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/students/year-4', year: 'Year 4' },
-            ],
-          },
-          { name: t('របាយការណ៍', 'Reports'), icon: ChartBarIcon, path: '/reports' },
-        ],
-      },
-      Teacher: {
-        label: t('គ្រូបង្រៀន', 'Teacher'),
-        items: [
-          { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
-          { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
-          { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
-          { name: t('សិស្ស', 'Students'), icon: UsersIcon, path: '/students' },
-          { name: t('វត្តមានសិស្ស', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
-          { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
-          { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
-          { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
-        ],
-      },
-      Student: {
-        label: t('សិស្ស', 'Student'),
-        items: [
-          { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
-          { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
-          { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
-          { name: t('វត្តមាន', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
-          { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
-          { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
-          { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
-        ],
-      },
-    }),
-    [t]
-  );
-
-  const roleKey = Object.keys(NAV_CONFIG).find((role) => hasRole(role));
-  const isStudent = roleKey === 'Student';
-  const section = roleKey ? NAV_CONFIG[roleKey] : null;
-  const navItems = section?.items || [];
-
-  const uniqueNavItems = useMemo(() => {
-    return navItems.reduce((acc, current) => {
-      const exists = acc.find(
-        (item) => item.path === current.path && item.name === current.name
-      );
-      if (!exists) {
-        acc.push(current);
-      }
-      return acc;
-    }, []);
-  }, [navItems]);
-
-  // ✅ ស្វែងរកម៉ឺនុយមេណាដែលមានម៉ឺនុយរង (children) កំពុង Active (គាំទ្រទាំង Admin, Teacher និង Student នៅថ្ងៃក្រោយ)
-  const findActiveParentPath = (pathname) => {
-    const matchedParent = uniqueNavItems.find(
-      (item) =>
-        Array.isArray(item.children) &&
-        (pathname.startsWith(item.path) ||
-          item.children.some((sub) => pathname === sub.path))
-    );
-    return matchedParent ? matchedParent.path : null;
-  };
-
-  const [openPopover, setOpenPopover] = useState(() =>
-    findActiveParentPath(location.pathname)
-  );
-
   // បិទផ្ទាំងផុសដោយស្វ័យប្រវត្តិ ពេលចុចក្រៅប្រអប់ (សម្រាប់អេក្រង់ Tablet)
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -146,29 +63,79 @@ const Sidebar = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // បើកទុកដោយស្វ័យប្រវត្តិនៅលើកុំព្យូទ័រ ពេលកំពុងស្ថិតក្នុងទំព័រម៉ឺនុយរងណាមួយ
+  // បើកទុកដោយស្វ័យប្រវត្តិនៅលើកុំព្យូទ័រ ពេលកំពុងស្ថិតក្នុងទំព័រគ្រប់គ្រងសិស្ស
   useEffect(() => {
-    const activeParent = findActiveParentPath(location.pathname);
-    if (activeParent && window.innerWidth >= 1024) {
-      setOpenPopover(activeParent);
-    } else if (!activeParent) {
+    if (location.pathname.startsWith('/students') && window.innerWidth >= 1024) {
+      setOpenPopover('/students');
+    } else if (!location.pathname.startsWith('/students')) {
       setOpenPopover(null);
     }
-  }, [location.pathname, location.search, uniqueNavItems]);
+  }, [location.pathname, location.search]);
 
-  // ✅ គណនាចំនួនបន្ទាត់ម៉ឺនុយដែលកំពុងបង្ហាញសរុប (រួមទាំងម៉ឺនុយរងដែលបើក)
-  // ដើម្បីปรับទំហំគម្លាតដោយស្វ័យប្រវត្តិសម្រាប់ Admin, Teacher និង Student ទោះថ្ងៃក្រោយថែមថយម៉ឺនុយក៏មិនហៀរដែរ
-  const totalVisibleRows = useMemo(() => {
-    return uniqueNavItems.reduce((count, item) => {
-      if (item.children && openPopover === item.path) {
-        return count + 1 + item.children.length;
-      }
-      return count + 1;
-    }, 0);
-  }, [uniqueNavItems, openPopover]);
+  // ==========================================
+  // NAVIGATION CONFIGURATION (CLEAN URLS)
+  // ==========================================
+  const NAV_CONFIG = {
+    Admin: {
+      label: t('អ្នកគ្រប់គ្រង', 'Administrator'),
+      items: [
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
+        { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/departments' },
+        { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/teachers' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
+        {
+          name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
+          icon: UserGroupIcon,
+          path: '/students',
+          children: [
+            { name: t('ឆ្នាំទី១', 'Year 1'), path: '/students/year-1', year: 'Year 1' },
+            { name: t('ឆ្នាំទី២', 'Year 2'), path: '/students/year-2', year: 'Year 2' },
+            { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/students/year-3', year: 'Year 3' },
+            { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/students/year-4', year: 'Year 4' },
+          ],
+        },
+        { name: t('របាយការណ៍', 'Reports'), icon: ChartBarIcon, path: '/reports' },
+      ],
+    },
+    Teacher: {
+      label: t('គ្រូបង្រៀន', 'Teacher'),
+      items: [
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
+        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
+        { name: t('សិស្ស', 'Students'), icon: UsersIcon, path: '/students' },
+        { name: t('វត្តមានសិស្ស', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
+        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
+        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
+        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
+      ],
+    },
+    Student: {
+      label: t('សិស្ស', 'Student'),
+      items: [
+        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
+        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
+        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
+        { name: t('វត្តមាន', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
+        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
+        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
+        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
+      ],
+    },
+  };
 
-  // បើមានម៉ឺនុយចាប់ពី 8 ឡើងទៅ (ដូចជា Teacher ឬពេលបើក Submenu ឬពេលថ្ងៃក្រោយបន្ថែមម៉ឺនុយថ្មី) ឱ្យប្រើទម្រង់ហាប់ណែនស្អាត
-  const isCompactMode = totalVisibleRows >= 8;
+  const roleKey = Object.keys(NAV_CONFIG).find((role) => hasRole(role));
+  const isStudent = roleKey === 'Student';
+  const section = roleKey ? NAV_CONFIG[roleKey] : null;
+  const navItems = section?.items || [];
+
+  const uniqueNavItems = navItems.reduce((acc, current) => {
+    const exists = acc.find((item) => item.path === current.path && item.name === current.name);
+    if (!exists) {
+      acc.push(current);
+    }
+    return acc;
+  }, []);
 
   const currentYearParam = new URLSearchParams(location.search).get('year') || 'all';
 
@@ -198,39 +165,39 @@ const Sidebar = () => {
         <div className="absolute -top-24 -right-24 w-52 h-52 bg-blue-500/20 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-24 -left-24 w-52 h-52 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col h-full w-full py-2">
+        <div className="relative z-10 flex flex-col h-full w-full py-2.5">
           {/* ============================================================== */}
           {/* 📌 1. MODERN HEADER LOGO & ROLE BADGE                          */}
           {/* ============================================================== */}
-          <div className="px-3.5 lg:px-5 pt-2.5 pb-1.5 shrink-0">
+          <div className="px-3.5 lg:px-5 pt-3.5 pb-2 shrink-0">
             <div className="flex items-center justify-center lg:justify-start gap-3.5">
               <div
-                className={`group relative h-10 w-10 rounded-2xl flex items-center justify-center shadow-lg shrink-0 border transition-transform duration-300 hover:scale-105 ${
+                className={`group relative h-11 w-11 rounded-2xl flex items-center justify-center shadow-lg shrink-0 border transition-transform duration-300 hover:scale-105 ${
                   isStudent
                     ? 'bg-gradient-to-br from-indigo-500 via-blue-600 to-violet-600 border-indigo-300/40 shadow-indigo-500/25'
                     : 'bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 border-blue-300/40 shadow-blue-500/25'
                 }`}
               >
-                <AcademicCapIcon className="h-5 w-5 stroke-[2.2] text-yellow-300" />
+                <AcademicCapIcon className="h-6 w-6 stroke-[2.2] text-yellow-300" />
               </div>
 
               <div className="hidden lg:block min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <p className="text-[15px] font-black text-white tracking-wide truncate leading-tight">
+                  <p className="text-[15.5px] font-black text-white tracking-wide truncate leading-tight">
                     LMS RPITSSVR
                   </p>
                 </div>
-                <p className="text-[11px] font-semibold text-blue-200/75 mt-0.5 truncate">
+                <p className="text-[11.5px] font-semibold text-blue-200/75 mt-0.5 truncate">
                   {t('ប្រព័ន្ធគ្រប់គ្រងការសិក្សា', 'Learning Management')}
                 </p>
               </div>
             </div>
 
-            {/* ✅ ផ្លាកតួនាទី (ឧ. ✨ អ្នកគ្រប់គ្រង / គ្រូបង្រៀន / សិស្ស) */}
+            {/* ✅ ដក «ម៉ឺនុយគោល» ចេញ ហើយយកផ្លាកតួនាទី (ឧ. ✨ សិស្ស) មកដាក់ជំនួសនៅខាងឆ្វេង */}
             {section && (
-              <div className="mt-2.5 mb-0.5 hidden lg:flex items-center justify-start border-t border-white/10 pt-2.5">
+              <div className="mt-4 mb-0.5 hidden lg:flex items-center justify-start border-t border-white/10 pt-3.5">
                 <span
-                  className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-extrabold border ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold border ${
                     isStudent
                       ? 'bg-cyan-400/15 text-cyan-200 border-cyan-400/30'
                       : 'bg-blue-400/15 text-blue-200 border-blue-400/30'
@@ -244,19 +211,13 @@ const Sidebar = () => {
           </div>
 
           {/* ============================================================== */}
-          {/* 📌 2. NAVIGATION LINKS (Auto-Adaptive សម្រាប់គ្រប់តួនាទីទាំងអស់) */}
+          {/* 📌 2. NAVIGATION LINKS (V18 Smooth Micro-Interactions)         */}
           {/* ============================================================== */}
-          <nav
-            className={`sidebar-nav px-3 lg:px-4 pt-1 pb-2 flex-1 md:overflow-visible lg:overflow-y-auto transition-all duration-200 ${
-              isCompactMode ? 'space-y-1' : 'space-y-1.5'
-            }`}
-          >
+          <nav className="sidebar-nav px-3 lg:px-4 pt-1.5 pb-3 flex-1 space-y-1.5 md:overflow-visible lg:overflow-y-auto">
             {uniqueNavItems.map((item) => {
-              // ១. ប៊ូតុងមានម៉ឺនុយរង (គាំទ្រទាំង Admin និងពេលបន្ថែមឱ្យ Teacher/Student នៅថ្ងៃក្រោយ)
+              // ១. ប៊ូតុងមានម៉ឺនុយរង (គ្រប់គ្រងសិស្ស សម្រាប់ Admin)
               if (item.children) {
-                const isParentActive =
-                  location.pathname.startsWith(item.path) ||
-                  item.children.some((sub) => location.pathname === sub.path);
+                const isParentActive = location.pathname.startsWith(item.path);
                 const isPopoverOpen = openPopover === item.path;
 
                 return (
@@ -268,30 +229,26 @@ const Sidebar = () => {
                     <button
                       type="button"
                       onClick={() => setOpenPopover(isPopoverOpen ? null : item.path)}
-                      className={`w-full group relative flex items-center justify-center lg:justify-between p-1.5 lg:px-3 ${
-                        isCompactMode ? 'lg:py-1.5' : 'lg:py-2'
-                      } text-[14px] rounded-2xl border transition-all duration-200 cursor-pointer ${
+                      className={`w-full group relative flex items-center justify-center lg:justify-between p-2 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 cursor-pointer ${
                         isParentActive || isPopoverOpen
                           ? 'bg-gradient-to-r from-white/15 to-white/[0.06] backdrop-blur-md text-white font-extrabold border-white/20 shadow-lg'
                           : 'border-transparent text-blue-100/80 font-semibold hover:bg-white/[0.07] hover:text-white lg:hover:translate-x-1'
                       }`}
                     >
                       {(isParentActive || isPopoverOpen) && (
-                        <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
+                        <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
                       )}
 
                       <div className="flex items-center gap-3 min-w-0">
                         <div
-                          className={`${
-                            isCompactMode ? 'h-8 w-8' : 'h-9 w-9'
-                          } rounded-xl flex items-center justify-center shrink-0 transition-all duration-200 ${
+                          className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200 ${
                             isParentActive || isPopoverOpen
                               ? 'bg-gradient-to-br from-amber-400/25 to-yellow-500/15 border border-yellow-400/40 text-yellow-300 shadow-xs'
                               : 'bg-white/[0.05] border border-white/[0.06] text-blue-200/85 group-hover:bg-white/10 group-hover:text-white group-hover:scale-105'
                           }`}
                         >
                           <item.icon
-                            className={`h-[18px] w-[18px] transition-all duration-200 ${
+                            className={`h-[19px] w-[19px] transition-all duration-200 ${
                               isParentActive || isPopoverOpen
                                 ? 'stroke-[2.2]'
                                 : 'stroke-[1.9]'
@@ -322,15 +279,14 @@ const Sidebar = () => {
                       )}
                     </button>
 
-                    {/* ✅ ម៉ឺនុយរង រចនាបែបហាប់ណែនស្អាត មិនលោត Scrollbar */}
+                    {/* ម៉ឺនុយរង (ឆ្នាំទី១ - ឆ្នាំទី៤) */}
                     {isPopoverOpen && (
-                      <div className="absolute left-full top-0 ml-3 w-52 bg-slate-950/95 backdrop-blur-xl border border-white/15 rounded-2xl shadow-[0_12px_32px_rgba(0,0,0,0.45)] p-2 z-50 lg:static lg:ml-[24px] lg:mt-1 lg:mb-0.5 lg:w-auto lg:bg-white/[0.03] lg:backdrop-blur-none lg:border-0 lg:border-l-2 lg:border-indigo-400/30 lg:rounded-r-2xl lg:rounded-l-none lg:shadow-none lg:py-1 lg:pr-2 lg:pl-2.5 animate-dropDown">
-                        <div className="flex flex-col space-y-0.5 relative z-10">
+                      <div className="absolute left-full top-0 ml-3 w-52 bg-slate-950/95 backdrop-blur-xl border border-white/15 rounded-2xl shadow-[0_12px_32px_rgba(0,0,0,0.45)] p-2 z-50 lg:static lg:ml-6 lg:mt-1.5 lg:w-auto lg:bg-transparent lg:backdrop-blur-none lg:border-0 lg:border-l-2 lg:border-white/15 lg:rounded-none lg:shadow-none lg:p-0 lg:pl-3.5 animate-dropDown">
+                        <div className="flex flex-col space-y-1 relative z-10">
                           {item.children.map((sub) => {
                             const isSubActive =
                               location.pathname === sub.path ||
-                              (location.pathname === item.path &&
-                                sub.year &&
+                              (location.pathname === '/students' &&
                                 currentYearParam === sub.year);
 
                             return (
@@ -340,24 +296,15 @@ const Sidebar = () => {
                                 onClick={() => {
                                   if (window.innerWidth < 1024) setOpenPopover(null);
                                 }}
-                                className={`group/sub flex items-center justify-between px-3 py-1.5 rounded-xl text-[13px] transition-all duration-200 ${
+                                className={`flex items-center justify-between px-3.5 py-2 rounded-xl text-[13.5px] transition-all duration-200 ${
                                   isSubActive
-                                    ? 'bg-gradient-to-r from-amber-400/20 to-yellow-500/10 text-yellow-300 font-extrabold border border-yellow-400/30 shadow-2xs'
+                                    ? 'bg-white/15 text-yellow-300 font-extrabold border border-white/20 shadow-xs'
                                     : 'text-blue-100/75 hover:bg-white/[0.08] hover:text-white lg:hover:translate-x-1 font-bold border border-transparent'
                                 }`}
                               >
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <span
-                                    className={`h-1.5 w-1.5 rounded-full transition-all duration-200 shrink-0 ${
-                                      isSubActive
-                                        ? 'bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.9)] scale-125'
-                                        : 'bg-blue-300/40 group-hover/sub:bg-blue-200'
-                                    }`}
-                                  />
-                                  <span className="truncate leading-snug">{sub.name}</span>
-                                </div>
+                                <span className="truncate leading-relaxed">{sub.name}</span>
                                 {isSubActive && (
-                                  <span className="h-1.5 w-1.5 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.9)] shrink-0"></span>
+                                  <span className="h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.9)] shrink-0"></span>
                                 )}
                               </Link>
                             );
@@ -369,15 +316,13 @@ const Sidebar = () => {
                 );
               }
 
-              // ២. ម៉ឺនុយធម្មតា (សម្រាប់ Admin, Teacher, Student - ปรับទំហំស្វ័យប្រវត្តិពេលថែមថយ)
+              // ២. ម៉ឺនុយធម្មតា (សម្រាប់ Admin, Teacher, Student)
               return (
                 <NavLink
                   key={`${item.path}-${item.name}`}
                   to={item.path}
                   className={({ isActive }) =>
-                    `group relative flex items-center justify-center lg:justify-start gap-3 p-1.5 lg:px-3 ${
-                      isCompactMode ? 'lg:py-1.5' : 'lg:py-2'
-                    } text-[14px] rounded-2xl border transition-all duration-200 ${
+                    `group relative flex items-center justify-center lg:justify-start gap-3 p-2 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 ${
                       isActive
                         ? 'bg-gradient-to-r from-white/15 to-white/[0.06] backdrop-blur-md text-white font-extrabold border-white/20 shadow-lg'
                         : 'border-transparent text-blue-100/80 font-semibold hover:bg-white/[0.07] hover:text-white lg:hover:translate-x-1'
@@ -388,21 +333,19 @@ const Sidebar = () => {
                     <>
                       {/* របារពន្លឺតូចនៅគែមឆ្វេងពេល Active */}
                       {isActive && (
-                        <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
+                        <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
                       )}
 
                       {/* ប្រអប់រូបតំណាងបែប V18 Glass Box */}
                       <div
-                        className={`${
-                          isCompactMode ? 'h-8 w-8' : 'h-9 w-9'
-                        } rounded-xl flex items-center justify-center shrink-0 transition-all duration-200 ${
+                        className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200 ${
                           isActive
                             ? 'bg-gradient-to-br from-amber-400/25 to-yellow-500/15 border border-yellow-400/40 text-yellow-300 shadow-xs scale-105'
                             : 'bg-white/[0.05] border border-white/[0.06] text-blue-200/85 group-hover:bg-white/10 group-hover:text-white group-hover:scale-105'
                         }`}
                       >
                         <item.icon
-                          className={`h-[18px] w-[18px] transition-all duration-200 ${
+                          className={`h-[19px] w-[19px] transition-all duration-200 ${
                             isActive ? 'stroke-[2.2]' : 'stroke-[1.9]'
                           }`}
                           aria-hidden="true"
@@ -431,7 +374,7 @@ const Sidebar = () => {
           {/* ============================================================== */}
           {/* 📌 3. MINIMALIST FOOTER SECTION                                */}
           {/* ============================================================== */}
-          <div className="px-4 lg:px-5 pb-2.5 pt-2 shrink-0 mt-auto border-t border-white/10">
+          <div className="px-4 lg:px-5 pb-3 pt-2.5 shrink-0 mt-auto border-t border-white/10">
             <div className="hidden lg:flex items-center justify-between text-[11.5px] font-semibold text-blue-200/70">
               <span className="truncate">© 2026 RPITSSVR</span>
               <span className="inline-flex items-center gap-1.5 text-[10.5px] text-emerald-300 font-extrabold bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-400/25 shrink-0">
@@ -468,15 +411,21 @@ const Sidebar = () => {
           .animate-dropDown {
             animation: dropDown 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
           }
-          /* ✅ លាក់របារ Scrollbar 100% លើគ្រប់ Browser និងគ្រប់តួនាទី (Admin, Teacher, Student) */
-          .sidebar-nav {
-            scrollbar-width: none !important;
-            -ms-overflow-style: none !important;
-          }
           .sidebar-nav::-webkit-scrollbar {
-            display: none !important;
-            width: 0px !important;
-            height: 0px !important;
+            width: 4px;
+          }
+          .sidebar-nav::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          .sidebar-nav::-webkit-scrollbar-thumb {
+            background: transparent;
+            border-radius: 10px;
+          }
+          .sidebar-nav:hover::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.12);
+          }
+          .sidebar-nav::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
           }
         `}</style>
       </aside>
