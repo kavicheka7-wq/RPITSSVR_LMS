@@ -93,18 +93,19 @@ const AppContent = () => {
 
   // ✅ ប្រើប្រាស់ផ្លូវរួមស្អាតតែមួយ '/dashboard' សម្រាប់គ្រប់តួនាទីទាំងអស់
   const getDashboardPath = () => {
-    if (!user) return '/login';
+    if (!user) return '/';
     return '/dashboard';
   };
 
-  // If user is not logged in, show auth pages without layout
+  // If user is not logged in, show auth pages without layout on clean root '/'
   if (!user) {
     return (
       <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
-          <Route path="/login" element={<Login />} />
+          <Route path="/" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
     );
@@ -127,8 +128,9 @@ const AppContent = () => {
             className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-20 md:pb-6 min-w-0"
           >
             <Routes>
-              {/* Redirect root to clean /dashboard */}
+              {/* Redirect root and /login to clean /dashboard */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/login" element={<Navigate to="/dashboard" replace />} />
 
               {/* ========================================================== */}
               {/* 📌 ១. CLEAN UNIFIED ROUTES (គ្មាន /admin, /teacher, /student) */}
