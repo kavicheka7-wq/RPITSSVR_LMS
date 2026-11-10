@@ -1821,7 +1821,7 @@ const Navbar = () => {
                 <section>
                   <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <GlobeAltIcon className="h-5 w-5 text-blue-600" />
-                    {t('ភាសា (Language)', 'Language')}
+                    {t('ភាសា', 'Language')}
                   </h4>
                   <div className="grid grid-cols-2 gap-4">
                     <button
@@ -1835,7 +1835,7 @@ const Navbar = () => {
                           : 'border-gray-100 text-gray-600 hover:bg-gray-50'
                       }`}
                     >
-                      <span>ខ្មែរ (KH)</span>
+                      <span>{t('ខ្មែរ', 'Khmer')}</span>
                       {language === 'km' && (
                         <span className="text-blue-600">✓</span>
                       )}
@@ -1851,7 +1851,7 @@ const Navbar = () => {
                           : 'border-gray-100 text-gray-600 hover:bg-gray-50'
                       }`}
                     >
-                      <span>English (EN)</span>
+                      <span>{t('English', 'English')}</span>
                       {language === 'en' && (
                         <span className="text-blue-600">✓</span>
                       )}
@@ -1904,7 +1904,7 @@ const Navbar = () => {
                   <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <PaperAirplaneIcon className="h-5 w-5 text-sky-500 -rotate-45" />
                     {t(
-                      'ភ្ជាប់គណនី Telegram (Telegram Integration)',
+                      'ភ្ជាប់គណនី Telegram',
                       'Telegram Account Integration'
                     )}
                   </h4>
