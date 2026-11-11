@@ -292,13 +292,18 @@ const pushLocalNotification = (notif) => {
     let role = 'teacher';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'teacher';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'teacher';
         role = rName.toString().toLowerCase();
+      } else if (Number(u?.role_id) === 1) {
+        role = 'admin';
+      } else if (Number(u?.role_id) === 3) {
+        role = 'student';
       }
     }
 
@@ -331,6 +336,7 @@ export default function TeacherManageQuizzes() {
   const { user } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || '';
@@ -1033,23 +1039,57 @@ export default function TeacherManageQuizzes() {
     [allStudents]
   );
 
+  // ✅ ទាញរករូបភាពប្រវត្តិរូប (Base64 / URL) របស់សិស្សដែលបានប្រឡងក្នុង Modal
+  const resolveAttemptStudentAvatar = useCallback(
+    (attempt) => {
+      const directImg =
+        attempt?.student?.profile_image ||
+        attempt?.student?.user?.profile_image ||
+        attempt?.profile_image ||
+        attempt?.student_image;
+      if (directImg) return directImg;
+
+      const attUserId =
+        attempt?.student_id ||
+        attempt?.user_id ||
+        attempt?.student?.user_id ||
+        attempt?.student?.id;
+      const attEmail = (attempt?.student?.email || '').toLowerCase().trim();
+
+      const matchedStd = (allStudents || []).find(
+        (s) =>
+          (attUserId &&
+            (String(s.user_id) === String(attUserId) ||
+              String(s.id) === String(attUserId))) ||
+          (attEmail && (s.email || '').toLowerCase().trim() === attEmail)
+      );
+
+      return matchedStd?.profile_image || matchedStd?.user?.profile_image || null;
+    },
+    [allStudents]
+  );
+
   // ============================================================================
   // 📌 ផ្នែកទី៤៖ មុខងារគ្រប់គ្រងកម្រងសំណួរ និងសំណួរនីមួយៗ (ភ្ជាប់កណ្ដឹង)
   // ============================================================================
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
+  const getProfileImageUrl = useCallback((imagePath) => {
+    if (!imagePath || typeof imagePath !== 'string') return null;
+    const trimmed = imagePath.trim();
+    if (!trimmed) return null;
     if (
-      imagePath.startsWith('http://') ||
-      imagePath.startsWith('https://') ||
-      imagePath.startsWith('data:')
-    )
-      return imagePath;
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const baseUrl = (
       import.meta.env.VITE_API_URL || 'http://localhost:8000'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = imagePath.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
-  };
+  }, []);
 
   const getGenderLabel = (gender) => {
     const g = (gender || '').toString().trim().toLowerCase();
@@ -1228,7 +1268,7 @@ export default function TeacherManageQuizzes() {
           descKm: `កម្រងសំណួរ «${payload.title}» ${courseName ? `(${courseName})` : ''} ត្រូវបានកែប្រែដោយជោគជ័យ។`,
           descEn: `Quiz "${payload.title}" was updated successfully.`,
           category: 'quiz',
-          link: '/teacher/quizzes',
+          link: '/quizzes',
         });
       } else {
         const res = await api.post('/teacher/quizzes', payload);
@@ -1267,7 +1307,7 @@ export default function TeacherManageQuizzes() {
           descKm: `បានបង្កើតកម្រងសំណួរថ្មី «${payload.title}» (${payload.duration} នាទី | ${payload.total_mark} ពិន្ទុ) សម្រាប់មុខវិជ្ជា «${courseName || '—'}»។`,
           descEn: `Created new quiz "${payload.title}" (${payload.duration} mins, ${payload.total_mark} pts).`,
           category: 'quiz',
-          link: '/teacher/quizzes',
+          link: '/quizzes',
         });
       }
       setShowAddModal(false);
@@ -1316,7 +1356,7 @@ export default function TeacherManageQuizzes() {
         descKm: `កម្រងសំណួរ «${deletedTitle}» ត្រូវបានលុបចេញពីប្រព័ន្ធរួចរាល់។`,
         descEn: `Quiz "${deletedTitle}" has been removed.`,
         category: 'quiz',
-        link: '/teacher/quizzes',
+        link: '/quizzes',
       });
     } catch (error) {
       console.error('Delete quiz error:', error);
@@ -1450,7 +1490,7 @@ export default function TeacherManageQuizzes() {
         descKm: `បានបន្ថែមសំណួរប្រភេទ ${questionType} (${payload.mark} ពិន្ទុ) ទៅក្នុងកម្រងសំណួរ «${targetQuiz?.title || ''}»។`,
         descEn: `Added a new ${questionType} question (${payload.mark} pts) to "${targetQuiz?.title || ''}".`,
         category: 'quiz',
-        link: '/teacher/quizzes',
+        link: '/quizzes',
       });
     } catch (error) {
       console.error('Add question error:', error);
@@ -1501,7 +1541,7 @@ export default function TeacherManageQuizzes() {
         descKm: `សំណួរ «${deletedQText}» ត្រូវបានលុបចេញពីកម្រងសំណួរ។`,
         descEn: `Question "${deletedQText}" was removed.`,
         category: 'quiz',
-        link: '/teacher/quizzes',
+        link: '/quizzes',
       });
     } catch (error) {
       console.error('Delete question error:', error);
@@ -1637,7 +1677,7 @@ export default function TeacherManageQuizzes() {
         descKm: `បាននាំចូលកម្រងសំណួរចំនួន ${parsedQuizzes.length} ទៅក្នុងមុខវិជ្ជា «${courseObj?.course_name || ''}»។`,
         descEn: `Imported ${parsedQuizzes.length} quizzes into "${courseObj?.course_name || ''}".`,
         category: 'quiz',
-        link: '/teacher/quizzes',
+        link: '/quizzes',
       });
 
       setShowImportModal(false);
@@ -1860,7 +1900,7 @@ export default function TeacherManageQuizzes() {
       descKm: `បញ្ជីកម្រងសំណួរចំនួន ${filteredQuizzes.length} ត្រូវបានទាញយកជាឯកសារ Excel ជោគជ័យ។`,
       descEn: `Exported ${filteredQuizzes.length} quizzes to Excel.`,
       category: 'export',
-      link: '/teacher/quizzes',
+      link: '/quizzes',
     });
   };
 
@@ -1928,7 +1968,7 @@ export default function TeacherManageQuizzes() {
       descKm: `លទ្ធផលប្រឡងកម្រងសំណួរ «${viewingQuiz.title}» (${filteredSubmissions.length} នាក់) ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: `Exported results for "${viewingQuiz.title}" (${filteredSubmissions.length} students) to Excel.`,
       category: 'export',
-      link: '/teacher/quizzes',
+      link: '/quizzes',
     });
   };
 
@@ -3576,9 +3616,14 @@ export default function TeacherManageQuizzes() {
                               const isPassed =
                                 (parseFloat(attempt.score) || 0) / rawTotalVal >=
                                 0.5;
-                              const profileImg =
-                                student?.profile_image ||
-                                student?.user?.profile_image;
+                              const rawAvatar = resolveAttemptStudentAvatar(
+                                attempt
+                              );
+                              const avatarUrl = getProfileImageUrl(rawAvatar);
+                              const avatarKey = `quz_att_${attempt.id || idx}`;
+                              const hasAvatar = Boolean(
+                                avatarUrl && !failedAvatars[avatarKey]
+                              );
                               const stdGender = student?.gender || '';
                               const isFemale = isFemaleGender(stdGender);
                               const stdShift = resolveAttemptStudentShift(attempt);
@@ -3594,24 +3639,26 @@ export default function TeacherManageQuizzes() {
                                   </td>
                                   <td className="px-4 py-3.5 whitespace-nowrap">
                                     <div className="flex items-center gap-3">
-                                      {profileImg ? (
-                                        <img
-                                          src={getProfileImageUrl(profileImg)}
-                                          alt={studentName}
-                                          className="w-9 h-9 rounded-full object-cover border border-gray-200 shrink-0"
-                                          onError={(e) => {
-                                            e.target.style.display = 'none';
-                                            e.target.nextSibling.style.display =
-                                              'flex';
-                                          }}
-                                        />
-                                      ) : null}
-                                      <div
-                                        className={`w-9 h-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-extrabold text-xs shrink-0 ${
-                                          profileImg ? 'hidden' : ''
-                                        }`}
-                                      >
-                                        {studentName.charAt(0).toUpperCase()}
+                                      <div className="w-9 h-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-extrabold text-xs shrink-0 overflow-hidden shadow-xs">
+                                        {hasAvatar ? (
+                                          <img
+                                            src={avatarUrl}
+                                            alt={studentName}
+                                            className="h-full w-full object-cover rounded-full"
+                                            onError={() =>
+                                              setFailedAvatars((prev) => ({
+                                                ...prev,
+                                                [avatarKey]: true,
+                                              }))
+                                            }
+                                          />
+                                        ) : (
+                                          <span>
+                                            {studentName
+                                              .charAt(0)
+                                              .toUpperCase()}
+                                          </span>
+                                        )}
                                       </div>
                                       <div>
                                         <div className="quz-text-primary text-sm font-extrabold text-gray-900">
@@ -3913,6 +3960,7 @@ export default function TeacherManageQuizzes() {
         }
         html.dark .quz-table-body {
           background-color: #1e293b !important;
+          border-color: #334155 !important;
         }
         html.dark .quz-table-row + .quz-table-row > td {
           border-top: 1px solid rgba(51, 65, 85, 0.55) !important;

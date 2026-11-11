@@ -16,8 +16,17 @@ class Grade extends Model
         'assignment_score',
         'quiz_score',
         'midterm_score',
+        'exam_score',
         'final_score',
         'grade_letter',
+    ];
+
+    protected $casts = [
+        'assignment_score' => 'float',
+        'quiz_score'       => 'float',
+        'midterm_score'    => 'float',
+        'exam_score'       => 'float',
+        'final_score'      => 'float',
     ];
 
     /**

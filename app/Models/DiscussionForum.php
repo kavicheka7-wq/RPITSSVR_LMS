@@ -14,6 +14,7 @@ class DiscussionForum extends Model
     protected $fillable = [
         'course_id',
         'title',
+        'description',
         'created_by',
     ];
 
@@ -22,7 +23,7 @@ class DiscussionForum extends Model
      */
     public function course(): BelongsTo
     {
-        return $this->belongsTo(Course::class);
+        return $this->belongsTo(Course::class, 'course_id');
     }
 
     /**
@@ -34,10 +35,10 @@ class DiscussionForum extends Model
     }
 
     /**
-     * Relationship: Posts within this forum.
+     * Relationship: Posts within this forum (ប្រើ forum_id ឱ្យត្រូវជាមួយតារាង forum_posts).
      */
     public function posts(): HasMany
     {
-        return $this->hasMany(ForumPost::class);
+        return $this->hasMany(ForumPost::class, 'forum_id');
     }
 }

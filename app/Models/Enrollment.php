@@ -15,10 +15,13 @@ class Enrollment extends Model
         'course_id',
         'enrolled_date',
         'status',
+        'year',
+        'academic_year',
+        'batch_year',
     ];
 
     protected $casts = [
-        'enrolled_date' => 'date',
+        'enrolled_date' => 'date:Y-m-d',
     ];
 
     /**
@@ -42,6 +45,6 @@ class Enrollment extends Model
      */
     public function course(): BelongsTo
     {
-        return $this->belongsTo(Course::class);
+        return $this->belongsTo(Course::class, 'course_id');
     }
 }

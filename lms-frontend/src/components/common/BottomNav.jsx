@@ -1,5 +1,5 @@
 // src/components/common/BottomNav.jsx
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -13,7 +13,9 @@ import {
   FolderIcon,
 } from '@heroicons/react/24/outline';
 
-// ✅ អនុគមន៍ចាប់យកតួនាទីអ្នកប្រើប្រាស់ភ្លាមៗក្នុង 0ms (គាំទ្រទាំង Context, LocalStorage និង role_id)
+const LAST_ADMIN_STUDENT_PATH_KEY = 'lms_admin_last_student_year_path';
+
+// ✅ អនុគមន៍ចាប់យកតួនាទីអ្នកប្រើប្រាស់ភ្លាមៗក្នុង 0ms (គាំទ្រទាំង Context, LocalStorage និង role_id ជាលេខ/អក្សរ)
 const resolveRoleSync = (contextUser, hasRoleFn) => {
   let u = contextUser;
   if (!u || (!u.role && !u.role_name && !u.role_id)) {
@@ -33,11 +35,12 @@ const resolveRoleSync = (contextUser, hasRoleFn) => {
     u?.role_name ||
     (typeof u?.role === 'string' ? u.role : '') ||
     '';
-  const r = rawRole.toString().toLowerCase();
+  const r = rawRole.toString().trim().toLowerCase();
+  const roleIdNum = Number(u?.role_id);
 
-  if (r.includes('admin') || u?.role_id === 1) return 'admin';
-  if (r.includes('teacher') || u?.role_id === 2) return 'teacher';
-  if (r.includes('student') || u?.role_id === 3) return 'student';
+  if (r.includes('admin') || roleIdNum === 1) return 'admin';
+  if (r.includes('teacher') || roleIdNum === 2) return 'teacher';
+  if (r.includes('student') || roleIdNum === 3) return 'student';
 
   if (typeof hasRoleFn === 'function') {
     if (hasRoleFn('Admin')) return 'admin';
@@ -61,6 +64,30 @@ const BottomNav = () => {
 
   const isStudent = currentRole === 'student';
 
+  // ✅ ចងចាំទំព័រឆ្នាំសិក្សារបស់សិស្សដែល Admin បានចូលមើលចុងក្រោយ
+  const [adminStudentPath, setAdminStudentPath] = useState(() => {
+    try {
+      return (
+        sessionStorage.getItem(LAST_ADMIN_STUDENT_PATH_KEY) ||
+        '/students/year-1'
+      );
+    } catch {
+      return '/students/year-1';
+    }
+  });
+
+  useEffect(() => {
+    if (
+      currentRole === 'admin' &&
+      /^\/students\/year-[1-4]/.test(location.pathname)
+    ) {
+      setAdminStudentPath(location.pathname);
+      try {
+        sessionStorage.setItem(LAST_ADMIN_STUDENT_PATH_KEY, location.pathname);
+      } catch {}
+    }
+  }, [currentRole, location.pathname]);
+
   // ✅ គណនាបញ្ជីម៉ឺនុយទាំង ៥ ដោយប្រើ Clean URLs
   const navItems = useMemo(() => {
     if (currentRole === 'admin') {
@@ -69,27 +96,31 @@ const BottomNav = () => {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
           path: '/dashboard',
+          matchPaths: ['/dashboard', '/admin/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
           path: '/courses',
+          matchPaths: ['/courses', '/admin/courses'],
         },
         {
           name: t('គ្រូ', 'Teachers'),
           icon: AcademicCapIcon,
           path: '/teachers',
+          matchPaths: ['/teachers', '/admin/teachers'],
         },
         {
           name: t('សិស្ស', 'Students'),
           icon: UserGroupIcon,
-          path: '/students/year-1',
+          path: adminStudentPath,
           matchPrefix: '/students',
         },
         {
           name: t('របាយការណ៍', 'Reports'),
           icon: ChartBarIcon,
           path: '/reports',
+          matchPaths: ['/reports', '/admin/reports'],
         },
       ];
     }
@@ -100,27 +131,31 @@ const BottomNav = () => {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
           path: '/dashboard',
+          matchPaths: ['/dashboard', '/teacher/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
           path: '/courses',
+          matchPaths: ['/courses', '/teacher/courses'],
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
           path: '/lessons',
+          matchPaths: ['/lessons', '/teacher/lessons'],
         },
         {
           name: t('វត្តមាន', 'Attendance'),
           icon: ClipboardDocumentListIcon,
           path: '/attendance',
+          matchPaths: ['/attendance', '/teacher/attendance'],
         },
         {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
           path: '/grades',
-          matchPaths: ['/grades', '/scores'],
+          matchPaths: ['/grades', '/scores', '/teacher/grades'],
         },
       ];
     }
@@ -131,38 +166,45 @@ const BottomNav = () => {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
           path: '/dashboard',
+          matchPaths: ['/dashboard', '/student/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
           icon: BookOpenIcon,
           path: '/courses',
+          matchPaths: ['/courses', '/student/courses'],
         },
         {
           name: t('មេរៀន', 'Lessons'),
           icon: FolderIcon,
           path: '/lessons',
+          matchPaths: ['/lessons', '/student/lessons'],
         },
         {
           name: t('វត្តមាន', 'Attendance'),
           icon: ClipboardDocumentListIcon,
           path: '/attendance',
+          matchPaths: ['/attendance', '/student/attendance'],
         },
         {
           name: t('ពិន្ទុ', 'Scores'),
           icon: ChartBarIcon,
           path: '/grades',
-          matchPaths: ['/grades', '/scores'],
+          matchPaths: ['/grades', '/scores', '/student/scores'],
         },
       ];
     }
 
     return [];
-  }, [currentRole, t]);
+  }, [currentRole, adminStudentPath, t]);
 
   if (navItems.length === 0) return null;
 
+  const cleanPathname =
+    location.pathname.replace(/\/+$/, '') || '/';
+
   return (
-    <div className="md:hidden fixed bottom-5 left-0 right-0 z-[90] flex justify-center px-4 animate-slideUp pointer-events-none">
+    <div className="md:hidden fixed bottom-5 left-0 right-0 z-40 flex justify-center px-4 pb-[env(safe-area-inset-bottom,0px)] animate-slideUp pointer-events-none select-none">
       {/* ✅ ផ្ទៃ Background ស៊ីគ្នាជាមួយ Navbar (Student ពណ៌ Indigo/Violet, Teacher/Admin ពណ៌ Blue/Indigo) */}
       <div
         className={`backdrop-blur-xl border rounded-2xl p-1.5 flex items-center justify-between w-full max-w-[365px] pointer-events-auto transition-colors duration-300 ${
@@ -175,13 +217,13 @@ const BottomNav = () => {
           const Icon = item.icon;
           const isCustomActive =
             (item.matchPrefix &&
-              location.pathname.startsWith(item.matchPrefix)) ||
+              cleanPathname.startsWith(item.matchPrefix)) ||
             (Array.isArray(item.matchPaths) &&
-              item.matchPaths.includes(location.pathname));
+              item.matchPaths.includes(cleanPathname));
 
           return (
             <NavLink
-              key={item.path}
+              key={item.matchPrefix || item.path}
               to={item.path}
               className={({ isActive }) => {
                 const activeState = isActive || isCustomActive;
@@ -206,7 +248,7 @@ const BottomNav = () => {
                       }`}
                     />
                     <span
-                      className={`text-[10px] transition-all duration-200 truncate w-full text-center ${
+                      className={`text-[10px] transition-all duration-200 truncate w-full text-center leading-snug ${
                         activeState
                           ? 'font-extrabold text-white'
                           : 'font-medium text-blue-200/75'

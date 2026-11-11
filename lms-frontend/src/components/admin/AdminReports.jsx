@@ -197,12 +197,13 @@ const pushLocalNotification = (notif) => {
     let role = 'admin';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'admin';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'admin';
         role = rName.toString().toLowerCase();
       }
     }
@@ -237,6 +238,27 @@ const AdminReports = () => {
   // ==========================================================================
   const { t, language } = useLanguage();
   const { user } = useAuth();
+  const [failedAvatars, setFailedAvatars] = useState({});
+
+  // ✅ អនុគមន៍បម្លែងទីតាំងរូបភាពឱ្យគាំទ្រទាំង Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const resolveImageUrl = useCallback((rawPath) => {
+    if (!rawPath || typeof rawPath !== 'string') return null;
+    const trimmed = rawPath.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
+    const baseUrl = (
+      import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    ).replace(/\/api\/?$/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    return `${baseUrl}/storage/${cleanPath}`;
+  }, []);
 
   // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
@@ -943,7 +965,7 @@ const AdminReports = () => {
       descKm: `${getActiveReportTitle()} (${exportRows.length} ជួរ) ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: `${getActiveReportTitle()} (${exportRows.length} rows) was exported to Excel.`,
       category: 'export',
-      link: '/admin/reports',
+      link: '/reports',
     });
   };
 
@@ -1579,34 +1601,62 @@ const AdminReports = () => {
                           </td>
                         </tr>
                       ) : (
-                        enrollmentData.data.map((item, idx) => (
-                          <tr key={item.id || idx} className="rep-table-row hover:bg-blue-50/30 transition-colors">
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600">{item.student_code || '—'}</td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="rep-text-primary font-extrabold text-gray-900 text-sm">{item.student_name || '—'}</div>
-                              <div className="rep-text-secondary text-xs text-gray-500 font-medium">{item.email || ''}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="rep-text-primary font-bold text-gray-800 text-sm">{item.course_name || '—'}</div>
-                              <div className="rep-text-secondary text-xs text-gray-500 font-medium">{item.course_code || ''}</div>
-                            </td>
-                            <td className="rep-text-secondary px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-600">{item.department_name || '—'}</td>
-                            <td className="rep-text-secondary px-6 py-4 whitespace-nowrap text-xs font-bold text-gray-500">{formatDateOnly(item.enrolled_date)}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-center">
-                              <span
-                                className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${
-                                  item.status === 'active'
-                                    ? 'rep-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : item.status === 'completed'
-                                    ? 'rep-badge-blue bg-blue-50 text-blue-700 border-blue-200'
-                                    : 'rep-badge-rose bg-rose-50 text-rose-700 border-rose-200'
-                                }`}
-                              >
-                                {getEnrollmentStatusLabel(item.status)}
-                              </span>
-                            </td>
-                          </tr>
-                        ))
+                        enrollmentData.data.map((item, idx) => {
+                          const rawAvatar =
+                            item.profile_image ||
+                            item.student?.profile_image ||
+                            item.student?.user?.profile_image ||
+                            item.user?.profile_image;
+                          const avatarUrl = resolveImageUrl(rawAvatar);
+                          const avatarKey = `enr_${item.id || item.student_id || idx}`;
+                          const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+
+                          return (
+                            <tr key={item.id || idx} className="rep-table-row hover:bg-blue-50/30 transition-colors">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600">{item.student_code || '—'}</td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center gap-3">
+                                  {hasAvatar && (
+                                    <img
+                                      src={avatarUrl}
+                                      alt={item.student_name || 'Student'}
+                                      className="no-print h-8 w-8 rounded-full object-cover shrink-0 border border-blue-200 shadow-2xs"
+                                      onError={() =>
+                                        setFailedAvatars((prev) => ({
+                                          ...prev,
+                                          [avatarKey]: true,
+                                        }))
+                                      }
+                                    />
+                                  )}
+                                  <div>
+                                    <div className="rep-text-primary font-extrabold text-gray-900 text-sm">{item.student_name || '—'}</div>
+                                    <div className="rep-text-secondary text-xs text-gray-500 font-medium">{item.email || ''}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="rep-text-primary font-bold text-gray-800 text-sm">{item.course_name || '—'}</div>
+                                <div className="rep-text-secondary text-xs text-gray-500 font-medium">{item.course_code || ''}</div>
+                              </td>
+                              <td className="rep-text-secondary px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-600">{item.department_name || '—'}</td>
+                              <td className="rep-text-secondary px-6 py-4 whitespace-nowrap text-xs font-bold text-gray-500">{formatDateOnly(item.enrolled_date)}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-center">
+                                <span
+                                  className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${
+                                    item.status === 'active'
+                                      ? 'rep-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : item.status === 'completed'
+                                      ? 'rep-badge-blue bg-blue-50 text-blue-700 border-blue-200'
+                                      : 'rep-badge-rose bg-rose-50 text-rose-700 border-rose-200'
+                                  }`}
+                                >
+                                  {getEnrollmentStatusLabel(item.status)}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -1827,6 +1877,18 @@ const AdminReports = () => {
                                        || (item.course?.teacher?.first_name ? `${item.course.teacher.first_name} ${item.course.teacher.last_name || ''}`.trim() : null)
                                        || t('មិនស្គាល់គ្រូបង្រៀន', 'Unknown Teacher');
 
+                        const rawTeacherAvatar =
+                          item.teacher_profile_image ||
+                          item.teacher?.profile_image ||
+                          item.teacher?.user?.profile_image ||
+                          item.course?.teacher?.profile_image ||
+                          item.course?.teacher?.user?.profile_image;
+                        const teacherAvatarUrl = resolveImageUrl(rawTeacherAvatar);
+                        const teacherAvatarKey = `att_t_${item.course_id || index}`;
+                        const hasTeacherAvatar = Boolean(
+                          teacherAvatarUrl && !failedAvatars[teacherAvatarKey]
+                        );
+
                         return (
                           <div key={item.course_id || index} className="rep-surface-card bg-white p-4 lg:p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow flex flex-col md:flex-row items-start md:items-center gap-5 lg:gap-6 group">
                             
@@ -1838,8 +1900,22 @@ const AdminReports = () => {
                                 <h4 className="rep-text-primary font-extrabold text-gray-900 text-sm leading-tight mb-1">{item.course_name || t('មិនមានឈ្មោះមុខវិជ្ជា', 'Unnamed Course')}</h4>
                                 <div className="flex items-center flex-wrap gap-2 mt-1">
                                   <span className="rep-code-pill text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-md">{item.course_code || 'N/A'}</span>
-                                  <span className="rep-text-secondary text-[11px] font-bold text-gray-600 flex items-center gap-1">
-                                    <UserGroupIcon className="w-3.5 h-3.5 text-gray-400" /> 
+                                  <span className="rep-text-secondary text-[11px] font-bold text-gray-600 flex items-center gap-1.5">
+                                    {hasTeacherAvatar ? (
+                                      <img
+                                        src={teacherAvatarUrl}
+                                        alt={teacherName}
+                                        className="w-4 h-4 rounded-full object-cover shrink-0 border border-indigo-200"
+                                        onError={() =>
+                                          setFailedAvatars((prev) => ({
+                                            ...prev,
+                                            [teacherAvatarKey]: true,
+                                          }))
+                                        }
+                                      />
+                                    ) : (
+                                      <UserGroupIcon className="w-3.5 h-3.5 text-gray-400" />
+                                    )}
                                     {teacherName}
                                   </span>
                                 </div>
@@ -2095,11 +2171,36 @@ const AdminReports = () => {
                       ) : (
                         enrichedAcademicRows.map((g, idx) => {
                           const { assignPts20, quizPts20, totalPoints, status } = g.computed;
+                          const rawAvatar =
+                            g.profile_image ||
+                            g.student?.profile_image ||
+                            g.student?.user?.profile_image ||
+                            g.user?.profile_image;
+                          const avatarUrl = resolveImageUrl(rawAvatar);
+                          const avatarKey = `acad_${g.id || g.student_id || idx}`;
+                          const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
 
                           return (
                             <tr key={g.id || idx} className="rep-table-row hover:bg-blue-50/30 transition-colors">
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600">{g.student_code || '—'}</td>
-                              <td className="rep-text-primary px-6 py-4 whitespace-nowrap text-sm font-extrabold text-gray-900">{g.student_name || '—'}</td>
+                              <td className="rep-text-primary px-6 py-4 whitespace-nowrap text-sm font-extrabold text-gray-900">
+                                <div className="flex items-center gap-3">
+                                  {hasAvatar && (
+                                    <img
+                                      src={avatarUrl}
+                                      alt={g.student_name || 'Student'}
+                                      className="no-print h-8 w-8 rounded-full object-cover shrink-0 border border-blue-200 shadow-2xs"
+                                      onError={() =>
+                                        setFailedAvatars((prev) => ({
+                                          ...prev,
+                                          [avatarKey]: true,
+                                        }))
+                                      }
+                                    />
+                                  )}
+                                  <span>{g.student_name || '—'}</span>
+                                </div>
+                              </td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <div className="rep-text-primary font-bold text-gray-800 text-sm">{g.course_name || '—'}</div>
                                 <div className="rep-text-secondary text-xs font-medium text-gray-500">{g.course_code || ''}</div>

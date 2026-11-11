@@ -3,16 +3,17 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
-use App\Models\Teacher;
 use App\Models\Role;
+use App\Models\Student;
+use App\Models\Teacher;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -20,10 +21,12 @@ use Illuminate\Validation\ValidationException;
 class AuthController extends Controller
 {
     /**
-     * HELPER METHOD: រៀបចំទម្រង់ទិន្នន័យ User និង Teacher
+     * HELPER METHOD: រៀបចំទម្រង់ទិន្នន័យ User, Teacher និង Student ឱ្យពេញលេញតាំងពីវិនាទីដំបូង
      */
     private function buildUserAndTeacherPayload(User $user)
     {
+        $user->loadMissing('role:id,role_name');
+
         $userData = [
             'id' => $user->id,
             'first_name' => $user->first_name,
@@ -41,27 +44,37 @@ class AuthController extends Controller
         ];
 
         $teacherData = null;
+        $roleNameLower = strtolower((string) ($user->role?->role_name ?? ''));
+        $isTeacherRole = $roleNameLower === 'teacher' || (int) $user->role_id === 2;
+        $isStudentRole = $roleNameLower === 'student' || (int) $user->role_id === 3;
 
-        if ($user->role?->role_name === 'Teacher') {
+        if ($isTeacherRole) {
             $teacher = Teacher::with([
                 'department:id,department_name',
-                'role:id,role_name'
+                'role:id,role_name',
             ])
-            ->select([
-                'id', 'user_id', 'role_id', 'department_id',
-                'teacher_code', 'first_name', 'last_name', 'gender',
-                'date_of_birth', 'email', 'phone', 'specialization',
-                'employment_type'
-            ])
-            ->where('user_id', $user->id)
-            ->first();
+                ->select([
+                    'id', 'user_id', 'role_id', 'department_id',
+                    'teacher_code', 'first_name', 'last_name', 'gender',
+                    'date_of_birth', 'email', 'phone', 'profile_image',
+                    'specialization', 'employment_type',
+                ])
+                ->where('user_id', $user->id)
+                ->first();
 
             if ($teacher) {
+                if (empty($teacher->profile_image) && !empty($user->profile_image)) {
+                    $teacher->profile_image = $user->profile_image;
+                } elseif (empty($userData['profile_image']) && !empty($teacher->profile_image)) {
+                    $userData['profile_image'] = $teacher->profile_image;
+                }
+
                 $userData['teacher_id'] = $teacher->id;
                 $userData['teacher_code'] = $teacher->teacher_code;
                 $userData['specialization'] = $teacher->specialization;
                 $userData['department_id'] = $teacher->department_id;
                 $userData['department_name'] = $teacher->department?->department_name;
+                $userData['department'] = $teacher->department;
                 $userData['employment_type'] = $teacher->employment_type;
                 $userData['date_of_birth'] = $teacher->date_of_birth;
                 $userData['teacher_first_name'] = $teacher->first_name;
@@ -70,11 +83,46 @@ class AuthController extends Controller
                 $userData['teacher_phone'] = $teacher->phone;
                 $userData['teacher_gender'] = $teacher->gender;
                 $userData['teacher_role'] = $teacher->role;
+                $userData['teacher'] = $teacher;
                 $userData['is_teacher'] = true;
 
                 $teacherData = $teacher;
             } else {
                 $userData['is_teacher'] = false;
+            }
+        } elseif ($isStudentRole) {
+            $userData['is_teacher'] = false;
+
+            $student = Student::with([
+                'department:id,department_name',
+                'role:id,role_name',
+            ])
+                ->select([
+                    'id', 'user_id', 'role_id', 'department_id',
+                    'student_code', 'first_name', 'last_name', 'gender',
+                    'date_of_birth', 'email', 'phone', 'profile_image',
+                    'batch_year', 'degree_level', 'study_shift', 'address',
+                ])
+                ->where('user_id', $user->id)
+                ->first();
+
+            if ($student) {
+                if (empty($student->profile_image) && !empty($user->profile_image)) {
+                    $student->profile_image = $user->profile_image;
+                } elseif (empty($userData['profile_image']) && !empty($student->profile_image)) {
+                    $userData['profile_image'] = $student->profile_image;
+                }
+
+                $userData['student_id'] = $student->id;
+                $userData['student_code'] = $student->student_code;
+                $userData['department_id'] = $student->department_id;
+                $userData['department_name'] = $student->department?->department_name;
+                $userData['department'] = $student->department;
+                $userData['batch_year'] = $student->batch_year;
+                $userData['degree_level'] = $student->degree_level;
+                $userData['study_shift'] = $student->study_shift ?? 'Monday-Friday';
+                $userData['date_of_birth'] = $student->date_of_birth;
+                $userData['student'] = $student;
             }
         } else {
             $userData['is_teacher'] = false;
@@ -564,7 +612,8 @@ class AuthController extends Controller
             'action' => 'nullable|string',
         ]);
 
-        $user = User::with('role:id,role_name')->where('email', $request->email)->first();
+        $cleanEmail = trim($request->email);
+        $user = User::with('role:id,role_name')->where('email', $cleanEmail)->first();
         if (!$user) {
             return response()->json(['linked' => false, 'message' => 'រកមិនឃើញគណនីនេះទេ'], 404);
         }
@@ -689,6 +738,15 @@ class AuthController extends Controller
     // ✅ ចុះឈ្មោះគណនី Admin ដំបូង រួចភ្ជាប់ទិន្នន័យ Role ត្រឡប់ទៅឱ្យ Frontend ភ្លាមៗ
     public function register(Request $request)
     {
+        // ការពារមិនឱ្យចុះឈ្មោះ Admin ថ្មីថែមទៀតប្រសិនបើមានគណនី Admin រួចហើយក្នុងប្រព័ន្ធ
+        $adminRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%admin%'])->first();
+        $adminRoleId = $adminRole?->id ?? 1;
+        if (User::where('role_id', $adminRoleId)->exists()) {
+            return response()->json([
+                'message' => 'គណនីអ្នកគ្រប់គ្រងដំបូងត្រូវបានបង្កើតរួចហើយ! សូមចូលប្រើប្រាស់តាមរយៈទំព័រ Login។',
+            ], 403);
+        }
+
         $request->validate([
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
@@ -698,13 +756,16 @@ class AuthController extends Controller
         ]);
 
         $user = User::create([
-            'first_name' => $request->first_name,
-            'last_name' => $request->last_name,
-            'email' => $request->email,
+            'first_name' => trim($request->first_name),
+            'last_name' => trim($request->last_name),
+            'email' => strtolower(trim($request->email)),
             'password' => Hash::make($request->password),
             'role_id' => $request->role_id,
             'status' => 'active',
         ]);
+
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
 
         $user->load('role:id,role_name');
         $token = $user->createToken('auth_token')->plainTextToken;
@@ -713,8 +774,9 @@ class AuthController extends Controller
         return response()->json([
             'user' => $userData,
             'teacher' => $teacherData,
+            'student' => $userData['student'] ?? null,
             'token' => $token,
-            'message' => 'Registration successful'
+            'message' => 'Registration successful',
         ], 201);
     }
 
@@ -732,12 +794,12 @@ class AuthController extends Controller
         $failedLogins = (int) Cache::get($lockoutKey, 0);
         if ($failedLogins >= 5) {
             return response()->json([
-                'message' => 'គណនីនេះត្រូវបានផ្អាកការចូលជាបណ្ដោះអាសន្នរយៈពេល ១៥ នាទី ដោយសារបញ្ចូលពាក្យសម្ងាត់ខុសលើសពី ៥ ដង!'
+                'message' => 'គណនីនេះត្រូវបានផ្អាកការចូលជាបណ្ដោះអាសន្នរយៈពេល ១៥ នាទី ដោយសារបញ្ចូលពាក្យសម្ងាត់ខុសលើសពី ៥ ដង!',
             ], 429);
         }
 
         $user = User::with('role:id,role_name')
-            ->where('email', $request->email)
+            ->where('email', trim($request->email))
             ->first();
 
         if (!$user) {
@@ -756,7 +818,7 @@ class AuthController extends Controller
                 'password' => [
                     $remaining > 0
                         ? "ពាក្យសម្ងាត់មិនត្រឹមត្រូវ! (នៅសល់ឱកាស {$remaining} ដងទៀត)"
-                        : 'អ្នកបានបញ្ចូលពាក្យសម្ងាត់ខុសលើសកំណត់! គណនីត្រូវបានផ្អាក ១៥ នាទី។'
+                        : 'អ្នកបានបញ្ចូលពាក្យសម្ងាត់ខុសលើសកំណត់! គណនីត្រូវបានផ្អាក ១៥ នាទី។',
                 ],
             ]);
         }
@@ -818,18 +880,18 @@ class AuthController extends Controller
         ]);
 
         $user = User::with('role:id,role_name')
-            ->where('email', $request->email)
+            ->where('email', trim($request->email))
             ->first();
 
         if (!$user) {
             return response()->json([
-                'message' => 'អ៊ីមែលនេះមិនមានក្នុងប្រព័ន្ធទេ'
+                'message' => 'អ៊ីមែលនេះមិនមានក្នុងប្រព័ន្ធទេ',
             ], 404);
         }
 
         if ($user->status !== 'active') {
             return response()->json([
-                'message' => 'គណនីរបស់អ្នកត្រូវបានបិទដោយអ្នកគ្រប់គ្រងប្រព័ន្ធ!'
+                'message' => 'គណនីរបស់អ្នកត្រូវបានបិទដោយអ្នកគ្រប់គ្រងប្រព័ន្ធ!',
             ], 403);
         }
 
@@ -837,7 +899,7 @@ class AuthController extends Controller
         if (Cache::has($otpLockoutKey)) {
             return response()->json([
                 'otp_expired' => true,
-                'message' => 'គណនីនេះត្រូវបានផ្អាកការផ្ទៀងផ្ទាត់រយៈពេល ១៥ នាទី ដោយសារវាយលេខកូដខុសលើសកំណត់!'
+                'message' => 'គណនីនេះត្រូវបានផ្អាកការផ្ទៀងផ្ទាត់រយៈពេល ១៥ នាទី ដោយសារវាយលេខកូដខុសលើសកំណត់!',
             ], 429);
         }
 
@@ -850,7 +912,7 @@ class AuthController extends Controller
         if (!$cachedOtp) {
             return response()->json([
                 'otp_expired' => true,
-                'message' => 'លេខកូដផ្ទៀងផ្ទាត់នេះបានផុតកំណត់ហើយ! សូមចុច «ផ្ញើលេខកូដម្ដងទៀត»។'
+                'message' => 'លេខកូដផ្ទៀងផ្ទាត់នេះបានផុតកំណត់ហើយ! សូមចុច «ផ្ញើលេខកូដម្ដងទៀត»។',
             ], 422);
         }
 
@@ -864,13 +926,13 @@ class AuthController extends Controller
                 Cache::put($otpLockoutKey, true, now()->addMinutes(15));
                 return response()->json([
                     'otp_expired' => true,
-                    'message' => 'អ្នកបានបញ្ចូលលេខកូដខុសគ្រប់ ៥ ដងហើយ! គណនីត្រូវបានផ្អាកការចូលរយៈពេល ១៥ នាទី។'
+                    'message' => 'អ្នកបានបញ្ចូលលេខកូដខុសគ្រប់ ៥ ដងហើយ! គណនីត្រូវបានផ្អាកការចូលរយៈពេល ១៥ នាទី។',
                 ], 429);
             }
 
             return response()->json([
                 'remaining_attempts' => $remaining,
-                'message' => "លេខកូដ OTP មិនត្រឹមត្រូវទេ! (នៅសល់ឱកាសព្យាយាម {$remaining} ដងទៀត)"
+                'message' => "លេខកូដ OTP មិនត្រឹមត្រូវទេ! (នៅសល់ឱកាសព្យាយាម {$remaining} ដងទៀត)",
             ], 422);
         }
 
@@ -901,7 +963,8 @@ class AuthController extends Controller
             'user' => $userData,
             'token' => $token,
             'teacher' => $teacherData ?? null,
-            'message' => 'ផ្ទៀងផ្ទាត់សុវត្ថិភាពជោគជ័យ! ចូលប្រព័ន្ធដោយជោគជ័យ'
+            'student' => $userData['student'] ?? null,
+            'message' => 'ផ្ទៀងផ្ទាត់សុវត្ថិភាពជោគជ័យ! ចូលប្រព័ន្ធដោយជោគជ័យ',
         ]);
     }
 
@@ -912,17 +975,17 @@ class AuthController extends Controller
             'email' => 'required|email',
         ]);
 
-        $user = User::with('role:id,role_name')->where('email', $request->email)->first();
+        $user = User::with('role:id,role_name')->where('email', trim($request->email))->first();
 
         if (!$user) {
             return response()->json([
-                'message' => 'អ៊ីមែលនេះមិនមានក្នុងប្រព័ន្ធទេ'
+                'message' => 'អ៊ីមែលនេះមិនមានក្នុងប្រព័ន្ធទេ',
             ], 404);
         }
 
         if (Cache::has('lms_2fa_lockout_' . $user->id)) {
             return response()->json([
-                'message' => 'គណនីនេះកំពុងត្រូវបានផ្អាកជាបណ្ដោះអាសន្នរយៈពេល ១៥ នាទី!'
+                'message' => 'គណនីនេះកំពុងត្រូវបានផ្អាកជាបណ្ដោះអាសន្នរយៈពេល ១៥ នាទី!',
             ], 429);
         }
 
@@ -931,7 +994,7 @@ class AuthController extends Controller
 
         if ($resendCount >= 5) {
             return response()->json([
-                'message' => 'អ្នកបានស្នើសុំលេខកូដច្រើនដងពេក! សូមរង់ចាំ ១០ នាទីក្រោយសិន។'
+                'message' => 'អ្នកបានស្នើសុំលេខកូដច្រើនដងពេក! សូមរង់ចាំ ១០ នាទីក្រោយសិន។',
             ], 429);
         }
 
@@ -990,7 +1053,7 @@ class AuthController extends Controller
         $lockoutKey = 'lms_pwd_reset_lockout_' . $user->id;
         if (Cache::has($lockoutKey)) {
             return response()->json([
-                'message' => 'គណនីនេះត្រូវបានផ្អាកការស្នើសុំប្ដូរពាក្យសម្ងាត់រយៈពេល ១៥ នាទី ដោយសារវាយលេខកូដខុសលើសកំណត់!'
+                'message' => 'គណនីនេះត្រូវបានផ្អាកការស្នើសុំប្ដូរពាក្យសម្ងាត់រយៈពេល ១៥ នាទី ដោយសារវាយលេខកូដខុសលើសកំណត់!',
             ], 429);
         }
 
@@ -998,7 +1061,7 @@ class AuthController extends Controller
         $resendCount = (int) Cache::get($resendLimitKey, 0);
         if ($resendCount >= 5) {
             return response()->json([
-                'message' => 'អ្នកបានស្នើសុំលេខកូដច្រើនដងពេក! សូមរង់ចាំ ១០ នាទីក្រោយសិន។'
+                'message' => 'អ្នកបានស្នើសុំលេខកូដច្រើនដងពេក! សូមរង់ចាំ ១០ នាទីក្រោយសិន។',
             ], 429);
         }
         Cache::put($resendLimitKey, $resendCount + 1, now()->addMinutes(10));
@@ -1048,7 +1111,7 @@ class AuthController extends Controller
         if (Cache::has($lockoutKey)) {
             return response()->json([
                 'otp_expired' => true,
-                'message' => 'គណនីនេះត្រូវបានផ្អាកការផ្ទៀងផ្ទាត់រយៈពេល ១៥ នាទី ដោយសារវាយលេខកូដខុសលើសកំណត់!'
+                'message' => 'គណនីនេះត្រូវបានផ្អាកការផ្ទៀងផ្ទាត់រយៈពេល ១៥ នាទី ដោយសារវាយលេខកូដខុសលើសកំណត់!',
             ], 429);
         }
 
@@ -1060,7 +1123,7 @@ class AuthController extends Controller
         if (!$cachedOtp) {
             return response()->json([
                 'otp_expired' => true,
-                'message' => 'លេខកូដផ្ទៀងផ្ទាត់នេះបានផុតកំណត់ហើយ! សូមចុច «ផ្ញើលេខកូដម្ដងទៀត»។'
+                'message' => 'លេខកូដផ្ទៀងផ្ទាត់នេះបានផុតកំណត់ហើយ! សូមចុច «ផ្ញើលេខកូដម្ដងទៀត»។',
             ], 422);
         }
 
@@ -1074,13 +1137,13 @@ class AuthController extends Controller
                 Cache::put($lockoutKey, true, now()->addMinutes(15));
                 return response()->json([
                     'otp_expired' => true,
-                    'message' => 'អ្នកបានបញ្ចូលលេខកូដខុសគ្រប់ ៥ ដងហើយ! គណនីត្រូវបានផ្អាក ១៥ នាទី។'
+                    'message' => 'អ្នកបានបញ្ចូលលេខកូដខុសគ្រប់ ៥ ដងហើយ! គណនីត្រូវបានផ្អាក ១៥ នាទី។',
                 ], 429);
             }
 
             return response()->json([
                 'remaining_attempts' => $remaining,
-                'message' => "លេខកូដ OTP មិនត្រឹមត្រូវទេ! (នៅសល់ឱកាសព្យាយាម {$remaining} ដងទៀត)"
+                'message' => "លេខកូដ OTP មិនត្រឹមត្រូវទេ! (នៅសល់ឱកាសព្យាយាម {$remaining} ដងទៀត)",
             ], 422);
         }
 
@@ -1093,7 +1156,7 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'reset_token' => $resetToken,
-            'message' => 'ផ្ទៀងផ្ទាត់លេខកូដជោគជ័យ! សូមបញ្ចូលពាក្យសម្ងាត់ថ្មីរបស់អ្នក។'
+            'message' => 'ផ្ទៀងផ្ទាត់លេខកូដជោគជ័យ! សូមបញ្ចូលពាក្យសម្ងាត់ថ្មីរបស់អ្នក។',
         ]);
     }
 
@@ -1118,7 +1181,7 @@ class AuthController extends Controller
 
         if (!$savedTokenHash || !Hash::check($request->reset_token, $savedTokenHash)) {
             return response()->json([
-                'message' => 'សម័យកាលប្ដូរពាក្យសម្ងាត់បានផុតកំណត់ហើយ! សូមផ្ទៀងផ្ទាត់លេខកូដម្ដងទៀត។'
+                'message' => 'សម័យកាលប្ដូរពាក្យសម្ងាត់បានផុតកំណត់ហើយ! សូមផ្ទៀងផ្ទាត់លេខកូដម្ដងទៀត។',
             ], 422);
         }
 
@@ -1141,26 +1204,27 @@ class AuthController extends Controller
             'user' => $userData,
             'token' => $token,
             'teacher' => $teacherData ?? null,
-            'message' => 'បានផ្លាស់ប្ដូរពាក្យសម្ងាត់ថ្មី និងចូលប្រព័ន្ធដោយជោគជ័យ!'
+            'student' => $userData['student'] ?? null,
+            'message' => 'បានផ្លាស់ប្ដូរពាក្យសម្ងាត់ថ្មី និងចូលប្រព័ន្ធដោយជោគជ័យ!',
         ]);
     }
 
     public function logout(Request $request)
     {
         if ($request->boolean('all_devices')) {
-            $request->user()->tokens()->delete();
+            $request->user()?->tokens()?->delete();
         } else {
-            $request->user()->currentAccessToken()->delete();
+            $request->user()?->currentAccessToken()?->delete();
         }
 
         return response()->json([
-            'message' => 'បានចាកចេញពីប្រព័ន្ធដោយជោគជ័យ'
+            'message' => 'បានចាកចេញពីប្រព័ន្ធដោយជោគជ័យ',
         ]);
     }
 
     public function user(Request $request)
     {
-        $user = User::with('role:id,role_name')->find($request->user()->id);
+        $user = User::with('role:id,role_name')->find($request->user()?->id);
 
         if (!$user || $user->status !== 'active') {
             $request->user()?->tokens()?->delete();
@@ -1171,7 +1235,8 @@ class AuthController extends Controller
 
         return response()->json([
             'user' => $userData,
-            'teacher' => $teacherData
+            'teacher' => $teacherData,
+            'student' => $userData['student'] ?? null,
         ]);
     }
 }

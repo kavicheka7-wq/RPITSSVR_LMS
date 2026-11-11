@@ -301,6 +301,7 @@ const ViewScores = () => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
   const abortControllerRef = useRef(null);
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   // ✅ កំណត់អត្តសញ្ញាណសិស្សបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentStudentId = useMemo(() => {
@@ -471,17 +472,25 @@ const ViewScores = () => {
     return isWeekendShift ? 'Shift: Sat-Sun' : 'Shift: Mon-Fri';
   }, [isWeekendShift, language]);
 
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
-    if (imagePath.startsWith('http') || imagePath.startsWith('data:')) {
-      return imagePath;
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const getProfileImageUrl = useCallback((imagePath) => {
+    if (!imagePath || typeof imagePath !== 'string') return null;
+    const trimmed = imagePath.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
     }
     const baseUrl = (
       import.meta.env.VITE_API_URL || 'http://localhost:8000'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = imagePath.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
-  };
+  }, []);
 
   // ✅ ទាញយកឈ្មោះ រូបថត និងជំនាញរបស់គ្រូបង្រៀនឱ្យត្រឹមត្រូវ ១០០%
   const resolveGradeTeacherMeta = useCallback(
@@ -535,9 +544,13 @@ const ViewScores = () => {
       const rawImg =
         tchProfile?.profile_image_url ||
         tchProfile?.profile_image ||
+        tchProfile?.user?.profile_image ||
         tch?.profile_image_url ||
         tch?.profile_image ||
-        tch?.user?.profile_image;
+        tch?.user?.profile_image_url ||
+        tch?.user?.profile_image ||
+        course?.teacher_image ||
+        gradeRow?.teacher_image;
 
       return {
         name: fullName,
@@ -547,7 +560,7 @@ const ViewScores = () => {
           tchProfile?.specialization || tch?.specialization || null,
       };
     },
-    [t]
+    [t, getProfileImageUrl]
   );
 
   const availableCourses = useMemo(() => {
@@ -1049,6 +1062,10 @@ const ViewScores = () => {
               ) : (
                 filteredGrades.map((grade, idx) => {
                   const teacherMeta = resolveGradeTeacherMeta(grade);
+                  const avatarKey = `scr_t_${grade.course?.id || grade.course_id || idx}`;
+                  const hasTeacherAvatar = Boolean(
+                    teacherMeta.image && !failedAvatars[avatarKey]
+                  );
 
                   const courseName =
                     grade.course?.course_name ||
@@ -1085,23 +1102,22 @@ const ViewScores = () => {
 
                       <td className="px-6 py-4 whitespace-nowrap align-middle">
                         <div className="flex items-center gap-3">
-                          {teacherMeta.image ? (
-                            <img
-                              src={teacherMeta.image}
-                              alt={teacherMeta.name}
-                              className="h-9 w-9 rounded-full object-cover border border-gray-200 shadow-2xs shrink-0"
-                              onError={(e) => {
-                                e.target.style.display = 'none';
-                                e.target.nextSibling.style.display = 'flex';
-                              }}
-                            />
-                          ) : null}
-                          <div
-                            className={`h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-extrabold text-xs shadow-2xs shrink-0 ${
-                              teacherMeta.image ? 'hidden' : ''
-                            }`}
-                          >
-                            {teacherMeta.initials}
+                          <div className="h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-extrabold text-xs shadow-2xs shrink-0 overflow-hidden">
+                            {hasTeacherAvatar ? (
+                              <img
+                                src={teacherMeta.image}
+                                alt={teacherMeta.name}
+                                className="h-full w-full object-cover rounded-full"
+                                onError={() =>
+                                  setFailedAvatars((prev) => ({
+                                    ...prev,
+                                    [avatarKey]: true,
+                                  }))
+                                }
+                              />
+                            ) : (
+                              <span>{teacherMeta.initials}</span>
+                            )}
                           </div>
                           <div className="min-w-0">
                             <span className="std-scr-text-primary block text-sm font-bold text-gray-800 truncate max-w-[160px]">

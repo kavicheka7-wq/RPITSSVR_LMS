@@ -1,5 +1,12 @@
 // src/context/AuthContext.jsx
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, {
+  createContext,
+  useState,
+  useContext,
+  useEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import api from '../services/api';
 
 const AuthContext = createContext();
@@ -15,85 +22,145 @@ const readStoredJson = (key) => {
   }
 };
 
+const readValidTokenSync = () => {
+  try {
+    const raw =
+      localStorage.getItem('token') || localStorage.getItem('auth_token');
+    if (!raw || raw === 'undefined' || raw === 'null') return null;
+    return raw;
+  } catch {
+    return null;
+  }
+};
+
+// ✅ កំណត់ Authorization Header ភ្លាមៗតាំងពីវិនាទីដំបូង មុនពេល Component កូនៗហៅ API
+const initialBootToken = readValidTokenSync();
+if (initialBootToken) {
+  api.defaults.headers.common['Authorization'] = `Bearer ${initialBootToken}`;
+}
+
 export const AuthProvider = ({ children }) => {
-  const [token, setToken] = useState(() => localStorage.getItem('token'));
+  const [token, setToken] = useState(() => readValidTokenSync());
+  const skipNextFetchRef = useRef(false);
 
   // ✅ អានទិន្នន័យ User និង Teacher ពី localStorage ភ្លាមៗក្នុង 0 វិនាទី
   const [user, setUser] = useState(() => {
-    const savedToken = localStorage.getItem('token');
+    const savedToken = readValidTokenSync();
     if (!savedToken) return null;
-    return readStoredJson('user') || readStoredJson('auth_user');
+    const rawUser = readStoredJson('user') || readStoredJson('auth_user');
+    return rawUser?.user || rawUser?.data || rawUser || null;
   });
 
   const [teacher, setTeacher] = useState(() => {
-    const savedToken = localStorage.getItem('token');
+    const savedToken = readValidTokenSync();
     if (!savedToken) return null;
     return readStoredJson('teacher');
   });
 
   const [loading, setLoading] = useState(() => {
-    const savedToken = localStorage.getItem('token');
+    const savedToken = readValidTokenSync();
     const savedUser = readStoredJson('user') || readStoredJson('auth_user');
     return Boolean(savedToken && !savedUser);
   });
 
-  useEffect(() => {
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      fetchUser();
-    } else {
-      setLoading(false);
-    }
-  }, [token]);
-
-  const applyAuthSession = (newToken, userData, teacherData = null) => {
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(userData));
-    localStorage.setItem('auth_user', JSON.stringify(userData));
-
-    setToken(newToken);
-    setUser(userData);
-
-    if (teacherData) {
-      setTeacher(teacherData);
-      localStorage.setItem('teacher', JSON.stringify(teacherData));
-    } else {
-      setTeacher(null);
+  const clearAuthStorage = useCallback(() => {
+    try {
+      localStorage.removeItem('token');
+      localStorage.removeItem('auth_token');
       localStorage.removeItem('teacher');
-    }
-
-    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-  };
-
-  const clearAuthStorage = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('teacher');
-    localStorage.removeItem('user');
-    localStorage.removeItem('auth_user');
+      localStorage.removeItem('student');
+      localStorage.removeItem('user');
+      localStorage.removeItem('auth_user');
+    } catch {}
     setToken(null);
     setUser(null);
     setTeacher(null);
     delete api.defaults.headers.common['Authorization'];
-  };
+  }, []);
 
-  const fetchUser = async () => {
+  const applyAuthSession = useCallback(
+    (newToken, userData, teacherData = null, studentData = null) => {
+      if (!newToken || !userData) return;
+
+      const resolvedTeacher = teacherData || userData?.teacher || null;
+      const resolvedStudent = studentData || userData?.student || null;
+      const enrichedUser = {
+        ...userData,
+        ...(resolvedTeacher ? { teacher: resolvedTeacher } : {}),
+        ...(resolvedStudent ? { student: resolvedStudent } : {}),
+      };
+
+      try {
+        localStorage.setItem('token', newToken);
+        localStorage.setItem('user', JSON.stringify(enrichedUser));
+        localStorage.setItem('auth_user', JSON.stringify(enrichedUser));
+
+        if (resolvedTeacher) {
+          localStorage.setItem('teacher', JSON.stringify(resolvedTeacher));
+        } else {
+          localStorage.removeItem('teacher');
+        }
+
+        if (resolvedStudent) {
+          localStorage.setItem('student', JSON.stringify(resolvedStudent));
+        } else {
+          localStorage.removeItem('student');
+        }
+      } catch {}
+
+      api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      skipNextFetchRef.current = true;
+      setToken(newToken);
+      setUser(enrichedUser);
+      setTeacher(resolvedTeacher);
+      setLoading(false);
+    },
+    []
+  );
+
+  const fetchUser = useCallback(async () => {
     try {
       const response = await api.get('/user');
-      const userData = response.data.user;
-      const teacherData = response.data.teacher || null;
+      const resData = response.data || {};
+      const userData =
+        resData.user || resData.data?.user || resData.data || resData;
+      const teacherData =
+        resData.teacher ||
+        resData.data?.teacher ||
+        userData?.teacher ||
+        null;
+      const studentData =
+        resData.student ||
+        resData.data?.student ||
+        userData?.student ||
+        null;
 
-      setUser(userData);
-      setTeacher(teacherData);
+      if (userData && (userData.id || userData.user_id || userData.email)) {
+        const enrichedUser = {
+          ...userData,
+          ...(teacherData ? { teacher: teacherData } : {}),
+          ...(studentData ? { student: studentData } : {}),
+        };
 
-      if (userData) {
-        localStorage.setItem('user', JSON.stringify(userData));
-        localStorage.setItem('auth_user', JSON.stringify(userData));
-      }
+        setUser(enrichedUser);
+        setTeacher(teacherData);
 
-      if (teacherData) {
-        localStorage.setItem('teacher', JSON.stringify(teacherData));
-      } else {
-        localStorage.removeItem('teacher');
+        try {
+          localStorage.setItem('user', JSON.stringify(enrichedUser));
+          localStorage.setItem('auth_user', JSON.stringify(enrichedUser));
+
+          if (teacherData) {
+            localStorage.setItem('teacher', JSON.stringify(teacherData));
+          } else {
+            localStorage.removeItem('teacher');
+          }
+
+          if (studentData) {
+            localStorage.setItem('student', JSON.stringify(studentData));
+          } else {
+            localStorage.removeItem('student');
+          }
+        } catch {}
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -104,7 +171,61 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [clearAuthStorage]);
+
+  useEffect(() => {
+    if (token) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      if (skipNextFetchRef.current) {
+        skipNextFetchRef.current = false;
+        setLoading(false);
+        return;
+      }
+      fetchUser();
+    } else {
+      delete api.defaults.headers.common['Authorization'];
+      setLoading(false);
+    }
+  }, [token, fetchUser]);
+
+  // ✅ ស្ដាប់ព្រឹត្តិការណ៍ផ្លាស់ប្ដូរទិន្នន័យគណនីពី Navbar, Login (Reset Password) ឬផ្ទាំង Tab ផ្សេងទៀត
+  useEffect(() => {
+    const syncFromLocalStorage = () => {
+      const latestToken = readValidTokenSync();
+      if (!latestToken) {
+        setToken(null);
+        setUser(null);
+        setTeacher(null);
+        delete api.defaults.headers.common['Authorization'];
+        return;
+      }
+
+      api.defaults.headers.common['Authorization'] = `Bearer ${latestToken}`;
+      const latestUserRaw =
+        readStoredJson('user') || readStoredJson('auth_user');
+      const latestUser =
+        latestUserRaw?.user || latestUserRaw?.data || latestUserRaw || null;
+      const latestTeacher =
+        readStoredJson('teacher') || latestUser?.teacher || null;
+
+      setToken((prev) => {
+        if (prev !== latestToken) {
+          skipNextFetchRef.current = true;
+          return latestToken;
+        }
+        return prev;
+      });
+      if (latestUser) setUser(latestUser);
+      setTeacher(latestTeacher);
+    };
+
+    window.addEventListener('lms_user_updated', syncFromLocalStorage);
+    window.addEventListener('storage', syncFromLocalStorage);
+    return () => {
+      window.removeEventListener('lms_user_updated', syncFromLocalStorage);
+      window.removeEventListener('storage', syncFromLocalStorage);
+    };
+  }, []);
 
   // ✅ ជំហានទី ១៖ ពិនិត្យ Email និង Password
   const login = async (email, password) => {
@@ -133,9 +254,14 @@ export const AuthProvider = ({ children }) => {
         };
       }
 
-      const { token: newToken, user: userData, teacher: teacherData } = data;
+      const {
+        token: newToken,
+        user: userData,
+        teacher: teacherData,
+        student: studentData,
+      } = data;
       if (newToken && userData) {
-        applyAuthSession(newToken, userData, teacherData);
+        applyAuthSession(newToken, userData, teacherData, studentData);
       }
 
       return {
@@ -183,15 +309,17 @@ export const AuthProvider = ({ children }) => {
         token: newToken,
         user: userData,
         teacher: teacherData,
+        student: studentData,
         message,
       } = response.data || {};
 
       if (newToken && userData) {
-        applyAuthSession(newToken, userData, teacherData);
+        applyAuthSession(newToken, userData, teacherData, studentData);
         return {
           success: true,
           user: userData,
           teacher: teacherData,
+          student: studentData,
           message,
         };
       }
@@ -268,9 +396,18 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     try {
       const response = await api.post('/register', userData);
-      const { token: newToken, user: createdUser } = response.data;
-      applyAuthSession(newToken, createdUser, null);
-      return { success: true, user: createdUser };
+      const data = response.data || {};
+      const newToken = data.token;
+      const createdUser = data.user || data.data;
+
+      if (newToken && createdUser) {
+        applyAuthSession(newToken, createdUser, null, null);
+      }
+      return {
+        success: true,
+        user: createdUser,
+        requires_2fa: Boolean(data.requires_2fa),
+      };
     } catch (error) {
       const validationErrors = error.response?.data?.errors || null;
       const firstError = validationErrors
@@ -289,7 +426,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async (allDevices = false) => {
-    const currentToken = token || localStorage.getItem('token');
+    const currentToken = token || readValidTokenSync();
     clearAuthStorage();
 
     if (currentToken) {
@@ -306,49 +443,67 @@ export const AuthProvider = ({ children }) => {
   };
 
   // ✅ កែលម្អ hasRole ឱ្យស្គាល់ទាំងឈ្មោះ Role និងលេខ role_id (1=Admin, 2=Teacher, 3=Student)
-  const hasRole = (roleName) => {
-    if (!user || !roleName) return false;
-    const target = String(roleName).trim().toLowerCase();
-    const userRole =
-      user?.role?.role_name ||
-      user?.role?.name ||
-      user?.role_name ||
-      (typeof user?.role === 'string' ? user.role : '');
+  const hasRole = useCallback(
+    (roleName) => {
+      if (!user || !roleName) return false;
+      const target = String(roleName).trim().toLowerCase();
+      const userRole =
+        user?.role?.role_name ||
+        user?.role?.name ||
+        user?.role_name ||
+        (typeof user?.role === 'string' ? user.role : '');
 
-    if (userRole && String(userRole).trim().toLowerCase() === target) {
-      return true;
-    }
+      if (userRole) {
+        const normRole = String(userRole).trim().toLowerCase();
+        if (normRole === target || normRole.includes(target)) {
+          return true;
+        }
+      }
 
-    const rid = Number(user?.role_id);
-    if (target === 'admin' && rid === 1) return true;
-    if (target === 'teacher' && rid === 2) return true;
-    if (target === 'student' && rid === 3) return true;
+      const rid = Number(user?.role_id);
+      if (target === 'admin' && rid === 1) return true;
+      if (target === 'teacher' && rid === 2) return true;
+      if (target === 'student' && rid === 3) return true;
 
-    return false;
-  };
+      return false;
+    },
+    [user]
+  );
 
-  const getTeacherData = () => {
-    return teacher || readStoredJson('teacher');
-  };
+  const getTeacherData = useCallback(() => {
+    return teacher || readStoredJson('teacher') || user?.teacher || null;
+  }, [teacher, user?.teacher]);
 
-  const getFullName = () => {
-    if (hasRole('Teacher') && teacher) {
+  const getFullName = useCallback(() => {
+    const activeTeacher = getTeacherData();
+    if (hasRole('Teacher') && activeTeacher) {
       return (
         `${
-          teacher.first_name || teacher.teacher_first_name || ''
-        } ${teacher.last_name || teacher.teacher_last_name || ''}`.trim() ||
-        `${user?.first_name || ''} ${user?.last_name || ''}`.trim()
+          activeTeacher.first_name || activeTeacher.teacher_first_name || ''
+        } ${
+          activeTeacher.last_name || activeTeacher.teacher_last_name || ''
+        }`.trim() ||
+        `${user?.first_name || ''} ${user?.last_name || ''}`.trim() ||
+        user?.name ||
+        ''
       );
     }
-    return `${user?.first_name || ''} ${user?.last_name || ''}`.trim();
-  };
+    return (
+      `${user?.first_name || ''} ${user?.last_name || ''}`.trim() ||
+      user?.name ||
+      ''
+    );
+  }, [getTeacherData, hasRole, user]);
 
-  const getEmail = () => {
-    if (hasRole('Teacher') && teacher) {
-      return teacher.email || teacher.teacher_email || user?.email;
+  const getEmail = useCallback(() => {
+    const activeTeacher = getTeacherData();
+    if (hasRole('Teacher') && activeTeacher) {
+      return (
+        activeTeacher.email || activeTeacher.teacher_email || user?.email || ''
+      );
     }
-    return user?.email;
-  };
+    return user?.email || '';
+  }, [getTeacherData, hasRole, user]);
 
   return (
     <AuthContext.Provider
@@ -364,7 +519,7 @@ export const AuthProvider = ({ children }) => {
         register,
         logout,
         hasRole,
-        isAuthenticated: !!user,
+        isAuthenticated: Boolean(token && user),
         getTeacherData,
         getFullName,
         getEmail,

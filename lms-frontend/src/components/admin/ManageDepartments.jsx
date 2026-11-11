@@ -15,7 +15,8 @@ import {
   MagnifyingGlassIcon,
   AcademicCapIcon,
   ArrowPathIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  ExclamationCircleIcon
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -78,13 +79,18 @@ const pushLocalNotification = (notif) => {
     let role = 'admin';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'admin';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'admin';
         role = rName.toString().toLowerCase();
+      } else if (Number(u?.role_id) === 2) {
+        role = 'teacher';
+      } else if (Number(u?.role_id) === 3) {
+        role = 'student';
       }
     }
 
@@ -117,10 +123,25 @@ const pushLocalNotification = (notif) => {
 // ============================================================================
 const ManageDepartments = () => {
   const { t } = useLanguage();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
 
   // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
+
+  // ✅ កំណត់ API Endpoint ដោយស្វ័យប្រវត្តិ (គាំទ្រទាំង Admin និង Teacher តាមការកំណត់ក្នុង api.php)
+  const deptApiBase = useMemo(() => {
+    const rawRole =
+      user?.role?.role_name ||
+      user?.role?.name ||
+      user?.role_name ||
+      (typeof user?.role === 'string' ? user.role : '') ||
+      '';
+    const isTeacherRole =
+      (typeof hasRole === 'function' && hasRole('Teacher')) ||
+      String(rawRole).toLowerCase().includes('teacher') ||
+      Number(user?.role_id) === 2;
+    return isTeacherRole ? '/teacher/departments' : '/admin/departments';
+  }, [user, hasRole]);
 
   if (
     ADMIN_DEPTS_MEM_CACHE.uid &&
@@ -152,6 +173,8 @@ const ManageDepartments = () => {
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [editingDepartment, setEditingDepartment] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -180,7 +203,7 @@ const ManageDepartments = () => {
       }
 
       try {
-        const response = await api.get('/admin/departments');
+        const response = await api.get(deptApiBase);
         const depts = Array.isArray(response.data?.data)
           ? response.data.data
           : Array.isArray(response.data)
@@ -205,7 +228,7 @@ const ManageDepartments = () => {
         console.error('Error fetching departments:', error);
       }
     },
-    [currentAdminId]
+    [currentAdminId, deptApiBase]
   );
 
   useEffect(() => {
@@ -214,6 +237,7 @@ const ManageDepartments = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    if (formError) setFormError('');
     setFormData({
       ...formData,
       [name]: value
@@ -223,8 +247,12 @@ const ManageDepartments = () => {
   // ✅ រក្សាទុកដេប៉ាតឺម៉ង់ថ្មី ឬការកែប្រែ រួចធ្វើបច្ចុប្បន្នភាពលើអេក្រង់ភ្លាមៗ (ភ្ជាប់តែកណ្ដឹង)
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setFormError('');
+
     const cleanName = formData.name.trim();
     if (!cleanName) {
+      setFormError(t('សូមបញ្ចូលឈ្មោះដេប៉ាតឺម៉ង់ឱ្យបានត្រឹមត្រូវ!', 'Please enter a valid department name!'));
       return;
     }
 
@@ -237,7 +265,7 @@ const ManageDepartments = () => {
       };
 
       if (editingDepartment) {
-        const response = await api.put(`/admin/departments/${editingDepartment.id}`, payload);
+        const response = await api.put(`${deptApiBase}/${editingDepartment.id}`, payload);
         const serverData = response.data?.data || response.data;
         const updatedDept = {
           ...editingDepartment,
@@ -261,10 +289,10 @@ const ManageDepartments = () => {
           descKm: `ដេប៉ាតឺម៉ង់ «${cleanName}» ត្រូវបានកែប្រែដោយជោគជ័យ។`,
           descEn: `Department "${cleanName}" has been updated successfully.`,
           category: 'department',
-          link: '/admin/departments'
+          link: '/departments'
         });
       } else {
-        const response = await api.post('/admin/departments', payload);
+        const response = await api.post(deptApiBase, payload);
         const serverData = response.data?.data || response.data;
         const newDept = {
           id: Date.now(),
@@ -291,7 +319,7 @@ const ManageDepartments = () => {
           descKm: `ដេប៉ាតឺម៉ង់ «${cleanName}» ត្រូវបានបង្កើតចូលក្នុងប្រព័ន្ធជោគជ័យ។`,
           descEn: `Department "${cleanName}" has been created successfully.`,
           category: 'department',
-          link: '/admin/departments'
+          link: '/departments'
         });
       }
 
@@ -301,6 +329,18 @@ const ManageDepartments = () => {
       fetchDepartments(true);
     } catch (error) {
       console.error('Error saving department:', error);
+      const apiErrors = error.response?.data?.errors;
+      const firstValidationMsg = apiErrors
+        ? Object.values(apiErrors).flat()[0]
+        : null;
+      const errMsg =
+        firstValidationMsg ||
+        error.response?.data?.message ||
+        t(
+          'មិនអាចរក្សាទុកទិន្នន័យដេប៉ាតឺម៉ង់បានទេ (ឈ្មោះដេប៉ាតឺម៉ង់អាចស្ទួន)!',
+          'Could not save department data (department name may already exist)!'
+        );
+      setFormError(String(errMsg));
     } finally {
       setIsSubmitting(false);
     }
@@ -313,12 +353,13 @@ const ManageDepartments = () => {
 
   // ✅ លុបដេប៉ាតឺម៉ង់ដោយប្រើ Optimistic UI Update និងបញ្ជូនសារចូលកណ្ដឹង
   const confirmDelete = async () => {
-    if (!selectedDepartment) return;
+    if (!selectedDepartment || isDeleting) return;
 
     const deletedId = selectedDepartment.id;
     const deletedName = getDepartmentDisplayName(selectedDepartment);
     const previousDepartments = [...departments];
 
+    setIsDeleting(true);
     setShowDeleteModal(false);
     setSelectedDepartment(null);
 
@@ -333,7 +374,7 @@ const ManageDepartments = () => {
     });
 
     try {
-      await api.delete(`/admin/departments/${deletedId}`);
+      await api.delete(`${deptApiBase}/${deletedId}`);
       clearDepartmentsCache();
 
       pushLocalNotification({
@@ -342,7 +383,7 @@ const ManageDepartments = () => {
         descKm: `ដេប៉ាតឺម៉ង់ «${deletedName}» ត្រូវបានលុបចេញពីប្រព័ន្ធរួចរាល់។`,
         descEn: `Department "${deletedName}" has been removed.`,
         category: 'department',
-        link: '/admin/departments'
+        link: '/departments'
       });
     } catch (error) {
       console.error('Error deleting department:', error);
@@ -352,6 +393,8 @@ const ManageDepartments = () => {
         localStorage.setItem(getDeptsCacheKey(currentAdminId), JSON.stringify(previousDepartments));
         localStorage.setItem(CACHE_KEY_SHARED_DEPTS, JSON.stringify(previousDepartments));
       } catch (e) {}
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -361,6 +404,7 @@ const ManageDepartments = () => {
       description: '',
     });
     setEditingDepartment(null);
+    setFormError('');
   };
 
   const openCreateModal = () => {
@@ -370,6 +414,7 @@ const ManageDepartments = () => {
 
   // ✅ ចាប់យកឈ្មោះ និងការពិពណ៌នាដើមពី Database មកបង្ហាញក្នុងប្រអប់ Input ពេលចុចកែប្រែ
   const openEditModal = (dept) => {
+    setFormError('');
     setEditingDepartment(dept);
     setFormData({
       name: getDepartmentDisplayName(dept),
@@ -602,7 +647,7 @@ const ManageDepartments = () => {
                 {editingDepartment ? t('កែប្រែដេប៉ាតឺម៉ង់', 'Edit Department') : t('បន្ថែមដេប៉ាតឺម៉ង់ថ្មី', 'Add New Department')}
               </h2>
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); setFormError(''); }}
                 className="dept-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-xl transition-all bg-white border border-gray-200 cursor-pointer"
               >
                 <XMarkIcon className="h-5 w-5" />
@@ -613,6 +658,13 @@ const ManageDepartments = () => {
             <form id="deptForm" onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
               {/* Modal Body Scrolling */}
               <div className="p-6 sm:p-8 overflow-y-auto flex-1 space-y-5">
+                {formError && (
+                  <div className="dept-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
+                    <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                    <p className="text-xs font-bold leading-relaxed">{formError}</p>
+                  </div>
+                )}
+
                 <div>
                   <label className="dept-label block text-sm font-bold text-gray-700 mb-1.5">
                     {t('ឈ្មោះដេប៉ាតឺម៉ង់', 'Department Name')} <span className="text-rose-500">*</span>
@@ -647,7 +699,7 @@ const ManageDepartments = () => {
               <div className="dept-modal-bar p-6 sm:p-8 border-t border-gray-100 bg-gray-50/50 flex justify-end space-x-3 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => { setShowModal(false); setFormError(''); }}
                   className="dept-cancel-btn px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 transition-all cursor-pointer"
                 >
                   {t('បោះបង់', 'Cancel')}
@@ -696,13 +748,15 @@ const ManageDepartments = () => {
                   setShowDeleteModal(false);
                   setSelectedDepartment(null);
                 }}
-                className="dept-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                disabled={isDeleting}
+                className="dept-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer"
+                disabled={isDeleting}
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer disabled:opacity-50"
               >
                 {t('លុបចោល', 'Delete')}
               </button>

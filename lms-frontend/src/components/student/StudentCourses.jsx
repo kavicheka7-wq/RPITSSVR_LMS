@@ -171,6 +171,7 @@ const COURSE_COVER_THEMES = [
 const StudentCourses = () => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   // ✅ កំណត់អត្តសញ្ញាណសិស្សបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentStudentId = useMemo(() => {
@@ -351,15 +352,25 @@ const StudentCourses = () => {
   // ============================================================================
   // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់រូបភាព ឈ្មោះគ្រូ ព័ត៌មានសិស្ស និងការច្រោះស្វែងរក
   // ============================================================================
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getImageUrl = useCallback((path) => {
-    if (!path) return null;
-    if (path.startsWith('http') || path.startsWith('data:')) return path;
+    if (!path || typeof path !== 'string') return null;
+    const trimmed = path.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const baseUrl = (
-      api.defaults?.baseURL ||
       import.meta.env.VITE_API_URL ||
+      api.defaults?.baseURL ||
       'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = path.replace(/^\/?storage\//, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
@@ -765,16 +776,21 @@ const StudentCourses = () => {
                       <div
                         className={`h-12 w-12 rounded-full bg-gradient-to-br ${currentInstructor.avatarBg} flex items-center justify-center font-black text-sm text-white shrink-0 overflow-hidden relative ring-2 ring-white/30 shadow-md transition-transform duration-300`}
                       >
-                        <span className="z-0">{currentInstructor.initials}</span>
-                        {currentInstructor.imageUrl && (
+                        {currentInstructor.imageUrl &&
+                        !failedAvatars[`inst_${currentInstructor.key}`] ? (
                           <img
                             src={currentInstructor.imageUrl}
                             alt={currentInstructor.name}
-                            className="h-full w-full object-cover rounded-full absolute inset-0 z-10"
-                            onError={(e) => {
-                              e.target.style.display = 'none';
-                            }}
+                            className="h-full w-full object-cover rounded-full"
+                            onError={() =>
+                              setFailedAvatars((prev) => ({
+                                ...prev,
+                                [`inst_${currentInstructor.key}`]: true,
+                              }))
+                            }
                           />
+                        ) : (
+                          <span>{currentInstructor.initials}</span>
                         )}
                       </div>
 
@@ -1022,6 +1038,10 @@ const StudentCourses = () => {
               const teacherInitials = getTeacherInitials(teacherName);
               const rawImagePath = resolveTeacherImagePath(course);
               const imageUrl = getImageUrl(rawImagePath);
+              const avatarKey = `crs_tch_${course.id}`;
+              const hasTeacherAvatar = Boolean(
+                imageUrl && !failedAvatars[avatarKey]
+              );
 
               const theme =
                 COURSE_COVER_THEMES[course.themeIndex % COURSE_COVER_THEMES.length];
@@ -1039,7 +1059,7 @@ const StudentCourses = () => {
                   <div>
                     {/* ១. គម្របខាងលើនៃកាតមុខវិជ្ជា (បង្ហាញតែកូដមុខវិជ្ជា និងក្រេឌីត គ្មានឆមាស) */}
                     <Link
-                      to={`/student/lessons?course_id=${course.id}`}
+                      to={`/lessons?course_id=${course.id}`}
                       className={`relative h-20 bg-gradient-to-r ${theme.coverBg} p-3 flex flex-col justify-between text-white overflow-hidden block`}
                     >
                       <div className="stdc-hero-grid absolute inset-0 opacity-20 pointer-events-none"></div>
@@ -1079,7 +1099,7 @@ const StudentCourses = () => {
                       </div>
 
                       <Link
-                        to={`/student/lessons?course_id=${course.id}`}
+                        to={`/lessons?course_id=${course.id}`}
                         className="block space-y-1"
                       >
                         <h3 className="stdc-text-primary text-sm sm:text-base font-black text-gray-900 group-hover:text-indigo-500 transition-colors line-clamp-1">
@@ -1097,7 +1117,7 @@ const StudentCourses = () => {
                       {/* ប៊ូតុងផ្លូវកាត់រហ័ស៖ មេរៀន • កិច្ចការ • កម្រងសំណួរ */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-gray-100 dark:border-slate-700/70">
                         <Link
-                          to={`/student/lessons?course_id=${course.id}`}
+                          to={`/lessons?course_id=${course.id}`}
                           state={{ courseId: course.id }}
                           className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50/80 hover:bg-blue-600 text-blue-700 hover:text-white border border-blue-100 transition-colors"
                         >
@@ -1108,7 +1128,7 @@ const StudentCourses = () => {
                           </span>
                         </Link>
                         <Link
-                          to={`/student/assignments?course_id=${course.id}`}
+                          to={`/assignments?course_id=${course.id}`}
                           state={{ courseId: course.id }}
                           className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50/80 hover:bg-purple-600 text-purple-700 hover:text-white border border-purple-100 transition-colors"
                         >
@@ -1121,7 +1141,7 @@ const StudentCourses = () => {
                           </span>
                         </Link>
                         <Link
-                          to={`/student/quizzes?course_id=${course.id}`}
+                          to={`/quizzes?course_id=${course.id}`}
                           state={{ courseId: course.id }}
                           className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50/80 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-100 transition-colors"
                         >
@@ -1141,16 +1161,20 @@ const StudentCourses = () => {
                       <div
                         className={`h-8 w-8 rounded-full bg-gradient-to-br ${theme.avatarBg} flex items-center justify-center font-black text-[10px] shrink-0 overflow-hidden relative shadow-2xs`}
                       >
-                        <span className="z-0">{teacherInitials}</span>
-                        {imageUrl && (
+                        {hasTeacherAvatar ? (
                           <img
                             src={imageUrl}
                             alt={teacherName}
-                            className="h-full w-full object-cover rounded-full absolute inset-0 z-10"
-                            onError={(e) => {
-                              e.target.style.display = 'none';
-                            }}
+                            className="h-full w-full object-cover rounded-full"
+                            onError={() =>
+                              setFailedAvatars((prev) => ({
+                                ...prev,
+                                [avatarKey]: true,
+                              }))
+                            }
                           />
+                        ) : (
+                          <span>{teacherInitials}</span>
                         )}
                       </div>
                       <div className="min-w-0">
@@ -1169,7 +1193,7 @@ const StudentCourses = () => {
                     </div>
 
                     <Link
-                      to={`/student/lessons?course_id=${course.id}`}
+                      to={`/lessons?course_id=${course.id}`}
                       state={{ courseId: course.id }}
                       className={`inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r ${theme.btnGradient} text-white font-extrabold text-[11px] shadow-2xs transition-all duration-300 shrink-0`}
                     >
@@ -1214,6 +1238,13 @@ const StudentCourses = () => {
                 <tbody className="stdc-table-body bg-white">
                   {filteredCourses.map((course, idx) => {
                     const teacherName = getTeacherDisplayName(course);
+                    const teacherInitials = getTeacherInitials(teacherName);
+                    const rawImagePath = resolveTeacherImagePath(course);
+                    const imageUrl = getImageUrl(rawImagePath);
+                    const avatarKey = `tbl_tch_${course.id}`;
+                    const hasTeacherAvatar = Boolean(
+                      imageUrl && !failedAvatars[avatarKey]
+                    );
                     const theme =
                       COURSE_COVER_THEMES[
                         course.themeIndex % COURSE_COVER_THEMES.length
@@ -1251,9 +1282,30 @@ const StudentCourses = () => {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="stdc-text-primary text-sm font-bold text-gray-800">
-                            {teacherName}
-                          </span>
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`h-8 w-8 rounded-full bg-gradient-to-br ${theme.avatarBg} flex items-center justify-center font-black text-[10px] shrink-0 overflow-hidden shadow-2xs`}
+                            >
+                              {hasTeacherAvatar ? (
+                                <img
+                                  src={imageUrl}
+                                  alt={teacherName}
+                                  className="h-full w-full object-cover rounded-full"
+                                  onError={() =>
+                                    setFailedAvatars((prev) => ({
+                                      ...prev,
+                                      [avatarKey]: true,
+                                    }))
+                                  }
+                                />
+                              ) : (
+                                <span>{teacherInitials}</span>
+                              )}
+                            </div>
+                            <span className="stdc-text-primary text-sm font-bold text-gray-800">
+                              {teacherName}
+                            </span>
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <span className="inline-flex items-center px-3 py-1 rounded-lg text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30">
@@ -1263,14 +1315,14 @@ const StudentCourses = () => {
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <div className="flex items-center justify-center gap-2">
                             <Link
-                              to={`/student/assignments?course_id=${course.id}`}
+                              to={`/assignments?course_id=${course.id}`}
                               state={{ courseId: course.id }}
                               className="stdc-code-pill px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 hover:bg-indigo-50 text-xs font-extrabold text-gray-700 transition-all"
                             >
                               {t('កិច្ចការ', 'Homework')}
                             </Link>
                             <Link
-                              to={`/student/lessons?course_id=${course.id}`}
+                              to={`/lessons?course_id=${course.id}`}
                               state={{ courseId: course.id }}
                               className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r ${theme.btnGradient} text-white text-xs font-extrabold shadow-2xs transition-all`}
                             >

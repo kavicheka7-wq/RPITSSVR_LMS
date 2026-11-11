@@ -11,6 +11,8 @@ class Assignment extends Model
 {
     use HasFactory;
 
+    protected $appends = ['marks'];
+
     protected $fillable = [
         'course_id',
         'title',
@@ -21,15 +23,24 @@ class Assignment extends Model
     ];
 
     protected $casts = [
-        'due_date' => 'datetime',
+        'due_date'    => 'datetime',
+        'total_score' => 'float',
     ];
+
+    /**
+     * Compatibility accessor so both $assignment->total_score and $assignment->marks work seamlessly.
+     */
+    public function getMarksAttribute(): float
+    {
+        return (float) ($this->total_score ?? 20);
+    }
 
     /**
      * Relationship: The course this assignment belongs to.
      */
     public function course(): BelongsTo
     {
-        return $this->belongsTo(Course::class);
+        return $this->belongsTo(Course::class, 'course_id');
     }
 
     /**
@@ -45,6 +56,6 @@ class Assignment extends Model
      */
     public function submissions(): HasMany
     {
-        return $this->hasMany(AssignmentSubmission::class);
+        return $this->hasMany(AssignmentSubmission::class, 'assignment_id');
     }
 }

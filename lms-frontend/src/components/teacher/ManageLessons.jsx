@@ -177,13 +177,18 @@ const pushLocalNotification = (notif) => {
     let role = 'teacher';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'teacher';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'teacher';
         role = rName.toString().toLowerCase();
+      } else if (Number(u?.role_id) === 1) {
+        role = 'admin';
+      } else if (Number(u?.role_id) === 3) {
+        role = 'student';
       }
     }
 
@@ -669,34 +674,48 @@ export default function ManageLessons() {
     } catch {}
   };
 
+  // ✅ គាំទ្រទាំង Domain Server Online លើ Railway (VITE_API_URL) និង Data URI/URL ធម្មតា
   const getStorageUrl = (path) => {
-    if (!path) return '#';
+    if (!path || typeof path !== 'string') return '#';
+    const trimmed = path.trim();
+    if (!trimmed) return '#';
     if (
-      path.startsWith('http://') ||
-      path.startsWith('https://') ||
-      path.startsWith('//')
-    )
-      return path;
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('//') ||
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const backendBase = (
-      api.defaults?.baseURL || 'http://localhost:8000/api'
+      import.meta.env.VITE_API_URL ||
+      api.defaults?.baseURL ||
+      'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = path.replace(/^\/?storage\//, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
   };
 
   const getVideoUrl = (url) => {
-    if (!url) return '#';
+    if (!url || typeof url !== 'string') return '#';
+    const trimmed = url.trim();
+    if (!trimmed) return '#';
     if (
-      url.startsWith('http://') ||
-      url.startsWith('https://') ||
-      url.startsWith('//')
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('//') ||
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('blob:')
     ) {
-      return url;
+      return trimmed;
     }
     const backendBase = (
-      api.defaults?.baseURL || 'http://localhost:8000/api'
+      import.meta.env.VITE_API_URL ||
+      api.defaults?.baseURL ||
+      'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = url.replace(/^\/?storage\//, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${backendBase}/storage/${cleanPath}`;
   };
 
@@ -799,7 +818,7 @@ export default function ManageLessons() {
           descKm: `មេរៀនទី ${payload.lesson_order}: «${payload.title}» ត្រូវបានកែប្រែដោយជោគជ័យ។`,
           descEn: `Lesson ${payload.lesson_order}: "${payload.title}" was updated successfully.`,
           category: 'lesson',
-          link: '/teacher/lessons',
+          link: '/lessons',
         });
       } else {
         const response = await api.post('/teacher/lessons', payload);
@@ -814,7 +833,7 @@ export default function ManageLessons() {
           descKm: `បានបង្កើតមេរៀនថ្មីទី ${payload.lesson_order}: «${payload.title}» សម្រាប់មុខវិជ្ជា «${courseName || '—'}»។`,
           descEn: `Created new lesson ${payload.lesson_order}: "${payload.title}" for "${courseName || '—'}".`,
           category: 'lesson',
-          link: '/teacher/lessons',
+          link: '/lessons',
         });
       }
 
@@ -825,8 +844,9 @@ export default function ManageLessons() {
           filePayload.append('file', file);
 
           try {
+            // ✅ ដាក់ Content-Type: undefined ដើម្បីឱ្យ Browser បង្កើត multipart boundary ដោយស្វ័យប្រវត្តិ
             await api.post('/teacher/lessons/file', filePayload, {
-              headers: { 'Content-Type': 'multipart/form-data' },
+              headers: { 'Content-Type': undefined },
             });
           } catch (fileError) {
             console.error('File upload failed', fileError);
@@ -845,7 +865,7 @@ export default function ManageLessons() {
 
         try {
           await api.post('/teacher/lessons/video', videoPayload, {
-            headers: { 'Content-Type': 'multipart/form-data' },
+            headers: { 'Content-Type': undefined },
           });
         } catch (videoError) {
           console.error('Video upload failed', videoError);
@@ -901,7 +921,7 @@ export default function ManageLessons() {
         descKm: `មេរៀន «${deletedTitle}» ត្រូវបានលុបចេញពីប្រព័ន្ធរួចរាល់។`,
         descEn: `Lesson "${deletedTitle}" has been removed.`,
         category: 'lesson',
-        link: '/teacher/lessons',
+        link: '/lessons',
       });
     } catch (error) {
       setLessons(previousLessons);
@@ -934,7 +954,7 @@ export default function ManageLessons() {
     setUploadingFileId(lessonId);
     try {
       await api.post('/teacher/lessons/file', filePayload, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 'Content-Type': undefined },
       });
       await fetchLessons();
 
@@ -944,7 +964,7 @@ export default function ManageLessons() {
         descKm: `បានផ្ទុកឡើងឯកសារ «${file.name}» ទៅកាន់មេរៀន «${targetLesson?.title || ''}»។`,
         descEn: `Uploaded file "${file.name}" to lesson "${targetLesson?.title || ''}".`,
         category: 'lesson',
-        link: '/teacher/lessons',
+        link: '/lessons',
       });
     } catch (error) {
       console.error('Failed to upload file:', error);
@@ -981,7 +1001,7 @@ export default function ManageLessons() {
     setUploadingVideoId(lessonId);
     try {
       await api.post('/teacher/lessons/video', videoPayload, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 'Content-Type': undefined },
       });
       setVideoTitle('');
       await fetchLessons();
@@ -992,7 +1012,7 @@ export default function ManageLessons() {
         descKm: `បានផ្ទុកឡើងវីដេអូ «${videoTitle.trim()}» ទៅកាន់មេរៀន «${targetLesson?.title || ''}»។`,
         descEn: `Uploaded video "${videoTitle.trim()}" to lesson "${targetLesson?.title || ''}".`,
         category: 'lesson',
-        link: '/teacher/lessons',
+        link: '/lessons',
       });
     } catch (error) {
       console.error('Failed to upload video:', error);
@@ -1018,7 +1038,7 @@ export default function ManageLessons() {
     setUploadingVideoId(lessonId);
     try {
       await api.post('/teacher/lessons/video', videoPayload, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 'Content-Type': undefined },
       });
       setVideoTitle('');
       setVideoUrlInput('');
@@ -1030,7 +1050,7 @@ export default function ManageLessons() {
         descKm: `បានភ្ជាប់តំណវីដេអូ «${videoTitle.trim()}» ទៅកាន់មេរៀន «${targetLesson?.title || ''}»។`,
         descEn: `Attached video link "${videoTitle.trim()}" to lesson "${targetLesson?.title || ''}".`,
         category: 'lesson',
-        link: '/teacher/lessons',
+        link: '/lessons',
       });
     } catch (error) {
       console.error('Failed to attach video URL:', error);
@@ -1082,7 +1102,7 @@ export default function ManageLessons() {
           descKm: `ឯកសារមេរៀនត្រូវបានលុបចេញពីប្រព័ន្ធ។`,
           descEn: `Lesson file was deleted.`,
           category: 'lesson',
-          link: '/teacher/lessons',
+          link: '/lessons',
         });
       } catch (error) {
         setLessons(previousLessons);
@@ -1123,7 +1143,7 @@ export default function ManageLessons() {
           descKm: `វីដេអូបង្រៀនត្រូវបានលុបចេញពីប្រព័ន្ធ។`,
           descEn: `Lesson video was deleted.`,
           category: 'lesson',
-          link: '/teacher/lessons',
+          link: '/lessons',
         });
       } catch (error) {
         setLessons(previousLessons);
@@ -1274,14 +1294,14 @@ export default function ManageLessons() {
       `Teacher_Lessons${yearSuffix}${courseSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
     );
 
-    // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
+    // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar (ប្រើ Clean URL '/lessons')
     pushLocalNotification({
       titleKm: 'បាននាំចេញបញ្ជីមេរៀនទៅ Excel',
       titleEn: 'Lessons Exported to Excel',
       descKm: `បញ្ជីមេរៀនចំនួន ${filteredLessons.length} មេរៀន ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: `Exported ${filteredLessons.length} lessons to Excel.`,
       category: 'export',
-      link: '/teacher/lessons',
+      link: '/lessons',
     });
   };
 

@@ -21,7 +21,7 @@ class ForumPost extends Model
      */
     public function forum(): BelongsTo
     {
-        return $this->belongsTo(DiscussionForum::class);
+        return $this->belongsTo(DiscussionForum::class, 'forum_id');
     }
 
     /**
@@ -29,6 +29,6 @@ class ForumPost extends Model
      */
     public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class, 'user_id');
     }
 }

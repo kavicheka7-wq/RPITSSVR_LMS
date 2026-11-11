@@ -139,12 +139,13 @@ const pushLocalNotification = (notif) => {
     let role = 'admin';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'admin';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'admin';
         role = rName.toString().toLowerCase();
       }
     }
@@ -179,6 +180,7 @@ const pushLocalNotification = (notif) => {
 const ManageTeachers = () => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
@@ -243,6 +245,10 @@ const ManageTeachers = () => {
     () => ADMIN_TEACHERS_MEM_CACHE.teacherRoleId || null
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [importError, setImportError] = useState('');
+
   const [showModal, setShowModal] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -662,6 +668,7 @@ const ManageTeachers = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    if (formError) setFormError('');
     setFormData({
       ...formData,
       [name]: value
@@ -671,7 +678,10 @@ const ManageTeachers = () => {
   // បង្កើតគណនីគ្រូថ្មី និងកែប្រែព័ត៌មានគ្រូដោយ Update State លើអេក្រង់ភ្លាមៗ
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+    if (isSubmitting) return;
+    setFormError('');
+
+    const effectiveRoleId = teacherRoleId || 2;
     const finalDepartmentId = formData.department_id || (selectedDepartment !== 'all' ? selectedDepartment : '');
     const matchedDept = departments.find(d => String(d.id) === String(finalDepartmentId));
 
@@ -679,7 +689,7 @@ const ManageTeachers = () => {
     try {
       if (editingTeacher) {
         const dataToUpdate = { ...formData, department_id: finalDepartmentId };
-        const payload = { ...dataToUpdate, role_id: teacherRoleId };
+        const payload = { ...dataToUpdate, role_id: effectiveRoleId };
         if (!payload.password) delete payload.password;
         const response = await api.put(`/admin/teachers/${editingTeacher.id}`, payload);
 
@@ -712,7 +722,7 @@ const ManageTeachers = () => {
           descKm: `ព័ត៌មានរបស់គ្រូបង្រៀន «${getTeacherFullName(dataToUpdate)}» ត្រូវបានធ្វើបច្ចុប្បន្នភាព។`,
           descEn: `Profile of teacher "${getTeacherFullName(dataToUpdate)}" has been updated.`,
           category: 'teacher',
-          link: '/admin/teachers'
+          link: '/teachers'
         });
       } else {
         const dataToCreate = {
@@ -721,7 +731,7 @@ const ManageTeachers = () => {
           employment_type: formData.employment_type || 'Full-time',
           status: formData.status || 'active',
         };
-        const payload = { ...dataToCreate, role_id: teacherRoleId };
+        const payload = { ...dataToCreate, role_id: effectiveRoleId };
         const response = await api.post('/admin/teachers', payload);
 
         const serverData = response.data?.data || response.data;
@@ -761,7 +771,7 @@ const ManageTeachers = () => {
           descKm: `គណនីគ្រូបង្រៀន «${getTeacherFullName(dataToCreate)}» ត្រូវបានបង្កើតថ្មី។`,
           descEn: `Teacher account "${getTeacherFullName(dataToCreate)}" was created.`,
           category: 'teacher',
-          link: '/admin/teachers'
+          link: '/teachers'
         });
       }
       setShowModal(false);
@@ -769,6 +779,13 @@ const ManageTeachers = () => {
       fetchTeachers(true);
     } catch (error) {
       console.error('Submit error:', error.response?.data || error);
+      const apiErrors = error.response?.data?.errors;
+      const firstValidationMsg = apiErrors ? Object.values(apiErrors).flat()[0] : null;
+      const errMsg =
+        firstValidationMsg ||
+        error.response?.data?.message ||
+        t('មិនអាចរក្សាទុកទិន្នន័យគ្រូបង្រៀនបានទេ (អ៊ីមែល ឬអត្តលេខអាចស្ទួន)!', 'Could not save teacher data (email or teacher code may already exist)!');
+      setFormError(String(errMsg));
     } finally {
       setIsSubmitting(false);
     }
@@ -781,13 +798,14 @@ const ManageTeachers = () => {
 
   // លុបឈ្មោះគ្រូចេញពីអេក្រង់ និងបិទ Modal ភ្លាមៗក្នុង 0 វិនាទី (Optimistic UI)
   const confirmDelete = async () => {
-    if (!teacherToDelete) return;
+    if (!teacherToDelete || isDeleting) return;
 
     const deletedId = teacherToDelete.id;
     const deletedName = getTeacherFullName(teacherToDelete);
     const previousTeachers = [...teachers];
     const previousMeta = { ...meta };
 
+    setIsDeleting(true);
     setShowDeleteModal(false);
     setTeacherToDelete(null);
 
@@ -821,7 +839,7 @@ const ManageTeachers = () => {
         descKm: `គណនីគ្រូបង្រៀន «${deletedName}» ត្រូវបានលុបចេញពីប្រព័ន្ធ។`,
         descEn: `Teacher "${deletedName}" was deleted from the system.`,
         category: 'teacher',
-        link: '/admin/teachers'
+        link: '/teachers'
       });
     } catch (error) {
       console.error('Failed to delete teacher:', error);
@@ -829,6 +847,8 @@ const ManageTeachers = () => {
       setMeta(previousMeta);
       ADMIN_TEACHERS_MEM_CACHE.teachers = previousTeachers;
       ADMIN_TEACHERS_MEM_CACHE.meta = previousMeta;
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -849,6 +869,7 @@ const ManageTeachers = () => {
       date_of_birth: '',
     });
     setEditingTeacher(null);
+    setFormError('');
   };
 
   const openCreateModal = () => {
@@ -857,6 +878,7 @@ const ManageTeachers = () => {
   };
 
   const openEditModal = (teacher) => {
+    setFormError('');
     setEditingTeacher(teacher);
     setFormData({
       first_name: teacher.first_name || '',
@@ -995,7 +1017,7 @@ const ManageTeachers = () => {
       descKm: `ទិន្នន័យគ្រូបង្រៀន (${currentDeptName || 'ទាំងអស់'}) ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: 'Teachers data was successfully exported to Excel.',
       category: 'export',
-      link: '/admin/teachers'
+      link: '/teachers'
     });
   };
 
@@ -1058,7 +1080,7 @@ const ManageTeachers = () => {
       descKm: 'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យគ្រូបង្រៀនត្រូវបានទាញយកជោគជ័យ។',
       descEn: 'The Excel template for teacher import was downloaded successfully.',
       category: 'download',
-      link: '/admin/teachers'
+      link: '/teachers'
     });
   };
 
@@ -1098,10 +1120,11 @@ const ManageTeachers = () => {
 
   // ✅ អាន និងពិនិត្យទិន្នន័យពីឯកសារ Excel សម្រាប់នាំចូល (Import)
   const handleFileUpload = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
 
     setSelectedFileName(file.name);
+    setImportError('');
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -1130,6 +1153,8 @@ const ManageTeachers = () => {
             });
 
           if (!nonEmptyRows || nonEmptyRows.length === 0) {
+            setImportPreview([]);
+            setImportError(t('រកមិនឃើញទិន្នន័យគ្រូបង្រៀនក្នុងឯកសារនេះទេ!', 'No teacher data found in this file!'));
             return;
           }
 
@@ -1217,6 +1242,7 @@ const ManageTeachers = () => {
           setImportPreview(parsedRows);
         } catch (err) {
           console.error('File parsing error:', err);
+          setImportError(t('មិនអាចអានឯកសារ Excel នេះបានទេ!', 'Failed to read Excel file!'));
         } finally {
           e.target.value = null;
         }
@@ -1227,7 +1253,7 @@ const ManageTeachers = () => {
 
   // បញ្ជូនទិន្នន័យគ្រូដែលត្រឹមត្រូវទៅកាន់ Backend API `/admin/teachers/import`
   const handleConfirmImport = async () => {
-    if (!importPreview || importPreview.length === 0) return;
+    if (!importPreview || importPreview.length === 0 || isImporting) return;
     const validItems = importPreview.filter(r => r.isValid).map(r => r.data);
 
     if (validItems.length === 0) {
@@ -1235,6 +1261,7 @@ const ManageTeachers = () => {
     }
 
     setIsImporting(true);
+    setImportError('');
     try {
       await api.post('/admin/teachers/import', { teachers: validItems });
       try {
@@ -1251,7 +1278,7 @@ const ManageTeachers = () => {
         descKm: `ទិន្នន័យគ្រូបង្រៀនចំនួន ${validItems.length} នាក់ត្រូវបាននាំចូល និងធ្វើបច្ចុប្បន្នភាពរួចរាល់។`,
         descEn: `${validItems.length} teachers were successfully imported/updated.`,
         category: 'import',
-        link: '/admin/teachers'
+        link: '/teachers'
       });
 
       setShowImportModal(false);
@@ -1260,6 +1287,10 @@ const ManageTeachers = () => {
       fetchTeachers(true);
     } catch (error) {
       console.error('Import submit error:', error);
+      const errMsg =
+        error.response?.data?.message ||
+        t('មានបញ្ហាក្នុងការនាំចូលទិន្នន័យគ្រូបង្រៀន!', 'Error importing teachers!');
+      setImportError(String(errMsg));
     } finally {
       setIsImporting(false);
     }
@@ -1296,12 +1327,25 @@ const ManageTeachers = () => {
     return type || 'Full-time';
   };
 
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
-    if (imagePath.startsWith('http') || imagePath.startsWith('data:')) return imagePath;
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-    return `${baseUrl}/storage/${imagePath}`;
-  };
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const getProfileImageUrl = useCallback((imagePath) => {
+    if (!imagePath || typeof imagePath !== 'string') return null;
+    const trimmed = imagePath.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
+    const baseUrl = (
+      import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    ).replace(/\/api\/?$/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    return `${baseUrl}/storage/${cleanPath}`;
+  }, []);
 
   // ============================================================================
   // 📌 ផ្នែកទី៧៖ ការបង្ហាញទម្រង់ផ្ទៃមុខកម្មវិធី (JSX UI Rendering)
@@ -1347,6 +1391,7 @@ const ManageTeachers = () => {
                 onClick={() => {
                   setImportPreview([]);
                   setSelectedFileName('');
+                  setImportError('');
                   setShowImportModal(true);
                 }}
                 className="inline-flex items-center justify-center px-4 py-3 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
@@ -1567,20 +1612,27 @@ const ManageTeachers = () => {
                     .filter(Boolean);
 
                   const isFemale = isFemaleGender(teacher.gender);
+                  const rawAvatar = teacher.profile_image || teacher.user?.profile_image;
+                  const avatarUrl = getProfileImageUrl(rawAvatar);
+                  const avatarKey = `tch_${teacher.id}`;
+                  const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+
                   return (
                     <tr key={teacher.id} className="tch-table-row hover:bg-blue-50/30 transition-colors">
                       <td className="px-4 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <div className="h-10 w-10 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold overflow-hidden shrink-0 shadow-sm">
-                            {teacher.profile_image ? (
+                            {hasAvatar ? (
                               <img 
-                                src={getProfileImageUrl(teacher.profile_image)} 
+                                src={avatarUrl} 
                                 alt="Profile" 
                                 className="h-full w-full object-cover rounded-full"
-                                onError={(e) => {
-                                  e.target.style.display = 'none';
-                                  e.target.parentElement.innerHTML = `<span>${teacher.first_name?.[0] || ''}${teacher.last_name?.[0] || ''}</span>`;
-                                }}
+                                onError={() =>
+                                  setFailedAvatars((prev) => ({
+                                    ...prev,
+                                    [avatarKey]: true,
+                                  }))
+                                }
                               />
                             ) : (
                               <span>{teacher.first_name?.[0] || ''}{teacher.last_name?.[0] || ''}</span>
@@ -1744,7 +1796,7 @@ const ManageTeachers = () => {
                 )}
               </div>
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); setFormError(''); }}
                 className="tch-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 <XMarkIcon className="h-6 w-6" />
@@ -1753,6 +1805,13 @@ const ManageTeachers = () => {
             
             <div className="p-6 sm:p-8 overflow-y-auto flex-1">
               <form id="teacherForm" onSubmit={handleSubmit} className="space-y-5">
+                {formError && (
+                  <div className="tch-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
+                    <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                    <p className="text-xs font-bold leading-relaxed">{formError}</p>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div>
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
@@ -1946,7 +2005,7 @@ const ManageTeachers = () => {
             <div className="tch-modal-bar p-6 sm:p-8 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); setFormError(''); }}
                 className="tch-cancel-btn px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
@@ -1997,6 +2056,7 @@ const ManageTeachers = () => {
                   setShowImportModal(false);
                   setImportPreview([]);
                   setSelectedFileName('');
+                  setImportError('');
                 }}
                 className="tch-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
@@ -2005,6 +2065,13 @@ const ManageTeachers = () => {
             </div>
 
             <div className="p-5 overflow-y-auto flex-1 space-y-5">
+              {importError && (
+                <div className="tch-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
+                  <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                  <p className="text-xs font-bold leading-relaxed">{importError}</p>
+                </div>
+              )}
+
               <div className="tch-import-info bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
                   <h4 className="tch-import-title font-extrabold text-emerald-900 text-sm">{t('ណែនាំសម្រាប់ការនាំចូល៖', 'Import Instructions:')}</h4>
@@ -2095,6 +2162,7 @@ const ManageTeachers = () => {
                   setShowImportModal(false);
                   setImportPreview([]);
                   setSelectedFileName('');
+                  setImportError('');
                 }}
                 className="tch-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
@@ -2143,13 +2211,15 @@ const ManageTeachers = () => {
                   setShowDeleteModal(false);
                   setTeacherToDelete(null);
                 }}
-                className="tch-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                disabled={isDeleting}
+                className="tch-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer"
+                disabled={isDeleting}
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer disabled:opacity-50"
               >
                 {t('លុបចោល', 'Delete')}
               </button>

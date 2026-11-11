@@ -206,12 +206,13 @@ const pushLocalNotification = (notif) => {
     let role = 'admin';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'admin';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'admin';
         role = rName.toString().toLowerCase();
       }
     }
@@ -246,6 +247,7 @@ const pushLocalNotification = (notif) => {
 const ManageStudentsYear2 = () => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
@@ -329,6 +331,11 @@ const ManageStudentsYear2 = () => {
   const [studentRoleId, setStudentRoleId] = useState(
     () => ADMIN_STUDENTS_Y2_MEM_CACHE.studentRoleId || null
   );
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [importError, setImportError] = useState('');
 
   const [selectedDepartment, setSelectedDepartment] = useState('all');
   // ✅ State សម្រាប់បែងចែកសិស្សតាមវេនសិក្សា ('all' | 'Monday-Friday' | 'Saturday-Sunday')
@@ -571,6 +578,23 @@ const ManageStudentsYear2 = () => {
     });
   }, [year2StudentsAll, selectedDepartment, selectedShift, searchTerm, getStudentDepartmentIds]);
 
+  // ✅ គណនាលេខទំព័រសម្រាប់ Sliding Window Pagination
+  const paginationPages = useMemo(() => {
+    const current = Number(meta.current_page || 1);
+    const last = Number(meta.last_page || 1);
+    const maxButtons = 5;
+    let startPage = Math.max(1, current - Math.floor(maxButtons / 2));
+    let endPage = Math.min(last, startPage + maxButtons - 1);
+    if (endPage - startPage + 1 < maxButtons) {
+      startPage = Math.max(1, endPage - maxButtons + 1);
+    }
+    const pages = [];
+    for (let p = startPage; p <= endPage; p++) {
+      pages.push(p);
+    }
+    return pages;
+  }, [meta.current_page, meta.last_page]);
+
   // ============================================================================
   // 📌 ផ្នែកទី ៤៖ មុខងារត្រួតពិនិត្យប៊ូតុងព្រួញអូសឆ្វេង-ស្ដាំ (SCROLL BUTTONS LOGIC)
   // ============================================================================
@@ -699,7 +723,7 @@ const ManageStudentsYear2 = () => {
         descKm: `សិស្សចំនួន ${countPromoted} នាក់ ត្រូវបានផ្លាស់ប្តូរទៅកាន់ «${targetStr}» ដោយជោគជ័យ។`,
         descEn: `${countPromoted} students have been successfully promoted to "${targetStr}".`,
         category: 'student',
-        link: '/admin/students/year-3'
+        link: '/students/year-3'
       });
 
       setSelectedStudents([]);
@@ -867,34 +891,34 @@ const ManageStudentsYear2 = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    if (formError) setFormError('');
     setFormData({ ...formData, [name]: value });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!studentRoleId) return;
+    if (isSubmitting) return;
+    setFormError('');
 
-    // ✅ ចាប់យកដេប៉ាតឺម៉ង់ដែលបានចុចចូលដោយស្វ័យប្រវត្តិនៅពេលបង្កើតសិស្សថ្មី
+    const effectiveRoleId = studentRoleId || 3;
     const finalDepartmentId = formData.department_id || (selectedDepartment !== 'all' ? selectedDepartment : '');
     const fullName = `${formData.first_name || ''} ${formData.last_name || ''}`.trim();
 
+    setIsSubmitting(true);
     try {
       if (editingStudent) {
-        const formDataToSend = new FormData();
+        const payload = {};
         const dataToUpdate = { ...formData, department_id: finalDepartmentId };
-        Object.keys(dataToUpdate).forEach(key => {
+        Object.keys(dataToUpdate).forEach((key) => {
           if (dataToUpdate[key] !== null && dataToUpdate[key] !== undefined && dataToUpdate[key] !== '') {
-            formDataToSend.append(key, dataToUpdate[key]);
+            payload[key] = dataToUpdate[key];
           }
         });
-        formDataToSend.append('role_id', studentRoleId);
-        if (!formData.password) formDataToSend.delete('password');
-        formDataToSend.append('_method', 'PUT');
-        
-        const response = await api.post(`/admin/students/${editingStudent.id}`, formDataToSend, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
-        const updatedStudent = response.data.data;
+        payload.role_id = effectiveRoleId;
+        if (!formData.password) delete payload.password;
+
+        const response = await api.put(`/admin/students/${editingStudent.id}`, payload);
+        const updatedStudent = response.data?.data || response.data;
 
         setStudents(prev => {
           const newList = isYear2Student(updatedStudent)
@@ -916,26 +940,24 @@ const ManageStudentsYear2 = () => {
           descKm: `ព័ត៌មានរបស់សិស្ស «${fullName}» ត្រូវបានកែប្រែដោយជោគជ័យ។`,
           descEn: `Student "${fullName}" has been updated successfully.`,
           category: 'student',
-          link: '/admin/students/year-2'
+          link: '/students/year-2'
         });
       } else {
-        const formDataToSend = new FormData();
+        const payload = {};
         const dataWithYear2 = {
           ...formData,
           department_id: finalDepartmentId,
           batch_year: formData.batch_year || 'ឆ្នាំទី2'
         };
-        Object.keys(dataWithYear2).forEach(key => {
+        Object.keys(dataWithYear2).forEach((key) => {
           if (dataWithYear2[key] !== null && dataWithYear2[key] !== undefined && dataWithYear2[key] !== '') {
-            formDataToSend.append(key, dataWithYear2[key]);
+            payload[key] = dataWithYear2[key];
           }
         });
-        formDataToSend.append('role_id', studentRoleId);
-        
-        const response = await api.post('/admin/students', formDataToSend, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
-        const newStudent = response.data.data;
+        payload.role_id = effectiveRoleId;
+
+        const response = await api.post('/admin/students', payload);
+        const newStudent = response.data?.data || response.data;
 
         if (isYear2Student(newStudent)) {
           setStudents(prev => {
@@ -957,7 +979,7 @@ const ManageStudentsYear2 = () => {
           descKm: `គណនីសិស្សឆ្នាំទី២ «${fullName}» ត្រូវបានបង្កើតចូលក្នុងប្រព័ន្ធជោគជ័យ។`,
           descEn: `Year 2 student "${fullName}" has been created successfully.`,
           category: 'student',
-          link: '/admin/students/year-2'
+          link: '/students/year-2'
         });
       }
       setShowModal(false);
@@ -965,6 +987,15 @@ const ManageStudentsYear2 = () => {
       fetchStudents(true);
     } catch (error) {
       console.error('Submit student error:', error);
+      const apiErrors = error.response?.data?.errors;
+      const firstValidationMsg = apiErrors ? Object.values(apiErrors).flat()[0] : null;
+      const errMsg =
+        firstValidationMsg ||
+        error.response?.data?.message ||
+        t('មិនអាចរក្សាទុកទិន្នន័យសិស្សបានទេ (អ៊ីមែល ឬអត្តលេខអាចស្ទួន)!', 'Could not save student data (email or student code may already exist)!');
+      setFormError(String(errMsg));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -974,12 +1005,13 @@ const ManageStudentsYear2 = () => {
   };
 
   const confirmDelete = async () => {
-    if (!studentToDelete) return;
+    if (!studentToDelete || isDeleting) return;
     const deletedId = studentToDelete.id;
     const deletedName = getStudentFullName(studentToDelete);
     const previousStudents = [...students];
     const previousMeta = { ...meta };
 
+    setIsDeleting(true);
     setShowDeleteModal(false);
     setStudentToDelete(null);
 
@@ -1004,7 +1036,7 @@ const ManageStudentsYear2 = () => {
         descKm: `គណនីសិស្ស «${deletedName}» ត្រូវបានលុបចេញពីប្រព័ន្ធរួចរាល់។`,
         descEn: `Student "${deletedName}" has been removed.`,
         category: 'student',
-        link: '/admin/students/year-2'
+        link: '/students/year-2'
       });
     } catch (error) {
       console.error('Failed to delete student:', error);
@@ -1012,6 +1044,8 @@ const ManageStudentsYear2 = () => {
       setMeta(previousMeta);
       ADMIN_STUDENTS_Y2_MEM_CACHE.students = previousStudents;
       ADMIN_STUDENTS_Y2_MEM_CACHE.meta = previousMeta;
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1034,6 +1068,7 @@ const ManageStudentsYear2 = () => {
       address: '',
     });
     setEditingStudent(null);
+    setFormError('');
   };
 
   const openCreateModal = () => {
@@ -1042,6 +1077,7 @@ const ManageStudentsYear2 = () => {
   };
 
   const openEditModal = (student) => {
+    setFormError('');
     setEditingStudent(student);
     setFormData({
       first_name: student.first_name || '',
@@ -1155,7 +1191,7 @@ const ManageStudentsYear2 = () => {
         descKm: `បានចុះឈ្មោះមុខវិជ្ជាចំនួន ${countToEnroll} មុខវិជ្ជាជូនសិស្ស «${studentName}» ដោយជោគជ័យ។`,
         descEn: `Enrolled "${studentName}" in ${countToEnroll} courses successfully.`,
         category: 'student',
-        link: '/admin/students/year-2'
+        link: '/students/year-2'
       });
     } catch (error) {
       console.error('Failed to enroll courses:', error);
@@ -1195,7 +1231,7 @@ const ManageStudentsYear2 = () => {
         descKm: `បានដាក់បញ្ចូលមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់ទាំង ${courseIds.length} មុខវិជ្ជាជូនសិស្ស «${studentName}» ជោគជ័យ។`,
         descEn: `Enrolled all ${courseIds.length} department courses for "${studentName}".`,
         category: 'student',
-        link: '/admin/students/year-2'
+        link: '/students/year-2'
       });
     } catch (error) {
       console.error('Failed to enroll courses:', error);
@@ -1301,7 +1337,7 @@ const ManageStudentsYear2 = () => {
         descKm: `បានដាក់មុខវិជ្ជាចំនួន ${bulkSelectedCourses.length} ជូនសិស្សឆ្នាំទី២ ចំនួន ${selectedStudents.length} នាក់។`,
         descEn: `Assigned ${bulkSelectedCourses.length} courses to ${selectedStudents.length} Year 2 students.`,
         category: 'student',
-        link: '/admin/students/year-2',
+        link: '/students/year-2',
       });
 
       setShowBulkEnrollModal(false);
@@ -1447,7 +1483,7 @@ const ManageStudentsYear2 = () => {
       descKm: `ទិន្នន័យសិស្សឆ្នាំទី២ (${currentDeptName || 'ទាំងអស់'}) ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: 'Year 2 students data was successfully exported to Excel.',
       category: 'export',
-      link: '/admin/students/year-2'
+      link: '/students/year-2'
     });
   };
 
@@ -1525,7 +1561,7 @@ const ManageStudentsYear2 = () => {
       descKm: 'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យសិស្សត្រូវបានទាញយកជោគជ័យ។',
       descEn: 'The Excel template for student import was downloaded successfully.',
       category: 'download',
-      link: '/admin/students/year-2'
+      link: '/students/year-2'
     });
   };
 
@@ -1567,10 +1603,11 @@ const ManageStudentsYear2 = () => {
   };
 
   const handleFileUpload = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
 
     setSelectedFileName(file.name);
+    setImportError('');
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -1597,6 +1634,8 @@ const ManageStudentsYear2 = () => {
           });
 
         if (!nonEmptyRows || nonEmptyRows.length === 0) {
+          setImportPreview([]);
+          setImportError(t('រកមិនឃើញទិន្នន័យសិស្សក្នុងឯកសារនេះទេ!', 'No student data found in this file!'));
           return;
         }
 
@@ -1668,6 +1707,7 @@ const ManageStudentsYear2 = () => {
         setImportPreview(parsedRows);
       } catch (err) {
         console.error('File parsing error:', err);
+        setImportError(t('មិនអាចអានឯកសារ Excel នេះបានទេ!', 'Failed to read Excel file!'));
       } finally {
         e.target.value = null;
       }
@@ -1676,13 +1716,14 @@ const ManageStudentsYear2 = () => {
   };
 
   const handleConfirmImport = async () => {
-    if (!importPreview || importPreview.length === 0) return;
+    if (!importPreview || importPreview.length === 0 || isImporting) return;
     const validItems = importPreview.filter(r => r.isValid).map(r => r.data);
     if (validItems.length === 0) {
       return;
     }
 
     setIsImporting(true);
+    setImportError('');
     try {
       await api.post('/admin/students/import', { students: validItems });
       try {
@@ -1698,7 +1739,7 @@ const ManageStudentsYear2 = () => {
         descKm: `ទិន្នន័យសិស្សចំនួន ${validItems.length} នាក់ត្រូវបាននាំចូល និងធ្វើបច្ចុប្បន្នភាពរួចរាល់។`,
         descEn: `${validItems.length} students were successfully imported/updated.`,
         category: 'import',
-        link: '/admin/students/year-2'
+        link: '/students/year-2'
       });
 
       setShowImportModal(false);
@@ -1707,6 +1748,10 @@ const ManageStudentsYear2 = () => {
       fetchStudents(true);
     } catch (error) {
       console.error('Import Error:', error);
+      const errMsg =
+        error.response?.data?.message ||
+        t('មានបញ្ហាក្នុងការនាំចូលទិន្នន័យសិស្ស!', 'Error importing students!');
+      setImportError(String(errMsg));
     } finally {
       setIsImporting(false);
     }
@@ -1747,12 +1792,25 @@ const ManageStudentsYear2 = () => {
     return g === 'female' || g === 'f' || g === 'ស្រី';
   };
 
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
-    if (imagePath.startsWith('http')) return imagePath;
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-    return `${baseUrl}/storage/${imagePath}`;
-  };
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const getProfileImageUrl = useCallback((imagePath) => {
+    if (!imagePath || typeof imagePath !== 'string') return null;
+    const trimmed = imagePath.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
+    const baseUrl = (
+      import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    ).replace(/\/api\/?$/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    return `${baseUrl}/storage/${cleanPath}`;
+  }, []);
 
   // ============================================================================
   // 📌 ផ្នែកទី ៩៖ ការបង្ហាញទម្រង់ផ្ទៃមុខកម្មវិធី (JSX UI RENDERING)
@@ -1792,7 +1850,7 @@ const ManageStudentsYear2 = () => {
                 {t('នាំចេញ Excel', 'Export Excel')}
               </button>
               <button
-                onClick={() => { setImportPreview([]); setSelectedFileName(''); setShowImportModal(true); }}
+                onClick={() => { setImportPreview([]); setSelectedFileName(''); setImportError(''); setShowImportModal(true); }}
                 className="inline-flex items-center justify-center px-4 py-3 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
               >
                 <DocumentIcon className="h-5 w-5 mr-2" />
@@ -2124,6 +2182,11 @@ const ManageStudentsYear2 = () => {
 
                     const isFemale = isFemaleGender(student.gender);
                     const isWeekend = normalizeShiftKey(student.study_shift) === 'Saturday-Sunday';
+                    const rawAvatar = student.profile_image || student.user?.profile_image;
+                    const avatarUrl = getProfileImageUrl(rawAvatar);
+                    const avatarKey = `std_${student.id}`;
+                    const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+
                     return (
                       <tr key={student.id} className="std-table-row hover:bg-blue-50/30 transition-colors">
                         <td className="px-4 py-4 whitespace-nowrap">
@@ -2133,15 +2196,17 @@ const ManageStudentsYear2 = () => {
                               onClick={() => handleSelectStudent(student.id)}
                             >
                               <div className={`absolute inset-0 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-opacity duration-200 ${selectedStudents.includes(student.id) ? 'opacity-0' : 'opacity-100 group-hover/avatar:opacity-0'}`}>
-                                {student.profile_image ? (
+                                {hasAvatar ? (
                                   <img
-                                    src={getProfileImageUrl(student.profile_image)}
+                                    src={avatarUrl}
                                     alt={getStudentFullName(student)}
                                     className="h-full w-full object-cover rounded-full"
-                                    onError={(e) => {
-                                      e.target.style.display = 'none';
-                                      e.target.parentElement.innerHTML = `<span>${student.first_name?.charAt(0) || ''}${student.last_name?.charAt(0) || ''}</span>`;
-                                    }}
+                                    onError={() =>
+                                      setFailedAvatars((prev) => ({
+                                        ...prev,
+                                        [avatarKey]: true,
+                                      }))
+                                    }
                                   />
                                 ) : (
                                   <span>{student.first_name?.charAt(0) || ''}{student.last_name?.charAt(0) || ''}</span>
@@ -2275,30 +2340,27 @@ const ManageStudentsYear2 = () => {
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={meta.current_page === 1}
-                className="std-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="std-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('មុន', 'Previous')}
               </button>
-              {[...Array(Math.min(5, meta.last_page))].map((_, i) => {
-                const pageNum = i + 1;
-                return (
-                  <button
-                    key={pageNum}
-                    onClick={() => setPage(pageNum)}
-                    className={`px-3 py-2 text-xs font-bold rounded-xl transition-all ${
-                      meta.current_page === pageNum
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'std-page-btn bg-white border border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    {pageNum}
-                  </button>
-                );
-              })}
+              {paginationPages.map((pageNum) => (
+                <button
+                  key={pageNum}
+                  onClick={() => setPage(pageNum)}
+                  className={`px-3 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                    meta.current_page === pageNum
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'std-page-btn bg-white border border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  {pageNum}
+                </button>
+              ))}
               <button
                 onClick={() => setPage(p => Math.min(meta.last_page, p + 1))}
                 disabled={meta.current_page === meta.last_page}
-                className="std-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="std-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('បន្ទាប់', 'Next')}
               </button>
@@ -2331,8 +2393,8 @@ const ManageStudentsYear2 = () => {
                 )}
               </div>
               <button
-                onClick={() => setShowModal(false)}
-                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+                onClick={() => { setShowModal(false); setFormError(''); }}
+                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -2340,6 +2402,13 @@ const ManageStudentsYear2 = () => {
             
             <div className="p-6 sm:p-8 overflow-y-auto flex-1">
               <form id="studentForm" onSubmit={handleSubmit} className="space-y-5">
+                {formError && (
+                  <div className="std-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
+                    <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                    <p className="text-xs font-bold leading-relaxed">{formError}</p>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
@@ -2572,7 +2641,7 @@ const ManageStudentsYear2 = () => {
             <div className="std-modal-bar p-6 sm:p-8 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); setFormError(''); }}
                 className="std-cancel-btn px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
@@ -2580,9 +2649,14 @@ const ManageStudentsYear2 = () => {
               <button
                 type="submit"
                 form="studentForm"
-                className="px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                disabled={isSubmitting}
+                className="px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
               >
-                <UserGroupIcon className="h-5 w-5" />
+                {isSubmitting ? (
+                  <ArrowPathIcon className="h-5 w-5 animate-spin" />
+                ) : (
+                  <UserGroupIcon className="h-5 w-5" />
+                )}
                 {editingStudent ? t('រក្សាទុកការកែប្រែ', 'Save Changes') : t('បង្កើតសិស្ស', 'Create Student')}
               </button>
             </div>
@@ -2762,21 +2836,26 @@ const ManageStudentsYear2 = () => {
                     {studentEnrollments.map((enrollment) => {
                       const teacher = enrollment.course?.teacher;
                       const teacherImage = teacher?.profile_image || teacher?.avatar || teacher?.user?.profile_image;
+                      const teacherAvatarUrl = getProfileImageUrl(teacherImage);
+                      const teacherAvatarKey = `enr_t_${enrollment.id}`;
+                      const hasTeacherAvatar = Boolean(teacherAvatarUrl && !failedAvatars[teacherAvatarKey]);
                       const teacherInitials = teacher ? `${teacher.first_name?.charAt(0) || ''}${teacher.last_name?.charAt(0) || ''}` : 'T';
 
                       return (
                         <div key={enrollment.id} className="std-enroll-item flex items-center justify-between p-3.5 bg-white border border-gray-200 rounded-2xl hover:border-indigo-300 transition-all shadow-sm">
                           <div className="flex items-start gap-3">
                             <div className="h-9 w-9 rounded-full bg-indigo-500 text-white flex items-center justify-center shrink-0 font-extrabold text-xs overflow-hidden shadow-sm">
-                              {teacherImage ? (
+                              {hasTeacherAvatar ? (
                                 <img
-                                  src={getProfileImageUrl(teacherImage)}
+                                  src={teacherAvatarUrl}
                                   alt="Teacher"
                                   className="h-full w-full object-cover rounded-full"
-                                  onError={(e) => {
-                                    e.target.style.display = 'none';
-                                    e.target.parentElement.innerHTML = `<span>${teacherInitials}</span>`;
-                                  }}
+                                  onError={() =>
+                                    setFailedAvatars((prev) => ({
+                                      ...prev,
+                                      [teacherAvatarKey]: true,
+                                    }))
+                                  }
                                 />
                               ) : (
                                 <span>{teacherInitials}</span>
@@ -2997,14 +3076,21 @@ const ManageStudentsYear2 = () => {
                 )}
               </div>
               <button
-                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); }}
-                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); setImportError(''); }}
+                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 <XMarkIcon className="h-5 w-5" />
               </button>
             </div>
 
             <div className="p-5 overflow-y-auto flex-1 space-y-5">
+              {importError && (
+                <div className="std-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
+                  <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                  <p className="text-xs font-bold leading-relaxed">{importError}</p>
+                </div>
+              )}
+
               <div className="std-import-info bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
                   <h4 className="std-import-title font-extrabold text-emerald-900 text-sm">
@@ -3096,7 +3182,7 @@ const ManageStudentsYear2 = () => {
             <div className="std-modal-bar p-5 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
-                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); }}
+                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); setImportError(''); }}
                 className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
@@ -3145,13 +3231,15 @@ const ManageStudentsYear2 = () => {
             <div className="flex justify-end space-x-3">
               <button
                 onClick={() => { setShowDeleteModal(false); setStudentToDelete(null); }}
-                className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                disabled={isDeleting}
+                className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer"
+                disabled={isDeleting}
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer disabled:opacity-50"
               >
                 {t('លុបចោល', 'Delete')}
               </button>

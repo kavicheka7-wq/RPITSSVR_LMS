@@ -3,22 +3,24 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Course;
-use App\Models\Lesson;
 use App\Models\Assignment;
 use App\Models\AssignmentSubmission;
+use App\Models\Attendance;
+use App\Models\Course;
+use App\Models\Enrollment;
+use App\Models\Grade;
+use App\Models\Lesson;
+use App\Models\Question;
 use App\Models\Quiz;
 use App\Models\QuizAttempt;
-use App\Models\Question;
-use App\Models\Attendance;
-use App\Models\Grade;
-use App\Models\Enrollment;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 
 class StudentController extends Controller
 {
@@ -108,11 +110,11 @@ class StudentController extends Controller
             return (int) $matches[1];
         }
 
-        // ៣. ពិនិត្យករណី batch_year ដាក់ជាឆ្នាំចូលរៀន (ឧ. សិស្សចូលរៀនឆ្នាំ 2022 ឬ 2023 គិតត្រឹមឆ្នាំសិក្សា 2025-2026)
-        if (preg_match('/\b(202[0-6])\b/', (string) $text, $yrMatch)) {
+        // ៣. ពិនិត្យករណី batch_year ដាក់ជាឆ្នាំចូលរៀន (ឧ. សិស្សចូលរៀនឆ្នាំ 2022 ឬ 2023)
+        if (preg_match('/\b(202[0-9])\b/', (string) $text, $yrMatch)) {
             $startYear = (int) $yrMatch[1];
-            $currentAcademicStart = 2025;
-            $diff = $currentAcademicStart - $startYear + 1;
+            $currentYear = (int) date('Y');
+            $diff = $currentYear - $startYear + 1;
             if ($diff >= 1 && $diff <= 4) {
                 return $diff;
             }
@@ -131,7 +133,7 @@ class StudentController extends Controller
     }
 
     /**
-     * HELPER METHOD: រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនឱ្យត្រឹមត្រូវ ១០០% (គាំទ្រទាំង teacher_id = users.id និង teachers.id)
+     * HELPER METHOD: រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនឱ្យត្រឹមត្រូវ ១០០% (គាំទ្រទាំង Base64 Data URI លើ Railway និង URL ធម្មតា)
      */
     private function formatTeacherData($course)
     {
@@ -141,13 +143,18 @@ class StudentController extends Controller
 
         static $teachersById = null;
         static $teachersByUserId = null;
-        static $usersById = null;
+        static $teacherUsersById = null;
 
         if ($teachersById === null) {
             $allTeachers = Teacher::all();
             $teachersById = $allTeachers->keyBy('id');
             $teachersByUserId = $allTeachers->whereNotNull('user_id')->keyBy('user_id');
-            $usersById = User::all()->keyBy('id');
+
+            $teacherUserIds = $allTeachers->pluck('user_id')->filter()->unique()->values()->all();
+            $teacherUsersById = User::where('role_id', 2)
+                ->orWhereIn('id', $teacherUserIds)
+                ->get(['id', 'first_name', 'last_name', 'email', 'profile_image'])
+                ->keyBy('id');
         }
 
         $tid = $course->teacher_id;
@@ -159,10 +166,10 @@ class StudentController extends Controller
         }
         if (!$teacherUser && $tid) {
             if ($teacherProfile && $teacherProfile->user_id) {
-                $teacherUser = $usersById->get($teacherProfile->user_id);
+                $teacherUser = $teacherUsersById->get($teacherProfile->user_id);
             }
             if (!$teacherUser) {
-                $teacherUser = $usersById->get($tid);
+                $teacherUser = $teacherUsersById->get($tid);
             }
         }
 
@@ -176,12 +183,19 @@ class StudentController extends Controller
 
         $profileImg = null;
         if ($teacherProfile && !empty($teacherProfile->profile_image)) {
-            $profileImg = $teacherProfile->profile_image;
+            $profileImg = trim((string) $teacherProfile->profile_image);
         } elseif ($teacherUser && !empty($teacherUser->profile_image)) {
-            $profileImg = $teacherUser->profile_image;
+            $profileImg = trim((string) $teacherUser->profile_image);
         }
 
-        if ($profileImg && !filter_var($profileImg, FILTER_VALIDATE_URL)) {
+        // ✅ ការពារកុំឱ្យយក asset('storage/...') ទៅតភ្ជាប់ពីមុខរូបភាព Base64 (data:image/...)
+        if (
+            $profileImg &&
+            !str_starts_with($profileImg, 'data:') &&
+            !str_starts_with($profileImg, 'http://') &&
+            !str_starts_with($profileImg, 'https://') &&
+            !str_starts_with($profileImg, '//')
+        ) {
             $cleanImg = preg_replace('/^\/?storage\//', '', ltrim($profileImg, '/'));
             $profileImg = asset('storage/' . $cleanImg);
         }
@@ -474,10 +488,10 @@ class StudentController extends Controller
             $baseQuery = Attendance::whereIn('student_id', $studentIds);
 
             $summaryRaw = (clone $baseQuery)->selectRaw("
-                SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) as present,
-                SUM(CASE WHEN status = 'Absent' THEN 1 ELSE 0 END) as absent,
-                SUM(CASE WHEN status = 'Permission' THEN 1 ELSE 0 END) as permission,
-                SUM(CASE WHEN status = 'Late' THEN 1 ELSE 0 END) as late
+                SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
+                SUM(CASE WHEN LOWER(status) = 'absent' THEN 1 ELSE 0 END) as absent,
+                SUM(CASE WHEN LOWER(status) = 'permission' THEN 1 ELSE 0 END) as permission,
+                SUM(CASE WHEN LOWER(status) = 'late' THEN 1 ELSE 0 END) as late
             ")->first();
 
             $summary = [
@@ -515,9 +529,9 @@ class StudentController extends Controller
                     'attendance_date' => $record->attendance_date,
                     'status' => $record->status,
                     'late_time' => $record->late_time ?? null,
-                    'created_at' => $record->created_at ? \Carbon\Carbon::parse($record->created_at)->format('Y-m-d H:i:s') : null,
+                    'created_at' => $record->created_at ? Carbon::parse($record->created_at)->format('Y-m-d H:i:s') : null,
                     'course' => $courseData,
-                    'student' => $studentData
+                    'student' => $studentData,
                 ];
             });
 
@@ -529,13 +543,12 @@ class StudentController extends Controller
                     'last_page' => $paginated->lastPage(),
                     'per_page' => $paginated->perPage(),
                     'total' => $paginated->total(),
-                ]
+                ],
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'error' => true,
-                'message' => 'មូលហេតុដែលគាំង: ' . $e->getMessage()
+                'message' => 'មូលហេតុដែលគាំង: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -553,7 +566,7 @@ class StudentController extends Controller
         return response()->json($attendance);
     }
 
-    // View Scores
+    // View Scores (គាំទ្រទាំង ៤ ផ្នែក៖ កិច្ចការ 20%, សំណួរខ្លី 20%, ពាក់កណ្ដាលឆមាស 25%, និងប្រឡងបញ្ចប់ 35%)
     public function getScores()
     {
         $student = auth()->user();
@@ -616,7 +629,7 @@ class StudentController extends Controller
                     $submissions = $allSubmissions->get($assign->id, collect());
                     if ($submissions->isNotEmpty()) {
                         $subScore = $submissions->max('score');
-                        $maxScore = $assign->total_score ?? 100;
+                        $maxScore = $assign->total_score ?? $assign->marks ?? 20;
                         if ($maxScore > 0) {
                             $totalEarned += $subScore;
                             $totalMax += $maxScore;
@@ -640,7 +653,7 @@ class StudentController extends Controller
                     $attempts = $allAttempts->get($quiz->id, collect());
                     if ($attempts->isNotEmpty()) {
                         $bestScore = $attempts->max('score');
-                        $maxMark = $quiz->total_mark ?? 100;
+                        $maxMark = $quiz->total_mark ?? 20;
                         if ($maxMark > 0) {
                             $totalEarned += $bestScore;
                             $totalMax += $maxMark;
@@ -656,18 +669,21 @@ class StudentController extends Controller
             $assignScore = $grade && $grade->assignment_score !== null ? $grade->assignment_score : $autoAssignmentScore;
             $quizScore = $grade && $grade->quiz_score !== null ? $grade->quiz_score : $autoQuizScore;
             $midtermScore = $grade && $grade->midterm_score !== null ? $grade->midterm_score : null;
+            $examScore = $grade && isset($grade->exam_score) && $grade->exam_score !== null ? $grade->exam_score : null;
             $finalScore = $grade && $grade->final_score !== null ? $grade->final_score : null;
 
             if ($finalScore === null) {
                 $a = $assignScore !== null ? (float) $assignScore : null;
                 $q = $quizScore !== null ? (float) $quizScore : null;
                 $m = $midtermScore !== null ? (float) $midtermScore : null;
+                $e = $examScore !== null ? (float) $examScore : null;
 
                 $weightedSum = 0;
                 $weightTotal = 0;
                 if ($a !== null) { $weightedSum += $a * 0.20; $weightTotal += 0.20; }
                 if ($q !== null) { $weightedSum += $q * 0.20; $weightTotal += 0.20; }
                 if ($m !== null) { $weightedSum += $m * 0.25; $weightTotal += 0.25; }
+                if ($e !== null) { $weightedSum += $e * 0.35; $weightTotal += 0.35; }
 
                 if ($weightTotal > 0) {
                     $finalScore = round(($weightedSum / $weightTotal), 2);
@@ -707,6 +723,7 @@ class StudentController extends Controller
                 'quiz_score' => $quizScore,
                 'auto_quiz_score' => $autoQuizScore,
                 'midterm_score' => $midtermScore,
+                'exam_score' => $examScore,
                 'final_score' => $finalScore,
                 'grade_letter' => $gradeLetter,
             ];
@@ -728,14 +745,14 @@ class StudentController extends Controller
         return response()->json($grade);
     }
 
-    // ✅ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សា (ឆ្នាំទី ១-៤) ក្នុងដេប៉ាតឺម៉ង់របស់សិស្ស សម្រាប់មើលមេរៀនឆ្នាំមុនៗ (រំលឹកមេរៀន), ថ្នាក់បច្ចុប្បន្ន, និងរៀនទុកមុន
+    // ✅ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សា (ឆ្នាំទី ១-៤) ក្នុងដេប៉ាតឺម៉ង់របស់សិស្ស
     public function getAllLessons(Request $request)
     {
         $student = auth()->user();
         $studentIds = $this->getStudentAllIds($student);
         $studentProfile = $this->resolveStudentProfile($student);
 
-        // ១. មុខវិជ្ជាទាំងអស់ដែលសិស្សធ្លាប់បានចុះឈ្មោះរៀន (ទាំងឆ្នាំមុនៗ និងឆ្នាំបច្ចុប្បន្ន)
+        // ១. មុខវិជ្ជាទាំងអស់ដែលសិស្សធ្លាប់បានចុះឈ្មោះរៀន
         $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
             ->where(function ($q) {
                 $q->whereNull('status')
@@ -757,7 +774,7 @@ class StudentController extends Controller
                 ->value('department_id');
         }
 
-        // ៣. ទាញយកមុខវិជ្ជាទាំងអស់ក្នុងដេប៉ាតឺម៉ង់ (គ្រប់ឆ្នាំទី ១ ដល់ ទី ៤) + មុខវិជ្ជាដែលសិស្សធ្លាប់រៀនពីឆ្នាំមុនៗ
+        // ៣. ទាញយកមុខវិជ្ជាទាំងអស់ក្នុងដេប៉ាតឺម៉ង់
         $coursesQuery = Course::with(['teacher', 'teacherProfile', 'department']);
         if ($deptId) {
             $coursesQuery->where(function ($q) use ($deptId, $enrolledCourseIds) {
@@ -776,7 +793,7 @@ class StudentController extends Controller
         // ៤. គណនាលេខឆ្នាំសិក្សា (1, 2, 3, 4) សម្រាប់មុខវិជ្ជានីមួយៗ
         $courseYearsMap = $this->buildCourseYearsMap($deptCourses);
 
-        // ✅ ៥. គណនាឆ្នាំសិក្សាបច្ចុប្បន្នរបស់សិស្សយ៉ាងឆ្លាតវៃ (ឆែក batch_year, student_code, email និងមុខវិជ្ជាខ្ពស់បំផុតដែលសិស្សកំពុងរៀន)
+        // ✅ ៥. គណនាឆ្នាំសិក្សាបច្ចុប្បន្នរបស់សិស្សយ៉ាងឆ្លាតវៃ
         $detectedYear = $this->parseAcademicYearNumber(
             ($studentProfile->year ?? '') . ' ' .
             ($studentProfile->academic_year ?? '') . ' ' .
@@ -790,7 +807,6 @@ class StudentController extends Controller
             ($studentProfile->email ?? '')
         );
 
-        // បើក្នុង Profile មិនទាន់មានសរសេរឆ្នាំទី ៤ ទេ តែសិស្សនេះត្រូវបានចុះឈ្មោះរៀនក្នុងមុខវិជ្ជាឆ្នាំទី ៤ (ឬ ៣, ២) ឱ្យចាប់យកឆ្នាំខ្ពស់បំផុតដែលគាត់កំពុងរៀន!
         if (!$detectedYear && !empty($enrolledCourseIds)) {
             $enrolledYears = [];
             foreach ($enrolledCourseIds as $ecid) {
@@ -830,7 +846,6 @@ class StudentController extends Controller
 
             $teacherData = $this->formatTeacherData($course);
 
-            // កំណត់ប្រភេទមេរៀនធៀបនឹងឆ្នាំសិក្សាបច្ចុប្បន្នរបស់សិស្ស៖ 'past_review' | 'current_class' | 'learn_ahead'
             $studyStatus = 'current_class';
             if ((int) $primaryYear < (int) $studentCurrentYear) {
                 $studyStatus = 'past_review';
@@ -926,24 +941,67 @@ class StudentController extends Controller
         ]);
     }
 
-    // អានឯកសារមេរៀនជា Base64 សម្រាប់បើកអានផ្ទាល់ក្នុង Modal (PDF / Word / Excel / រូបភាព)
+    // ✅ អានឯកសារមេរៀនជា Base64 (គាំទ្រទាំងការអានពី Disk និងការអានពី Database លើ Railway)
     public function readLessonFile(Request $request)
     {
-        $path = ltrim((string) $request->query('path', ''), '/');
-        $cleanPath = preg_replace('/^storage\//', '', $path);
-
-        if (!$cleanPath || !Storage::disk('public')->exists($cleanPath)) {
+        $path = trim((string) $request->query('path', ''));
+        if (!$path) {
             return response()->json(['message' => 'រកមិនឃើញឯកសារមេរៀននេះទេ'], 404);
         }
 
-        $fileContent = Storage::disk('public')->get($cleanPath);
-        $mimeType = Storage::disk('public')->mimeType($cleanPath) ?: 'application/octet-stream';
+        // ករណី path ជា Base64 Data URI ផ្ទាល់
+        if (str_starts_with($path, 'data:')) {
+            if (preg_match('/^data:([^;]+);base64,(.+)$/s', $path, $matches)) {
+                return response()->json([
+                    'file_name' => 'lesson-file',
+                    'mime_type' => $matches[1] ?: 'application/octet-stream',
+                    'base64' => $matches[2],
+                ]);
+            }
+        }
 
-        return response()->json([
-            'file_name' => basename($cleanPath),
-            'mime_type' => $mimeType,
-            'base64' => base64_encode($fileContent),
-        ]);
+        $cleanPath = preg_replace('/^storage\//', '', ltrim($path, '/'));
+
+        // ១. ពិនិត្យមើលលើ Disk ជាមុនសិន
+        if ($cleanPath && Storage::disk('public')->exists($cleanPath)) {
+            $fileContent = Storage::disk('public')->get($cleanPath);
+            $mimeType = Storage::disk('public')->mimeType($cleanPath) ?: 'application/octet-stream';
+
+            return response()->json([
+                'file_name' => basename($cleanPath),
+                'mime_type' => $mimeType,
+                'base64' => base64_encode($fileContent),
+            ]);
+        }
+
+        // ២. ប្រសិនបើនៅលើ Railway ឯកសារមិនមានលើ Disk ឱ្យឆែករកក្នុងតារាង lesson_files
+        if (Schema::hasTable('lesson_files')) {
+            $dbFile = DB::table('lesson_files')
+                ->where('file_path', $cleanPath)
+                ->orWhere('file_path', 'storage/' . $cleanPath)
+                ->orWhere('file_path', '/storage/' . $cleanPath)
+                ->first();
+
+            if ($dbFile) {
+                $rawContent = $dbFile->file_data ?? $dbFile->base64_data ?? $dbFile->file_content ?? null;
+                if ($rawContent) {
+                    if (str_starts_with($rawContent, 'data:') && preg_match('/^data:([^;]+);base64,(.+)$/s', $rawContent, $m)) {
+                        return response()->json([
+                            'file_name' => $dbFile->file_name ?? basename($cleanPath),
+                            'mime_type' => $m[1] ?: ($dbFile->mime_type ?? 'application/octet-stream'),
+                            'base64' => $m[2],
+                        ]);
+                    }
+                    return response()->json([
+                        'file_name' => $dbFile->file_name ?? basename($cleanPath),
+                        'mime_type' => $dbFile->mime_type ?? 'application/octet-stream',
+                        'base64' => $rawContent,
+                    ]);
+                }
+            }
+        }
+
+        return response()->json(['message' => 'រកមិនឃើញឯកសារមេរៀននេះទេ'], 404);
     }
 
     // View Lessons by Course
@@ -982,34 +1040,44 @@ class StudentController extends Controller
         ]);
 
         $student = auth()->user();
+        $studentIds = $this->getStudentAllIds($student);
         $assignment = Assignment::findOrFail($request->assignment_id);
 
-        if (now()->gt($assignment->due_date)) {
-            return response()->json(['message' => 'Assignment submission deadline has passed'], 400);
+        if ($assignment->due_date && now()->gt(Carbon::parse($assignment->due_date))) {
+            return response()->json(['message' => 'ផុតកំណត់ថ្ងៃទទួលកិច្ចការនេះហើយ!'], 400);
         }
 
         $existing = AssignmentSubmission::where('assignment_id', $request->assignment_id)
-            ->where('student_id', $student->id)
+            ->whereIn('student_id', $studentIds)
             ->first();
 
         if ($existing) {
-            return response()->json(['message' => 'You have already submitted this assignment'], 400);
+            return response()->json(['message' => 'អ្នកបានប្រគល់កិច្ចការនេះរួចរាល់ហើយ!'], 400);
         }
 
         $file = $request->file('file');
         $filePath = $file->store('assignment_submissions', 'public');
 
-        $submission = AssignmentSubmission::create([
+        $submissionData = [
             'assignment_id' => $request->assignment_id,
             'student_id' => $student->id,
             'file_path' => $filePath,
             'original_filename' => $file->getClientOriginalName(),
             'submitted_at' => now(),
-        ]);
+        ];
+
+        // ប្រសិនបើតារាង assignment_submissions មានជួរឈរសម្រាប់ផ្ទុកទិន្នន័យ Base64 លើ Railway
+        if (Schema::hasColumn('assignment_submissions', 'file_data')) {
+            $mime = $file->getMimeType() ?: 'application/octet-stream';
+            $submissionData['file_data'] = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($file->getRealPath()));
+        }
+
+        $submission = AssignmentSubmission::create($submissionData);
 
         return response()->json([
             'submission' => $submission,
-            'message' => 'Assignment submitted successfully'
+            'file_path' => $filePath,
+            'message' => 'បានប្រគល់កិច្ចការសិក្សាដោយជោគជ័យ',
         ], 201);
     }
 
@@ -1034,7 +1102,7 @@ class StudentController extends Controller
 
         return response()->json([
             'file_path' => $filePath,
-            'message' => 'Homework uploaded successfully'
+            'message' => 'Homework uploaded successfully',
         ]);
     }
 
@@ -1059,7 +1127,7 @@ class StudentController extends Controller
 
         return response()->json([
             'video_path' => $filePath,
-            'message' => 'Video uploaded successfully'
+            'message' => 'Video uploaded successfully',
         ]);
     }
 
@@ -1067,11 +1135,12 @@ class StudentController extends Controller
     public function getQuiz($quizId)
     {
         $student = auth()->user();
+        $studentIds = $this->getStudentAllIds($student);
 
         $quiz = Quiz::with(['course', 'questions.options'])->findOrFail($quizId);
 
         $attempt = QuizAttempt::where('quiz_id', $quizId)
-            ->where('student_id', $student->id)
+            ->whereIn('student_id', $studentIds)
             ->first();
 
         if ($attempt && $attempt->submitted_at) {
@@ -1081,7 +1150,7 @@ class StudentController extends Controller
         $durationInSeconds = max(1, (int) ($quiz->duration ?? 30)) * 60;
 
         if ($attempt) {
-            $startedTimestamp = \Carbon\Carbon::parse($attempt->started_at)->getTimestamp();
+            $startedTimestamp = Carbon::parse($attempt->started_at)->getTimestamp();
             $elapsedSeconds = now()->getTimestamp() - $startedTimestamp;
             $timeLeft = $durationInSeconds - $elapsedSeconds;
 
@@ -1093,11 +1162,11 @@ class StudentController extends Controller
                 return response()->json(['message' => 'អស់ម៉ោងប្រឡងហើយ! ប្រព័ន្ធបានបញ្ជូនចម្លើយដោយស្វ័យប្រវត្តិ។'], 400);
             }
         } else {
-            if ($quiz->start_date && now()->lt(\Carbon\Carbon::parse($quiz->start_date))) {
+            if ($quiz->start_date && now()->lt(Carbon::parse($quiz->start_date))) {
                 return response()->json(['message' => 'កម្រងសំណួរនេះមិនទាន់ដល់ម៉ោងបើកប្រឡងនៅឡើយទេ'], 400);
             }
 
-            if ($quiz->end_date && now()->gt(\Carbon\Carbon::parse($quiz->end_date))) {
+            if ($quiz->end_date && now()->gt(Carbon::parse($quiz->end_date)->endOfDay())) {
                 return response()->json(['message' => 'កម្រងសំណួរនេះបានផុតកំណត់ម៉ោងប្រឡងហើយ'], 400);
             }
 
@@ -1126,10 +1195,11 @@ class StudentController extends Controller
         ]);
 
         $student = auth()->user();
+        $studentIds = $this->getStudentAllIds($student);
         $quiz = Quiz::with('questions.options')->findOrFail($quizId);
 
         $attempt = QuizAttempt::where('quiz_id', $quizId)
-            ->where('student_id', $student->id)
+            ->whereIn('student_id', $studentIds)
             ->whereNull('submitted_at')
             ->first();
 
@@ -1163,7 +1233,7 @@ class StudentController extends Controller
 
         $finalTotalMarks = $calculatedTotalMarks > 0
             ? $calculatedTotalMarks
-            : (float) ($quiz->total_mark ?? 100);
+            : (float) ($quiz->total_mark ?? 20);
 
         $attempt->update([
             'score' => $score,
@@ -1187,7 +1257,7 @@ class StudentController extends Controller
             'attempt' => $attempt,
             'score' => $score,
             'total_marks' => $finalTotalMarks,
-            'message' => 'បានបញ្ជូនចម្លើយប្រឡងដោយជោគជ័យ'
+            'message' => 'បានបញ្ជូនចម្លើយប្រឡងដោយជោគជ័យ',
         ]);
     }
 
@@ -1245,8 +1315,8 @@ class StudentController extends Controller
                 'title' => $assignment->title,
                 'description' => $assignment->description,
                 'due_date' => $assignment->due_date,
-                'marks' => $assignment->marks ?? $assignment->total_score ?? 100,
-                'total_score' => $assignment->total_score ?? $assignment->marks ?? 100,
+                'marks' => $assignment->marks ?? $assignment->total_score ?? 20,
+                'total_score' => $assignment->total_score ?? $assignment->marks ?? 20,
                 'course' => $assignment->course,
                 'submission' => $submission ? [
                     'id' => $submission->id,
@@ -1254,7 +1324,7 @@ class StudentController extends Controller
                     'submitted_at' => $submission->submitted_at,
                     'score' => $submission->score,
                     'feedback' => $submission->feedback,
-                ] : null
+                ] : null,
             ];
         });
 
@@ -1265,7 +1335,7 @@ class StudentController extends Controller
                 'last_page' => $paginated->lastPage(),
                 'per_page' => $paginated->perPage(),
                 'total' => $paginated->total(),
-            ]
+            ],
         ]);
     }
 
@@ -1312,7 +1382,7 @@ class StudentController extends Controller
 
         $items = collect($paginated->items())->map(function ($quiz) use ($attempts) {
             $attempt = $attempts->get($quiz->id);
-            $resolvedTotalMark = $quiz->total_mark ?? $quiz->questions_total_mark ?? 100;
+            $resolvedTotalMark = $quiz->total_mark ?? $quiz->questions_total_mark ?? 20;
 
             if ($quiz->course) {
                 $teacherData = $this->formatTeacherData($quiz->course);
@@ -1335,7 +1405,7 @@ class StudentController extends Controller
                     'score' => $attempt->score,
                     'started_at' => $attempt->started_at,
                     'submitted_at' => $attempt->submitted_at,
-                ] : null
+                ] : null,
             ];
         });
 
@@ -1346,7 +1416,7 @@ class StudentController extends Controller
                 'last_page' => $paginated->lastPage(),
                 'per_page' => $paginated->perPage(),
                 'total' => $paginated->total(),
-            ]
+            ],
         ]);
     }
 }

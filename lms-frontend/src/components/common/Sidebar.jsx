@@ -1,5 +1,5 @@
 // src/components/common/Sidebar.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -20,13 +20,14 @@ import {
 } from '@heroicons/react/24/outline';
 
 const Sidebar = () => {
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
   const { t } = useLanguage();
   const location = useLocation();
 
   // State និង Ref សម្រាប់គ្រប់គ្រងផ្ទាំងម៉ឺនុយរង (Dropdown / Popover)
   const [openPopover, setOpenPopover] = useState(() => {
-    return location.pathname.startsWith('/students') ? '/students' : null;
+    const isDesktop = typeof window !== 'undefined' ? window.innerWidth >= 1024 : true;
+    return isDesktop && location.pathname.startsWith('/students') ? '/students' : null;
   });
   const popoverRef = useRef(null);
   const spacerRef = useRef(null);
@@ -36,9 +37,12 @@ const Sidebar = () => {
 
   useEffect(() => {
     const updatePosition = () => {
-      if (spacerRef.current) {
+      if (spacerRef.current && window.scrollY < 50) {
         const rect = spacerRef.current.getBoundingClientRect();
-        const calculatedTop = Math.max(16, Math.round(rect.top + window.scrollY));
+        const calculatedTop = Math.min(
+          120,
+          Math.max(16, Math.round(rect.top + window.scrollY))
+        );
         setTopOffset(calculatedTop);
       }
     };
@@ -48,7 +52,7 @@ const Sidebar = () => {
     return () => window.removeEventListener('resize', updatePosition);
   }, []);
 
-  // បិទផ្ទាំងផុសដោយស្វ័យប្រវត្តិ ពេលចុចក្រៅប្រអប់ (សម្រាប់អេក្រង់ Tablet)
+  // បិទផ្ទាំងផុសដោយស្វ័យប្រវត្តិ ពេលចុចក្រៅប្រអប់ (សម្រាប់អេក្រង់ Tablet ទាំង Mouse និង Touch)
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (
@@ -60,14 +64,22 @@ const Sidebar = () => {
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
   }, []);
 
-  // បើកទុកដោយស្វ័យប្រវត្តិនៅលើកុំព្យូទ័រ ពេលកំពុងស្ថិតក្នុងទំព័រគ្រប់គ្រងសិស្ស
+  // បើកទុកដោយស្វ័យប្រវត្តិនៅលើកុំព្យូទ័រ ពេលកំពុងស្ថិតក្នុងទំព័រគ្រប់គ្រងសិស្ស និងបិទលើ Tablet ពេលប្ដូរទំព័រ
   useEffect(() => {
-    if (location.pathname.startsWith('/students') && window.innerWidth >= 1024) {
+    if (window.innerWidth < 1024) {
+      setOpenPopover(null);
+      return;
+    }
+    if (location.pathname.startsWith('/students')) {
       setOpenPopover('/students');
-    } else if (!location.pathname.startsWith('/students')) {
+    } else {
       setOpenPopover(null);
     }
   }, [location.pathname, location.search]);
@@ -75,62 +87,84 @@ const Sidebar = () => {
   // ==========================================
   // NAVIGATION CONFIGURATION (CLEAN URLS)
   // ==========================================
-  const NAV_CONFIG = {
-    Admin: {
-      label: t('អ្នកគ្រប់គ្រង', 'Administrator'),
-      items: [
-        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
-        { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/departments' },
-        { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/teachers' },
-        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
-        {
-          name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
-          icon: UserGroupIcon,
-          path: '/students',
-          children: [
-            { name: t('ឆ្នាំទី១', 'Year 1'), path: '/students/year-1', year: 'Year 1' },
-            { name: t('ឆ្នាំទី២', 'Year 2'), path: '/students/year-2', year: 'Year 2' },
-            { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/students/year-3', year: 'Year 3' },
-            { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/students/year-4', year: 'Year 4' },
-          ],
-        },
-        { name: t('របាយការណ៍', 'Reports'), icon: ChartBarIcon, path: '/reports' },
-      ],
-    },
-    Teacher: {
-      label: t('គ្រូបង្រៀន', 'Teacher'),
-      items: [
-        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
-        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
-        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
-        { name: t('សិស្ស', 'Students'), icon: UsersIcon, path: '/students' },
-        { name: t('វត្តមានសិស្ស', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
-        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
-        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
-        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
-      ],
-    },
-    Student: {
-      label: t('សិស្ស', 'Student'),
-      items: [
-        { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
-        { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
-        { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
-        { name: t('វត្តមាន', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
-        { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
-        { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
-        { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
-      ],
-    },
-  };
+  const NAV_CONFIG = useMemo(
+    () => ({
+      Admin: {
+        label: t('អ្នកគ្រប់គ្រង', 'Administrator'),
+        items: [
+          { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
+          { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/departments' },
+          { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/teachers' },
+          { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
+          {
+            name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
+            icon: UserGroupIcon,
+            path: '/students',
+            children: [
+              { name: t('ឆ្នាំទី១', 'Year 1'), path: '/students/year-1', year: 'Year 1' },
+              { name: t('ឆ្នាំទី២', 'Year 2'), path: '/students/year-2', year: 'Year 2' },
+              { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/students/year-3', year: 'Year 3' },
+              { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/students/year-4', year: 'Year 4' },
+            ],
+          },
+          { name: t('របាយការណ៍', 'Reports'), icon: ChartBarIcon, path: '/reports' },
+        ],
+      },
+      Teacher: {
+        label: t('គ្រូបង្រៀន', 'Teacher'),
+        items: [
+          { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
+          { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
+          { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
+          { name: t('សិស្ស', 'Students'), icon: UsersIcon, path: '/students' },
+          { name: t('វត្តមានសិស្ស', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
+          { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
+          { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
+          { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
+        ],
+      },
+      Student: {
+        label: t('សិស្ស', 'Student'),
+        items: [
+          { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
+          { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
+          { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
+          { name: t('វត្តមាន', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
+          { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
+          { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
+          { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
+        ],
+      },
+    }),
+    [t]
+  );
 
-  const roleKey = Object.keys(NAV_CONFIG).find((role) => hasRole(role));
+  // ✅ ឆែកតួនាទីដោយគាំទ្រទាំង hasRole និងការអានផ្ទាល់ពី user object ជា Fallback
+  const roleKey = useMemo(() => {
+    const matched = Object.keys(NAV_CONFIG).find(
+      (role) => typeof hasRole === 'function' && hasRole(role)
+    );
+    if (matched) return matched;
+
+    const rawRole =
+      typeof user?.role === 'string'
+        ? user.role
+        : user?.role?.role_name || user?.role?.name || '';
+    const norm = rawRole.toString().trim().toLowerCase();
+    if (norm === 'admin' || Number(user?.role_id) === 1) return 'Admin';
+    if (norm === 'teacher' || Number(user?.role_id) === 2) return 'Teacher';
+    if (norm === 'student' || Number(user?.role_id) === 3) return 'Student';
+    return null;
+  }, [NAV_CONFIG, hasRole, user]);
+
   const isStudent = roleKey === 'Student';
   const section = roleKey ? NAV_CONFIG[roleKey] : null;
   const navItems = section?.items || [];
 
   const uniqueNavItems = navItems.reduce((acc, current) => {
-    const exists = acc.find((item) => item.path === current.path && item.name === current.name);
+    const exists = acc.find(
+      (item) => item.path === current.path && item.name === current.name
+    );
     if (!exists) {
       acc.push(current);
     }
@@ -148,22 +182,24 @@ const Sidebar = () => {
         aria-hidden="true"
       />
 
-      {/* ✅ Modern V18 Floating Sidebar */}
+      {/* ✅ Modern V18 Floating Sidebar (md:overflow-visible ដើម្បីកុំឱ្យដាច់ Popover និង Tooltip លើ Tablet) */}
       <aside
         style={{
           top: `${topOffset}px`,
           height: `calc(100vh - ${topOffset + 16}px)`,
         }}
-        className={`hidden md:flex md:w-20 lg:w-[260px] fixed left-4 rounded-[1.75rem] flex-col shrink-0 transition-all duration-300 z-30 shadow-[0_20px_50px_rgba(8,15,40,0.45)] overflow-hidden ${
+        className={`hidden md:flex md:w-20 lg:w-[260px] fixed left-4 rounded-[1.75rem] flex-col shrink-0 transition-all duration-300 z-30 shadow-[0_20px_50px_rgba(8,15,40,0.45)] md:overflow-visible lg:overflow-hidden ${
           isStudent
             ? 'bg-gradient-to-b from-blue-950 via-indigo-950 to-violet-950 border border-indigo-400/25'
             : 'bg-gradient-to-b from-slate-950 via-blue-950 to-indigo-950 border border-blue-800/45'
         }`}
       >
-        {/* ផ្ទៃក្រឡាអុចៗស្រាលៗ និងពន្លឺ Glow បែបទំនើប */}
-        <div className="std-sidebar-grid-pattern absolute inset-0 opacity-15 pointer-events-none" />
-        <div className="absolute -top-24 -right-24 w-52 h-52 bg-blue-500/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -left-24 w-52 h-52 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+        {/* ផ្ទៃក្រឡាអុចៗស្រាលៗ និងពន្លឺ Glow បែបទំនើប (ដាក់ក្នុងប្រអប់ overflow-hidden ដាច់ដោយឡែក) */}
+        <div className="absolute inset-0 rounded-[1.75rem] overflow-hidden pointer-events-none">
+          <div className="std-sidebar-grid-pattern absolute inset-0 opacity-15" />
+          <div className="absolute -top-24 -right-24 w-52 h-52 bg-blue-500/20 rounded-full blur-3xl" />
+          <div className="absolute -bottom-24 -left-24 w-52 h-52 bg-indigo-500/20 rounded-full blur-3xl" />
+        </div>
 
         <div className="relative z-10 flex flex-col h-full w-full py-2.5">
           {/* ============================================================== */}
@@ -376,7 +412,7 @@ const Sidebar = () => {
           {/* ============================================================== */}
           <div className="px-4 lg:px-5 pb-3 pt-2.5 shrink-0 mt-auto border-t border-white/10">
             <div className="hidden lg:flex items-center justify-between text-[11.5px] font-semibold text-blue-200/70">
-              <span className="truncate">© 2026 RPITSSVR</span>
+              <span className="truncate">© {new Date().getFullYear()} RPITSSVR</span>
               <span className="inline-flex items-center gap-1.5 text-[10.5px] text-emerald-300 font-extrabold bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-400/25 shrink-0">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                 v2.0

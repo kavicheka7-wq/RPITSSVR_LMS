@@ -123,12 +123,13 @@ const pushLocalNotification = (notif) => {
     let role = 'admin';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'admin';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'admin';
         role = rName.toString().toLowerCase();
       }
     }
@@ -224,6 +225,9 @@ const ManageCourses = () => {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [importError, setImportError] = useState('');
 
   // State និង Ref សម្រាប់កាតដេប៉ាតឺម៉ង់ខាងលើ
   const [selectedDepartment, setSelectedDepartment] = useState('all');
@@ -333,14 +337,17 @@ const ManageCourses = () => {
     return departments.find((d) => String(d.id) === String(selectedDepartment)) || null;
   }, [selectedDepartment, departments]);
 
-  // ច្រោះគ្រូបង្រៀនតាមដេប៉ាតឺម៉ង់ដែលបានជ្រើសរើសក្នុង Modal (បើដេប៉ាតឺម៉ង់នោះមិនទាន់មានគ្រូ បង្ហាញគ្រូទាំងអស់)
+  // ✅ ច្រោះគ្រូបង្រៀនតាមដេប៉ាតឺម៉ង់ និងរក្សាទុកគ្រូបច្ចុប្បន្នជានិច្ចពេលកែប្រែ (Edit Mode)
   const availableTeachersForModal = useMemo(() => {
     if (!formData.department_id) return teachers;
     const deptTeachers = teachers.filter(
-      (tItem) => String(tItem.department_id || tItem.department?.id) === String(formData.department_id)
+      (tItem) =>
+        String(tItem.department_id || tItem.department?.id) ===
+          String(formData.department_id) ||
+        (formData.teacher_id && String(tItem.id) === String(formData.teacher_id))
     );
     return deptTeachers.length > 0 ? deptTeachers : teachers;
-  }, [teachers, formData.department_id]);
+  }, [teachers, formData.department_id, formData.teacher_id]);
 
   // ✅ គណនាលេខទំព័រសម្រាប់ Sliding Window Pagination
   const paginationPages = useMemo(() => {
@@ -578,11 +585,17 @@ const ManageCourses = () => {
 
   useEffect(() => {
     fetchCourses(false);
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [fetchCourses]);
 
   // ✅ ប្រសិនបើប្តូរដេប៉ាតឺម៉ង់ក្នុង Modal ឱ្យសម្អាត teacher_id ចាស់ចេញដើម្បីជ្រើសរើសគ្រូថ្មីឱ្យត្រូវតាមដេប៉ាតឺម៉ង់
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    if (formError) setFormError('');
     if (name === 'department_id') {
       setFormData(prev => ({ ...prev, department_id: value, teacher_id: '' }));
     } else {
@@ -593,6 +606,9 @@ const ManageCourses = () => {
   // បង្កើត ឬកែប្រែមុខវិជ្ជា ព្រមទាំងបញ្ជូនសារចូលកណ្ដឹងស្វ័យប្រវត្តិ
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setFormError('');
+
     const finalDepartmentId = formData.department_id || (selectedDepartment !== 'all' ? selectedDepartment : '');
     const payload = {
       ...formData,
@@ -604,6 +620,7 @@ const ManageCourses = () => {
     };
 
     if (!payload.course_name || !payload.course_code || !payload.department_id || !payload.teacher_id) {
+      setFormError(t('សូមបំពេញព័ត៌មានចាំបាច់ទាំងអស់ឱ្យបានគ្រប់គ្រាន់!', 'Please fill in all required fields!'));
       return;
     }
 
@@ -643,7 +660,7 @@ const ManageCourses = () => {
           descKm: `មុខវិជ្ជា «${payload.course_name}» ត្រូវបានធ្វើបច្ចុប្បន្នភាព។`,
           descEn: `Course "${payload.course_name}" has been updated.`,
           category: 'course',
-          link: '/admin/courses'
+          link: '/courses'
         });
       } else {
         const response = await api.post('/admin/courses', payload);
@@ -684,7 +701,7 @@ const ManageCourses = () => {
           descKm: `មុខវិជ្ជា «${payload.course_name} (${payload.course_code})» ត្រូវបានបង្កើតថ្មី។`,
           descEn: `Course "${payload.course_name} (${payload.course_code})" was created.`,
           category: 'course',
-          link: '/admin/courses'
+          link: '/courses'
         });
       }
       
@@ -693,7 +710,19 @@ const ManageCourses = () => {
       resetForm();
       fetchCourses(true);
     } catch (error) {
-      console.error('Submit error:', error.response?.data);
+      console.error('Submit error:', error.response?.data || error);
+      const apiErrors = error.response?.data?.errors;
+      const firstValidationMsg = apiErrors
+        ? Object.values(apiErrors).flat()[0]
+        : null;
+      const errMsg =
+        firstValidationMsg ||
+        error.response?.data?.message ||
+        t(
+          'មិនអាចរក្សាទុកទិន្នន័យមុខវិជ្ជាបានទេ (លេខកូដមុខវិជ្ជាអាចស្ទួន)!',
+          'Could not save course data (course code may already exist)!'
+        );
+      setFormError(String(errMsg));
     } finally {
       setIsSubmitting(false);
     }
@@ -706,13 +735,14 @@ const ManageCourses = () => {
 
   // លុបមុខវិជ្ជា ព្រមទាំងបញ្ជូនសារចូលកណ្ដឹងស្វ័យប្រវត្តិ
   const confirmDelete = async () => {
-    if (!courseToDelete) return;
+    if (!courseToDelete || isDeleting) return;
 
     const deletedId = courseToDelete.id;
     const deletedName = courseToDelete.course_name;
     const previousCourses = [...courses];
     const previousMeta = { ...meta };
 
+    setIsDeleting(true);
     setShowDeleteModal(false);
     setCourseToDelete(null);
 
@@ -747,7 +777,7 @@ const ManageCourses = () => {
         descKm: `មុខវិជ្ជា «${deletedName}» ត្រូវបានលុបចេញពីប្រព័ន្ធ។`,
         descEn: `Course "${deletedName}" was deleted from the system.`,
         category: 'course',
-        link: '/admin/courses'
+        link: '/courses'
       });
     } catch (error) {
       console.error('Delete course error:', error);
@@ -755,6 +785,8 @@ const ManageCourses = () => {
       setMeta(previousMeta);
       ADMIN_COURSES_MEM_CACHE.courses = previousCourses;
       ADMIN_COURSES_MEM_CACHE.meta = previousMeta;
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -768,6 +800,7 @@ const ManageCourses = () => {
       teacher_id: '',
     });
     setEditingCourse(null);
+    setFormError('');
   };
 
   const openCreateModal = () => {
@@ -776,6 +809,7 @@ const ManageCourses = () => {
   };
 
   const openEditModal = (course) => {
+    setFormError('');
     setEditingCourse(course);
     setFormData({
       course_code: course.course_code || '',
@@ -891,7 +925,7 @@ const ManageCourses = () => {
       descKm: `បញ្ជីមុខវិជ្ជា (${currentDeptName || 'ទាំងអស់'}) ចំនួន ${sortedCoursesForExport.length} ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: `${sortedCoursesForExport.length} courses were successfully exported to Excel.`,
       category: 'export',
-      link: '/admin/courses'
+      link: '/courses'
     });
   };
 
@@ -944,7 +978,7 @@ const ManageCourses = () => {
       descKm: 'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យមុខវិជ្ជាត្រូវបានទាញយកជោគជ័យ។',
       descEn: 'The Excel template for course import was downloaded successfully.',
       category: 'download',
-      link: '/admin/courses'
+      link: '/courses'
     });
   };
 
@@ -966,7 +1000,7 @@ const ManageCourses = () => {
     return found ? found.id : null;
   };
 
-  // ✅ ផ្ទៀងផ្ទាត់ឈ្មោះគ្រូបង្រៀនពេល Import Excel (បើមិនបានបំពេញឈ្មោះគ្រូ ត្រឡប់ null ដើម្បីឱ្យលោតប្រាប់ថាខ្វះឈ្មោះគ្រូបង្រៀន មិនចាប់យកគ្រូទី ១ ដោយចៃដន្យឡើយ)
+  // ✅ ផ្ទៀងផ្ទាត់ឈ្មោះគ្រូបង្រៀនពេល Import Excel
   const findTeacherId = (teacherNameOrEmail) => {
     if (!teacherNameOrEmail || !teacherNameOrEmail.toString().trim()) return null;
     const search = teacherNameOrEmail.toString().trim().toLowerCase();
@@ -999,6 +1033,7 @@ const ManageCourses = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     setSelectedFileName(file.name);
+    setImportError('');
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -1020,6 +1055,8 @@ const ManageCourses = () => {
             });
 
           if (nonEmptyRows.length === 0) {
+            setImportPreview([]);
+            setImportError(t('រកមិនឃើញទិន្នន័យមុខវិជ្ជាក្នុងឯកសារនេះទេ!', 'No course data found in this file!'));
             return;
           }
 
@@ -1072,6 +1109,7 @@ const ManageCourses = () => {
           setImportPreview(parsedRows);
         } catch (err) {
           console.error('Course Excel parse error:', err);
+          setImportError(t('មិនអាចអានឯកសារ Excel នេះបានទេ!', 'Failed to read Excel file!'));
         } finally {
           e.target.value = null;
         }
@@ -1081,12 +1119,14 @@ const ManageCourses = () => {
   };
 
   const handleConfirmImport = async () => {
+    if (isImporting) return;
     const validItems = importPreview.filter(r => r.isValid).map(r => r.data);
     if (validItems.length === 0) {
       return;
     }
 
     setIsImporting(true);
+    setImportError('');
     try {
       const results = await Promise.allSettled(
         validItems.map((coursePayload) => api.post('/admin/courses', coursePayload))
@@ -1109,7 +1149,7 @@ const ManageCourses = () => {
           descKm: `មុខវិជ្ជាចំនួន ${successCount} ត្រូវបាននាំចូលទៅក្នុងប្រព័ន្ធជោគជ័យ។`,
           descEn: `${successCount} courses were imported successfully.`,
           category: 'import',
-          link: '/admin/courses'
+          link: '/courses'
         });
       }
 
@@ -1119,6 +1159,7 @@ const ManageCourses = () => {
       fetchCourses(true);
     } catch (error) {
       console.error('Import courses error:', error);
+      setImportError(t('មានបញ្ហាក្នុងការនាំចូលមុខវិជ្ជា!', 'Error importing courses!'));
     } finally {
       setIsImporting(false);
     }
@@ -1163,7 +1204,7 @@ const ManageCourses = () => {
                 {t('នាំចេញ Excel', 'Export Excel')}
               </button>
               <button
-                onClick={() => { setImportPreview([]); setSelectedFileName(''); setShowImportModal(true); }}
+                onClick={() => { setImportPreview([]); setSelectedFileName(''); setImportError(''); setShowImportModal(true); }}
                 className="inline-flex items-center justify-center px-4 py-3 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
                 title={t('នាំចូលទិន្នន័យមុខវិជ្ជាពី Excel', 'Import course data from Excel')}
               >
@@ -1286,7 +1327,7 @@ const ManageCourses = () => {
           <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder=""
+            placeholder={t('ស្វែងរកឈ្មោះមុខវិជ្ជា, កូដ, ដេប៉ាតឺម៉ង់ ឬគ្រូបង្រៀន...', 'Search course name, code, department, or teacher...')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="crs-input w-full pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
@@ -1500,7 +1541,7 @@ const ManageCourses = () => {
                 )}
               </div>
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); setFormError(''); }}
                 className="crs-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 <XMarkIcon className="h-6 w-6" />
@@ -1509,6 +1550,13 @@ const ManageCourses = () => {
             
             <div className="p-6 sm:p-8 overflow-y-auto flex-1">
               <form id="courseForm" onSubmit={handleSubmit} className="space-y-5">
+                {formError && (
+                  <div className="crs-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
+                    <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                    <p className="text-xs font-bold leading-relaxed">{formError}</p>
+                  </div>
+                )}
+
                 <div>
                   <label className="crs-label block text-sm font-bold text-gray-700 mb-1.5">
                     {t('ឈ្មោះមុខវិជ្ជា', 'Course Name')} <span className="text-rose-500">*</span>
@@ -1622,7 +1670,7 @@ const ManageCourses = () => {
             <div className="crs-modal-bar p-6 sm:p-8 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); setFormError(''); }}
                 className="crs-cancel-btn px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
@@ -1669,7 +1717,7 @@ const ManageCourses = () => {
                 )}
               </div>
               <button
-                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); }}
+                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); setImportError(''); }}
                 className="crs-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 <XMarkIcon className="h-5 w-5" />
@@ -1677,6 +1725,13 @@ const ManageCourses = () => {
             </div>
 
             <div className="p-5 overflow-y-auto flex-1 space-y-5">
+              {importError && (
+                <div className="crs-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
+                  <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                  <p className="text-xs font-bold leading-relaxed">{importError}</p>
+                </div>
+              )}
+
               <div className="crs-import-info bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
                   <h4 className="crs-import-title font-extrabold text-emerald-900 text-sm">
@@ -1767,7 +1822,7 @@ const ManageCourses = () => {
             <div className="crs-modal-bar p-5 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
-                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); }}
+                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); setImportError(''); }}
                 className="crs-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
@@ -1818,13 +1873,15 @@ const ManageCourses = () => {
             <div className="flex justify-end space-x-3">
               <button
                 onClick={() => { setShowDeleteModal(false); setCourseToDelete(null); }}
-                className="crs-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                disabled={isDeleting}
+                className="crs-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer"
+                disabled={isDeleting}
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer disabled:opacity-50"
               >
                 {t('លុបចោល', 'Delete')}
               </button>

@@ -8,22 +8,25 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie', 'storage/*'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie', 'storage/*', 'download-file*'],
 
     'allowed_methods' => ['*'],
 
     'allowed_origins' => array_values(array_unique(array_filter([
-        env('FRONTEND_URL', 'http://localhost:5173'),
+        rtrim((string) env('FRONTEND_URL', 'http://localhost:5173'), '/'),
+        'https://lmsrpitssvr.site',
+        'https://www.lmsrpitssvr.site',
         'http://localhost:5173',
         'http://127.0.0.1:5173',
         'http://localhost:3000',
     ]))),
 
     'allowed_origins_patterns' => [
+        '#^https://([a-zA-Z0-9-]+\.)?lmsrpitssvr\.site$#',
         '#^https://.*\.vercel\.app$#',
+        '#^https://.*\.up\.railway\.app$#',
         '#^https?://localhost(:\d+)?$#',
         '#^https?://127\.0\.0\.1(:\d+)?$#',
-        '#^https://(.*\.)?[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$#', // ✅ បន្ថែមបន្ទាត់នេះ ដើម្បីអនុញ្ញាតគ្រប់ Custom Domain ទាំងអស់ដោយស្វ័យប្រវត្តិ
     ],
 
     'allowed_headers' => ['*'],

@@ -15,7 +15,16 @@ class LessonFile extends Model
         'file_name',
         'file_path',
         'file_type',
+        'mime_type',
+        'file_data',
         'uploaded_at',
+    ];
+
+    /**
+     * លាក់ទិន្នន័យ Base64 ធំៗពេលទាញបញ្ជីមេរៀនធម្មតា ដើម្បីឱ្យ API ដើរលឿនបំផុត
+     */
+    protected $hidden = [
+        'file_data',
     ];
 
     protected $casts = [

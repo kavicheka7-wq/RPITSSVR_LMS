@@ -17,7 +17,6 @@ import {
   SparklesIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
-import { toast } from 'react-toastify';
 import api from '../../services/api';
 
 const NOTIFICATION_EXPIRE_DAYS = 30;
@@ -29,6 +28,9 @@ const NOTIF_MEM_CACHE = {
   key: null,
   list: null,
   activeInterceptorId: null,
+  mountedInstances: 0,
+  latestRole: 'guest',
+  latestPushFn: null,
 };
 
 const filterValidNotifications = (list) => {
@@ -43,6 +45,15 @@ const filterValidNotifications = (list) => {
       return isNaN(itemTime) || now - itemTime <= maxAgeMs;
     })
     .slice(0, MAX_NOTIFICATIONS_COUNT);
+};
+
+// ✅ អនុគមន៍បម្លែងតំណភ្ជាប់ចាស់ៗ (/admin/..., /teacher/..., /student/...) មកជា Clean URLs ដោយស្វ័យប្រវត្តិ
+const normalizeNotifLink = (rawLink) => {
+  if (!rawLink || typeof rawLink !== 'string') return '/dashboard';
+  const trimmed = rawLink.trim();
+  if (trimmed === '/student/scores') return '/grades';
+  const cleaned = trimmed.replace(/^\/(admin|teacher|student)(?=\/)/i, '');
+  return cleaned || '/dashboard';
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណ និងតួនាទីអ្នកប្រើប្រាស់ឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (0ms)
@@ -75,11 +86,12 @@ const resolveUserIdentitySync = (contextUser, hasRoleFn, pathname = '') => {
     (typeof u?.role === 'string' ? u.role : '') ||
     '';
   const r = rawRole.toString().toLowerCase();
+  const roleIdNum = Number(u?.role_id);
 
   let role = 'guest';
-  if (r.includes('admin')) role = 'admin';
-  else if (r.includes('teacher')) role = 'teacher';
-  else if (r.includes('student')) role = 'student';
+  if (r.includes('admin') || roleIdNum === 1) role = 'admin';
+  else if (r.includes('teacher') || roleIdNum === 2) role = 'teacher';
+  else if (r.includes('student') || roleIdNum === 3) role = 'student';
   else if (typeof hasRoleFn === 'function') {
     if (hasRoleFn('Admin')) role = 'admin';
     else if (hasRoleFn('Teacher')) role = 'teacher';
@@ -140,7 +152,10 @@ const extractItemTitle = (configData, resData) => {
       parsedConfig?.first_name;
 
     if (t && typeof t === 'string') {
-      const shortTitle = t.length > 35 ? `${t.slice(0, 35)}...` : t;
+      const cleanStr = t.trim();
+      if (!cleanStr) return '';
+      const shortTitle =
+        cleanStr.length > 35 ? `${cleanStr.slice(0, 35)}...` : cleanStr;
       return ` «${shortTitle}»`;
     }
   } catch {}
@@ -160,7 +175,10 @@ const buildActionNotification = (method, url, role, configData, resData) => {
     u.includes('logout') ||
     u.includes('refresh') ||
     u.includes('profile') ||
-    u.includes('update-password')
+    u.includes('update-password') ||
+    u.includes('forgot-password') ||
+    u.includes('two-factor') ||
+    u.includes('telegram')
   ) {
     return null;
   }
@@ -168,7 +186,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
   const itemTitle = extractItemTitle(configData, resData);
 
   // --------------------------------------------------------------------------
-  // ADMIN ACTIONS
+  // ADMIN ACTIONS (Clean URLs)
   // --------------------------------------------------------------------------
   if (role === 'admin') {
     if (u.includes('students/import')) {
@@ -179,7 +197,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
           'បញ្ជីសិស្សថ្មីពីឯកសារ Excel ត្រូវបានបញ្ចូលទៅក្នុងប្រព័ន្ធដោយជោគជ័យ។',
         descEn:
           'New students from the Excel file have been successfully imported.',
-        link: '/admin/students/year-1',
+        link: '/students/year-1',
         category: 'student',
       };
     }
@@ -191,7 +209,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
           'សិស្សដែលបានជ្រើសរើស ត្រូវបានផ្លាស់ប្តូរទៅកាន់ឆ្នាំសិក្សាថ្មីរួចរាល់។',
         descEn:
           'The selected students have been successfully promoted to the new academic year.',
-        link: '/admin/students/year-1',
+        link: '/students/year-1',
         category: 'student',
       };
     }
@@ -215,7 +233,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         descEn: isDelete
           ? 'A student account was removed.'
           : `Student record${itemTitle} was saved.`,
-        link: '/admin/students/year-1',
+        link: '/students/year-1',
         category: 'student',
       };
     }
@@ -235,7 +253,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
           : 'New Teacher Added',
         descKm: `ទិន្នន័យគ្រូបង្រៀន${itemTitle} ក្នុងប្រព័ន្ធត្រូវបានធ្វើបច្ចុប្បន្នភាព។`,
         descEn: `Teacher records${itemTitle} in the system have been updated.`,
-        link: '/admin/teachers',
+        link: '/teachers',
         category: 'teacher',
       };
     }
@@ -246,7 +264,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         titleEn: m === 'delete' ? 'Course Deleted' : 'Course Updated',
         descKm: `បញ្ជីមុខវិជ្ជា${itemTitle} ក្នុងប្រព័ន្ធត្រូវបានកែប្រែដោយជោគជ័យ។`,
         descEn: `System courses list${itemTitle} has been updated successfully.`,
-        link: '/admin/courses',
+        link: '/courses',
         category: 'course',
       };
     }
@@ -257,14 +275,14 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         titleEn: m === 'delete' ? 'Department Deleted' : 'Department Updated',
         descKm: `ទិន្នន័យដេប៉ាតឺម៉ង់${itemTitle} ត្រូវបានធ្វើបច្ចុប្បន្នភាព។`,
         descEn: `Department${itemTitle} information has been updated.`,
-        link: '/admin/departments',
+        link: '/departments',
         category: 'department',
       };
     }
   }
 
   // --------------------------------------------------------------------------
-  // TEACHER ACTIONS
+  // TEACHER ACTIONS (Clean URLs)
   // --------------------------------------------------------------------------
   if (role === 'teacher') {
     if (u.includes('teacher/attendance')) {
@@ -273,7 +291,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         titleEn: 'Student Attendance Recorded',
         descKm: 'បានរក្សាទុកវត្តមានសិស្សក្នុងប្រព័ន្ធដោយជោគជ័យ។',
         descEn: 'Student attendance has been successfully saved.',
-        link: '/teacher/attendance',
+        link: '/attendance',
         category: 'attendance',
       };
     }
@@ -286,7 +304,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         titleEn: 'Student Grades Updated',
         descKm: 'ពិន្ទុរបស់សិស្សត្រូវបានធ្វើបច្ចុប្បន្នភាពក្នុងប្រព័ន្ធរួចរាល់។',
         descEn: 'Student grades have been updated successfully.',
-        link: '/teacher/grades',
+        link: '/grades',
         category: 'grade',
       };
     }
@@ -305,7 +323,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         descEn: isDelete
           ? 'Lesson item was removed.'
           : `Lesson${itemTitle} details saved.`,
-        link: '/teacher/lessons',
+        link: '/lessons',
         category: 'lesson',
       };
     }
@@ -324,7 +342,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         descEn: isDelete
           ? 'Assignment was removed.'
           : `Assignment${itemTitle} details saved.`,
-        link: '/teacher/assignments',
+        link: '/assignments',
         category: 'assignment',
       };
     }
@@ -343,14 +361,14 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         descEn: isDelete
           ? 'Quiz was deleted.'
           : `Quiz${itemTitle} saved successfully.`,
-        link: '/teacher/quizzes',
+        link: '/quizzes',
         category: 'quiz',
       };
     }
   }
 
   // --------------------------------------------------------------------------
-  // STUDENT ACTIONS
+  // STUDENT ACTIONS (Clean URLs)
   // --------------------------------------------------------------------------
   if (role === 'student') {
     if (u.includes('assignment') || u.includes('submit')) {
@@ -359,7 +377,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         titleEn: 'Assignment Submitted',
         descKm: 'កិច្ចការរបស់អ្នកត្រូវបានបញ្ជូនទៅកាន់គ្រូបង្រៀនរួចរាល់។',
         descEn: 'Your assignment has been submitted to the teacher.',
-        link: '/student/assignments',
+        link: '/assignments',
         category: 'assignment',
       };
     }
@@ -369,7 +387,7 @@ const buildActionNotification = (method, url, role, configData, resData) => {
         titleEn: 'Quiz Completed',
         descKm: 'ចម្លើយប្រឡងរបស់អ្នកត្រូវបានរក្សាទុកក្នុងប្រព័ន្ធ។',
         descEn: 'Your quiz attempt has been recorded.',
-        link: '/student/quizzes',
+        link: '/quizzes',
         category: 'quiz',
       };
     }
@@ -402,7 +420,7 @@ const extractTeacherModuleNotifications = (url, resData) => {
         titleEn: `${pendingCount} Student Submissions Pending Grading`,
         descKm: 'សូមចូលពិនិត្យ និងដាក់ពិន្ទុកិច្ចការដែលសិស្សបានប្រគល់។',
         descEn: 'Click here to review and grade student submissions.',
-        link: '/teacher/assignments',
+        link: '/assignments',
         category: 'assignment',
       });
     }
@@ -414,7 +432,7 @@ const extractTeacherModuleNotifications = (url, resData) => {
         titleEn: `${act.student_name || 'Student'} submitted an assignment`,
         descKm: `កិច្ចការ៖ ${act.assignment_title || '—'}`,
         descEn: `Assignment: ${act.assignment_title || '—'}`,
-        link: '/teacher/assignments',
+        link: '/assignments',
         category: 'submission',
         time: act.submitted_at || new Date().toISOString(),
       });
@@ -516,14 +534,18 @@ const NotificationBell = ({ isMobile = false }) => {
         itemsArray.forEach((notifObj) => {
           if (!notifObj) return;
 
+          const cleanTargetLink = normalizeNotifLink(notifObj.link);
+
           // ការពារកុំឱ្យជាន់គ្នាជាមួយ pushLocalNotification ដែលទំព័រនីមួយៗបានហៅរួចហើយ
           const isDuplicateRecentLocal = currentList.some((existing) => {
             if (!existing?.id?.toString().startsWith('local_')) return false;
-            const timeDiff = Math.abs(nowMs - new Date(existing.time).getTime());
+            const timeDiff = Math.abs(
+              nowMs - new Date(existing.time).getTime()
+            );
             return (
               timeDiff < 5000 &&
               (existing.category === notifObj.category ||
-                existing.link === notifObj.link)
+                normalizeNotifLink(existing.link) === cleanTargetLink)
             );
           });
 
@@ -540,7 +562,7 @@ const NotificationBell = ({ isMobile = false }) => {
               titleEn: notifObj.titleEn,
               descKm: notifObj.descKm,
               descEn: notifObj.descEn,
-              link: notifObj.link || `/${normalizedRole}/dashboard`,
+              link: cleanTargetLink,
               category: notifObj.category || 'general',
               time: notifObj.time || new Date().toISOString(),
               read: false,
@@ -566,53 +588,67 @@ const NotificationBell = ({ isMobile = false }) => {
     [normalizedRole, userUniqueKey]
   );
 
-  // ✅ ភ្ជាប់ API Interceptor តែ ១ គត់ក្នុងប្រព័ន្ធ (ដំណើរការទាំងលើកុំព្យូទ័រ និងទូរស័ព្ទដោយមិនជាន់គ្នា)
+  // រក្សាទុកយោង (Reference) នៃតួនាទី និងអនុគមន៍ចុងក្រោយសម្រាប់ប្រើក្នុង Singleton Interceptor
   useEffect(() => {
-    if (normalizedRole === 'guest') return;
+    NOTIF_MEM_CACHE.latestRole = normalizedRole;
+    NOTIF_MEM_CACHE.latestPushFn = pushNotificationsBatch;
+  }, [normalizedRole, pushNotificationsBatch]);
 
-    if (NOTIF_MEM_CACHE.activeInterceptorId !== null) {
-      api.interceptors.response.eject(NOTIF_MEM_CACHE.activeInterceptorId);
-      NOTIF_MEM_CACHE.activeInterceptorId = null;
+  // ✅ ភ្ជាប់ API Interceptor តែ ១ គត់ក្នុងប្រព័ន្ធ (មិនដាច់នៅពេលបិទ/បើកម៉ឺនុយទូរស័ព្ទ)
+  useEffect(() => {
+    NOTIF_MEM_CACHE.mountedInstances += 1;
+
+    if (NOTIF_MEM_CACHE.activeInterceptorId === null) {
+      const interceptorId = api.interceptors.response.use(
+        (response) => {
+          const activeRole = NOTIF_MEM_CACHE.latestRole;
+          const pushFn = NOTIF_MEM_CACHE.latestPushFn;
+          if (!pushFn || activeRole === 'guest') return response;
+
+          const method = (response?.config?.method || '').toLowerCase();
+          const url = response?.config?.url || '';
+          const configData = response?.config?.data;
+          const resData = response?.data;
+
+          if (['post', 'put', 'delete'].includes(method)) {
+            setTimeout(() => {
+              const actionNotif = buildActionNotification(
+                method,
+                url,
+                NOTIF_MEM_CACHE.latestRole,
+                configData,
+                resData
+              );
+              if (actionNotif && NOTIF_MEM_CACHE.latestPushFn) {
+                NOTIF_MEM_CACHE.latestPushFn([actionNotif]);
+              }
+            }, 180);
+          } else if (method === 'get' && activeRole === 'teacher') {
+            const syncedItems = extractTeacherModuleNotifications(url, resData);
+            if (syncedItems.length > 0) pushFn(syncedItems);
+          }
+          return response;
+        },
+        (error) => Promise.reject(error)
+      );
+
+      NOTIF_MEM_CACHE.activeInterceptorId = interceptorId;
     }
 
-    const interceptorId = api.interceptors.response.use(
-      (response) => {
-        const method = (response?.config?.method || '').toLowerCase();
-        const url = response?.config?.url || '';
-        const configData = response?.config?.data;
-        const resData = response?.data;
-
-        if (['post', 'put', 'delete'].includes(method)) {
-          setTimeout(() => {
-            const actionNotif = buildActionNotification(
-              method,
-              url,
-              normalizedRole,
-              configData,
-              resData
-            );
-            if (actionNotif) {
-              pushNotificationsBatch([actionNotif]);
-            }
-          }, 180);
-        } else if (method === 'get' && normalizedRole === 'teacher') {
-          const syncedItems = extractTeacherModuleNotifications(url, resData);
-          if (syncedItems.length > 0) pushNotificationsBatch(syncedItems);
-        }
-        return response;
-      },
-      (error) => Promise.reject(error)
-    );
-
-    NOTIF_MEM_CACHE.activeInterceptorId = interceptorId;
-
     return () => {
-      if (NOTIF_MEM_CACHE.activeInterceptorId === interceptorId) {
-        api.interceptors.response.eject(interceptorId);
+      NOTIF_MEM_CACHE.mountedInstances = Math.max(
+        0,
+        NOTIF_MEM_CACHE.mountedInstances - 1
+      );
+      if (
+        NOTIF_MEM_CACHE.mountedInstances === 0 &&
+        NOTIF_MEM_CACHE.activeInterceptorId !== null
+      ) {
+        api.interceptors.response.eject(NOTIF_MEM_CACHE.activeInterceptorId);
         NOTIF_MEM_CACHE.activeInterceptorId = null;
       }
     };
-  }, [normalizedRole, pushNotificationsBatch]);
+  }, []);
 
   // ✅ សមកាលកម្មសារជូនដំណឹងពី Cache `_v8_` របស់ Teacher Dashboard
   useEffect(() => {
@@ -669,11 +705,8 @@ const NotificationBell = ({ isMobile = false }) => {
         localStorage.setItem(userUniqueKey, JSON.stringify([]));
         window.dispatchEvent(new Event(SYNC_EVENT_NAME));
       } catch {}
-      toast.success(
-        t('បានសម្អាតសារជូនដំណឹងទាំងអស់', 'All notifications cleared')
-      );
     },
-    [userUniqueKey, t]
+    [userUniqueKey]
   );
 
   const handleNotificationClick = useCallback(
@@ -689,7 +722,7 @@ const NotificationBell = ({ isMobile = false }) => {
         window.dispatchEvent(new Event(SYNC_EVENT_NAME));
       } catch {}
       if (notif.link) {
-        navigate(notif.link);
+        navigate(normalizeNotifLink(notif.link));
       }
     },
     [notifications, userUniqueKey, navigate]
@@ -764,7 +797,7 @@ const NotificationBell = ({ isMobile = false }) => {
         leaveFrom="transform opacity-100 scale-100"
         leaveTo="transform opacity-0 scale-95"
       >
-        <Menu.Items className="nbell-dropdown origin-top-right absolute right-0 mt-2.5 w-80 sm:w-96 rounded-2xl shadow-2xl bg-white ring-1 ring-black/5 focus:outline-none z-50 border border-gray-100">
+        <Menu.Items className="nbell-dropdown origin-top-right absolute right-0 mt-2.5 w-[calc(100vw-1.5rem)] max-w-[20rem] sm:max-w-[24rem] sm:w-96 rounded-2xl shadow-2xl bg-white ring-1 ring-black/5 focus:outline-none z-50 border border-gray-100">
           <div
             className={`nbell-header relative px-4 py-3.5 border-b border-gray-100 rounded-t-2xl flex items-center justify-between ${
               isStudent

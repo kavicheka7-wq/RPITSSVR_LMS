@@ -194,10 +194,11 @@ const detectCurrentStudentYear = (contextUser) => {
     return '1';
   }
 
-  const startYearMatch = combinedText.match(/\b(202[0-6])\b/);
+  const startYearMatch = combinedText.match(/\b(202[0-9])\b/);
   if (startYearMatch) {
     const startYear = Number(startYearMatch[1]);
-    const diff = 2025 - startYear + 1;
+    const currentYear = new Date().getFullYear();
+    const diff = currentYear - startYear + 1;
     if (diff >= 1 && diff <= 4) return String(diff);
   }
 
@@ -368,6 +369,7 @@ const StudentLessons = () => {
   const { user } = useAuth();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
@@ -565,32 +567,46 @@ const StudentLessons = () => {
   // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ទាញឈ្មោះ និងរូបថតគ្រូបង្រៀនប្រចាំមុខវិជ្ជានីមួយៗ
   // ============================================================================
   const getViewUrl = useCallback((path) => {
-    if (!path) return '#';
+    if (!path || typeof path !== 'string') return '#';
+    const trimmed = path.trim();
+    if (!trimmed) return '#';
     if (
-      path.startsWith('http://') ||
-      path.startsWith('https://') ||
-      path.startsWith('//')
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('//') ||
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('blob:')
     ) {
-      return path;
+      return trimmed;
     }
     const backendBase = (
-      api.defaults?.baseURL ||
       import.meta.env.VITE_API_URL ||
+      api.defaults?.baseURL ||
       'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = path.replace(/^\/?storage\//, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${backendBase}/storage/${cleanPath}`;
   }, []);
 
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getImageUrl = useCallback((path) => {
-    if (!path) return null;
-    if (path.startsWith('http') || path.startsWith('data:')) return path;
+    if (!path || typeof path !== 'string') return null;
+    const trimmed = path.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const baseUrl = (
-      api.defaults?.baseURL ||
       import.meta.env.VITE_API_URL ||
+      api.defaults?.baseURL ||
       'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = path.replace(/^\/?storage\//, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
@@ -675,6 +691,7 @@ const StudentLessons = () => {
       let rawImg =
         tchProfile?.profile_image_url ||
         tchProfile?.profile_image ||
+        tchProfile?.user?.profile_image ||
         tch?.profile_image_url ||
         tch?.profile_image ||
         tch?.user?.profile_image_url ||
@@ -693,6 +710,7 @@ const StudentLessons = () => {
           rawImg =
             matchScore?.course?.teacher?.profile_image_url ||
             matchScore?.course?.teacher?.profile_image ||
+            matchScore?.course?.teacher?.user?.profile_image ||
             matchScore?.course?.teacher_profile?.profile_image_url ||
             matchScore?.course?.teacher_profile?.profile_image ||
             null;
@@ -883,11 +901,28 @@ const StudentLessons = () => {
   }, [fetchLessons]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ មុខងារទាញយកឯកសារមេរៀន (Download File)
+  // 📌 ផ្នែកទី៥៖ មុខងារទាញយកឯកសារមេរៀន (Download File - គាំទ្រ Railway & Base64)
   // ============================================================================
   const handleDownloadFile = async (filePath, fileName, fileId) => {
-    if (!filePath) return;
-    const cleanPath = filePath.replace(/^\/?storage\//, '');
+    if (!filePath || typeof filePath !== 'string') return;
+    const trimmed = filePath.trim();
+
+    if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+      const link = document.createElement('a');
+      link.href = trimmed;
+      link.setAttribute('download', fileName || 'lesson-file');
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      return;
+    }
+
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      window.open(trimmed, '_blank');
+      return;
+    }
+
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
 
     setDownloadingFileId(fileId || filePath);
     try {
@@ -938,7 +973,12 @@ const StudentLessons = () => {
         window.URL.revokeObjectURL(url);
       }
     } catch (error) {
-      const fallbackUrl = getViewUrl(filePath);
+      const backendBase = (
+        import.meta.env.VITE_API_URL ||
+        api.defaults?.baseURL ||
+        'http://localhost:8000/api'
+      ).replace(/\/api\/?$/, '');
+      const fallbackUrl = `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
       window.open(fallbackUrl, '_blank');
     } finally {
       setDownloadingFileId(null);
@@ -1894,6 +1934,10 @@ const StudentLessons = () => {
                   {section.folders.map((folder, idx) => {
                     const theme = FOLDER_THEMES[idx % FOLDER_THEMES.length];
                     const tMeta = folder.teacherMeta;
+                    const avatarKey = `lsn_t_${folder.courseId}`;
+                    const hasTeacherAvatar = Boolean(
+                      tMeta?.imageUrl && !failedAvatars[avatarKey]
+                    );
 
                     return (
                       <div
@@ -1971,18 +2015,20 @@ const StudentLessons = () => {
                             <div
                               className={`h-7 w-7 rounded-full bg-gradient-to-br ${theme.avatarBg} text-white font-black text-[10px] flex items-center justify-center shrink-0 overflow-hidden relative shadow-2xs`}
                             >
-                              <span className="z-0">
-                                {tMeta?.initials || 'T'}
-                              </span>
-                              {tMeta?.imageUrl && (
+                              {hasTeacherAvatar ? (
                                 <img
                                   src={tMeta.imageUrl}
                                   alt={tMeta.name}
-                                  className="h-full w-full object-cover rounded-full absolute inset-0 z-10"
-                                  onError={(e) => {
-                                    e.target.style.display = 'none';
-                                  }}
+                                  className="h-full w-full object-cover rounded-full"
+                                  onError={() =>
+                                    setFailedAvatars((prev) => ({
+                                      ...prev,
+                                      [avatarKey]: true,
+                                    }))
+                                  }
                                 />
+                              ) : (
+                                <span>{tMeta?.initials || 'T'}</span>
                               )}
                             </div>
                             <span className="std-lsn-text-primary text-xs font-extrabold text-gray-800 truncate">
@@ -2020,18 +2066,23 @@ const StudentLessons = () => {
                   {activeSelectedFolder.teacherMeta && (
                     <span className="std-lsn-subbox inline-flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-full bg-white border border-gray-200/90 text-xs font-extrabold text-gray-700 shadow-2xs">
                       <div className="h-5 w-5 rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-white text-[9px] font-black flex items-center justify-center shrink-0 overflow-hidden relative">
-                        <span className="z-0">
-                          {activeSelectedFolder.teacherMeta.initials}
-                        </span>
-                        {activeSelectedFolder.teacherMeta.imageUrl && (
+                        {activeSelectedFolder.teacherMeta.imageUrl &&
+                        !failedAvatars[`lsn_t_${activeSelectedFolder.courseId}`] ? (
                           <img
                             src={activeSelectedFolder.teacherMeta.imageUrl}
                             alt={activeSelectedFolder.teacherMeta.name}
-                            className="h-full w-full object-cover rounded-full absolute inset-0 z-10"
-                            onError={(e) => {
-                              e.target.style.display = 'none';
-                            }}
+                            className="h-full w-full object-cover rounded-full"
+                            onError={() =>
+                              setFailedAvatars((prev) => ({
+                                ...prev,
+                                [`lsn_t_${activeSelectedFolder.courseId}`]: true,
+                              }))
+                            }
                           />
+                        ) : (
+                          <span>
+                            {activeSelectedFolder.teacherMeta.initials}
+                          </span>
                         )}
                       </div>
                       <span>

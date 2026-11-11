@@ -21,11 +21,11 @@ class Attendance extends Model
     ];
 
     protected $casts = [
-        'attendance_date' => 'date',
+        'attendance_date' => 'date:Y-m-d',
     ];
 
     /**
-     * Relationship: The student whose attendance is being recorded.
+     * Relationship: The student (User) whose attendance is being recorded.
      */
     public function student(): BelongsTo
     {
@@ -33,10 +33,18 @@ class Attendance extends Model
     }
 
     /**
+     * Relationship: The student profile record (matching student_id to students.user_id).
+     */
+    public function studentProfile(): BelongsTo
+    {
+        return $this->belongsTo(Student::class, 'student_id', 'user_id');
+    }
+
+    /**
      * Relationship: The course the student is attending.
      */
     public function course(): BelongsTo
     {
-        return $this->belongsTo(Course::class);
+        return $this->belongsTo(Course::class, 'course_id');
     }
 }

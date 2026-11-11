@@ -47,6 +47,8 @@ const EMPTY_FIELD_ERRORS = Object.freeze({
 });
 
 const Register = () => {
+  const [logoFailed, setLogoFailed] = useState(false);
+
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -72,6 +74,7 @@ const Register = () => {
       return false;
     }
   });
+  const [hasCheckedServer, setHasCheckedServer] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -218,6 +221,10 @@ const Register = () => {
         setIsAlreadyInitialized(false);
       } catch (error) {
         console.error('Error checking initial setup:', error);
+      } finally {
+        if (isMounted) {
+          setHasCheckedServer(true);
+        }
       }
     };
 
@@ -228,13 +235,13 @@ const Register = () => {
   }, []);
 
   useEffect(() => {
-    if (isAlreadyInitialized) {
+    if (hasCheckedServer && isAlreadyInitialized) {
       const timer = setTimeout(() => {
         navigate('/login', { replace: true });
       }, 1200);
       return () => clearTimeout(timer);
     }
-  }, [isAlreadyInitialized, navigate]);
+  }, [hasCheckedServer, isAlreadyInitialized, navigate]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -265,17 +272,20 @@ const Register = () => {
       const passErr = Array.isArray(apiErrors.password)
         ? apiErrors.password[0]
         : apiErrors.password;
+      const confirmErr = Array.isArray(apiErrors.password_confirmation)
+        ? apiErrors.password_confirmation[0]
+        : apiErrors.password_confirmation;
 
-      if (firstErr || lastErr || emailErr || passErr) {
+      if (firstErr || lastErr || emailErr || passErr || confirmErr) {
         setFieldErrors({
           first_name: firstErr ? String(firstErr) : '',
           last_name: lastErr ? String(lastErr) : '',
           email: emailErr ? String(emailErr) : '',
           password: passErr ? String(passErr) : '',
-          password_confirmation: '',
+          password_confirmation: confirmErr ? String(confirmErr) : '',
         });
 
-        if (passErr) {
+        if (passErr || confirmErr) {
           setFormData((prev) => ({
             ...prev,
             password: '',
@@ -288,6 +298,7 @@ const Register = () => {
           else if (lastErr) lastNameInputRef.current?.focus();
           else if (emailErr) emailInputRef.current?.focus();
           else if (passErr) passwordInputRef.current?.focus();
+          else if (confirmErr) confirmPasswordInputRef.current?.focus();
         });
         return;
       }
@@ -382,6 +393,7 @@ const Register = () => {
         first_name: formData.first_name.trim(),
         last_name: formData.last_name.trim(),
         email: formData.email.trim(),
+        role_id: Number(formData.role_id) || 1,
       };
 
       const result = await register(payload);
@@ -391,8 +403,14 @@ const Register = () => {
           localStorage.setItem(ADMIN_SETUP_STORAGE_KEY, 'true');
         } catch {}
 
-        // ✅ បញ្ជូនទៅកាន់ '/dashboard' ផ្ទាល់តាមរយៈ resolveTargetDashboardPath
-        navigate(resolveTargetDashboardPath(result.user), { replace: true });
+        window.dispatchEvent(new Event('lms_user_updated'));
+
+        // ✅ បញ្ជូនទៅកាន់ '/dashboard' ផ្ទាល់ ឬទៅ '/login' ប្រសិនបើតម្រូវឱ្យផ្ទៀងផ្ទាត់ 2FA
+        if (result.requires_2fa) {
+          navigate('/login', { replace: true });
+        } else {
+          navigate(resolveTargetDashboardPath(result.user), { replace: true });
+        }
       } else {
         applyRegistrationValidationError(result);
       }
@@ -661,14 +679,16 @@ const Register = () => {
                       : 'bg-slate-50 border-slate-200'
                   }`}
                 >
-                  <img
-                    src={logo}
-                    alt="RPITSSVR Logo"
-                    className="h-full w-full object-contain"
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                    }}
-                  />
+                  {!logoFailed ? (
+                    <img
+                      src={logo}
+                      alt="RPITSSVR Logo"
+                      className="h-full w-full object-contain"
+                      onError={() => setLogoFailed(true)}
+                    />
+                  ) : (
+                    <AcademicCapIcon className="h-7 w-7 text-indigo-500" />
+                  )}
                 </div>
               </div>
 

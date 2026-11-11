@@ -1,5 +1,5 @@
 // src/components/teacher/TeacherManageCourses.jsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -64,6 +64,22 @@ const resolveTeacherUid = (contextUser) => {
   return 'default_teacher';
 };
 
+// ✅ តម្រៀបមុខវិជ្ជាតាមលេខកូដ ឬ ID ពីតូចទៅធំ សម្រាប់ទាញយក Excel
+const sortCoursesOldestFirst = (list) => {
+  if (!Array.isArray(list)) return [];
+  return [...list].sort((a, b) => {
+    const codeA = (a.course_code || '').toString().trim();
+    const codeB = (b.course_code || '').toString().trim();
+    if (codeA && codeB && codeA !== codeB) {
+      return codeA.localeCompare(codeB, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
+    }
+    return (Number(a.id) || 0) - (Number(b.id) || 0);
+  });
+};
+
 // ✅ អនុគមន៍បញ្ជូនសារជូនដំណឹងទៅកាន់រូបកណ្ដឹង (NotificationBell) លើ Navbar
 const pushLocalNotification = (notif) => {
   try {
@@ -73,12 +89,13 @@ const pushLocalNotification = (notif) => {
     let role = 'teacher';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'teacher';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'teacher';
         role = rName.toString().toLowerCase();
       }
     }
@@ -138,6 +155,7 @@ const CARD_THEMES = [
 const TeacherManageCourses = () => {
   const { t } = useLanguage();
   const { user } = useAuth();
+  const abortControllerRef = useRef(null);
 
   // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentTeacherId = useMemo(() => resolveTeacherUid(user), [user]);
@@ -165,7 +183,8 @@ const TeacherManageCourses = () => {
       TEACHER_COURSES_MEM_CACHE.courses = fromUserKey;
       return fromUserKey;
     }
-    return readStorageJson(CACHE_KEY_SHARED_COURSES, []);
+    const fallback = readStorageJson(CACHE_KEY_SHARED_COURSES, []);
+    return Array.isArray(fallback) ? fallback : [];
   });
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -203,18 +222,28 @@ const TeacherManageCourses = () => {
 
       if (
         TEACHER_COURSES_MEM_CACHE.uid === currentTeacherId &&
+        cachedForUser.length > 0 &&
         now - TEACHER_COURSES_MEM_CACHE.lastSyncedAt < 25000
       ) {
         return;
       }
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      const response = await api.get('/teacher/courses');
-      const coursesData = Array.isArray(response.data?.data)
-        ? response.data.data
-        : Array.isArray(response.data)
-        ? response.data
+      const response = await api.get('/teacher/courses', {
+        signal: controller.signal,
+      });
+      const rawData = response.data?.data ?? response.data ?? [];
+      const coursesData = Array.isArray(rawData)
+        ? rawData
+        : Array.isArray(rawData?.data)
+        ? rawData.data
         : [];
 
       setCourses(coursesData);
@@ -239,6 +268,9 @@ const TeacherManageCourses = () => {
         console.warn('Failed to cache teacher courses:', e);
       }
     } catch (error) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        return;
+      }
       console.error('Error fetching courses:', error);
     }
   }, [currentTeacherId]);
@@ -247,6 +279,11 @@ const TeacherManageCourses = () => {
     setSelectedDept('all');
     setSearchTerm('');
     fetchCourses();
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [fetchCourses]);
 
   // ============================================================================
@@ -254,7 +291,7 @@ const TeacherManageCourses = () => {
   // ============================================================================
   const departmentFilters = useMemo(() => {
     const map = new Map();
-    courses.forEach((c) => {
+    (courses || []).forEach((c) => {
       const deptId = c.department_id || c.department?.id;
       const deptName = c.department?.department_name || c.department?.name;
       if (deptId && deptName) {
@@ -272,7 +309,7 @@ const TeacherManageCourses = () => {
   }, [courses]);
 
   const filteredCourses = useMemo(() => {
-    return courses.filter((course) => {
+    return (courses || []).filter((course) => {
       const deptId = course.department_id || course.department?.id;
       const matchesDept =
         selectedDept === 'all' || String(deptId) === String(selectedDept);
@@ -300,7 +337,9 @@ const TeacherManageCourses = () => {
       return;
     }
 
-    const exportData = filteredCourses.map((course, idx) => ({
+    const sortedCourses = sortCoursesOldestFirst(filteredCourses);
+
+    const exportData = sortedCourses.map((course, idx) => ({
       'ល.រ': idx + 1,
       'កូដមុខវិជ្ជា': course.course_code || '—',
       'ឈ្មោះមុខវិជ្ជា': course.course_name || '—',
@@ -311,38 +350,62 @@ const TeacherManageCourses = () => {
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    if (worksheet['!ref']) {
+      const range = XLSX.utils.decode_range(worksheet['!ref']);
 
-    for (let R = range.s.r; R <= range.e.r; ++R) {
-      for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-        if (!worksheet[cellAddress]) continue;
-        const isHeader = R === 0;
-        worksheet[cellAddress].s = {
-          font: {
-            name: 'Khmer OS Siemreap',
-            sz: isHeader ? 11 : 10,
-            bold: isHeader,
-            color: { rgb: isHeader ? 'FFFFFF' : '1E293B' },
-          },
-          fill: {
-            fgColor: {
-              rgb: isHeader ? '1E3A8A' : R % 2 === 1 ? 'FFFFFF' : 'F8FAFC',
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+          if (!worksheet[cellAddress]) {
+            worksheet[cellAddress] = { t: 's', v: '' };
+          }
+          const isHeader = R === 0;
+          const isTextCol = !isHeader && C === 1;
+
+          if (isTextCol) {
+            worksheet[cellAddress].t = 's';
+            worksheet[cellAddress].z = '@';
+            if (
+              worksheet[cellAddress].v !== undefined &&
+              worksheet[cellAddress].v !== null
+            ) {
+              worksheet[cellAddress].v = String(worksheet[cellAddress].v);
+            }
+          }
+
+          worksheet[cellAddress].s = {
+            font: {
+              name: 'Khmer OS Siemreap',
+              sz: isHeader ? 11 : 10,
+              bold: isHeader,
+              color: { rgb: isHeader ? 'FFFFFF' : '1E293B' },
             },
-          },
-          alignment: {
-            vertical: 'center',
-            horizontal: isHeader || C === 0 || C === 4 ? 'center' : 'left',
-            wrapText: true,
-          },
-          border: {
-            top: { style: 'thin', color: { rgb: 'CBD5E1' } },
-            bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
-            left: { style: 'thin', color: { rgb: 'CBD5E1' } },
-            right: { style: 'thin', color: { rgb: 'CBD5E1' } },
-          },
-        };
+            fill: {
+              fgColor: {
+                rgb: isHeader ? '1E3A8A' : R % 2 === 1 ? 'FFFFFF' : 'F8FAFC',
+              },
+            },
+            alignment: {
+              vertical: 'center',
+              horizontal: isHeader || C === 0 || C === 4 ? 'center' : 'left',
+              wrapText: true,
+            },
+            ...(isTextCol ? { numFmt: '@' } : {}),
+            border: {
+              top: { style: 'thin', color: { rgb: 'CBD5E1' } },
+              bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
+              left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+              right: { style: 'thin', color: { rgb: 'CBD5E1' } },
+            },
+          };
+        }
       }
+
+      const rows = [];
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        rows.push({ hpt: R === 0 ? 28 : 22 });
+      }
+      worksheet['!rows'] = rows;
     }
 
     worksheet['!cols'] = [
@@ -364,10 +427,10 @@ const TeacherManageCourses = () => {
     pushLocalNotification({
       titleKm: 'បាននាំចេញបញ្ជីមុខវិជ្ជាបង្រៀនទៅ Excel',
       titleEn: 'Teaching Courses Exported to Excel',
-      descKm: `បញ្ជីមុខវិជ្ជាបង្រៀនចំនួន ${filteredCourses.length} មុខវិជ្ជា ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
-      descEn: `Exported ${filteredCourses.length} teaching courses to Excel.`,
+      descKm: `បញ្ជីមុខវិជ្ជាបង្រៀនចំនួន ${sortedCourses.length} មុខវិជ្ជា ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
+      descEn: `Exported ${sortedCourses.length} teaching courses to Excel.`,
       category: 'export',
-      link: '/teacher/courses',
+      link: '/courses',
     });
   };
 

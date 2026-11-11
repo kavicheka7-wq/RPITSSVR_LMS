@@ -189,13 +189,18 @@ const pushLocalNotification = (notif) => {
     let role = 'teacher';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'teacher';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'teacher';
         role = rName.toString().toLowerCase();
+      } else if (Number(u?.role_id) === 1) {
+        role = 'admin';
+      } else if (Number(u?.role_id) === 3) {
+        role = 'student';
       }
     }
 
@@ -492,8 +497,16 @@ const formatScoresList = (scoresData, courseId = '') => {
       examPts35
     );
 
+    const resolvedAvatar =
+      s.profile_image ||
+      s.user?.profile_image ||
+      s.student?.profile_image ||
+      s.student?.user?.profile_image ||
+      null;
+
     return {
       ...s,
+      profile_image: resolvedAvatar,
       student_id: resolvedUserId,
       student_record_id: s.student_record_id || s.id,
       student_name: studentName,
@@ -546,6 +559,8 @@ const buildInstantCourseScores = (
     const merged = targetStudents.map((std) => {
       const targetUserId = std.user_id || std.user?.id || std.id;
       const isEnrolledAny = isStudentEnrolledInAnyTeacherCourse(std, courseMap);
+      const stdAvatar = std.profile_image || std.user?.profile_image || null;
+
       const matchedScore = scoreLookup.find(
         (sc) =>
           String(sc.student_id) === String(targetUserId) ||
@@ -558,6 +573,11 @@ const buildInstantCourseScores = (
       if (matchedScore) {
         return {
           ...matchedScore,
+          profile_image:
+            stdAvatar ||
+            matchedScore.profile_image ||
+            matchedScore.student?.profile_image ||
+            null,
           student_id: targetUserId,
           student_record_id: std.id,
           enrolled_course_ids: std.enrolled_course_ids || [],
@@ -578,7 +598,10 @@ const buildInstantCourseScores = (
             gender: std.gender,
             study_shift: std.study_shift,
             profile_image:
-              std.profile_image || matchedScore.student?.profile_image,
+              stdAvatar ||
+              matchedScore.student?.profile_image ||
+              matchedScore.profile_image ||
+              null,
           },
         };
       }
@@ -596,6 +619,7 @@ const buildInstantCourseScores = (
             batch_year: std.batch_year,
             gender: std.gender,
             study_shift: std.study_shift || 'Monday-Friday',
+            profile_image: stdAvatar,
             enrolled_course_ids: std.enrolled_course_ids || [],
             is_enrolled_with_teacher: isEnrolledAny,
             student: {
@@ -604,7 +628,7 @@ const buildInstantCourseScores = (
               last_name: std.last_name,
               gender: std.gender,
               study_shift: std.study_shift,
-              profile_image: std.profile_image,
+              profile_image: stdAvatar,
             },
             assignment_score: null,
             quiz_score: null,
@@ -628,6 +652,7 @@ const TeacherManageGrades = () => {
   const { user } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || '';
@@ -751,16 +776,25 @@ const TeacherManageGrades = () => {
   const [savingAll, setSavingAll] = useState(false);
   const abortControllerRef = useRef(null);
 
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
-    if (imagePath.startsWith('http') || imagePath.startsWith('data:'))
-      return imagePath;
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const getProfileImageUrl = useCallback((imagePath) => {
+    if (!imagePath || typeof imagePath !== 'string') return null;
+    const trimmed = imagePath.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const baseUrl = (
       import.meta.env.VITE_API_URL || 'http://localhost:8000'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = imagePath.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
-  };
+  }, []);
 
   const getGenderLabel = (gender) => {
     const g = (gender || '').toString().trim().toLowerCase();
@@ -1274,7 +1308,7 @@ const TeacherManageGrades = () => {
         descKm: `ពិន្ទុរបស់សិស្ស «${item.student_name}» ក្នុងមុខវិជ្ជា «${activeCourseObj?.course_name || ''}» ត្រូវបានរក្សាទុក (${total !== null ? total + ' ពិន្ទុ' : '—'} | លទ្ធផល៖ ${passResultKm})។`,
         descEn: `Saved grade for "${item.student_name}" in "${activeCourseObj?.course_name || ''}" (${total !== null ? total + ' pts' : '—'}).`,
         category: 'grade',
-        link: '/teacher/grades',
+        link: '/grades',
       });
     } catch (err) {
       console.error(err);
@@ -1329,7 +1363,7 @@ const TeacherManageGrades = () => {
         descKm: `បានរក្សាទុកតារាងពិន្ទុសិស្សចំនួន ${filteredScores.length} នាក់ សម្រាប់មុខវិជ្ជា «${activeCourseObj?.course_name || ''}»។`,
         descEn: `Saved grades for ${filteredScores.length} students in "${activeCourseObj?.course_name || ''}".`,
         category: 'grade',
-        link: '/teacher/grades',
+        link: '/grades',
       });
     } catch (err) {
       console.error(err);
@@ -1509,7 +1543,7 @@ const TeacherManageGrades = () => {
       descKm: `តារាងពិន្ទុសិស្ស (${exportScopeKm} - ${filteredScores.length} នាក់) ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: `Exported grades for ${filteredScores.length} students to Excel.`,
       category: 'export',
-      link: '/teacher/grades',
+      link: '/grades',
     });
   };
 
@@ -2013,6 +2047,17 @@ const TeacherManageGrades = () => {
                       ? (nameParts[0][0] + nameParts[1][0]).toUpperCase()
                       : (studentName[0] || 'S').toUpperCase();
 
+                  const rawAvatar =
+                    item.profile_image ||
+                    item.student?.profile_image ||
+                    item.student?.user?.profile_image ||
+                    item.user?.profile_image;
+                  const avatarUrl = getProfileImageUrl(rawAvatar);
+                  const avatarKey = `grd_std_${item.student_id || idx}`;
+                  const hasAvatar = Boolean(
+                    avatarUrl && !failedAvatars[avatarKey]
+                  );
+
                   const { total, isPassed } = calculateRowMetrics(
                     item.assignment_score,
                     item.quiz_score,
@@ -2031,23 +2076,22 @@ const TeacherManageGrades = () => {
 
                       <td className="py-4 px-6 whitespace-nowrap">
                         <div className="flex items-center gap-3.5">
-                          {item.student?.profile_image ? (
-                            <img
-                              src={getProfileImageUrl(item.student.profile_image)}
-                              alt={studentName}
-                              className="w-10 h-10 rounded-full object-cover border border-gray-200 shrink-0"
-                              onError={(e) => {
-                                e.target.style.display = 'none';
-                                e.target.nextSibling.style.display = 'flex';
-                              }}
-                            />
-                          ) : null}
-                          <div
-                            className={`w-10 h-10 rounded-full bg-indigo-500 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-xs ${
-                              item.student?.profile_image ? 'hidden' : ''
-                            }`}
-                          >
-                            {initial}
+                          <div className="w-10 h-10 rounded-full bg-indigo-500 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-xs overflow-hidden">
+                            {hasAvatar ? (
+                              <img
+                                src={avatarUrl}
+                                alt={studentName}
+                                className="h-full w-full object-cover rounded-full"
+                                onError={() =>
+                                  setFailedAvatars((prev) => ({
+                                    ...prev,
+                                    [avatarKey]: true,
+                                  }))
+                                }
+                              />
+                            ) : (
+                              <span>{initial}</span>
+                            )}
                           </div>
                           <div>
                             <div className="flex flex-wrap items-center gap-2">

@@ -41,6 +41,7 @@ const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v10_${u
 const getAssignmentsMetaCacheKey = (uid) => `cached_student_assignments_meta_v10_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 
 const DEFAULT_META = {
   current_page: 1,
@@ -214,9 +215,9 @@ const resolveStudentSubmission = (assign) => {
   return null;
 };
 
-// ✅ ៣. អនុគមន៍កាត់ .00 ចេញពីពិន្ទុ (ឧ. 100.00 -> 100)
+// ✅ ៣. អនុគមន៍កាត់ .00 ចេញពីពិន្ទុ (ឧ. 20.00 -> 20)
 const formatCleanScore = (val) => {
-  if (val === null || val === undefined || val === '') return 100;
+  if (val === null || val === undefined || val === '') return 20;
   const num = Number(val);
   return isNaN(num) ? val : Math.round(num * 100) / 100;
 };
@@ -230,12 +231,13 @@ const pushLocalNotification = (notif) => {
     let role = 'student';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'student';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'student';
         role = rName.toString().toLowerCase();
       }
     }
@@ -346,6 +348,7 @@ const StudentAssignments = () => {
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [uploadFile, setUploadFile] = useState(null);
   const [submittingFile, setSubmittingFile] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   // ✅ ចាក់សោរការអូសទំព័រខាងក្រោយ (Lock Body Scroll) នៅពេលបើកផ្ទាំងប្រគល់កិច្ចការ
   useEffect(() => {
@@ -365,22 +368,28 @@ const StudentAssignments = () => {
     }
   }, [searchParams, location.state]);
 
-  const getStorageUrl = (path) => {
-    if (!path) return '#';
+  // ✅ គាំទ្រទាំង Domain Server Online លើ Railway (VITE_API_URL) និង Data URI/URL ធម្មតា
+  const getStorageUrl = useCallback((path) => {
+    if (!path || typeof path !== 'string') return '#';
+    const trimmed = path.trim();
+    if (!trimmed) return '#';
     if (
-      path.startsWith('http://') ||
-      path.startsWith('https://') ||
-      path.startsWith('//')
-    )
-      return path;
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('//') ||
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const backendBase = (
-      api.defaults?.baseURL ||
       import.meta.env.VITE_API_URL ||
+      api.defaults?.baseURL ||
       'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = path.replace(/^\/?storage\//, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
-  };
+  }, []);
 
   // ============================================================================
   // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី Backend API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
@@ -688,29 +697,33 @@ const StudentAssignments = () => {
   const handleOpenSubmitModal = (assignment) => {
     setSelectedAssignment(assignment);
     setUploadFile(null);
+    setSubmitError('');
     setSubmitModalOpen(true);
   };
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       setUploadFile(e.target.files[0]);
+      if (submitError) setSubmitError('');
     }
   };
 
   const handleAssignmentSubmit = async (e) => {
     e.preventDefault();
-    if (!uploadFile || !selectedAssignment) {
+    if (!uploadFile || !selectedAssignment || submittingFile) {
       return;
     }
 
     setSubmittingFile(true);
+    setSubmitError('');
     const formData = new FormData();
     formData.append('assignment_id', selectedAssignment.id);
     formData.append('file', uploadFile);
 
     try {
+      // ✅ ប្រើ headers: { 'Content-Type': undefined } ដើម្បីឱ្យ Browser បង្កើត multipart boundary ដោយស្វ័យប្រវត្តិលើ Railway
       const res = await api.post('/student/assignments/submit', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 'Content-Type': undefined },
       });
 
       const newSub = res.data?.submission ||
@@ -719,7 +732,7 @@ const StudentAssignments = () => {
           submitted_at: new Date().toISOString(),
           score: null,
           feedback: null,
-          file_path: uploadFile.name,
+          file_path: res.data?.file_path || null,
         };
 
       // Optimistic UI Update
@@ -737,18 +750,19 @@ const StudentAssignments = () => {
             CACHE_KEY_SHARED_ASSIGNMENTS,
             JSON.stringify(updated)
           );
+          localStorage.removeItem(getScoresCacheKey(currentStudentId));
         } catch (err) {}
         return updated;
       });
 
-      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
+      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar (Clean URL '/assignments')
       pushLocalNotification({
         titleKm: 'បានប្រគល់កិច្ចការសិក្សាជោគជ័យ',
         titleEn: 'Assignment Submitted',
         descKm: `អ្នកបានប្រគល់ឯកសារកិច្ចការ «${selectedAssignment.title}» រួចរាល់ហើយ។`,
         descEn: `You have submitted "${selectedAssignment.title}" successfully.`,
         category: 'assignment',
-        link: '/student/assignments',
+        link: '/assignments',
       });
 
       setSubmitModalOpen(false);
@@ -756,6 +770,18 @@ const StudentAssignments = () => {
       fetchAssignments(true);
     } catch (error) {
       console.error('Error submitting assignment:', error);
+      const apiErrors = error.response?.data?.errors;
+      const firstValidationMsg = apiErrors
+        ? Object.values(apiErrors).flat()[0]
+        : null;
+      const errMsg =
+        firstValidationMsg ||
+        error.response?.data?.message ||
+        t(
+          'មិនអាចបង្ហោះឯកសារកិច្ចការបានទេ (សូមពិនិត្យទំហំ ឬប្រភេទឯកសារឡើងវិញ)!',
+          'Could not submit assignment file (please check file size or format)!'
+        );
+      setSubmitError(String(errMsg));
     } finally {
       setSubmittingFile(false);
     }
@@ -798,8 +824,8 @@ const StudentAssignments = () => {
                   a.marks ||
                   a.total_mark ||
                   a.max_score ||
-                  100
-              ) || 100;
+                  20
+              ) || 20;
             earnedPercentSum += (Number(sub.score) / maxS) * 100;
           }
         } else if (isPastDue) {
@@ -1211,7 +1237,7 @@ const StudentAssignments = () => {
                 assign.marks ||
                 assign.total_mark ||
                 assign.max_score ||
-                100
+                20
             );
 
             return (
@@ -1348,24 +1374,27 @@ const StudentAssignments = () => {
                         </div>
                       )}
 
-                      {submission.file_path && (
-                        <div className="std-asg-divider pt-2 border-t border-gray-200/70 flex items-center justify-between gap-2">
-                          <a
-                            href={getStorageUrl(submission.file_path)}
-                            rel="noopener noreferrer"
-                            download
-                            className="inline-flex items-center gap-1.5 text-xs font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-                          >
-                            <ArrowDownTrayIcon className="h-4 w-4 stroke-[2.2]" />
-                            <span>
-                              {t(
-                                'ទាញយកឯកសារដែលបានផ្ញើ',
-                                'Download Submitted File'
-                              )}
-                            </span>
-                          </a>
-                        </div>
-                      )}
+                      {submission.file_path &&
+                        (String(submission.file_path).includes('/') ||
+                          String(submission.file_path).startsWith('http') ||
+                          String(submission.file_path).startsWith('data:')) && (
+                          <div className="std-asg-divider pt-2 border-t border-gray-200/70 flex items-center justify-between gap-2">
+                            <a
+                              href={getStorageUrl(submission.file_path)}
+                              rel="noopener noreferrer"
+                              download
+                              className="inline-flex items-center gap-1.5 text-xs font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                            >
+                              <ArrowDownTrayIcon className="h-4 w-4 stroke-[2.2]" />
+                              <span>
+                                {t(
+                                  'ទាញយកឯកសារដែលបានផ្ញើ',
+                                  'Download Submitted File'
+                                )}
+                              </span>
+                            </a>
+                          </div>
+                        )}
                     </div>
                   ) : isOverdue ? (
                     <div className="std-asg-badge-rose w-full lg:w-auto px-4 py-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-extrabold text-rose-600 flex items-center justify-center gap-2">
@@ -1455,7 +1484,10 @@ const StudentAssignments = () => {
         createPortal(
           <div
             className="fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-4 overflow-y-auto animate-fadeIn"
-            onClick={() => setSubmitModalOpen(false)}
+            onClick={() => {
+              setSubmitModalOpen(false);
+              setSubmitError('');
+            }}
           >
             <div
               className="std-asg-surface bg-white rounded-[1.75rem] shadow-2xl w-full max-w-lg overflow-hidden border border-gray-200 dark:border-slate-700"
@@ -1470,7 +1502,10 @@ const StudentAssignments = () => {
                 </h2>
                 <button
                   type="button"
-                  onClick={() => setSubmitModalOpen(false)}
+                  onClick={() => {
+                    setSubmitModalOpen(false);
+                    setSubmitError('');
+                  }}
                   className="std-asg-code-pill p-2 hover:bg-gray-200 rounded-xl transition text-gray-500 hover:text-gray-800 border border-gray-200 cursor-pointer"
                 >
                   <XMarkIcon className="h-5 w-5" />
@@ -1478,6 +1513,15 @@ const StudentAssignments = () => {
               </div>
 
               <div className="p-6 sm:p-7 space-y-5">
+                {submitError && (
+                  <div className="std-asg-badge-rose p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
+                    <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                    <p className="text-xs font-bold leading-relaxed">
+                      {submitError}
+                    </p>
+                  </div>
+                )}
+
                 <div className="std-asg-subbox bg-gray-50 p-4 rounded-2xl border border-gray-200/80 text-xs space-y-1.5">
                   <p className="std-asg-text-primary font-extrabold text-gray-900 text-sm">
                     {selectedAssignment.title}
@@ -1520,7 +1564,10 @@ const StudentAssignments = () => {
                   <div className="flex justify-end gap-3 pt-2">
                     <button
                       type="button"
-                      onClick={() => setSubmitModalOpen(false)}
+                      onClick={() => {
+                        setSubmitModalOpen(false);
+                        setSubmitError('');
+                      }}
                       className="std-asg-code-pill px-5 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm font-extrabold text-gray-700 hover:bg-gray-100 transition cursor-pointer"
                     >
                       {t('បោះបង់', 'Cancel')}

@@ -238,13 +238,18 @@ const pushLocalNotification = (notif) => {
     let role = 'teacher';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'teacher';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'teacher';
         role = rName.toString().toLowerCase();
+      } else if (Number(u?.role_id) === 1) {
+        role = 'admin';
+      } else if (Number(u?.role_id) === 3) {
+        role = 'student';
       }
     }
 
@@ -333,6 +338,7 @@ const ManageAttendance = () => {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const courseSelectRef = useRef(null);
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || '';
@@ -472,16 +478,25 @@ const ManageAttendance = () => {
     return [];
   };
 
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
-    if (imagePath.startsWith('http') || imagePath.startsWith('data:'))
-      return imagePath;
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const getProfileImageUrl = useCallback((imagePath) => {
+    if (!imagePath || typeof imagePath !== 'string') return null;
+    const trimmed = imagePath.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const baseUrl = (
       import.meta.env.VITE_API_URL || 'http://localhost:8000'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = imagePath.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
-  };
+  }, []);
 
   const getGenderLabel = (gender) => {
     const g = (gender || '').toString().trim().toLowerCase();
@@ -990,14 +1005,14 @@ const ManageAttendance = () => {
         ? ` (${getStudyShiftLabel(selectedShift)})`
         : '';
 
-      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
+      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar (ប្រើ Clean URL '/attendance')
       pushLocalNotification({
         titleKm: 'បានកត់ត្រាវត្តមានសិស្សជោគជ័យ',
         titleEn: 'Student Attendance Saved',
         descKm: `វត្តមានសិស្សមុខវិជ្ជា «${activeCourseObj?.course_name || ''}»${shiftNoteKm} សម្រាប់ថ្ងៃទី ${attendanceDate} ត្រូវបានរក្សាទុក។`,
         descEn: `Attendance for "${activeCourseObj?.course_name || ''}" on ${attendanceDate} was saved.`,
         category: 'attendance',
-        link: '/teacher/attendance',
+        link: '/attendance',
       });
     } catch (error) {
       console.error('Failed to mark attendance:', error);
@@ -1149,14 +1164,14 @@ const ManageAttendance = () => {
       ? getYearTextLabel(selectedYear)
       : 'ទាំងអស់';
 
-    // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
+    // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar (ប្រើ Clean URL '/attendance')
     pushLocalNotification({
       titleKm: 'បាននាំចេញវត្តមានសិស្សទៅ Excel',
       titleEn: 'Attendance Exported to Excel',
       descKm: `បញ្ជីវត្តមាន (${exportScopeKm} - ${filteredStudents.length} នាក់) ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: `Attendance list (${filteredStudents.length} students) was exported to Excel.`,
       category: 'export',
-      link: '/teacher/attendance',
+      link: '/attendance',
     });
   };
 
@@ -1700,6 +1715,14 @@ const ManageAttendance = () => {
                     const isEnrolledWithTeacher =
                       isStudentEnrolledInAnyTeacherCourse(student, courseMap);
 
+                    const rawAvatar =
+                      student.profile_image || student.user?.profile_image;
+                    const avatarUrl = getProfileImageUrl(rawAvatar);
+                    const avatarKey = `att_std_${student.id}`;
+                    const hasAvatar = Boolean(
+                      avatarUrl && !failedAvatars[avatarKey]
+                    );
+
                     return (
                       <tr
                         key={`table-${student.id}`}
@@ -1715,23 +1738,22 @@ const ManageAttendance = () => {
                         </td>
                         <td className="py-4 px-6 whitespace-nowrap align-middle">
                           <div className="flex items-center gap-3.5">
-                            {student.profile_image ? (
-                              <img
-                                src={getProfileImageUrl(student.profile_image)}
-                                alt={studentName}
-                                className="w-10 h-10 rounded-full object-cover border border-gray-200 shrink-0"
-                                onError={(e) => {
-                                  e.target.style.display = 'none';
-                                  e.target.nextSibling.style.display = 'flex';
-                                }}
-                              />
-                            ) : null}
-                            <div
-                              className={`w-10 h-10 rounded-full bg-indigo-500 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-xs ${
-                                student.profile_image ? 'hidden' : ''
-                              }`}
-                            >
-                              {initial}
+                            <div className="w-10 h-10 rounded-full bg-indigo-500 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-xs overflow-hidden">
+                              {hasAvatar ? (
+                                <img
+                                  src={avatarUrl}
+                                  alt={studentName}
+                                  className="h-full w-full object-cover rounded-full"
+                                  onError={() =>
+                                    setFailedAvatars((prev) => ({
+                                      ...prev,
+                                      [avatarKey]: true,
+                                    }))
+                                  }
+                                />
+                              ) : (
+                                <span>{initial}</span>
+                              )}
                             </div>
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
@@ -1925,6 +1947,12 @@ const ManageAttendance = () => {
               courseMap
             );
 
+            const rawAvatar =
+              student.profile_image || student.user?.profile_image;
+            const avatarUrl = getProfileImageUrl(rawAvatar);
+            const avatarKey = `att_std_${student.id}`;
+            const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+
             return (
               <div
                 key={`card-${student.id}`}
@@ -1951,23 +1979,22 @@ const ManageAttendance = () => {
                 />
 
                 <div className="flex items-start gap-4 mb-4 mt-1">
-                  {student.profile_image ? (
-                    <img
-                      src={getProfileImageUrl(student.profile_image)}
-                      alt={studentName}
-                      className="w-13 h-13 rounded-2xl object-cover border border-gray-100 shadow-sm shrink-0"
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'flex';
-                      }}
-                    />
-                  ) : null}
-                  <div
-                    className={`w-13 h-13 rounded-2xl bg-indigo-500 text-white font-black text-lg flex items-center justify-center shrink-0 shadow-sm ${
-                      student.profile_image ? 'hidden' : ''
-                    }`}
-                  >
-                    {initial}
+                  <div className="w-13 h-13 rounded-2xl bg-indigo-500 text-white font-black text-lg flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+                    {hasAvatar ? (
+                      <img
+                        src={avatarUrl}
+                        alt={studentName}
+                        className="h-full w-full object-cover rounded-2xl"
+                        onError={() =>
+                          setFailedAvatars((prev) => ({
+                            ...prev,
+                            [avatarKey]: true,
+                          }))
+                        }
+                      />
+                    ) : (
+                      <span>{initial}</span>
+                    )}
                   </div>
 
                   <div className="flex-1 min-w-0">

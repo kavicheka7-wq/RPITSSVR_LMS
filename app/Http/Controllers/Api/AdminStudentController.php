@@ -3,66 +3,97 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Department;
+use App\Models\Enrollment;
 use App\Models\Role;
 use App\Models\Student;
 use App\Models\User;
-use App\Models\Department;
-use App\Models\Enrollment;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Validation\Rule;
 
 class AdminStudentController extends Controller
 {
+    /**
+     * បម្លែងរូបភាពដែលបានបង្ហោះ ទៅជា Base64 Data URI (ការពារបាត់រូបលើ Railway)
+     */
+    private function encodeUploadedImageToBase64($file): ?string
+    {
+        if (!$file || !$file->isValid()) {
+            return null;
+        }
+        $mime = $file->getMimeType() ?: 'image/jpeg';
+        $contents = file_get_contents($file->getRealPath());
+        if ($contents === false) {
+            return null;
+        }
+        return 'data:' . $mime . ';base64,' . base64_encode($contents);
+    }
+
     public function index(Request $request)
     {
-        $perPage = $request->input('per_page', 15);
-        $search = $request->input('search');
+        $perPage = max(1, min(500, (int) $request->input('per_page', 15)));
+        $search = trim((string) $request->input('search', ''));
 
-        // ✅ កែសម្រួល៖ select columns ចាំបាច់ និងប្រើ with() ត្រឹមត្រូវ
+        // ✅ select columns ចាំបាច់ និងប្រើ with() ត្រឹមត្រូវ
         $query = Student::with([
             'department:id,department_name',
-            'user:id,status,email',
-            'role:id,role_name'
+            'user:id,status,email,profile_image',
+            'role:id,role_name',
         ])->select([
             'id', 'user_id', 'role_id', 'department_id',
             'student_code', 'first_name', 'last_name', 'gender',
             'date_of_birth', 'email', 'phone', 'profile_image',
             'batch_year', 'degree_level', 'study_shift', 'address',
-            'created_at'
+            'created_at',
         ]);
 
-        if (!empty($search)) {
-            // ✅ កែសម្រួល៖ ប្រើ LIKE '%search%' តែខាងចុង ដើម្បីឱ្យ Index ដំណើរការ
+        if ($request->filled('department_id')) {
+            $query->where('department_id', $request->input('department_id'));
+        }
+
+        if ($request->filled('study_shift')) {
+            $query->where('study_shift', $request->input('study_shift'));
+        }
+
+        // ✅ ច្រោះតាមឆ្នាំសិក្សា (ដាក់មុន paginate ដើម្បីឱ្យដំណើរការត្រឹមត្រូវ)
+        if ($request->filled('year')) {
+            $y = trim((string) $request->input('year'));
+            if (preg_match('/([1-4])/', $y, $m)) {
+                $y = $m[1];
+            }
+            $khmerNumerals = ['1' => '១', '2' => '២', '3' => '៣', '4' => '៤'];
+            $khNum = $khmerNumerals[$y] ?? $y;
+
+            $query->where(function ($q) use ($y, $khNum) {
+                $q->where('batch_year', $y)
+                  ->orWhere('batch_year', $khNum)
+                  ->orWhere('batch_year', 'LIKE', "%Year {$y}%")
+                  ->orWhere('batch_year', 'LIKE', "%Year{$y}%")
+                  ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី{$khNum}%")
+                  ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី {$khNum}%")
+                  ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី{$y}%")
+                  ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី {$y}%");
+            });
+        }
+
+        if ($search !== '') {
             $query->where(function ($q) use ($search) {
-                $q->where('first_name', 'like', "{$search}%")
-                  ->orWhere('last_name', 'like', "{$search}%")
-                  ->orWhere('student_code', 'like', "{$search}%")
-                  ->orWhere('email', 'like', "{$search}%");
+                $q->where('first_name', 'like', "%{$search}%")
+                  ->orWhere('last_name', 'like', "%{$search}%")
+                  ->orWhere(DB::raw("CONCAT(first_name, ' ', last_name)"), 'like', "%{$search}%")
+                  ->orWhere('student_code', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('phone', 'like', "%{$search}%");
             });
         }
 
         $students = $query->orderBy('id', 'desc')->paginate($perPage);
 
-        // នៅក្នុងអនុគមន៍ index(Request $request) នៃ AdminStudentController.php
-if ($request->filled('year')) {
-    $y = $request->input('year'); // ឧ. '1', '2', '3', '4'
-    $khmerNumerals = ['1' => '១', '2' => '២', '3' => '៣', '4' => '៤'];
-    $khNum = $khmerNumerals[$y] ?? $y;
-
-    $query->where(function ($q) use ($y, $khNum) {
-        $q->where('batch_year', $y)
-          ->orWhere('batch_year', $khNum)
-          ->orWhere('batch_year', 'LIKE', "%Year {$y}%")
-          ->orWhere('batch_year', 'LIKE', "%Year{$y}%")
-          ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី{$khNum}%")
-          ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី {$khNum}%")
-          ->orWhere('batch_year', 'LIKE', "%ឆ្នាំទី{$y}%");
-    });
-}
         return response()->json([
             'data' => $students->items(),
             'meta' => [
@@ -71,7 +102,7 @@ if ($request->filled('year')) {
                 'per_page' => $students->perPage(),
                 'total' => $students->total(),
             ],
-            'message' => 'បានទាញយកបញ្ជីសិស្សដោយជោគជ័យ'
+            'message' => 'បានទាញយកបញ្ជីសិស្សដោយជោគជ័យ',
         ]);
     }
 
@@ -93,37 +124,42 @@ if ($request->filled('year')) {
             'study_shift' => 'nullable|in:Monday-Friday,Saturday-Sunday',
             'address' => 'nullable|string',
             'role_id' => 'required|exists:roles,id',
-            'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
         ]);
 
         $student = DB::transaction(function () use ($validated, $request) {
+            $profileImagePath = null;
+            if ($request->hasFile('profile_image')) {
+                $profileImagePath = $this->encodeUploadedImageToBase64($request->file('profile_image'));
+            }
+
+            $cleanEmail = strtolower(trim($validated['email']));
+            $cleanFirst = trim($validated['first_name']);
+            $cleanLast = trim($validated['last_name']);
+
             $user = User::create([
-                'first_name' => $validated['first_name'],
-                'last_name' => $validated['last_name'],
-                'email' => $validated['email'],
+                'first_name' => $cleanFirst,
+                'last_name' => $cleanLast,
+                'email' => $cleanEmail,
                 'password' => Hash::make($validated['password']),
                 'phone' => $validated['phone'] ?? null,
                 'gender' => $validated['gender'] ?? null,
                 'status' => $validated['status'] ?? 'active',
                 'role_id' => $validated['role_id'],
+                'profile_image' => $profileImagePath,
             ]);
-
-            $profileImagePath = null;
-            if ($request->hasFile('profile_image')) {
-                $file = $request->file('profile_image');
-                $filename = time() . '_' . $file->getClientOriginalName();
-                $profileImagePath = $file->storeAs('student_profiles', $filename, 'public');
-            }
 
             $student = Student::create([
                 'user_id' => $user->id,
                 'role_id' => $validated['role_id'],
-                'student_code' => $validated['student_code'] ?? $this->generateStudentCode(),
-                'first_name' => $validated['first_name'],
-                'last_name' => $validated['last_name'],
+                'student_code' => !empty($validated['student_code'])
+                    ? trim($validated['student_code'])
+                    : $this->generateStudentCode(),
+                'first_name' => $cleanFirst,
+                'last_name' => $cleanLast,
                 'gender' => $validated['gender'],
                 'date_of_birth' => $validated['date_of_birth'] ?? null,
-                'email' => $validated['email'],
+                'email' => $cleanEmail,
                 'phone' => $validated['phone'] ?? null,
                 'department_id' => $validated['department_id'] ?? null,
                 'batch_year' => $validated['batch_year'] ?? null,
@@ -142,7 +178,7 @@ if ($request->filled('year')) {
 
         return response()->json([
             'message' => 'បានបង្កើតគណនីសិស្សដោយជោគជ័យ',
-            'data' => $student
+            'data' => $student,
         ], 201);
     }
 
@@ -171,43 +207,57 @@ if ($request->filled('year')) {
             'study_shift' => 'nullable|in:Monday-Friday,Saturday-Sunday',
             'address' => 'nullable|string',
             'role_id' => 'required|exists:roles,id',
-            'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
         ]);
 
         DB::transaction(function () use ($validated, $request, $student) {
-            $userData = [
-                'first_name' => $validated['first_name'],
-                'last_name' => $validated['last_name'],
-                'email' => $validated['email'],
-                'phone' => $validated['phone'] ?? $student->user->phone,
-                'gender' => $validated['gender'] ?? $student->user->gender,
-                'status' => $validated['status'] ?? $student->user->status,
-                'role_id' => $validated['role_id'],
-            ];
-
-            if (!empty($validated['password'])) {
-                $userData['password'] = Hash::make($validated['password']);
-            }
-
-            $student->user->update($userData);
-
             $profileImagePath = $student->profile_image;
             if ($request->hasFile('profile_image')) {
-                if ($student->profile_image) {
+                if (
+                    $student->profile_image &&
+                    !str_starts_with($student->profile_image, 'data:') &&
+                    !str_starts_with($student->profile_image, 'http')
+                ) {
                     Storage::disk('public')->delete($student->profile_image);
                 }
-                $file = $request->file('profile_image');
-                $filename = time() . '_' . $file->getClientOriginalName();
-                $profileImagePath = $file->storeAs('student_profiles', $filename, 'public');
+                $encoded = $this->encodeUploadedImageToBase64($request->file('profile_image'));
+                if ($encoded) {
+                    $profileImagePath = $encoded;
+                }
+            }
+
+            $cleanEmail = strtolower(trim($validated['email']));
+            $cleanFirst = trim($validated['first_name']);
+            $cleanLast = trim($validated['last_name']);
+
+            if ($student->user) {
+                $userData = [
+                    'first_name' => $cleanFirst,
+                    'last_name' => $cleanLast,
+                    'email' => $cleanEmail,
+                    'phone' => $validated['phone'] ?? $student->user->phone,
+                    'gender' => $validated['gender'] ?? $student->user->gender,
+                    'status' => $validated['status'] ?? $student->user->status,
+                    'role_id' => $validated['role_id'],
+                    'profile_image' => $profileImagePath,
+                ];
+
+                if (!empty($validated['password'])) {
+                    $userData['password'] = Hash::make($validated['password']);
+                }
+
+                $student->user->update($userData);
             }
 
             $student->update([
-                'student_code' => $validated['student_code'] ?? $student->student_code,
-                'first_name' => $validated['first_name'],
-                'last_name' => $validated['last_name'],
+                'student_code' => !empty($validated['student_code'])
+                    ? trim($validated['student_code'])
+                    : $student->student_code,
+                'first_name' => $cleanFirst,
+                'last_name' => $cleanLast,
                 'gender' => $validated['gender'],
                 'date_of_birth' => $validated['date_of_birth'] ?? $student->date_of_birth,
-                'email' => $validated['email'],
+                'email' => $cleanEmail,
                 'phone' => $validated['phone'] ?? $student->phone,
                 'department_id' => $validated['department_id'] ?? $student->department_id,
                 'batch_year' => $validated['batch_year'] ?? $student->batch_year,
@@ -219,28 +269,41 @@ if ($request->filled('year')) {
             ]);
         });
 
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
+
         return response()->json([
             'message' => 'បានកែប្រែព័ត៌មានសិស្សដោយជោគជ័យ',
-            'data' => $student->fresh(['department', 'user', 'role'])
+            'data' => $student->fresh(['department', 'user', 'role']),
         ]);
     }
 
     public function destroy(Student $student)
     {
-        $studentName = $student->first_name . ' ' . $student->last_name;
+        $studentName = trim($student->first_name . ' ' . $student->last_name);
 
-        if ($student->profile_image) {
+        if (
+            $student->profile_image &&
+            !str_starts_with($student->profile_image, 'data:') &&
+            !str_starts_with($student->profile_image, 'http')
+        ) {
             Storage::disk('public')->delete($student->profile_image);
         }
 
-        $student->user->delete();
+        DB::transaction(function () use ($student) {
+            $targetUser = $student->user;
+            $student->delete();
+            if ($targetUser) {
+                $targetUser->delete();
+            }
+        });
 
         // ✅ លុប Cache ពេលលុបសិស្ស
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
         return response()->json([
-            'message' => "បានលុបគណនីសិស្ស '{$studentName}' ដោយជោគជ័យ"
+            'message' => "បានលុបគណនីសិស្ស '{$studentName}' ដោយជោគជ័យ",
         ]);
     }
 
@@ -268,12 +331,12 @@ if ($request->filled('year')) {
 
             return response()->json([
                 'data' => $enrollments,
-                'message' => 'បានទាញយកបញ្ជីការចុះឈ្មោះដោយជោគជ័យ'
+                'message' => 'បានទាញយកបញ្ជីការចុះឈ្មោះដោយជោគជ័យ',
             ]);
         } catch (\Exception $e) {
-            \Log::error('Error fetching student enrollments: ' . $e->getMessage());
+            Log::error('Error fetching student enrollments: ' . $e->getMessage());
             return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យចុះឈ្មោះ'
+                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យចុះឈ្មោះ',
             ], 500);
         }
     }
@@ -299,9 +362,9 @@ if ($request->filled('year')) {
                         'enrolled_date' => now(),
                         'status' => 'active',
                     ]);
-                    
+
                     $loadedEnrollment = $enrollment->load('course.teacher');
-                    
+
                     // ✅ ភ្ជាប់រូបភាពគ្រូពីតារាង teachers ពេលចុះឈ្មោះមុខវិជ្ជាថ្មី
                     $teacher = $loadedEnrollment->course?->teacher;
                     if ($teacher && empty($teacher->profile_image)) {
@@ -319,19 +382,22 @@ if ($request->filled('year')) {
                 }
             }
 
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
+
             return response()->json([
                 'data' => $enrolledCourses,
-                'message' => 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្សដោយជោគជ័យ'
+                'message' => 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្សដោយជោគជ័យ',
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
-            \Log::error('Error enrolling student: ' . $e->getMessage());
+            Log::error('Error enrolling student: ' . $e->getMessage());
             return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការចុះឈ្មោះមុខវិជ្ជាឱ្យសិស្ស: ' . $e->getMessage()
+                'message' => 'មានបញ្ហាក្នុងការចុះឈ្មោះមុខវិជ្ជាឱ្យសិស្ស: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -346,25 +412,29 @@ if ($request->filled('year')) {
             $students = [];
             Student::with([
                 'department:id,department_name',
-                'user:id,status,email',
-                'role:id,role_name'
+                'user:id,status,email,profile_image',
+                'role:id,role_name',
             ])
-            ->select([
-                'id', 'user_id', 'role_id', 'department_id',
-                'student_code', 'first_name', 'last_name', 'gender',
-                'date_of_birth', 'email', 'phone',
-                'batch_year', 'degree_level', 'study_shift', 'address'
-            ])
-            ->orderBy('first_name')
-            ->chunk(500, function ($chunk) use (&$students) {
-                foreach ($chunk as $student) {
-                    $students[] = $student;
-                }
-            });
+                ->select([
+                    'id', 'user_id', 'role_id', 'department_id',
+                    'student_code', 'first_name', 'last_name', 'gender',
+                    'date_of_birth', 'email', 'phone', 'profile_image',
+                    'batch_year', 'degree_level', 'study_shift', 'address',
+                    'created_at',
+                ])
+                ->orderBy('id', 'asc')
+                ->chunk(500, function ($chunk) use (&$students) {
+                    foreach ($chunk as $student) {
+                        if (empty($student->profile_image) && !empty($student->user?->profile_image)) {
+                            $student->profile_image = $student->user->profile_image;
+                        }
+                        $students[] = $student;
+                    }
+                });
 
             return response()->json([
                 'data' => $students,
-                'message' => 'បានទាញយកទិន្នន័យសិស្សទាំងអស់ដោយជោគជ័យ'
+                'message' => 'បានទាញយកទិន្នន័យសិស្សទាំងអស់ដោយជោគជ័យ',
             ]);
         }
 
@@ -396,45 +466,49 @@ if ($request->filled('year')) {
                 'Study Shift',
                 'Address',
                 'Date of Birth',
-                'Status'
+                'Status',
             ]);
 
             $index = 1;
             Student::with([
                 'department:id,department_name',
                 'user:id,status,email',
-                'role:id,role_name'
+                'role:id,role_name',
             ])
-            ->select([
-                'id', 'user_id', 'role_id', 'department_id',
-                'student_code', 'first_name', 'last_name', 'gender',
-                'date_of_birth', 'email', 'phone',
-                'batch_year', 'degree_level', 'study_shift', 'address'
-            ])
-            ->orderBy('first_name')
-            ->chunk(500, function ($students) use ($handle, &$index) {
-                foreach ($students as $s) {
-                    $gender = $s->gender === 'Male' ? 'ប្រុស (Male)' : ($s->gender === 'Female' ? 'ស្រី (Female)' : ($s->gender ?? ''));
-                    $status = ($s->user->status ?? $s->status) === 'active' ? 'សកម្ម (Active)' : 'អសកម្ម (Inactive)';
+                ->select([
+                    'id', 'user_id', 'role_id', 'department_id',
+                    'student_code', 'first_name', 'last_name', 'gender',
+                    'date_of_birth', 'email', 'phone',
+                    'batch_year', 'degree_level', 'study_shift', 'address',
+                ])
+                ->orderBy('id', 'asc')
+                ->chunk(500, function ($students) use ($handle, &$index) {
+                    foreach ($students as $s) {
+                        $gender = $s->gender === 'Male'
+                            ? 'ប្រុស (Male)'
+                            : ($s->gender === 'Female' ? 'ស្រី (Female)' : ($s->gender ?? ''));
+                        $status = ($s->user->status ?? $s->status ?? 'active') === 'active'
+                            ? 'សកម្ម (Active)'
+                            : 'អសកម្ម (Inactive)';
 
-                    fputcsv($handle, [
-                        $index++,
-                        $s->student_code ?? '',
-                        $s->first_name ?? '',
-                        $s->last_name ?? '',
-                        $gender,
-                        $s->email ?? '',
-                        $s->phone ?? '',
-                        $s->department->department_name ?? '',
-                        $s->batch_year ?? '',
-                        $s->degree_level ?? '',
-                        $s->study_shift ?? '',
-                        $s->address ?? '',
-                        $s->date_of_birth ?? '',
-                        $status
-                    ]);
-                }
-            });
+                        fputcsv($handle, [
+                            $index++,
+                            $s->student_code ?? '',
+                            $s->first_name ?? '',
+                            $s->last_name ?? '',
+                            $gender,
+                            $s->email ?? '',
+                            $s->phone ?? '',
+                            $s->department->department_name ?? '',
+                            $s->batch_year ?? '',
+                            $s->degree_level ?? '',
+                            $s->study_shift ?? '',
+                            $s->address ?? '',
+                            $s->date_of_birth ?? '',
+                            $status,
+                        ]);
+                    }
+                });
 
             fclose($handle);
         }, 200, $headers);
@@ -453,53 +527,76 @@ if ($request->filled('year')) {
             'students.*.email' => 'required|email',
         ]);
 
-        $studentRole = Role::where('role_name', 'Student')->firstOrFail();
+        $studentRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%student%'])->first()
+            ?? Role::find(3);
+        $studentRoleId = $studentRole?->id ?? 3;
+
         $importedCount = 0;
         $skipped = [];
 
-        DB::transaction(function () use ($request, $studentRole, &$importedCount, &$skipped) {
-            // ✅ កែសម្រួល៖ ទាញ Emails ដែលមានរួច ក្នុង Query តែម្តង
-            $emails = collect($request->students)->pluck('email')->filter()->toArray();
+        DB::transaction(function () use ($request, $studentRoleId, &$importedCount, &$skipped) {
+            // ✅ ទាញ Emails ដែលមានរួច ក្នុង Query តែម្តង
+            $emails = collect($request->students)
+                ->pluck('email')
+                ->filter()
+                ->map(fn ($e) => strtolower(trim($e)))
+                ->toArray();
+
             $existingEmails = User::whereIn('email', $emails)->pluck('email')
                 ->merge(Student::whereIn('email', $emails)->pluck('email'))
+                ->map(fn ($e) => strtolower(trim($e)))
                 ->unique()
                 ->toArray();
 
             foreach ($request->students as $index => $item) {
-                if (in_array($item['email'], $existingEmails)) {
+                $cleanEmail = strtolower(trim($item['email']));
+
+                if (in_array($cleanEmail, $existingEmails, true)) {
                     $skipped[] = [
                         'row' => $index + 1,
                         'email' => $item['email'],
-                        'reason' => 'អ៊ីមែលនេះមានរួចហើយ (Email already exists)'
+                        'reason' => 'អ៊ីមែលនេះមានរួចហើយ (Email already exists)',
                     ];
                     continue;
                 }
 
+                $existingEmails[] = $cleanEmail;
+
                 $password = !empty($item['password']) ? $item['password'] : '12345678';
                 $gender = in_array($item['gender'] ?? '', ['Male', 'Female', 'Other']) ? $item['gender'] : 'Male';
-                $studyShift = in_array($item['study_shift'] ?? '', ['Monday-Friday', 'Saturday-Sunday']) ? $item['study_shift'] : 'Monday-Friday';
+                $studyShift = in_array($item['study_shift'] ?? '', ['Monday-Friday', 'Saturday-Sunday'])
+                    ? $item['study_shift']
+                    : 'Monday-Friday';
                 $status = in_array($item['status'] ?? '', ['active', 'inactive']) ? $item['status'] : 'active';
 
+                $cleanFirst = trim($item['first_name']);
+                $cleanLast = trim($item['last_name']);
+
                 $user = User::create([
-                    'first_name' => $item['first_name'],
-                    'last_name' => $item['last_name'],
-                    'email' => $item['email'],
+                    'first_name' => $cleanFirst,
+                    'last_name' => $cleanLast,
+                    'email' => $cleanEmail,
                     'password' => Hash::make($password),
                     'phone' => $item['phone'] ?? null,
                     'gender' => $gender,
                     'status' => $status,
-                    'role_id' => $studentRole->id,
+                    'role_id' => $studentRoleId,
                 ]);
+
+                $requestedCode = !empty($item['student_code']) ? trim($item['student_code']) : null;
+                if ($requestedCode && Student::where('student_code', $requestedCode)->exists()) {
+                    $requestedCode = null;
+                }
 
                 Student::create([
                     'user_id' => $user->id,
-                    'role_id' => $studentRole->id,
-                    'student_code' => !empty($item['student_code']) ? $item['student_code'] : $this->generateStudentCode(),
-                    'first_name' => $item['first_name'],
-                    'last_name' => $item['last_name'],
+                    'role_id' => $studentRoleId,
+                    'student_code' => $requestedCode ?: $this->generateStudentCode(),
+                    'first_name' => $cleanFirst,
+                    'last_name' => $cleanLast,
                     'gender' => $gender,
                     'date_of_birth' => !empty($item['date_of_birth']) ? $item['date_of_birth'] : null,
-                    'email' => $item['email'],
+                    'email' => $cleanEmail,
                     'phone' => $item['phone'] ?? null,
                     'department_id' => $item['department_id'] ?? null,
                     'batch_year' => $item['batch_year'] ?? null,
@@ -518,15 +615,23 @@ if ($request->filled('year')) {
         return response()->json([
             'message' => "នាំចូលសិស្សចំនួន {$importedCount} នាក់ដោយជោគជ័យ",
             'imported_count' => $importedCount,
-            'skipped' => $skipped
+            'skipped' => $skipped,
         ]);
     }
 
-    private function generateStudentCode()
+    /**
+     * បង្កើតអត្តលេខសិស្សដោយស្វ័យប្រវត្តិដោយមិនឱ្យស្ទួនគ្នាដាច់ខាត
+     */
+    private function generateStudentCode(): string
     {
         $year = date('Y');
-        $count = Student::count() + 1;
-        return 'STU-' . $year . '-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+        $nextNum = (int) Student::max('id') + 1;
+        do {
+            $code = 'STU-' . $year . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
+            $nextNum++;
+        } while (Student::where('student_code', $code)->exists());
+
+        return $code;
     }
 
     /**
@@ -534,39 +639,38 @@ if ($request->filled('year')) {
      */
     public function promoteStudents(Request $request)
     {
-        // ១. ត្រួតពិនិត្យទិន្នន័យដែលផ្ញើមកពី React
         $request->validate([
             'student_ids' => 'required|array|min:1',
-            'student_ids.*' => 'integer|exists:students,id', // ពិនិត្យថា ID ទាំងនេះពិតជាមានក្នុង Table students
+            'student_ids.*' => 'integer|exists:students,id',
             'target_year' => 'required|string|max:50',
         ]);
 
         try {
             DB::beginTransaction();
 
-            // ២. ធ្វើការ Update Field `batch_year` របស់សិស្សទាំងអស់ដែលបានបញ្ជូន ID មក
-            $promotedCount = Student::whereIn('id',$request->student_ids)
+            $promotedCount = Student::whereIn('id', $request->student_ids)
                 ->update([
                     'batch_year' => $request->target_year,
-                    'updated_at' => now() // Update ម៉ោងបច្ចុប្បន្ន
+                    'updated_at' => now(),
                 ]);
 
             DB::commit();
 
-            // ៣. បញ្ជូនសារជោគជ័យទៅកាន់ React វិញ
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
+
             return response()->json([
                 'success' => true,
                 'message' => "បានដំឡើងថ្នាក់សិស្សចំនួន {$promotedCount} នាក់ ទៅកាន់ «{$request->target_year}» ដោយជោគជ័យ។",
-                'promoted_count' => $promotedCount
+                'promoted_count' => $promotedCount,
             ], 200);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('ការដំឡើងថ្នាក់សិស្សបរាជ័យ៖ ' . $e->getMessage());
 
             return response()->json([
                 'success' => false,
-                'message' => 'មានបញ្ហាក្នុងការដំឡើងថ្នាក់សិស្ស។ សូមព្យាយាមម្តងទៀត។'
+                'message' => 'មានបញ្ហាក្នុងការដំឡើងថ្នាក់សិស្ស។ សូមព្យាយាមម្តងទៀត។',
             ], 500);
         }
     }
@@ -577,28 +681,28 @@ if ($request->filled('year')) {
     public function unenrollStudent(Student $student, $courseId)
     {
         try {
-            // ស្វែងរកទិន្នន័យដែលបានចុះឈ្មោះ ដោយផ្អែកលើ user_id របស់សិស្ស និង course_id
             $enrollment = Enrollment::where('student_id', $student->user_id)
-                                    ->where('course_id', $courseId)
-                                    ->first();
+                ->where('course_id', $courseId)
+                ->first();
 
             if (!$enrollment) {
                 return response()->json(['message' => 'រកមិនឃើញទិន្នន័យនៃការចុះឈ្មោះនេះទេ'], 404);
             }
 
-            // ធ្វើការលុប
             $enrollment->delete();
+
+            Cache::forget('admin_dashboard_stats');
+            Cache::forget('admin_overview_report');
 
             return response()->json([
                 'success' => true,
-                'message' => 'បានលុបមុខវិជ្ជាចេញពីសិស្សដោយជោគជ័យ'
+                'message' => 'បានលុបមុខវិជ្ជាចេញពីសិស្សដោយជោគជ័យ',
             ]);
-
         } catch (\Exception $e) {
-            \Log::error('Error unenrolling student course: ' . $e->getMessage());
-            
+            Log::error('Error unenrolling student course: ' . $e->getMessage());
+
             return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការលុបមុខវិជ្ជាសិស្ស។ សូមព្យាយាមម្តងទៀត។'
+                'message' => 'មានបញ្ហាក្នុងការលុបមុខវិជ្ជាសិស្ស។ សូមព្យាយាមម្តងទៀត។',
             ], 500);
         }
     }

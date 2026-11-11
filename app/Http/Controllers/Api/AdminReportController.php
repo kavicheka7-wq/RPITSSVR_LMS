@@ -3,20 +3,22 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
-use App\Models\Student;
-use App\Models\Teacher;
+use App\Models\Assignment;
+use App\Models\Attendance;
 use App\Models\Course;
 use App\Models\Department;
 use App\Models\Enrollment;
-use App\Models\Attendance;
 use App\Models\Grade;
 use App\Models\Lesson;
-use App\Models\Assignment;
 use App\Models\Role;
+use App\Models\Student;
+use App\Models\Teacher;
+use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AdminReportController extends Controller
 {
@@ -25,65 +27,86 @@ class AdminReportController extends Controller
      */
     public function getOverviewReport(Request $request)
     {
-        // ✅ កែសម្រួល៖ ប្រើ Cache សម្រាប់ Overview Report (៥ នាទី)
+        // ✅ ប្រើ Cache សម្រាប់ Overview Report (៥ នាទី)
         $data = Cache::remember('admin_overview_report', 300, function () {
-            $studentRole = Role::where('role_name', 'Student')->first();
+            $studentRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%student%'])->first();
+            $teacherRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%teacher%'])->first();
+
+            $studentRoleId = $studentRole?->id ?? 3;
+            $teacherRoleId = $teacherRole?->id ?? 2;
+
             $totalStudents = Student::count();
             if ($totalStudents === 0) {
-                $totalStudents = $studentRole ? User::where('role_id', $studentRole->id)->count() : 0;
+                $totalStudents = User::where('role_id', $studentRoleId)->count();
             }
 
             $totalTeachers = Teacher::count();
+            if ($totalTeachers === 0) {
+                $totalTeachers = User::where('role_id', $teacherRoleId)->count();
+            }
+
             $totalCourses = Course::count();
             $totalDepartments = Department::count();
             $totalEnrollments = Enrollment::count();
             $totalLessons = Lesson::count();
             $totalAssignments = Assignment::count();
 
-            // ✅ កែសម្រួល៖ ប្រើ Query តែម្តងសម្រាប់ Attendance Rate
+            // ✅ ប្រើ Query តែម្តងសម្រាប់ Attendance Rate
             $attendanceStats = Attendance::selectRaw("
                 COUNT(*) as total,
-                SUM(CASE WHEN status IN ('present', 'Present') THEN 1 ELSE 0 END) as present
+                SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
+                SUM(CASE WHEN LOWER(status) = 'late' THEN 1 ELSE 0 END) as late,
+                SUM(CASE WHEN LOWER(status) = 'permission' THEN 1 ELSE 0 END) as permission
             ")->first();
 
-            $totalAttendances = $attendanceStats->total ?? 0;
-            $presentAttendances = $attendanceStats->present ?? 0;
+            $totalAttendances = (int) ($attendanceStats->total ?? 0);
+            $presentAttendances = (int) ($attendanceStats->present ?? 0);
+            $lateAttendances = (int) ($attendanceStats->late ?? 0);
+            $permissionAttendances = (int) ($attendanceStats->permission ?? 0);
+
+            $effectiveAttended = $presentAttendances + $lateAttendances + ($permissionAttendances * 0.5);
             $overallAttendanceRate = $totalAttendances > 0
-                ? round(($presentAttendances / $totalAttendances) * 100, 1)
+                ? min(100, round(($effectiveAttended / $totalAttendances) * 100, 1))
                 : 100;
 
-            // ✅ កែសម្រួល៖ ប្រើ withCount ជំនួស get() + map()
+            // ✅ ប្រើ withCount ជំនួស get() + map()
             $departments = Department::withCount(['courses', 'students', 'teachers'])->get();
             $departmentDistribution = $departments->map(function ($dept) {
                 return [
                     'id' => $dept->id,
                     'department_name' => $dept->department_name,
                     'department_code' => $dept->department_code,
-                    'students_count' => $dept->students_count ?? 0,
-                    'teachers_count' => $dept->teachers_count ?? 0,
-                    'courses_count' => $dept->courses_count ?? 0,
+                    'students_count' => (int) ($dept->students_count ?? 0),
+                    'teachers_count' => (int) ($dept->teachers_count ?? 0),
+                    'courses_count' => (int) ($dept->courses_count ?? 0),
                 ];
             });
 
             // Recent 6 Months Enrollment Trend
             $enrollmentTrend = Enrollment::select(
                 DB::raw("DATE_FORMAT(created_at, '%Y-%m') as month"),
-                DB::raw('count(*) as count')
+                DB::raw('COUNT(*) as count')
             )
-            ->where('created_at', '>=', now()->subMonths(6))
-            ->groupBy('month')
-            ->orderBy('month', 'asc')
-            ->get();
+                ->where('created_at', '>=', now()->subMonths(6))
+                ->groupBy('month')
+                ->orderBy('month', 'asc')
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'month' => $row->month,
+                        'count' => (int) $row->count,
+                    ];
+                });
 
             return [
                 'stats' => [
-                    'total_students' => $totalStudents,
-                    'total_teachers' => $totalTeachers,
-                    'total_courses' => $totalCourses,
-                    'total_departments' => $totalDepartments,
-                    'total_enrollments' => $totalEnrollments,
-                    'total_lessons' => $totalLessons,
-                    'total_assignments' => $totalAssignments,
+                    'total_students' => (int) $totalStudents,
+                    'total_teachers' => (int) $totalTeachers,
+                    'total_courses' => (int) $totalCourses,
+                    'total_departments' => (int) $totalDepartments,
+                    'total_enrollments' => (int) $totalEnrollments,
+                    'total_lessons' => (int) $totalLessons,
+                    'total_assignments' => (int) $totalAssignments,
                     'overall_attendance_rate' => $overallAttendanceRate,
                 ],
                 'department_distribution' => $departmentDistribution->values()->all(),
@@ -99,7 +122,7 @@ class AdminReportController extends Controller
      */
     public function getEnrollmentReport(Request $request)
     {
-        // ✅ កែសម្រួល៖ បង្កើត Base Query តែម្តង រួច Clone សម្រាប់រាប់ និង Paginate
+        // ✅ បង្កើត Base Query តែម្តង រួច Clone សម្រាប់រាប់ និង Paginate
         $baseQuery = Enrollment::query();
 
         if ($request->filled('department_id')) {
@@ -117,41 +140,52 @@ class AdminReportController extends Controller
         }
 
         if ($request->filled('search')) {
-            $search = $request->search;
-            $baseQuery->where(function ($q) use ($search) {
-                $q->whereHas('student', function ($sq) use ($search) {
-                    $sq->where('first_name', 'like', "{$search}%")
-                       ->orWhere('last_name', 'like', "{$search}%")
-                       ->orWhere('email', 'like', "{$search}%");
+            $search = trim($request->search);
+            $matchedStudentUserIds = Student::where('student_code', 'like', "%{$search}%")
+                ->pluck('user_id')
+                ->filter()
+                ->all();
+
+            $baseQuery->where(function ($q) use ($search, $matchedStudentUserIds) {
+                if (!empty($matchedStudentUserIds)) {
+                    $q->orWhereIn('student_id', $matchedStudentUserIds);
+                }
+                $q->orWhereHas('student', function ($sq) use ($search) {
+                    $sq->where('first_name', 'like', "%{$search}%")
+                        ->orWhere('last_name', 'like', "%{$search}%")
+                        ->orWhere(DB::raw("CONCAT(first_name, ' ', last_name)"), 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
                 })->orWhereHas('course', function ($cq) use ($search) {
-                    $cq->where('course_name', 'like', "{$search}%")
-                       ->orWhere('course_code', 'like', "{$search}%");
+                    $cq->where('course_name', 'like', "%{$search}%")
+                        ->orWhere('course_code', 'like', "%{$search}%");
                 });
             });
         }
 
-        // ✅ កែសម្រួល៖ រាប់ដោយប្រើ clone (មិនទាញទិន្នន័យទាំងអស់ចូល Memory)
+        // ✅ រាប់ដោយប្រើ clone (មិនទាញទិន្នន័យទាំងអស់ចូល Memory)
         $summary = [
-            'total' => (clone $baseQuery)->count(),
-            'active' => (clone $baseQuery)->where('status', 'active')->count(),
-            'completed' => (clone $baseQuery)->where('status', 'completed')->count(),
-            'dropped' => (clone $baseQuery)->whereIn('status', ['dropped', 'inactive', 'cancelled'])->count(),
+            'total' => (int) (clone $baseQuery)->count(),
+            'active' => (int) (clone $baseQuery)->where('status', 'active')->count(),
+            'completed' => (int) (clone $baseQuery)->where('status', 'completed')->count(),
+            'dropped' => (int) (clone $baseQuery)->whereIn('status', ['dropped', 'inactive', 'cancelled'])->count(),
         ];
 
-        // ✅ កែសម្រួល៖ ប្រើ with() សម្រាប់ Eager Loading ព្រមទាំង select columns ចាំបាច់
+        $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
+
+        // ✅ ប្រើ with() សម្រាប់ Eager Loading ព្រមទាំង select columns ចាំបាច់
         $paginated = $baseQuery
             ->with([
-                'student:id,first_name,last_name,email',
+                'student:id,first_name,last_name,email,profile_image',
                 'course:id,course_name,course_code,department_id',
                 'course.department:id,department_name',
             ])
             ->orderBy('created_at', 'desc')
-            ->paginate($request->per_page ?? 15);
+            ->paginate($perPage);
 
-        // ✅ កែសម្រួល៖ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1)
+        // ✅ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1)
         $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter();
         $studentProfiles = Student::whereIn('user_id', $studentIds)
-            ->select('user_id', 'student_code')
+            ->select('id', 'user_id', 'student_code', 'batch_year', 'study_shift', 'profile_image')
             ->get()
             ->keyBy('user_id');
 
@@ -159,19 +193,32 @@ class AdminReportController extends Controller
             $studentUser = $enr->student;
             $studentProfile = $studentProfiles->get($enr->student_id);
 
+            $enrolledDateStr = 'N/A';
+            $rawDate = $enr->enrolled_date ?? $enr->created_at;
+            if ($rawDate) {
+                try {
+                    $enrolledDateStr = Carbon::parse($rawDate)->format('Y-m-d');
+                } catch (\Throwable $e) {
+                    $enrolledDateStr = substr((string) $rawDate, 0, 10);
+                }
+            }
+
             return [
                 'id' => $enr->id,
                 'student_id' => $enr->student_id,
-                'student_name' => $studentUser ? ($studentUser->first_name . ' ' . $studentUser->last_name) : 'N/A',
+                'student_name' => $studentUser
+                    ? trim(($studentUser->first_name ?? '') . ' ' . ($studentUser->last_name ?? ''))
+                    : 'N/A',
                 'student_code' => $studentProfile->student_code ?? ('STD-' . $enr->student_id),
+                'student_image' => $studentProfile->profile_image ?? $studentUser->profile_image ?? null,
+                'batch_year' => $studentProfile->batch_year ?? null,
+                'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
                 'email' => $studentUser->email ?? 'N/A',
                 'course_name' => $enr->course->course_name ?? 'N/A',
                 'course_code' => $enr->course->course_code ?? 'N/A',
                 'department_name' => $enr->course->department->department_name ?? 'N/A',
                 'status' => $enr->status ?? 'active',
-                'enrolled_date' => $enr->enrolled_date
-                    ? $enr->enrolled_date->format('Y-m-d')
-                    : ($enr->created_at ? $enr->created_at->format('Y-m-d') : 'N/A'),
+                'enrolled_date' => $enrolledDateStr,
             ];
         });
 
@@ -183,7 +230,7 @@ class AdminReportController extends Controller
                 'last_page' => $paginated->lastPage(),
                 'per_page' => $paginated->perPage(),
                 'total' => $paginated->total(),
-            ]
+            ],
         ]);
     }
 
@@ -192,7 +239,7 @@ class AdminReportController extends Controller
      */
     public function getAttendanceReport(Request $request)
     {
-        // ✅ កែសម្រួល៖ បង្កើត Base Query តែម្តង
+        // ✅ បង្កើត Base Query តែម្តង
         $baseQuery = Attendance::query();
 
         if ($request->filled('department_id')) {
@@ -213,41 +260,42 @@ class AdminReportController extends Controller
             $baseQuery->whereDate('attendance_date', '<=', $request->date_to);
         }
 
-        // ✅ កែសម្រួល៖ ប្រើ Query តែម្តងសម្រាប់ Summary ទាំងអស់ (ជំនួស get() + count())
+        // ✅ ប្រើ Query តែម្តងសម្រាប់ Summary ទាំងអស់
         $summaryRaw = (clone $baseQuery)->selectRaw("
             COUNT(*) as total_records,
-            SUM(CASE WHEN status IN ('present', 'Present') THEN 1 ELSE 0 END) as present,
-            SUM(CASE WHEN status IN ('absent', 'Absent') THEN 1 ELSE 0 END) as absent,
-            SUM(CASE WHEN status IN ('late', 'Late') THEN 1 ELSE 0 END) as late,
-            SUM(CASE WHEN status IN ('permission', 'Permission') THEN 1 ELSE 0 END) as permission
+            SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
+            SUM(CASE WHEN LOWER(status) = 'absent' THEN 1 ELSE 0 END) as absent,
+            SUM(CASE WHEN LOWER(status) = 'late' THEN 1 ELSE 0 END) as late,
+            SUM(CASE WHEN LOWER(status) = 'permission' THEN 1 ELSE 0 END) as permission
         ")->first();
 
-        $totalRecords = $summaryRaw->total_records ?? 0;
-        $presentCount = $summaryRaw->present ?? 0;
-        $absentCount = $summaryRaw->absent ?? 0;
-        $lateCount = $summaryRaw->late ?? 0;
-        $permissionCount = $summaryRaw->permission ?? 0;
+        $totalRecords = (int) ($summaryRaw->total_records ?? 0);
+        $presentCount = (int) ($summaryRaw->present ?? 0);
+        $absentCount = (int) ($summaryRaw->absent ?? 0);
+        $lateCount = (int) ($summaryRaw->late ?? 0);
+        $permissionCount = (int) ($summaryRaw->permission ?? 0);
 
-        $rate = $totalRecords > 0 ? round(($presentCount / $totalRecords) * 100, 1) : 100;
+        $effectiveAttended = $presentCount + $lateCount + ($permissionCount * 0.5);
+        $rate = $totalRecords > 0
+            ? min(100, round(($effectiveAttended / $totalRecords) * 100, 1))
+            : 100;
 
-        // ✅ កែសម្រួល៖ ប្រើ withCount ជំនួស N+1 Query ក្នុង map()
-        // នេះជាចំណុចកែសម្រួលសំខាន់បំផុត!
-        $coursesQuery = Course::with(['department:id,department_name', 'teacher:id,first_name,last_name,profile_image'])
+        $coursesQuery = Course::with(['department:id,department_name', 'teacher'])
             ->when($request->filled('department_id'), function ($q) use ($request) {
                 $q->where('department_id', $request->department_id);
             })
             ->when($request->filled('course_id'), function ($q) use ($request) {
-                $q->where('id', $request->course_id);
+                $q->where('courses.id', $request->course_id);
             });
 
         // បង្កើត Subquery សម្រាប់ Attendance Counts
         $attendanceSubquery = Attendance::selectRaw("
             course_id,
             COUNT(*) as total,
-            SUM(CASE WHEN status IN ('present', 'Present') THEN 1 ELSE 0 END) as present,
-            SUM(CASE WHEN status IN ('absent', 'Absent') THEN 1 ELSE 0 END) as absent,
-            SUM(CASE WHEN status IN ('late', 'Late') THEN 1 ELSE 0 END) as late,
-            SUM(CASE WHEN status IN ('permission', 'Permission') THEN 1 ELSE 0 END) as permission
+            SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
+            SUM(CASE WHEN LOWER(status) = 'absent' THEN 1 ELSE 0 END) as absent,
+            SUM(CASE WHEN LOWER(status) = 'late' THEN 1 ELSE 0 END) as late,
+            SUM(CASE WHEN LOWER(status) = 'permission' THEN 1 ELSE 0 END) as permission
         ")->groupBy('course_id');
 
         if ($request->filled('date_from')) {
@@ -256,6 +304,11 @@ class AdminReportController extends Controller
         if ($request->filled('date_to')) {
             $attendanceSubquery->whereDate('attendance_date', '<=', $request->date_to);
         }
+
+        // ទាញបញ្ជីគ្រូបង្រៀនពីតារាង teachers ទុកផ្គូផ្គងរូបថត និងឈ្មោះបន្ថែមក្នុង Query តែម្តង
+        $teachersByUserId = Teacher::select('id', 'user_id', 'first_name', 'last_name', 'profile_image')
+            ->get()
+            ->keyBy('user_id');
 
         $courseBreakdown = $coursesQuery
             ->leftJoinSub($attendanceSubquery, 'att_stats', function ($join) {
@@ -274,18 +327,34 @@ class AdminReportController extends Controller
                 DB::raw('COALESCE(att_stats.permission, 0) as permission'),
             ])
             ->get()
-            ->map(function ($course) {
-                $cTotal = $course->total;
-                $cPresent = $course->present;
-                $cRate = $cTotal > 0 ? round(($cPresent / $cTotal) * 100, 1) : 100;
+            ->map(function ($course) use ($teachersByUserId) {
+                $cTotal = (int) $course->total;
+                $cPresent = (int) $course->present;
+                $cAbsent = (int) $course->absent;
+                $cLate = (int) $course->late;
+                $cPermission = (int) $course->permission;
 
-                $teacherName = $course->teacher
-                    ? trim(($course->teacher->first_name ?? '') . ' ' . ($course->teacher->last_name ?? ''))
+                $cEffective = $cPresent + $cLate + ($cPermission * 0.5);
+                $cRate = $cTotal > 0 ? min(100, round(($cEffective / $cTotal) * 100, 1)) : 100;
+
+                $relTeacher = $course->teacher;
+                $extTeacher = $teachersByUserId->get($course->teacher_id);
+
+                $teacherName = $relTeacher
+                    ? trim(($relTeacher->first_name ?? '') . ' ' . ($relTeacher->last_name ?? ''))
                     : null;
 
-                if (!$teacherName && isset($course->teacher->name)) {
-                    $teacherName = $course->teacher->name;
+                if (!$teacherName && $extTeacher) {
+                    $teacherName = trim(($extTeacher->first_name ?? '') . ' ' . ($extTeacher->last_name ?? ''));
                 }
+
+                if (!$teacherName && isset($relTeacher->name)) {
+                    $teacherName = $relTeacher->name;
+                }
+
+                $teacherImage = $relTeacher->profile_image
+                    ?? $extTeacher?->profile_image
+                    ?? null;
 
                 return [
                     'course_id' => $course->id,
@@ -293,12 +362,12 @@ class AdminReportController extends Controller
                     'course_code' => $course->course_code,
                     'department_name' => $course->department->department_name ?? 'N/A',
                     'teacher_name' => $teacherName ?: 'មិនស្គាល់គ្រូបង្រៀន',
-                    'teacher_image' => $course->teacher->profile_image ?? null,
+                    'teacher_image' => $teacherImage,
                     'total' => $cTotal,
                     'present' => $cPresent,
-                    'absent' => $course->absent,
-                    'late' => $course->late,
-                    'permission' => $course->permission,
+                    'absent' => $cAbsent,
+                    'late' => $cLate,
+                    'permission' => $cPermission,
                     'rate' => $cRate,
                 ];
             });
@@ -321,7 +390,7 @@ class AdminReportController extends Controller
      */
     public function getAcademicReport(Request $request)
     {
-        // ✅ កែសម្រួល៖ បង្កើត Base Query តែម្តង
+        // ✅ បង្កើត Base Query តែម្តង
         $baseQuery = Grade::query();
 
         if ($request->filled('department_id')) {
@@ -335,45 +404,66 @@ class AdminReportController extends Controller
         }
 
         if ($request->filled('search')) {
-            $search = $request->search;
-            $baseQuery->where(function ($q) use ($search) {
-                $q->whereHas('student', function ($sq) use ($search) {
-                    $sq->where('first_name', 'like', "{$search}%")
-                       ->orWhere('last_name', 'like', "{$search}%");
+            $search = trim($request->search);
+            $matchedStudentUserIds = Student::where('student_code', 'like', "%{$search}%")
+                ->pluck('user_id')
+                ->filter()
+                ->all();
+
+            $baseQuery->where(function ($q) use ($search, $matchedStudentUserIds) {
+                if (!empty($matchedStudentUserIds)) {
+                    $q->orWhereIn('student_id', $matchedStudentUserIds);
+                }
+                $q->orWhereHas('student', function ($sq) use ($search) {
+                    $sq->where('first_name', 'like', "%{$search}%")
+                        ->orWhere('last_name', 'like', "%{$search}%")
+                        ->orWhere(DB::raw("CONCAT(first_name, ' ', last_name)"), 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
                 })->orWhereHas('course', function ($cq) use ($search) {
-                    $cq->where('course_name', 'like', "{$search}%");
+                    $cq->where('course_name', 'like', "%{$search}%")
+                        ->orWhere('course_code', 'like', "%{$search}%");
                 });
             });
         }
 
-        // ✅ កែសម្រួល៖ ប្រើ Query តែម្តងសម្រាប់ Summary ទាំងអស់
+        $hasMidtermCol = Schema::hasColumn('grades', 'midterm_score');
+        $hasExamCol = Schema::hasColumn('grades', 'exam_score');
+
+        $midtermAvgSelect = $hasMidtermCol ? 'AVG(midterm_score) as avg_midterm,' : '0 as avg_midterm,';
+        $examAvgSelect = $hasExamCol ? 'AVG(exam_score) as avg_exam,' : '0 as avg_exam,';
+
+        // ✅ ប្រើ Query តែម្តងសម្រាប់ Summary ទាំងអស់ (គាំទ្រទាំងនិទ្ទេស A+, B+, C+ និង Passed/Failed)
         $summaryRaw = (clone $baseQuery)->selectRaw("
             COUNT(*) as total_graded,
             AVG(assignment_score) as avg_assignment,
             AVG(quiz_score) as avg_quiz,
+            {$midtermAvgSelect}
+            {$examAvgSelect}
             AVG(final_score) as avg_final,
-            SUM(CASE WHEN grade_letter = 'A' THEN 1 ELSE 0 END) as grade_a,
-            SUM(CASE WHEN grade_letter = 'B' THEN 1 ELSE 0 END) as grade_b,
-            SUM(CASE WHEN grade_letter = 'C' THEN 1 ELSE 0 END) as grade_c,
-            SUM(CASE WHEN grade_letter = 'D' THEN 1 ELSE 0 END) as grade_d,
-            SUM(CASE WHEN grade_letter = 'F' THEN 1 ELSE 0 END) as grade_f
+            SUM(CASE WHEN UPPER(TRIM(grade_letter)) IN ('A', 'A+') THEN 1 ELSE 0 END) as grade_a,
+            SUM(CASE WHEN UPPER(TRIM(grade_letter)) IN ('B', 'B+') THEN 1 ELSE 0 END) as grade_b,
+            SUM(CASE WHEN UPPER(TRIM(grade_letter)) IN ('C', 'C+') THEN 1 ELSE 0 END) as grade_c,
+            SUM(CASE WHEN UPPER(TRIM(grade_letter)) = 'D' THEN 1 ELSE 0 END) as grade_d,
+            SUM(CASE WHEN UPPER(TRIM(grade_letter)) = 'F' OR (grade_letter IS NULL AND final_score < 50) THEN 1 ELSE 0 END) as grade_f,
+            SUM(CASE WHEN final_score >= 50 AND UPPER(TRIM(COALESCE(grade_letter, ''))) != 'F' THEN 1 ELSE 0 END) as passed_count,
+            SUM(CASE WHEN final_score < 50 OR UPPER(TRIM(COALESCE(grade_letter, ''))) = 'F' THEN 1 ELSE 0 END) as failed_count
         ")->first();
 
-        // ✅ កែសម្រួល៖ បន្ថែម Pagination សម្រាប់ទិន្នន័យតារាង
-        // ប៉ុន្តែ Summary ខាងលើគណនាពី Query ទាំងមូល (មិនមែនតែ Page បច្ចុប្បន្នទេ)
+        $perPage = max(1, min(200, (int) ($request->per_page ?? 50)));
+
         $paginated = (clone $baseQuery)
             ->with([
-                'student:id,first_name,last_name,email',
+                'student:id,first_name,last_name,email,profile_image',
                 'course:id,course_name,course_code,department_id',
                 'course.department:id,department_name',
             ])
             ->orderBy('id', 'desc')
-            ->paginate($request->per_page ?? 50);
+            ->paginate($perPage);
 
-        // ✅ កែសម្រួល៖ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1)
+        // ✅ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1)
         $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter();
         $studentProfiles = Student::whereIn('user_id', $studentIds)
-            ->select('user_id', 'student_code')
+            ->select('id', 'user_id', 'student_code', 'batch_year', 'study_shift', 'profile_image')
             ->get()
             ->keyBy('user_id');
 
@@ -383,30 +473,42 @@ class AdminReportController extends Controller
 
             return [
                 'id' => $g->id,
-                'student_name' => $studentUser ? ($studentUser->first_name . ' ' . $studentUser->last_name) : 'N/A',
+                'student_id' => $g->student_id,
+                'student_name' => $studentUser
+                    ? trim(($studentUser->first_name ?? '') . ' ' . ($studentUser->last_name ?? ''))
+                    : 'N/A',
                 'student_code' => $studentProfile->student_code ?? ('STD-' . $g->student_id),
+                'student_image' => $studentProfile->profile_image ?? $studentUser->profile_image ?? null,
+                'batch_year' => $studentProfile->batch_year ?? null,
+                'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
                 'course_name' => $g->course->course_name ?? 'N/A',
                 'course_code' => $g->course->course_code ?? 'N/A',
                 'department_name' => $g->course->department->department_name ?? 'N/A',
-                'assignment_score' => $g->assignment_score ?? 0,
-                'quiz_score' => $g->quiz_score ?? 0,
-                'final_score' => $g->final_score ?? 0,
+                'assignment_score' => round((float) ($g->assignment_score ?? 0), 2),
+                'quiz_score' => round((float) ($g->quiz_score ?? 0), 2),
+                'midterm_score' => round((float) ($g->midterm_score ?? 0), 2),
+                'exam_score' => round((float) ($g->exam_score ?? 0), 2),
+                'final_score' => round((float) ($g->final_score ?? 0), 2),
                 'grade_letter' => $g->grade_letter ?? 'N/A',
             ];
         });
 
         return response()->json([
             'summary' => [
-                'total_graded' => $summaryRaw->total_graded ?? 0,
-                'avg_assignment' => round($summaryRaw->avg_assignment ?? 0, 1),
-                'avg_quiz' => round($summaryRaw->avg_quiz ?? 0, 1),
-                'avg_final' => round($summaryRaw->avg_final ?? 0, 1),
+                'total_graded' => (int) ($summaryRaw->total_graded ?? 0),
+                'avg_assignment' => round((float) ($summaryRaw->avg_assignment ?? 0), 1),
+                'avg_quiz' => round((float) ($summaryRaw->avg_quiz ?? 0), 1),
+                'avg_midterm' => round((float) ($summaryRaw->avg_midterm ?? 0), 1),
+                'avg_exam' => round((float) ($summaryRaw->avg_exam ?? 0), 1),
+                'avg_final' => round((float) ($summaryRaw->avg_final ?? 0), 1),
+                'passed_count' => (int) ($summaryRaw->passed_count ?? 0),
+                'failed_count' => (int) ($summaryRaw->failed_count ?? 0),
                 'grade_distribution' => [
-                    'A' => $summaryRaw->grade_a ?? 0,
-                    'B' => $summaryRaw->grade_b ?? 0,
-                    'C' => $summaryRaw->grade_c ?? 0,
-                    'D' => $summaryRaw->grade_d ?? 0,
-                    'F' => $summaryRaw->grade_f ?? 0,
+                    'A' => (int) ($summaryRaw->grade_a ?? 0),
+                    'B' => (int) ($summaryRaw->grade_b ?? 0),
+                    'C' => (int) ($summaryRaw->grade_c ?? 0),
+                    'D' => (int) ($summaryRaw->grade_d ?? 0),
+                    'F' => (int) ($summaryRaw->grade_f ?? 0),
                 ],
             ],
             'data' => $gradeList,

@@ -187,6 +187,27 @@ const prefetchAllAdminPagesData = (uid) => {
 const AdminDashboard = () => {
   const { t, language } = useLanguage();
   const { getFullName, user } = useAuth();
+  const [failedAvatars, setFailedAvatars] = useState({});
+
+  // ✅ អនុគមន៍បម្លែងទីតាំងរូបភាពឱ្យគាំទ្រទាំង Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const resolveImageUrl = useCallback((rawPath) => {
+    if (!rawPath || typeof rawPath !== 'string') return null;
+    const trimmed = rawPath.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
+    const baseUrl = (
+      import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    ).replace(/\/api\/?$/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    return `${baseUrl}/storage/${cleanPath}`;
+  }, []);
 
   // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => {
@@ -228,6 +249,45 @@ const AdminDashboard = () => {
     }
     return [];
   });
+
+  // ✅ ធ្វើបច្ចុប្បន្នភាពរូបភាពប្រវត្តិរូបរបស់ Admin បច្ចុប្បន្នក្នុងតារាង Recent Users ភ្លាមៗនៅពេលប្ដូររូបលើ Navbar
+  useEffect(() => {
+    if (!user?.id || !user?.profile_image) return;
+    setFailedAvatars((prev) => {
+      if (!prev[user.id]) return prev;
+      const next = { ...prev };
+      delete next[user.id];
+      return next;
+    });
+    setRecentUsers((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev;
+      let changed = false;
+      const updated = prev.map((item) => {
+        if (
+          Number(item.id) === Number(user.id) &&
+          item.profile_image !== user.profile_image
+        ) {
+          changed = true;
+          return { ...item, profile_image: user.profile_image };
+        }
+        return item;
+      });
+      if (changed) {
+        ADMIN_DASH_MEM_CACHE.recentUsers = updated;
+        try {
+          localStorage.setItem(
+            getUsersCacheKey(currentAdminId),
+            JSON.stringify(updated)
+          );
+          localStorage.setItem(
+            CACHE_KEY_SHARED_USERS,
+            JSON.stringify(updated)
+          );
+        } catch {}
+      }
+      return changed ? updated : prev;
+    });
+  }, [user?.id, user?.profile_image, currentAdminId]);
 
   // ✅ បម្លែង និងចាប់ទិន្នន័យ Chart ភ្លាមៗដោយប្រើ useMemo
   const chartData = useMemo(() => {
@@ -599,41 +659,69 @@ const AdminDashboard = () => {
                     </td>
                   </tr>
                 ) : (
-                  recentUsers.map((u) => (
-                    <tr key={u.id} className="admin-table-row hover:bg-blue-50/30 transition-colors">
-                      <td className="admin-text-primary px-4 sm:px-6 py-3.5 sm:py-4 font-extrabold text-gray-800 whitespace-nowrap">
-                        <div className="flex items-center gap-3">
-                          <div className="admin-user-avatar h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-xs sm:text-sm shrink-0 border border-emerald-200 shadow-sm">
-                            {(u.first_name?.[0] || u.name?.[0] || 'U').toUpperCase()}
+                  recentUsers.map((u) => {
+                    const rawAvatar =
+                      (Number(u.id) === Number(user?.id) && user?.profile_image) ||
+                      u.profile_image ||
+                      u.teacher?.profile_image ||
+                      u.student?.profile_image;
+                    const avatarUrl = resolveImageUrl(rawAvatar);
+                    const hasAvatar = Boolean(avatarUrl && !failedAvatars[u.id]);
+                    const initials = (
+                      (u.first_name?.[0] || u.name?.[0] || '') +
+                      (u.last_name?.[0] || '')
+                    ).toUpperCase() || 'U';
+
+                    return (
+                      <tr key={u.id} className="admin-table-row hover:bg-blue-50/30 transition-colors">
+                        <td className="admin-text-primary px-4 sm:px-6 py-3.5 sm:py-4 font-extrabold text-gray-800 whitespace-nowrap">
+                          <div className="flex items-center gap-3">
+                            <div className="admin-user-avatar h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-xs sm:text-sm shrink-0 border border-emerald-200 shadow-sm overflow-hidden">
+                              {hasAvatar ? (
+                                <img
+                                  src={avatarUrl}
+                                  alt={u.first_name || u.name || 'User'}
+                                  className="h-full w-full object-cover rounded-full"
+                                  onError={() =>
+                                    setFailedAvatars((prev) => ({
+                                      ...prev,
+                                      [u.id]: true,
+                                    }))
+                                  }
+                                />
+                              ) : (
+                                <span>{initials}</span>
+                              )}
+                            </div>
+                            <span>{u.first_name || u.name} {u.last_name || ''}</span>
                           </div>
-                          <span>{u.first_name || u.name} {u.last_name || ''}</span>
-                        </div>
-                      </td>
-                      <td className="admin-text-secondary px-4 sm:px-6 py-3.5 sm:py-4 text-xs sm:text-sm text-gray-500 font-medium whitespace-nowrap">
-                        {u.email}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3.5 sm:py-4 whitespace-nowrap">
-                        <span className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold rounded-xl inline-block ${
-                          u.role?.role_name === 'Admin' 
-                            ? 'admin-badge-rose bg-rose-50 text-rose-700 border border-rose-200' 
-                            : u.role?.role_name === 'Teacher'
-                            ? 'admin-badge-amber bg-amber-50 text-amber-700 border border-amber-200'
-                            : 'admin-badge-blue bg-blue-50 text-blue-700 border border-blue-200'
-                        }`}>
-                          {getRoleBadgeName(u.role?.role_name)}
-                        </span>
-                      </td>
-                      <td className="px-4 sm:px-6 py-3.5 sm:py-4 text-center whitespace-nowrap">
-                        <span className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold rounded-xl inline-block ${
-                          u.status === 'active' 
-                            ? 'admin-badge-emerald bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                            : 'admin-badge-inactive bg-gray-100 text-gray-600 border border-gray-200'
-                        }`}>
-                          {u.status === 'active' ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="admin-text-secondary px-4 sm:px-6 py-3.5 sm:py-4 text-xs sm:text-sm text-gray-500 font-medium whitespace-nowrap">
+                          {u.email}
+                        </td>
+                        <td className="px-4 sm:px-6 py-3.5 sm:py-4 whitespace-nowrap">
+                          <span className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold rounded-xl inline-block ${
+                            u.role?.role_name === 'Admin' 
+                              ? 'admin-badge-rose bg-rose-50 text-rose-700 border border-rose-200' 
+                              : u.role?.role_name === 'Teacher'
+                              ? 'admin-badge-amber bg-amber-50 text-amber-700 border border-amber-200'
+                              : 'admin-badge-blue bg-blue-50 text-blue-700 border border-blue-200'
+                          }`}>
+                            {getRoleBadgeName(u.role?.role_name)}
+                          </span>
+                        </td>
+                        <td className="px-4 sm:px-6 py-3.5 sm:py-4 text-center whitespace-nowrap">
+                          <span className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold rounded-xl inline-block ${
+                            u.status === 'active' 
+                              ? 'admin-badge-emerald bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                              : 'admin-badge-inactive bg-gray-100 text-gray-600 border border-gray-200'
+                          }`}>
+                            {u.status === 'active' ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

@@ -5,12 +5,14 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Teacher extends Model
 {
     use HasFactory;
 
-    protected $appends = ['full_name', 'status', 'profile_image_url'];
+    protected $appends = ['full_name', 'name', 'status', 'profile_image_url'];
 
     protected $fillable = [
         'user_id',
@@ -29,55 +31,84 @@ class Teacher extends Model
     ];
 
     protected $casts = [
-        'date_of_birth' => 'date',
+        'date_of_birth' => 'date:Y-m-d',
     ];
 
     // Relationships
-    public function user()
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    public function role()
+    public function role(): BelongsTo
     {
         return $this->belongsTo(Role::class);
     }
 
-    public function department()
+    public function department(): BelongsTo
     {
         return $this->belongsTo(Department::class);
     }
 
-    public function courses()
+    public function courses(): HasMany
     {
         return $this->hasMany(Course::class, 'teacher_id');
     }
 
     // Accessor for full name
-    public function getFullNameAttribute()
+    public function getFullNameAttribute(): string
     {
-        return $this->first_name . ' ' . $this->last_name;
+        return trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? ''));
     }
 
-    // Accessor for status (from user)
-    public function getStatusAttribute()
+    // Accessor alias for name compatibility
+    public function getNameAttribute(): string
     {
-        return $this->user ? $this->user->status : 'inactive';
+        return $this->full_name;
     }
 
-    // Accessor for profile image with default
-    public function getProfileImageUrlAttribute()
+    // Accessor for status (ការពារកុំឱ្យកើត N+1 Query ពេលមិនបានហៅ with('user'))
+    public function getStatusAttribute(): string
     {
-        if ($this->profile_image) {
-            // Check if it's a full URL or local path
-            if (filter_var($this->profile_image, FILTER_VALIDATE_URL)) {
-                return $this->profile_image;
-            }
-            return asset('storage/' . $this->profile_image);
+        if (!empty($this->attributes['status'])) {
+            return (string) $this->attributes['status'];
         }
-        
+
+        if ($this->relationLoaded('user')) {
+            return $this->user ? ($this->user->status ?? 'active') : 'inactive';
+        }
+
+        return 'active';
+    }
+
+    // Accessor for profile image with default (គាំទ្រទាំង Base64 Data URI លើ Railway, URL ពេញ, និង Storage path)
+    public function getProfileImageUrlAttribute(): string
+    {
+        $img = $this->profile_image;
+
+        if (empty($img) && $this->relationLoaded('user') && $this->user) {
+            $img = $this->user->profile_image;
+        }
+
+        if (!empty($img)) {
+            $trimmed = trim((string) $img);
+
+            if (
+                str_starts_with($trimmed, 'data:') ||
+                str_starts_with($trimmed, 'http://') ||
+                str_starts_with($trimmed, 'https://') ||
+                str_starts_with($trimmed, '//')
+            ) {
+                return $trimmed;
+            }
+
+            $cleanPath = preg_replace('/^\/?storage\//', '', ltrim($trimmed, '/'));
+            return asset('storage/' . $cleanPath);
+        }
+
         // Default avatar using UI Avatars
-        $name = urlencode($this->first_name . ' ' . $this->last_name);
+        $fullName = $this->full_name ?: 'Teacher';
+        $name = urlencode($fullName);
         return "https://ui-avatars.com/api/?name={$name}&background=2563eb&color=fff&size=128";
     }
 }

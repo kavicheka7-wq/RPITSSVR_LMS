@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use Illuminate\Database\Eloquent\Casts\Attribute;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class User extends Authenticatable
 {
@@ -33,6 +34,7 @@ class User extends Authenticatable
         'phone',
         'password',
         'profile_image',
+        'telegram_chat_id',
         'status',
     ];
 
@@ -53,7 +55,7 @@ class User extends Authenticatable
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
-        'password' => 'hashed', // បន្ថែមចំណុចនេះដើម្បី Hash password ស្វ័យប្រវត្តិ
+        'password' => 'hashed', // Hash password ស្វ័យប្រវត្តិ
     ];
 
     /**
@@ -79,27 +81,51 @@ class User extends Authenticatable
     {
         return $this->hasMany(Enrollment::class, 'student_id');
     }
-    
-    // Relationship: User has one Teacher profile.
-    public function teacher()
+
+    /**
+     * Relationship: Student's grades.
+     */
+    public function grades(): HasMany
+    {
+        return $this->hasMany(Grade::class, 'student_id');
+    }
+
+    /**
+     * Relationship: Student's attendances.
+     */
+    public function attendances(): HasMany
+    {
+        return $this->hasMany(Attendance::class, 'student_id');
+    }
+
+    /**
+     * Relationship: User has one Teacher profile.
+     */
+    public function teacher(): HasOne
     {
         return $this->hasOne(Teacher::class, 'user_id');
     }
 
-    // Relationship: Teacher profile alias for eager loading compatibility
-    public function teacherProfile()
+    /**
+     * Relationship: Teacher profile alias for eager loading compatibility.
+     */
+    public function teacherProfile(): HasOne
     {
         return $this->hasOne(Teacher::class, 'user_id');
     }
 
-    // Relationship: User has one Student profile
-    public function student()
+    /**
+     * Relationship: User has one Student profile.
+     */
+    public function student(): HasOne
     {
         return $this->hasOne(Student::class, 'user_id');
     }
 
-    // Relationship: Student profile alias for eager loading compatibility
-    public function studentProfile()
+    /**
+     * Relationship: Student profile alias for eager loading compatibility.
+     */
+    public function studentProfile(): HasOne
     {
         return $this->hasOne(Student::class, 'user_id');
     }
@@ -110,7 +136,7 @@ class User extends Authenticatable
     protected function fullName(): Attribute
     {
         return Attribute::make(
-            get: fn () => $this->first_name . ' ' . $this->last_name,
+            get: fn () => trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? '')),
         );
     }
 
@@ -120,7 +146,7 @@ class User extends Authenticatable
     protected function name(): Attribute
     {
         return Attribute::make(
-            get: fn () => $this->first_name . ' ' . $this->last_name,
+            get: fn () => trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? '')),
         );
     }
 }

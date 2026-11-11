@@ -1,5 +1,5 @@
 // src/components/teacher/TeacherManageStudents.jsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -244,12 +244,13 @@ const pushLocalNotification = (notif) => {
     let role = 'teacher';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'teacher';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'teacher';
         role = rName.toString().toLowerCase();
       }
     }
@@ -283,6 +284,8 @@ const TeacherManageStudents = () => {
   const { user } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const [failedAvatars, setFailedAvatars] = useState({});
+  const abortControllerRef = useRef(null);
 
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || '';
@@ -309,7 +312,8 @@ const TeacherManageStudents = () => {
       MEMORY_CACHE.students = fromUserKey;
       return fromUserKey;
     }
-    return readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
+    const fallback = readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
+    return Array.isArray(fallback) ? fallback : [];
   });
 
   const [courses, setCourses] = useState(() => {
@@ -317,8 +321,9 @@ const TeacherManageStudents = () => {
     const cached =
       readStorageJson(getCoursesCacheKey(currentTeacherId), null) ||
       readStorageJson(CACHE_KEY_SHARED_COURSES, []);
-    MEMORY_CACHE.courses = cached;
-    return cached;
+    const validCourses = Array.isArray(cached) ? cached : [];
+    MEMORY_CACHE.courses = validCourses;
+    return validCourses;
   });
 
   const [courseMap, setCourseMap] = useState(() => {
@@ -326,8 +331,8 @@ const TeacherManageStudents = () => {
     const cached =
       readStorageJson(getCourseMapCacheKey(currentTeacherId), null) ||
       readStorageJson(CACHE_KEY_SHARED_MAP, {});
-    MEMORY_CACHE.courseMap = cached;
-    return cached;
+    MEMORY_CACHE.courseMap = cached || {};
+    return cached || {};
   });
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -421,6 +426,7 @@ const TeacherManageStudents = () => {
     if (
       MEMORY_CACHE.uid === currentTeacherId &&
       Array.isArray(MEMORY_CACHE.students) &&
+      MEMORY_CACHE.students.length > 0 &&
       Array.isArray(MEMORY_CACHE.courses) &&
       MEMORY_CACHE.courseMap &&
       now - MEMORY_CACHE.lastFetchedAt < 25000
@@ -428,12 +434,22 @@ const TeacherManageStudents = () => {
       return;
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     api
-      .get('/teacher/students')
+      .get('/teacher/students', { signal: controller.signal })
       .then((stdRes) => {
         if (!isMounted) return;
-        const rawStd = stdRes.data?.data || stdRes.data || [];
-        const latestStudents = Array.isArray(rawStd) ? rawStd : [];
+        const rawStd = stdRes.data?.data ?? stdRes.data ?? [];
+        const latestStudents = Array.isArray(rawStd)
+          ? rawStd
+          : Array.isArray(rawStd?.data)
+          ? rawStd.data
+          : [];
         setStudents(latestStudents);
         MEMORY_CACHE.students = latestStudents;
         MEMORY_CACHE.lastFetchedAt = Date.now();
@@ -464,15 +480,22 @@ const TeacherManageStudents = () => {
         }
       })
       .catch((error) => {
+        if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+          return;
+        }
         console.error('Error syncing teacher students:', error);
       });
 
     api
-      .get('/teacher/courses')
+      .get('/teacher/courses', { signal: controller.signal })
       .then((crsRes) => {
         if (!isMounted) return;
-        const rawCrs = crsRes.data?.data || crsRes.data || [];
-        const latestCourses = Array.isArray(rawCrs) ? rawCrs : [];
+        const rawCrs = crsRes.data?.data ?? crsRes.data ?? [];
+        const latestCourses = Array.isArray(rawCrs)
+          ? rawCrs
+          : Array.isArray(rawCrs?.data)
+          ? rawCrs.data
+          : [];
         setCourses(latestCourses);
         MEMORY_CACHE.courses = latestCourses;
         try {
@@ -490,6 +513,9 @@ const TeacherManageStudents = () => {
 
     return () => {
       isMounted = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [currentTeacherId]);
 
@@ -762,17 +788,25 @@ const TeacherManageStudents = () => {
     return level || '—';
   };
 
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
-    if (imagePath.startsWith('http') || imagePath.startsWith('data:')) {
-      return imagePath;
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const getProfileImageUrl = useCallback((imagePath) => {
+    if (!imagePath || typeof imagePath !== 'string') return null;
+    const trimmed = imagePath.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
     }
     const baseUrl = (
       import.meta.env.VITE_API_URL || 'http://localhost:8000'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = imagePath.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
-  };
+  }, []);
 
   const applyExcelStyling = (worksheet, colWidths = [], textColumnIndices = []) => {
     if (!worksheet || !worksheet['!ref']) return;
@@ -929,7 +963,7 @@ const TeacherManageStudents = () => {
       descKm: `បញ្ជីសិស្ស (${exportScopeKm} - ${filteredStudents.length} នាក់) ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: `Exported ${filteredStudents.length} students to Excel successfully.`,
       category: 'export',
-      link: '/teacher/students',
+      link: '/students',
     });
   };
 
@@ -1136,7 +1170,10 @@ const TeacherManageStudents = () => {
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder=""
+              placeholder={t(
+                'ស្វែងរកឈ្មោះសិស្ស, អត្តលេខ, អ៊ីមែល ឬលេខទូរស័ព្ទ...',
+                'Search student name, code, email, or phone...'
+              )}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="tstd-input w-full pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
@@ -1394,6 +1431,14 @@ const TeacherManageStudents = () => {
                         courseMap
                       );
 
+                    const rawAvatar =
+                      student.profile_image || student.user?.profile_image;
+                    const avatarUrl = getProfileImageUrl(rawAvatar);
+                    const avatarKey = `tstd_${student.id}`;
+                    const hasAvatar = Boolean(
+                      avatarUrl && !failedAvatars[avatarKey]
+                    );
+
                     return (
                       <tr
                         key={student.id}
@@ -1404,23 +1449,22 @@ const TeacherManageStudents = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-3.5">
-                            {student.profile_image ? (
-                              <img
-                                src={getProfileImageUrl(student.profile_image)}
-                                alt={`${student.first_name} ${student.last_name}`}
-                                className="h-10 w-10 rounded-full object-cover border border-gray-200 shadow-sm shrink-0"
-                                onError={(e) => {
-                                  e.target.style.display = 'none';
-                                  e.target.nextSibling.style.display = 'flex';
-                                }}
-                              />
-                            ) : null}
-                            <div
-                              className={`tstd-avatar h-10 w-10 rounded-full bg-indigo-500 text-white flex items-center justify-center font-extrabold text-sm shadow-sm shrink-0 ${
-                                student.profile_image ? 'hidden' : ''
-                              }`}
-                            >
-                              {initials || 'ST'}
+                            <div className="tstd-avatar h-10 w-10 rounded-full bg-indigo-500 text-white flex items-center justify-center font-extrabold text-sm shadow-sm shrink-0 overflow-hidden">
+                              {hasAvatar ? (
+                                <img
+                                  src={avatarUrl}
+                                  alt={`${student.first_name || ''} ${student.last_name || ''}`}
+                                  className="h-full w-full object-cover rounded-full"
+                                  onError={() =>
+                                    setFailedAvatars((prev) => ({
+                                      ...prev,
+                                      [avatarKey]: true,
+                                    }))
+                                  }
+                                />
+                              ) : (
+                                <span>{initials || 'ST'}</span>
+                              )}
                             </div>
                             <div>
                               <div className="flex flex-wrap items-center gap-2">

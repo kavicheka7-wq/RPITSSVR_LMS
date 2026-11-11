@@ -124,6 +124,20 @@ const pushLocalNotification = (notif) => {
   }
 };
 
+// ✅ សម្អាត Cache បញ្ជីគ្រូ និងសិស្សនៅពេលគណនីប្ដូររូបថត ឬកែប្រែឈ្មោះ ដើម្បីឱ្យគ្រប់ទំព័រទាញទិន្នន័យថ្មីភ្លាមៗ
+const invalidateDirectoryAvatarCaches = () => {
+  try {
+    const keysToRemove = [
+      'cached_admin_teachers_list',
+      'cached_admin_teachers_page1',
+      'cached_teacher_students_list_v6',
+      'cached_student_dept_lessons_v12',
+      'cached_student_dept_courses_all_years_v12',
+    ];
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+  } catch {}
+};
+
 const Navbar = () => {
   const {
     user: contextUser,
@@ -180,6 +194,7 @@ const Navbar = () => {
   const [avatarError, setAvatarError] = useState(false);
   const [logoError, setLogoError] = useState(false);
   const [instantAvatarPreview, setInstantAvatarPreview] = useState(null);
+  const [profileFormError, setProfileFormError] = useState('');
   const [passwordFormError, setPasswordFormError] = useState('');
 
   const userEmail = useMemo(
@@ -292,6 +307,13 @@ const Navbar = () => {
           JSON.stringify(updatedUserObj.teacher)
         );
       }
+      if (updatedUserObj?.student) {
+        localStorage.setItem(
+          'student',
+          JSON.stringify(updatedUserObj.student)
+        );
+      }
+      window.dispatchEvent(new Event('lms_user_updated'));
     } catch (e) {
       console.warn('Failed to sync user to localStorage:', e);
     }
@@ -308,6 +330,7 @@ const Navbar = () => {
       try {
         localStorage.removeItem('token');
         localStorage.removeItem('teacher');
+        localStorage.removeItem('student');
         localStorage.removeItem('user');
         localStorage.removeItem('auth_user');
       } catch {}
@@ -372,19 +395,23 @@ const Navbar = () => {
     [language, user?.role_id]
   );
 
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const resolveImageUrl = useCallback((rawPath) => {
-    if (!rawPath) return null;
+    if (!rawPath || typeof rawPath !== 'string') return null;
+    const trimmed = rawPath.trim();
+    if (!trimmed) return null;
     if (
-      rawPath.startsWith('http') ||
-      rawPath.startsWith('data:') ||
-      rawPath.startsWith('blob:')
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
     ) {
-      return rawPath;
+      return trimmed;
     }
     const baseUrl = (
       import.meta.env.VITE_API_URL || 'http://localhost:8000'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = rawPath.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
@@ -392,9 +419,13 @@ const Navbar = () => {
     if (instantAvatarPreview) return instantAvatarPreview;
     const rawImg =
       user?.profile_image ||
+      user?.profile_image_url ||
       teacherData?.profile_image ||
+      teacherData?.profile_image_url ||
       user?.teacher?.profile_image ||
-      user?.student?.profile_image;
+      user?.teacher?.profile_image_url ||
+      user?.student?.profile_image ||
+      user?.student?.profile_image_url;
     return rawImg ? resolveImageUrl(rawImg) : null;
   }, [user, teacherData, instantAvatarPreview, resolveImageUrl]);
 
@@ -678,7 +709,7 @@ const Navbar = () => {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
           path: '/grades',
-          altPaths: ['/teacher/grades'],
+          altPaths: ['/scores', '/teacher/grades'],
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
@@ -724,7 +755,7 @@ const Navbar = () => {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
           path: '/grades',
-          altPaths: ['/student/grades'],
+          altPaths: ['/scores', '/student/grades', '/student/scores'],
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
@@ -744,6 +775,7 @@ const Navbar = () => {
   }, [isAdmin, isTeacher, isStudent, t]);
 
   const openProfileModal = useCallback(() => {
+    setProfileFormError('');
     setProfileData({
       first_name: resolvedFirstName || user?.name || '',
       last_name: resolvedLastName || '',
@@ -752,11 +784,19 @@ const Navbar = () => {
       profile_image: profileImgUrl,
     });
     setIsProfileModalOpen(true);
-  }, [resolvedFirstName, resolvedLastName, user?.name, userEmail, userPhone, profileImgUrl]);
+  }, [
+    resolvedFirstName,
+    resolvedLastName,
+    user?.name,
+    userEmail,
+    userPhone,
+    profileImgUrl,
+  ]);
 
   const closeProfileModal = useCallback(() => {
     setIsProfileModalOpen(false);
     setIsEditing(false);
+    setProfileFormError('');
   }, []);
 
   const openSettingsModal = useCallback(() => {
@@ -797,6 +837,7 @@ const Navbar = () => {
 
   const handlePasswordUpdate = async (e) => {
     e.preventDefault();
+    if (isSavingPassword) return;
     setPasswordFormError('');
 
     if (passwordData.new_password !== passwordData.new_password_confirmation) {
@@ -848,7 +889,27 @@ const Navbar = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) {
+    setProfileFormError('');
+
+    if (!file.type.startsWith('image/')) {
+      setProfileFormError(
+        t(
+          'សូមជ្រើសរើសឯកសារប្រភេទរូបភាព (JPG, PNG, WEBP)!',
+          'Please select a valid image file!'
+        )
+      );
+      if (e.target) e.target.value = null;
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setProfileFormError(
+        t(
+          'ទំហំរូបភាពមិនត្រូវលើសពី 5MB ឡើយ!',
+          'Image size must not exceed 5MB!'
+        )
+      );
+      if (e.target) e.target.value = null;
       return;
     }
 
@@ -871,8 +932,9 @@ const Navbar = () => {
         endpoint = '/student/profile/update-image';
       }
 
+      // ✅ ប្រើ headers: { 'Content-Type': undefined } ដើម្បីឱ្យ Browser បង្កើត multipart boundary ដោយស្វ័យប្រវត្តិលើ Railway
       const response = await api.post(endpoint, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 'Content-Type': undefined },
       });
 
       if (response.data) {
@@ -904,6 +966,7 @@ const Navbar = () => {
           setUser(updatedUser);
         }
         syncUserToStorage(updatedUser, updatedTeacher);
+        invalidateDirectoryAvatarCaches();
 
         const resolvedServerUrl = resolveImageUrl(newImgPath);
         setProfileData((prev) => ({
@@ -911,6 +974,9 @@ const Navbar = () => {
           profile_image: resolvedServerUrl || localBlobUrl,
         }));
         setInstantAvatarPreview(null);
+        if (resolvedServerUrl) {
+          URL.revokeObjectURL(localBlobUrl);
+        }
 
         pushLocalNotification({
           titleKm: 'បានដូររូបថតប្រវត្តិរូប',
@@ -922,18 +988,32 @@ const Navbar = () => {
       }
     } catch (error) {
       console.error('Upload error:', error);
+      URL.revokeObjectURL(localBlobUrl);
       setInstantAvatarPreview(null);
       setProfileData((prev) => ({
         ...prev,
         profile_image: profileImgUrl,
       }));
+      const errMsg =
+        error.response?.data?.message ||
+        t(
+          'មិនអាចបង្ហោះរូបភាពប្រវត្តិរូបបានទេ សូមសាកល្បងម្ដងទៀត!',
+          'Failed to upload profile photo. Please try again!'
+        );
+      setProfileFormError(String(errMsg));
     } finally {
       if (e.target) e.target.value = null;
     }
   };
 
   const handleProfileUpdate = async () => {
+    if (isSavingProfile) return;
+    setProfileFormError('');
+
     if (!profileData.first_name.trim()) {
+      setProfileFormError(
+        t('សូមបញ្ចូលនាមខ្លួនរបស់អ្នក!', 'First name is required!')
+      );
       return;
     }
 
@@ -973,11 +1053,6 @@ const Navbar = () => {
       student: user?.student ? { ...user.student, ...payload } : user?.student,
     };
 
-    if (typeof setUser === 'function') {
-      setUser(optimisticUser);
-    }
-    syncUserToStorage(optimisticUser, optimisticTeacher);
-    setIsEditing(false);
     setIsSavingProfile(true);
 
     try {
@@ -991,7 +1066,8 @@ const Navbar = () => {
       const response = await api.put(endpoint, payload);
 
       if (response.data) {
-        const serverData = response.data?.data || response.data?.user || response.data;
+        const serverData =
+          response.data?.data || response.data?.user || response.data;
         const updatedUser = {
           ...optimisticUser,
           ...(typeof serverData === 'object' ? serverData : {}),
@@ -1000,6 +1076,8 @@ const Navbar = () => {
           setUser(updatedUser);
         }
         syncUserToStorage(updatedUser, optimisticTeacher);
+        invalidateDirectoryAvatarCaches();
+        setIsEditing(false);
 
         pushLocalNotification({
           titleKm: 'បានកែប្រែព័ត៌មានប្រវត្តិរូប',
@@ -1015,6 +1093,18 @@ const Navbar = () => {
         setUser(previousUser);
       }
       syncUserToStorage(previousUser, previousTeacher);
+      const apiErrors = error.response?.data?.errors;
+      const firstValidationMsg = apiErrors
+        ? Object.values(apiErrors).flat()[0]
+        : null;
+      const errMsg =
+        firstValidationMsg ||
+        error.response?.data?.message ||
+        t(
+          'មិនអាចរក្សាទុកការកែប្រែបានទេ (អ៊ីមែលអាចស្ទួន)!',
+          'Could not update profile (email may already be in use)!'
+        );
+      setProfileFormError(String(errMsg));
     } finally {
       setIsSavingProfile(false);
     }
@@ -1525,6 +1615,15 @@ const Navbar = () => {
             </div>
 
             <div className="p-6 sm:p-8 overflow-y-auto flex-1">
+              {profileFormError && (
+                <div className="mb-6 p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded-xl flex items-start gap-2.5 text-rose-600 dark:text-rose-400">
+                  <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                  <p className="text-xs font-bold leading-relaxed">
+                    {profileFormError}
+                  </p>
+                </div>
+              )}
+
               <div className="flex flex-col items-center mb-8">
                 <div className="relative group">
                   <div
@@ -1670,12 +1769,13 @@ const Navbar = () => {
                         type="text"
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.first_name}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          if (profileFormError) setProfileFormError('');
                           setProfileData({
                             ...profileData,
                             first_name: e.target.value,
-                          })
-                        }
+                          });
+                        }}
                       />
                     </div>
                     <div>
@@ -1686,12 +1786,13 @@ const Navbar = () => {
                         type="text"
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.last_name}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          if (profileFormError) setProfileFormError('');
                           setProfileData({
                             ...profileData,
                             last_name: e.target.value,
-                          })
-                        }
+                          });
+                        }}
                       />
                     </div>
                     <div>
@@ -1702,12 +1803,13 @@ const Navbar = () => {
                         type="email"
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.email}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          if (profileFormError) setProfileFormError('');
                           setProfileData({
                             ...profileData,
                             email: e.target.value,
-                          })
-                        }
+                          });
+                        }}
                       />
                     </div>
                     <div>
@@ -1718,12 +1820,13 @@ const Navbar = () => {
                         type="tel"
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.phone}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          if (profileFormError) setProfileFormError('');
                           setProfileData({
                             ...profileData,
                             phone: e.target.value,
-                          })
-                        }
+                          });
+                        }}
                       />
                     </div>
                   </div>
@@ -1743,7 +1846,10 @@ const Navbar = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setIsEditing(true)}
+                    onClick={() => {
+                      setProfileFormError('');
+                      setIsEditing(true);
+                    }}
                     className="px-6 py-3.5 bg-blue-600 text-white hover:bg-blue-700 rounded-xl text-sm font-bold flex items-center gap-2 cursor-pointer"
                   >
                     <PencilIcon className="h-4 w-4" />
@@ -1754,7 +1860,10 @@ const Navbar = () => {
                 <>
                   <button
                     type="button"
-                    onClick={() => setIsEditing(false)}
+                    onClick={() => {
+                      setProfileFormError('');
+                      setIsEditing(false);
+                    }}
                     className="px-6 py-3.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer"
                     disabled={isSavingProfile}
                   >

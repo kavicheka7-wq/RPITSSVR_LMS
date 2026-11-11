@@ -633,7 +633,7 @@ const StudentDashboard = () => {
           meta: `${courseInfo.course_code || 'COURSE'} • ${getTeacherDisplayName(courseInfo)}`,
           title: courseInfo.course_name || t('មុខវិជ្ជាសិក្សា', 'Course'),
           buttonText: t('ចូលរៀនឥឡូវនេះ', 'Resume Class'),
-          link: `/student/lessons?course_id=${courseId}`,
+          link: `/lessons?course_id=${courseId}`,
           icon: PlayCircleIcon,
           iconBoxStyle: theme.iconGradient,
         });
@@ -651,7 +651,7 @@ const StudentDashboard = () => {
         'Check & submit your course assignments on time'
       ),
       buttonText: t('មើលកិច្ចការ', 'View Tasks'),
-      link: '/student/assignments',
+      link: '/assignments',
       icon: ClipboardDocumentListIcon,
       iconBoxStyle: 'from-purple-400 to-indigo-500 text-white',
     });
@@ -667,7 +667,7 @@ const StudentDashboard = () => {
         'Take practice quizzes to test your knowledge'
       ),
       buttonText: t('ចូលធ្វើតេស្ត', 'Take Quiz'),
-      link: '/student/quizzes',
+      link: '/quizzes',
       icon: AcademicCapIcon,
       iconBoxStyle: 'from-emerald-400 to-teal-500 text-slate-950',
     });
@@ -682,7 +682,7 @@ const StudentDashboard = () => {
         '“TVET Real Skills, Better Life! Study to Finish, to Know, to Get a Job”'
       ),
       buttonText: t('មើលតារាងពិន្ទុ', 'View Grades'),
-      link: '/student/scores',
+      link: '/grades',
       icon: ChartBarIcon,
       iconBoxStyle: 'from-cyan-400 to-blue-500 text-slate-950',
     });
@@ -885,7 +885,7 @@ const StudentDashboard = () => {
       iconBox:
         'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-blue-500/25',
       textAccent: 'text-blue-600 dark:text-blue-400',
-      link: '/student/courses',
+      link: '/courses',
     },
     {
       title: t('ពិន្ទុមធ្យមភាគ', 'Average Score'),
@@ -897,7 +897,7 @@ const StudentDashboard = () => {
       iconBox:
         'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-emerald-500/25',
       textAccent: 'text-emerald-600 dark:text-emerald-400',
-      link: '/student/scores',
+      link: '/grades',
     },
     {
       title: t('កិច្ចការសិស្ស', 'Assignments'),
@@ -909,7 +909,7 @@ const StudentDashboard = () => {
       iconBox:
         'bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-purple-500/25',
       textAccent: 'text-purple-600 dark:text-purple-400',
-      link: '/student/assignments',
+      link: '/assignments',
     },
     {
       title: t('កម្រងសំណួរប្រឡង', 'Quizzes'),
@@ -921,7 +921,7 @@ const StudentDashboard = () => {
       iconBox:
         'bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-amber-500/25',
       textAccent: 'text-amber-600 dark:text-amber-400',
-      link: '/student/quizzes',
+      link: '/quizzes',
     },
   ];
 
@@ -1168,7 +1168,7 @@ const StudentDashboard = () => {
               </strong>
             </span>
             <Link
-              to="/student/scores"
+              to="/grades"
               className="font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
             >
               <span>{t('មើលតារាងពិន្ទុលម្អិត', 'View Full Grades')}</span>
@@ -1279,7 +1279,7 @@ const StudentDashboard = () => {
                   return (
                     <Link
                       key={assign.id || idx}
-                      to={`/student/assignments?course_id=${
+                      to={`/assignments?course_id=${
                         assign.course?.id || assign.course_id || 'all'
                       }`}
                       className="std-activity-item flex items-center justify-between gap-3.5 p-3.5 sm:p-4 rounded-2xl border border-gray-100 bg-gray-50/60 hover:bg-indigo-50/40 hover:border-indigo-300 transition-all group"
@@ -1361,7 +1361,7 @@ const StudentDashboard = () => {
 
           <div className="std-card-divider pt-4 mt-5 border-t border-gray-100">
             <Link
-              to="/student/assignments"
+              to="/assignments"
               className="std-view-all-activity-btn group w-full py-3 px-4 rounded-xl bg-indigo-50/80 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200/80 hover:border-indigo-600 text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 transition-all duration-200 shadow-2xs hover:shadow-md cursor-pointer"
             >
               <span>{t('មើលកិច្ចការសិស្សទាំងអស់', 'View All Assignments')}</span>
@@ -1425,7 +1425,7 @@ const StudentDashboard = () => {
                   return (
                     <Link
                       key={quiz.id || idx}
-                      to={`/student/quizzes?course_id=${
+                      to={`/quizzes?course_id=${
                         quiz.course?.id || quiz.course_id || 'all'
                       }`}
                       className="std-activity-item flex items-center justify-between gap-3.5 p-3.5 sm:p-4 rounded-2xl border border-gray-100 bg-gray-50/60 hover:bg-indigo-50/40 hover:border-indigo-300 transition-all group"
@@ -1501,7 +1501,7 @@ const StudentDashboard = () => {
 
           <div className="std-card-divider pt-4 mt-5 border-t border-gray-100">
             <Link
-              to="/student/quizzes"
+              to="/quizzes"
               className="std-view-all-activity-btn group w-full py-3 px-4 rounded-xl bg-indigo-50/80 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200/80 hover:border-indigo-600 text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 transition-all duration-200 shadow-2xs hover:shadow-md cursor-pointer"
             >
               <span>{t('មើលកម្រងសំណួរប្រឡងទាំងអស់', 'View All Quizzes')}</span>

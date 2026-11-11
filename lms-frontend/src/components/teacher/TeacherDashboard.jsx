@@ -272,6 +272,7 @@ const formatSubmittedDate = (dateStr) => {
 export default function TeacherDashboard() {
   const { t, language } = useLanguage();
   const { user } = useAuth();
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentTeacherId = useMemo(() => {
@@ -352,17 +353,25 @@ export default function TeacherDashboard() {
     return user?.name || t('លោកគ្រូ/អ្នកគ្រូ', 'Teacher');
   };
 
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
-    if (imagePath.startsWith('http') || imagePath.startsWith('data:'))
-      return imagePath;
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const getProfileImageUrl = useCallback((imagePath) => {
+    if (!imagePath || typeof imagePath !== 'string') return null;
+    const trimmed = imagePath.trim();
+    if (!trimmed) return null;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const baseUrl = (
       import.meta.env.VITE_API_URL || 'http://localhost:8000'
     ).replace(/\/api\/?$/, '');
-    return `${baseUrl}/storage/${imagePath
-      .replace(/^\/?storage\//, '')
-      .replace(/^\/+/, '')}`;
-  };
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    return `${baseUrl}/storage/${cleanPath}`;
+  }, []);
 
   // ============================================================================
   // 📌 ផ្នែកទី២៖ ទាញយកទិន្នន័យ Dashboard ល្បឿនលឿន (0ms) + Prefetch ទំព័រផ្សេងៗទុកមុន
@@ -553,7 +562,7 @@ export default function TeacherDashboard() {
       subtitle: `${t('វត្តមានថ្ងៃនេះ', 'Present Today')}: ${
         stats?.present_today ?? 0
       }`,
-      link: '/teacher/students',
+      link: '/students',
     },
     {
       title: t('មុខវិជ្ជាបង្រៀន', 'Courses'),
@@ -565,7 +574,7 @@ export default function TeacherDashboard() {
       subtitle: `${t('មេរៀនសរុប', 'Total Lessons')}: ${
         stats?.total_lessons ?? 0
       }`,
-      link: '/teacher/courses',
+      link: '/courses',
     },
     {
       title: t('អត្រាវត្តមាន', 'Attendance'),
@@ -577,7 +586,7 @@ export default function TeacherDashboard() {
       subtitle: `${t('អវត្តមានថ្ងៃនេះ', 'Absent Today')}: ${
         stats?.absent_today ?? 0
       }`,
-      link: '/teacher/attendance',
+      link: '/attendance',
     },
     {
       title: t('កម្រងសំណួរ', 'Quizzes'),
@@ -589,7 +598,7 @@ export default function TeacherDashboard() {
       subtitle: `${t('កិច្ចការសរុប', 'Assignments')}: ${
         stats?.total_assignments ?? assignmentsList.length ?? 0
       }`,
-      link: '/teacher/quizzes',
+      link: '/quizzes',
     },
   ];
 
@@ -750,7 +759,7 @@ export default function TeacherDashboard() {
               </p>
             </div>
             <Link
-              to="/teacher/assignments"
+              to="/assignments"
               className="tch-badge-amber text-[11px] font-extrabold text-amber-700 bg-amber-50 border border-amber-100 px-2.5 py-1 rounded-xl shrink-0 hover:bg-amber-100 transition-colors"
             >
               {t('បញ្ជីកិច្ចការ', 'Assignments')}
@@ -829,7 +838,7 @@ export default function TeacherDashboard() {
               </p>
             </div>
             <Link
-              to="/teacher/grades"
+              to="/grades"
               className="tch-badge-emerald text-[11px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-xl shrink-0 hover:bg-emerald-100 transition-colors"
             >
               {t('តារាងពិន្ទុ', 'Grades')}
@@ -911,7 +920,7 @@ export default function TeacherDashboard() {
             </p>
           </div>
           <Link
-            to="/teacher/assignments"
+            to="/assignments"
             className="tch-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 border border-blue-100 px-4 py-2 rounded-xl transition-all flex items-center gap-1"
           >
             {t('មើលទាំងអស់', 'View All')}
@@ -955,9 +964,14 @@ export default function TeacherDashboard() {
                 </tr>
               ) : (
                 recentActivities.map((act, index) => {
-                  const avatarUrl = getProfileImageUrl(
-                    act.student_image || act.profile_image
-                  );
+                  const rawAvatar =
+                    act.student_image ||
+                    act.profile_image ||
+                    act.student?.profile_image ||
+                    act.student?.user?.profile_image;
+                  const avatarUrl = getProfileImageUrl(rawAvatar);
+                  const avatarKey = `act_${act.id || index}`;
+                  const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
                   const initial = (act.student_name?.[0] || 'S').toUpperCase();
                   return (
                     <tr
@@ -967,15 +981,17 @@ export default function TeacherDashboard() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-3.5">
                           <div className="tch-avatar w-10 h-10 rounded-full bg-indigo-500 text-white flex items-center justify-center font-black shrink-0 overflow-hidden shadow-xs">
-                            {avatarUrl ? (
+                            {hasAvatar ? (
                               <img
                                 src={avatarUrl}
                                 alt={act.student_name}
-                                className="h-full w-full object-cover"
-                                onError={(e) => {
-                                  e.target.style.display = 'none';
-                                  e.target.parentElement.innerHTML = `<span>${initial}</span>`;
-                                }}
+                                className="h-full w-full object-cover rounded-full"
+                                onError={() =>
+                                  setFailedAvatars((prev) => ({
+                                    ...prev,
+                                    [avatarKey]: true,
+                                  }))
+                                }
                               />
                             ) : (
                               <span>{initial}</span>
@@ -1010,7 +1026,7 @@ export default function TeacherDashboard() {
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
                         <Link
-                          to="/teacher/assignments"
+                          to="/assignments"
                           className="tch-grade-btn inline-flex items-center gap-1.5 text-xs font-extrabold text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl border border-blue-200 transition-all shadow-2xs"
                         >
                           {t('ដាក់ពិន្ទុ', 'Grade')}
@@ -1034,7 +1050,7 @@ export default function TeacherDashboard() {
             {t('កិច្ចការរង់ចាំការដាក់ពិន្ទុ', 'Pending Submissions')}
           </h2>
           <Link
-            to="/teacher/assignments"
+            to="/assignments"
             className="text-xs font-extrabold text-blue-600 flex items-center gap-0.5"
           >
             {t('មើលទាំងអស់', 'View All')}
@@ -1052,22 +1068,33 @@ export default function TeacherDashboard() {
             </div>
           ) : (
             recentActivities.map((act, index) => {
-              const avatarUrl = getProfileImageUrl(
-                act.student_image || act.profile_image
-              );
+              const rawAvatar =
+                act.student_image ||
+                act.profile_image ||
+                act.student?.profile_image ||
+                act.student?.user?.profile_image;
+              const avatarUrl = getProfileImageUrl(rawAvatar);
+              const avatarKey = `act_${act.id || index}`;
+              const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
               const initial = (act.student_name?.[0] || 'S').toUpperCase();
               return (
                 <Link
                   key={`mob-${act.id || index}`}
-                  to="/teacher/assignments"
+                  to="/assignments"
                   className="tch-surface-card bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3.5 active:scale-[0.98] transition-transform"
                 >
                   <div className="w-11 h-11 rounded-full bg-indigo-500 text-white flex items-center justify-center font-black text-base shrink-0 overflow-hidden shadow-xs">
-                    {avatarUrl ? (
+                    {hasAvatar ? (
                       <img
                         src={avatarUrl}
                         alt={act.student_name}
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-cover rounded-full"
+                        onError={() =>
+                          setFailedAvatars((prev) => ({
+                            ...prev,
+                            [avatarKey]: true,
+                          }))
+                        }
                       />
                     ) : (
                       <span>{initial}</span>

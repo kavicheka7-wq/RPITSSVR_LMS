@@ -12,6 +12,7 @@ import {
   XCircleIcon,
   ArrowPathIcon,
   ExclamationCircleIcon,
+  ExclamationTriangleIcon,
   MagnifyingGlassIcon,
   BookOpenIcon,
   PencilSquareIcon,
@@ -42,6 +43,7 @@ const getQuizzesMetaCacheKey = (uid) => `cached_student_quizzes_meta_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
 const getQuizReviewsCacheKey = (uid) => `cached_student_quiz_reviews_v8_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 
 const DEFAULT_META = {
   current_page: 1,
@@ -288,12 +290,13 @@ const pushLocalNotification = (notif) => {
     let role = 'student';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'student';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'student';
         role = rName.toString().toLowerCase();
       }
     }
@@ -416,6 +419,9 @@ const StudentQuizzes = () => {
   const [loadingQuizId, setLoadingQuizId] = useState(null);
   const [timeLeft, setTimeLeft] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [unansweredCountPrompt, setUnansweredCountPrompt] = useState(0);
+  const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const timerRef = useRef(null);
   const endTimeRef = useRef(null);
 
@@ -796,6 +802,9 @@ const StudentQuizzes = () => {
   const handleStartAttempt = async (quiz) => {
     setLoadingQuizId(quiz.id);
     setIsAttemptExpanded(false);
+    setSubmitError('');
+    setUnansweredCountPrompt(0);
+    setShowExitConfirmModal(false);
     try {
       const response = await api.get(`/student/quizzes/${quiz.id}`);
       const loadedQuiz = response.data?.quiz || quiz;
@@ -826,6 +835,8 @@ const StudentQuizzes = () => {
   };
 
   const handleSelectOption = (questionId, optionId) => {
+    if (unansweredCountPrompt > 0) setUnansweredCountPrompt(0);
+    if (submitError) setSubmitError('');
     setAttemptAnswers((prev) => ({
       ...prev,
       [questionId]: optionId,
@@ -833,28 +844,22 @@ const StudentQuizzes = () => {
   };
 
   // ✅ មុខងារបញ្ជូនចម្លើយប្រឡង និងបង្កើតទិន្នន័យពិនិត្យសំណួរ (Review Items)
-  const handleQuizSubmit = async (e, isAuto = false) => {
+  const handleQuizSubmit = async (e, isAuto = false, forceSubmit = false) => {
     if (e) e.preventDefault();
     if (isSubmitting || !activeQuizAttempt) return;
 
-    if (!isAuto && Array.isArray(activeQuizAttempt?.questions)) {
+    if (!isAuto && !forceSubmit && Array.isArray(activeQuizAttempt?.questions)) {
       const unanswered = activeQuizAttempt.questions.filter(
         (q) => !attemptAnswers[q.id]
       );
       if (unanswered.length > 0) {
-        if (
-          !window.confirm(
-            t(
-              `អ្នកនៅសល់សំណួរចំនួន ${unanswered.length} ទៀតមិនទាន់ឆ្លើយ។ តើអ្នកចង់ផ្ញើចម្លើយមែនទេ?`,
-              `You have ${unanswered.length} unanswered questions. Do you want to submit anyway?`
-            )
-          )
-        ) {
-          return;
-        }
+        setUnansweredCountPrompt(unanswered.length);
+        return;
       }
     }
 
+    setUnansweredCountPrompt(0);
+    setSubmitError('');
     setIsSubmitting(true);
     clearInterval(timerRef.current);
     endTimeRef.current = null;
@@ -882,7 +887,7 @@ const StudentQuizzes = () => {
       const resData = response.data || {};
       const earnedScore = resData.score ?? resData.attempt?.score ?? 0;
       const totalMarks =
-        resData.total_marks ?? activeQuizAttempt.total_mark ?? 100;
+        resData.total_marks ?? activeQuizAttempt.total_mark ?? 20;
 
       const finalResultPayload = {
         ...resData,
@@ -931,24 +936,32 @@ const StudentQuizzes = () => {
             CACHE_KEY_SHARED_QUIZZES,
             JSON.stringify(updated)
           );
+          localStorage.removeItem(getScoresCacheKey(currentStudentId));
         } catch (err) {}
         return updated;
       });
 
-      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
+      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar (Clean URL '/quizzes')
       pushLocalNotification({
         titleKm: 'បានបញ្ចប់ការប្រឡងកម្រងសំណួរ',
         titleEn: 'Quiz Completed',
-        descKm: `អ្នកទទួលបានពិន្ទុ ${formatCleanScore(earnedScore)} / ${formatCleanScore(totalMarks)} លើកម្រងសំណួរ «${activeQuizAttempt.title}»។`,
-        descEn: `You scored ${formatCleanScore(earnedScore)} / ${formatCleanScore(totalMarks)} on "${activeQuizAttempt.title}".`,
+        descKm: `អ្នកទទួលបានពិន្ទុ ${formatCleanScore(earnedScore)} / ${formatCleanScore(totalMarks, 20)} លើកម្រងសំណួរ «${activeQuizAttempt.title}»។`,
+        descEn: `You scored ${formatCleanScore(earnedScore)} / ${formatCleanScore(totalMarks, 20)} on "${activeQuizAttempt.title}".`,
         category: 'quiz',
-        link: '/student/quizzes',
+        link: '/quizzes',
       });
 
       setActiveQuizAttempt(null);
       fetchQuizzes(true);
     } catch (error) {
       console.error('Failed to submit quiz:', error);
+      const errMsg =
+        error.response?.data?.message ||
+        t(
+          'មានបញ្ហាក្នុងការបញ្ជូនចម្លើយ សូមសាកល្បងម្ដងទៀត!',
+          'Failed to submit quiz answers. Please try again!'
+        );
+      setSubmitError(String(errMsg));
     } finally {
       setIsSubmitting(false);
     }
@@ -961,8 +974,8 @@ const StudentQuizzes = () => {
     const saved = savedReviewsMap[reviewKey];
     const attempt = quiz.resolvedAttempt;
     const totalMarks = formatCleanScore(
-      quiz.total_mark || quiz.total_marks || 100,
-      100
+      quiz.total_mark || quiz.total_marks || 20,
+      20
     );
     const earnedScore = formatCleanScore(attempt?.score, 0);
 
@@ -1007,7 +1020,7 @@ const StudentQuizzes = () => {
     enrichedQuizzes.forEach((q) => {
       if (q.isCompleted) {
         completed += 1;
-        const maxM = Number(q.total_mark || q.total_marks || 100) || 100;
+        const maxM = Number(q.total_mark || q.total_marks || 20) || 20;
         const sc = Number(q.resolvedAttempt?.score || 0);
         percentSum += (sc / maxM) * 100;
       } else if (q.isAvailable) {
@@ -1399,8 +1412,8 @@ const StudentQuizzes = () => {
           {filteredQuizzes.map((quiz) => {
             const attempt = quiz.resolvedAttempt;
             const totalMark = formatCleanScore(
-              quiz.total_mark || quiz.total_marks || 100,
-              100
+              quiz.total_mark || quiz.total_marks || 20,
+              20
             );
             const earnedScore = formatCleanScore(attempt?.score, 0);
             const isStartingThis = loadingQuizId === quiz.id;
@@ -1751,7 +1764,82 @@ const StudentQuizzes = () => {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+                {submitError && (
+                  <div className="std-qz-badge-rose p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
+                    <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                    <p className="text-xs font-bold leading-relaxed">
+                      {submitError}
+                    </p>
+                  </div>
+                )}
+
+                {unansweredCountPrompt > 0 && (
+                  <div className="std-qz-badge-amber p-4 bg-amber-50 border border-amber-300 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-800 animate-fadeIn">
+                    <div className="flex items-start gap-2.5">
+                      <ExclamationTriangleIcon className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-xs sm:text-sm font-extrabold leading-relaxed">
+                        {t(
+                          `អ្នកនៅសល់សំណួរចំនួន ${unansweredCountPrompt} ទៀតមិនទាន់ឆ្លើយ។ តើអ្នកពិតជាចង់បញ្ជូនចម្លើយឥឡូវនេះមែនទេ?`,
+                          `You have ${unansweredCountPrompt} unanswered questions. Submit anyway?`
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => setUnansweredCountPrompt(0)}
+                        className="px-3.5 py-1.5 rounded-xl bg-white text-gray-700 border border-gray-200 text-xs font-bold hover:bg-gray-50 cursor-pointer"
+                      >
+                        {t('ត្រឡប់ទៅឆ្លើយបន្ត', 'Keep Answering')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleQuizSubmit(e, false, true)}
+                        className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold shadow-xs cursor-pointer"
+                      >
+                        {t('បញ្ជូនឥឡូវនេះ', 'Submit Anyway')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {showExitConfirmModal && (
+                  <div className="std-qz-badge-rose p-4 bg-rose-50 border border-rose-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-800 animate-fadeIn">
+                    <div className="flex items-start gap-2.5">
+                      <ExclamationTriangleIcon className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                      <p className="text-xs sm:text-sm font-extrabold leading-relaxed">
+                        {t(
+                          'តើអ្នកចង់ចាកចេញពីផ្ទាំងប្រឡងសិនមែនទេ? (ម៉ោងប្រឡងនឹងនៅតែបន្តរាប់)',
+                          'Do you want to close the quiz window? (The timer will continue running)'
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => setShowExitConfirmModal(false)}
+                        className="px-3.5 py-1.5 rounded-xl bg-white text-gray-700 border border-gray-200 text-xs font-bold hover:bg-gray-50 cursor-pointer"
+                      >
+                        {t('បន្តប្រឡង', 'Stay')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveQuizAttempt(null);
+                          setAttemptAnswers({});
+                          endTimeRef.current = null;
+                          setIsAttemptExpanded(false);
+                          setShowExitConfirmModal(false);
+                        }}
+                        className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shadow-xs cursor-pointer"
+                      >
+                        {t('ចាកចេញ', 'Leave Quiz')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {Array.isArray(activeQuizAttempt.questions) &&
                 activeQuizAttempt.questions.length > 0 ? (
                   <div
@@ -1840,21 +1928,7 @@ const StudentQuizzes = () => {
               <div className="std-qz-modal-bar px-5 sm:px-7 py-4 border-t border-gray-100 flex items-center justify-between gap-3 shrink-0 bg-gray-50">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        t(
-                          'តើអ្នកចង់ចាកចេញពីផ្ទាំងប្រឡងសិនមែនទេ? (ម៉ោងប្រឡងនឹងនៅតែបន្តរាប់)',
-                          'Do you want to close the quiz window? (The timer will continue running)'
-                        )
-                      )
-                    ) {
-                      setActiveQuizAttempt(null);
-                      setAttemptAnswers({});
-                      endTimeRef.current = null;
-                      setIsAttemptExpanded(false);
-                    }
-                  }}
+                  onClick={() => setShowExitConfirmModal(true)}
                   className="std-qz-code-pill bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 text-xs sm:text-sm font-extrabold px-5 py-2.5 rounded-xl transition cursor-pointer"
                 >
                   {t('ចាកចេញសិន', 'Close')}
@@ -1945,7 +2019,7 @@ const StudentQuizzes = () => {
                         </span>
                         <span className="text-xs font-bold text-blue-200/80">/</span>
                         <span className="text-xs sm:text-sm font-extrabold text-white">
-                          {formatCleanScore(quizResult.total_marks, 100)}
+                          {formatCleanScore(quizResult.total_marks, 20)}
                         </span>
                         <span className="text-[10px] font-bold text-blue-200 ml-0.5">
                           {t('ពិន្ទុ', 'pts')}
@@ -2160,7 +2234,7 @@ const StudentQuizzes = () => {
                       {t('ពិន្ទុសរុបរបស់អ្នក៖', 'Your Total Score:')}{' '}
                       <strong className="text-indigo-600 dark:text-indigo-400">
                         {formatCleanScore(quizResult.score)} /{' '}
-                        {formatCleanScore(quizResult.total_marks, 100)}{' '}
+                        {formatCleanScore(quizResult.total_marks, 20)}{' '}
                         {t('ពិន្ទុ', 'pts')}
                       </strong>
                     </p>

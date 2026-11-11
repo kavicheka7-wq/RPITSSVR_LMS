@@ -280,13 +280,18 @@ const pushLocalNotification = (notif) => {
     let role = 'teacher';
     if (userObjStr) {
       const userObj = JSON.parse(userObjStr);
-      uid = userObj.id || userObj.user_id || userObj.email || 'default';
-      if (userObj.role) {
+      const u = userObj?.user || userObj?.data || userObj;
+      uid = u?.id || u?.user_id || u?.email || 'default';
+      if (u?.role) {
         const rName =
-          typeof userObj.role === 'string'
-            ? userObj.role
-            : userObj.role.role_name || userObj.role.name || 'teacher';
+          typeof u.role === 'string'
+            ? u.role
+            : u.role.role_name || u.role.name || 'teacher';
         role = rName.toString().toLowerCase();
+      } else if (Number(u?.role_id) === 1) {
+        role = 'admin';
+      } else if (Number(u?.role_id) === 3) {
+        role = 'student';
       }
     }
 
@@ -319,6 +324,7 @@ export default function TeacherManageAssignments() {
   const { user } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const [failedAvatars, setFailedAvatars] = useState({});
 
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || '';
@@ -999,6 +1005,33 @@ export default function TeacherManageAssignments() {
     [allStudents]
   );
 
+  // ✅ ទាញរករូបភាពប្រវត្តិរូប (Base64 / URL) របស់សិស្សដែលបានប្រគល់កិច្ចការក្នុង Modal
+  const resolveSubmissionStudentAvatar = useCallback(
+    (sub) => {
+      const directImg =
+        sub?.student?.profile_image ||
+        sub?.student?.user?.profile_image ||
+        sub?.profile_image ||
+        sub?.student_image;
+      if (directImg) return directImg;
+
+      const subUserId =
+        sub?.student_id || sub?.user_id || sub?.student?.user_id || sub?.student?.id;
+      const subEmail = (sub?.student?.email || '').toLowerCase().trim();
+
+      const matchedStd = (allStudents || []).find(
+        (s) =>
+          (subUserId &&
+            (String(s.user_id) === String(subUserId) ||
+              String(s.id) === String(subUserId))) ||
+          (subEmail && (s.email || '').toLowerCase().trim() === subEmail)
+      );
+
+      return matchedStd?.profile_image || matchedStd?.user?.profile_image || null;
+    },
+    [allStudents]
+  );
+
   // ============================================================================
   // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបកិច្ចការ និងដាក់ពិន្ទុសិស្ស (ភ្ជាប់តែកណ្ដឹង)
   // ============================================================================
@@ -1109,7 +1142,7 @@ export default function TeacherManageAssignments() {
           descKm: `កិច្ចការ «${payload.title}» ${courseName ? `(${courseName})` : ''} ត្រូវបានកែប្រែដោយជោគជ័យ។`,
           descEn: `Assignment "${payload.title}" was updated successfully.`,
           category: 'assignment',
-          link: '/teacher/assignments',
+          link: '/assignments',
         });
       } else {
         const res = await api.post('/teacher/assignments', payload);
@@ -1145,7 +1178,7 @@ export default function TeacherManageAssignments() {
           descKm: `បានដាក់កិច្ចការថ្មី «${payload.title}» (${payload.total_score} ពិន្ទុ) សម្រាប់មុខវិជ្ជា «${courseName || '—'}»។`,
           descEn: `Created new assignment "${payload.title}" (${payload.total_score} pts).`,
           category: 'assignment',
-          link: '/teacher/assignments',
+          link: '/assignments',
         });
       }
       setShowAddModal(false);
@@ -1197,7 +1230,7 @@ export default function TeacherManageAssignments() {
         descKm: `កិច្ចការ «${deletedTitle}» ត្រូវបានលុបចេញពីប្រព័ន្ធរួចរាល់។`,
         descEn: `Assignment "${deletedTitle}" has been removed.`,
         category: 'assignment',
-        link: '/teacher/assignments',
+        link: '/assignments',
       });
     } catch (error) {
       console.error('Delete assignment error:', error);
@@ -1363,7 +1396,7 @@ export default function TeacherManageAssignments() {
         descKm: `បានដាក់ពិន្ទុ ${formatCleanScore(payload.score ?? 0)} ពិន្ទុ ជូនសិស្ស «${studentName}» សម្រាប់កិច្ចការ «${viewingAssignment?.title || ''}»។`,
         descEn: `Graded "${studentName}" (${formatCleanScore(payload.score ?? 0)} pts) for "${viewingAssignment?.title || ''}".`,
         category: 'assignment',
-        link: '/teacher/assignments',
+        link: '/assignments',
       });
     } catch (error) {
       console.error('Save grade error:', error);
@@ -1379,30 +1412,46 @@ export default function TeacherManageAssignments() {
   // 📌 ផ្នែកទី៥៖ អនុគមន៍ជំនួយ និងការនាំចេញឯកសារ Excel (.xlsx)
   // ============================================================================
   const getFileUrl = (filePath) => {
-    if (!filePath) return '#';
-    if (filePath.startsWith('http://') || filePath.startsWith('https://'))
-      return filePath;
+    if (!filePath || typeof filePath !== 'string') return '#';
+    const trimmed = filePath.trim();
+    if (!trimmed) return '#';
+    if (
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('//') ||
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const backendBase = (
-      import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+      import.meta.env.VITE_API_URL ||
+      api.defaults?.baseURL ||
+      'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = filePath.replace(/^\/?storage\//, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
   };
 
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  const getProfileImageUrl = useCallback((imagePath) => {
+    if (!imagePath || typeof imagePath !== 'string') return null;
+    const trimmed = imagePath.trim();
+    if (!trimmed) return null;
     if (
-      imagePath.startsWith('http://') ||
-      imagePath.startsWith('https://') ||
-      imagePath.startsWith('data:')
-    )
-      return imagePath;
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
     const baseUrl = (
       import.meta.env.VITE_API_URL || 'http://localhost:8000'
     ).replace(/\/api\/?$/, '');
-    const cleanPath = imagePath.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
-  };
+  }, []);
 
   const getStudentDisplayName = (student) => {
     if (!student) return 'Unknown';
@@ -1584,7 +1633,7 @@ export default function TeacherManageAssignments() {
       descKm: `បញ្ជីកិច្ចការចំនួន ${filteredAssignments.length} ត្រូវបានទាញយកជាឯកសារ Excel ជោគជ័យ។`,
       descEn: `Exported ${filteredAssignments.length} assignments to Excel.`,
       category: 'export',
-      link: '/teacher/assignments',
+      link: '/assignments',
     });
   };
 
@@ -1658,7 +1707,7 @@ export default function TeacherManageAssignments() {
       descKm: `បញ្ជីសិស្សដាក់កិច្ចការ «${viewingAssignment.title}» (${submissions.length} នាក់) ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: `Exported submissions for "${viewingAssignment.title}" (${submissions.length} students) to Excel.`,
       category: 'export',
-      link: '/teacher/assignments',
+      link: '/assignments',
     });
   };
 
@@ -2478,7 +2527,7 @@ export default function TeacherManageAssignments() {
                             </tr>
                           </thead>
                           <tbody className="asg-table-body bg-white">
-                            {filteredModalSubmissions.map((sub) => {
+                            {filteredModalSubmissions.map((sub, subIdx) => {
                               const subTimeMs = toComparableTimeMs(
                                 sub.submitted_at
                               );
@@ -2494,9 +2543,14 @@ export default function TeacherManageAssignments() {
                               const displayName = getStudentDisplayName(
                                 sub.student
                               );
-                              const profileImg =
-                                sub.student?.profile_image ||
-                                sub.student?.user?.profile_image;
+                              const rawAvatar = resolveSubmissionStudentAvatar(
+                                sub
+                              );
+                              const avatarUrl = getProfileImageUrl(rawAvatar);
+                              const avatarKey = `sub_${sub.id || subIdx}`;
+                              const hasAvatar = Boolean(
+                                avatarUrl && !failedAvatars[avatarKey]
+                              );
                               const stdGender = sub.student?.gender || '';
                               const isFemale = isFemaleGender(stdGender);
                               const stdShift = resolveSubmissionStudentShift(sub);
@@ -2509,24 +2563,27 @@ export default function TeacherManageAssignments() {
                                 >
                                   <td className="px-4 py-3.5 whitespace-nowrap">
                                     <div className="flex items-center gap-3">
-                                      {profileImg ? (
-                                        <img
-                                          src={getProfileImageUrl(profileImg)}
-                                          alt={displayName}
-                                          className="w-9 h-9 rounded-full object-cover border border-gray-200 shrink-0"
-                                          onError={(e) => {
-                                            e.target.style.display = 'none';
-                                          }}
-                                        />
-                                      ) : (
-                                        <div className="w-9 h-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-extrabold text-xs shrink-0">
-                                          {displayName !== 'Unknown' ? (
-                                            displayName.charAt(0).toUpperCase()
-                                          ) : (
-                                            <UserCircleIcon className="h-5 w-5" />
-                                          )}
-                                        </div>
-                                      )}
+                                      <div className="w-9 h-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-extrabold text-xs shrink-0 overflow-hidden shadow-xs">
+                                        {hasAvatar ? (
+                                          <img
+                                            src={avatarUrl}
+                                            alt={displayName}
+                                            className="h-full w-full object-cover rounded-full"
+                                            onError={() =>
+                                              setFailedAvatars((prev) => ({
+                                                ...prev,
+                                                [avatarKey]: true,
+                                              }))
+                                            }
+                                          />
+                                        ) : displayName !== 'Unknown' ? (
+                                          <span>
+                                            {displayName.charAt(0).toUpperCase()}
+                                          </span>
+                                        ) : (
+                                          <UserCircleIcon className="h-5 w-5" />
+                                        )}
+                                      </div>
                                       <div>
                                         <div className="asg-text-primary text-sm font-extrabold text-gray-900">
                                           {displayName}

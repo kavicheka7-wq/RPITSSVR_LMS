@@ -4,23 +4,49 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Student;
 use App\Models\Course;
-use App\Models\Enrollment;
 use App\Models\Department;
+use App\Models\Enrollment;
+use App\Models\Student;
+use App\Models\Teacher;
 use App\Models\User;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class TeacherStudentController extends Controller
 {
     /**
+     * ទាញយកកំណត់ត្រាគ្រូបង្រៀនពីតារាង teachers ដោយផ្អែកលើ user_id ឬ email
+     */
+    private function resolveTeacherRecord(): ?Teacher
+    {
+        $user = Auth::user();
+        if (!$user) {
+            return null;
+        }
+
+        if ($user->relationLoaded('teacher') && $user->teacher) {
+            return $user->teacher;
+        }
+
+        $teacher = Teacher::where('user_id', $user->id)->first();
+        if (!$teacher && !empty($user->email)) {
+            $teacher = Teacher::where('email', $user->email)->first();
+        }
+
+        return $teacher;
+    }
+
+    /**
      * ទាញយកបញ្ជី ID របស់គ្រូបង្រៀន (ទាំង teachers.id និង users.id)
      */
-    private function getTeacherIds()
+    private function getTeacherIds(): array
     {
-        $teacher = Auth::user() ? Auth::user()->teacher : null;
+        $teacher = $this->resolveTeacherRecord();
+
         return array_values(array_unique(array_filter([
             $teacher ? (int) $teacher->id : null,
             Auth::id() ? (int) Auth::id() : null,
@@ -30,9 +56,9 @@ class TeacherStudentController extends Controller
     /**
      * ទាញយកបញ្ជីដេប៉ាតឺម៉ង់របស់គ្រូបង្រៀន និងដេប៉ាតឺម៉ង់នៃមុខវិជ្ជាដែលគ្រូបង្រៀន
      */
-    private function getTeacherDepartmentIds()
+    private function getTeacherDepartmentIds(): array
     {
-        $teacher = Auth::user() ? Auth::user()->teacher : null;
+        $teacher = $this->resolveTeacherRecord();
         $deptIds = [];
         if ($teacher && $teacher->department_id) {
             $deptIds[] = (int) $teacher->department_id;
@@ -52,7 +78,7 @@ class TeacherStudentController extends Controller
     /**
      * បង្កើតតារាងផ្គូផ្គងរវាង course_id និងបញ្ជី students.id ដែលបានចុះឈ្មោះក្នុងមុខវិជ្ជានីមួយៗយ៉ាងត្រឹមត្រូវ ១០០%
      */
-    private function buildCourseToStudentIdsMap(array $courseIds)
+    private function buildCourseToStudentIdsMap(array $courseIds): array
     {
         if (empty($courseIds)) {
             return [];
@@ -142,7 +168,7 @@ class TeacherStudentController extends Controller
             $filterCourseId = $request ? $request->input('course_id') : null;
 
             // ✅ កំណត់បញ្ជី students.id ដែលត្រូវទាញយក (រួមបញ្ចូលទាំងសិស្សក្នុងដេប៉ាតឺម៉ង់របស់គ្រូទាំងអស់)
-            if (!empty($filterCourseId)) {
+            if (!empty($filterCourseId) && $filterCourseId !== 'all') {
                 $targetCid = (int) $filterCourseId;
                 $studentIds = $courseToStudentIdsMap[$targetCid] ?? [];
             } else {
@@ -169,24 +195,30 @@ class TeacherStudentController extends Controller
                     'data' => [],
                     'total' => 0,
                     'course_students_map' => $courseToStudentIdsMap,
-                    'message' => 'មិនទាន់មានសិស្សក្នុងដេប៉ាតឺម៉ង់ ឬមុខវិជ្ជានេះនៅឡើយទេ'
+                    'message' => 'មិនទាន់មានសិស្សក្នុងដេប៉ាតឺម៉ង់ ឬមុខវិជ្ជានេះនៅឡើយទេ',
                 ]);
             }
 
             $query = Student::with([
                 'department:id,department_name',
-                'user:id,status,email',
-                'role:id,role_name'
+                'user:id,status,email,profile_image',
+                'role:id,role_name',
             ])
-            ->whereIn('id', $studentIds);
+                ->whereIn('id', $studentIds);
+
+            if ($request && $request->filled('study_shift') && $request->study_shift !== 'all') {
+                $query->where('study_shift', $request->study_shift);
+            }
 
             // Server-side search filter
-            $search = $request ? ($request->input('search') ?: $request->input('q')) : null;
-            if ($search) {
+            $search = $request ? trim((string) ($request->input('search') ?: $request->input('q') ?: '')) : '';
+            if ($search !== '') {
                 $query->where(function ($q) use ($search) {
                     $q->where('first_name', 'like', "%{$search}%")
                       ->orWhere('last_name', 'like', "%{$search}%")
+                      ->orWhere(DB::raw("CONCAT(first_name, ' ', last_name)"), 'like', "%{$search}%")
                       ->orWhere('email', 'like', "%{$search}%")
+                      ->orWhere('phone', 'like', "%{$search}%")
                       ->orWhere('student_code', 'like', "%{$search}%")
                       ->orWhere('batch_year', 'like', "%{$search}%");
                 });
@@ -199,7 +231,8 @@ class TeacherStudentController extends Controller
             $page = $request ? $request->input('page') : null;
 
             if ($perPage || $page) {
-                $paginated = $query->paginate((int) ($perPage ?: 15));
+                $safePerPage = max(1, min(500, (int) ($perPage ?: 15)));
+                $paginated = $query->paginate($safePerPage);
                 $students = collect($paginated->items());
                 $total = $paginated->total();
             } else {
@@ -233,6 +266,7 @@ class TeacherStudentController extends Controller
                 }
 
                 $isEnrolledWithTeacher = count($enrolledCourseIds) > 0;
+                $resolvedImage = $student->profile_image ?: ($student->user?->profile_image ?? null);
 
                 return [
                     'id' => $student->id,
@@ -243,13 +277,13 @@ class TeacherStudentController extends Controller
                     'last_name' => $student->last_name,
                     'gender' => $student->gender,
                     'date_of_birth' => $student->date_of_birth,
-                    'email' => $student->email,
+                    'email' => $student->email ?: ($student->user?->email ?? null),
                     'phone' => $student->phone,
                     'batch_year' => $student->batch_year,
                     'degree_level' => $student->degree_level,
-                    'study_shift' => $student->study_shift,
+                    'study_shift' => $student->study_shift ?? 'Monday-Friday',
                     'address' => $student->address,
-                    'profile_image' => $student->profile_image,
+                    'profile_image' => $resolvedImage,
                     'department_id' => $student->department_id,
                     'enrolled_course_ids' => $enrolledCourseIds,
                     'course_ids' => $enrolledCourseIds,
@@ -265,6 +299,7 @@ class TeacherStudentController extends Controller
                         'id' => $student->user->id,
                         'status' => $student->user->status,
                         'email' => $student->user->email,
+                        'profile_image' => $resolvedImage,
                     ] : null,
                     'status' => $student->user ? $student->user->status : 'active',
                 ];
@@ -274,7 +309,7 @@ class TeacherStudentController extends Controller
                 'data' => $studentsWithDept,
                 'total' => $total,
                 'course_students_map' => $courseToStudentIdsMap,
-                'message' => 'បានទាញយកបញ្ជីសិស្សដោយជោគជ័យ'
+                'message' => 'បានទាញយកបញ្ជីសិស្សដោយជោគជ័យ',
             ];
 
             if (isset($paginated)) {
@@ -287,11 +322,10 @@ class TeacherStudentController extends Controller
             }
 
             return response()->json($response);
-
         } catch (\Exception $e) {
-            \Log::error('Error fetching teacher students: ' . $e->getMessage());
+            Log::error('Error fetching teacher students: ' . $e->getMessage());
             return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យសិស្ស: ' . $e->getMessage()
+                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យសិស្ស: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -318,7 +352,7 @@ class TeacherStudentController extends Controller
             }
 
             $deptStudentIds = !empty($teacherDeptIds)
-                ? Student::whereIn('department_id', $teacherDeptIds)->pluck('id')->map(fn($id) => (int) $id)->toArray()
+                ? Student::whereIn('department_id', $teacherDeptIds)->pluck('id')->map(fn ($id) => (int) $id)->toArray()
                 : [];
 
             $totalStudents = count(array_unique(array_merge($allEnrolled, $deptStudentIds)));
@@ -329,7 +363,7 @@ class TeacherStudentController extends Controller
                     'course_id' => $course->id,
                     'course_code' => $course->course_code,
                     'course_name' => $course->course_name,
-                    'student_count' => count($courseMap[(int) $course->id] ?? [])
+                    'student_count' => count($courseMap[(int) $course->id] ?? []),
                 ];
             }
 
@@ -337,13 +371,12 @@ class TeacherStudentController extends Controller
                 'total_students' => $totalStudents,
                 'enrolled_students_count' => count(array_unique($allEnrolled)),
                 'course_stats' => $courseStats,
-                'message' => 'បានទាញយកចំនួនសិស្សដោយជោគជ័យ'
+                'message' => 'បានទាញយកចំនួនសិស្សដោយជោគជ័យ',
             ]);
-
         } catch (\Exception $e) {
-            \Log::error('Error fetching student count: ' . $e->getMessage());
+            Log::error('Error fetching student count: ' . $e->getMessage());
             return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការទាញយកចំនួនសិស្ស: ' . $e->getMessage()
+                'message' => 'មានបញ្ហាក្នុងការទាញយកចំនួនសិស្ស: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -357,9 +390,13 @@ class TeacherStudentController extends Controller
     {
         try {
             $student = Student::with(['department', 'user', 'role'])
-                ->where('id', $studentId)
-                ->orWhere('user_id', $studentId)
+                ->where(function ($q) use ($studentId) {
+                    $q->where('id', $studentId)
+                      ->orWhere('user_id', $studentId);
+                })
                 ->firstOrFail();
+
+            $resolvedImage = $student->profile_image ?: ($student->user?->profile_image ?? null);
 
             return response()->json([
                 'data' => [
@@ -370,13 +407,13 @@ class TeacherStudentController extends Controller
                     'last_name' => $student->last_name,
                     'gender' => $student->gender,
                     'date_of_birth' => $student->date_of_birth,
-                    'email' => $student->email,
+                    'email' => $student->email ?: ($student->user?->email ?? null),
                     'phone' => $student->phone,
                     'batch_year' => $student->batch_year,
                     'degree_level' => $student->degree_level,
-                    'study_shift' => $student->study_shift,
+                    'study_shift' => $student->study_shift ?? 'Monday-Friday',
                     'address' => $student->address,
-                    'profile_image' => $student->profile_image,
+                    'profile_image' => $resolvedImage,
                     'department_id' => $student->department_id,
                     'department' => $student->department ? [
                         'id' => $student->department->id,
@@ -385,13 +422,16 @@ class TeacherStudentController extends Controller
                     ] : null,
                     'status' => $student->user ? $student->user->status : 'active',
                 ],
-                'message' => 'បានទាញយកព័ត៌មានសិស្សដោយជោគជ័យ'
+                'message' => 'បានទាញយកព័ត៌មានសិស្សដោយជោគជ័យ',
             ]);
-
-        } catch (\Exception $e) {
-            \Log::error('Error fetching student details: ' . $e->getMessage());
+        } catch (ModelNotFoundException $e) {
             return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យសិស្ស'
+                'message' => 'រកមិនឃើញព័ត៌មានសិស្សនេះទេ',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error fetching student details: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យសិស្ស',
             ], 500);
         }
     }

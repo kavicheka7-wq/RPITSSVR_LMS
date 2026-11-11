@@ -44,6 +44,8 @@ const resolveTargetDashboardPath = () => {
 };
 
 const Login = () => {
+  const [logoFailed, setLogoFailed] = useState(false);
+
   const [rememberMe, setRememberMe] = useState(() => {
     try {
       const savedPref = localStorage.getItem(REMEMBER_CHECKED_STORAGE_KEY);
@@ -203,12 +205,14 @@ const Login = () => {
       return;
     }
 
+    let isMounted = true;
+
     const checkNow = async () => {
-      if (isCheckingTelegramRef.current) return;
+      if (isCheckingTelegramRef.current || !isMounted) return;
       isCheckingTelegramRef.current = true;
       try {
-        const status = await checkTelegramLinkStatus(email);
-        if (status?.linked) {
+        const status = await checkTelegramLinkStatus(email.trim());
+        if (isMounted && status?.linked) {
           setTelegramLinked(true);
           setTelegramSent(true);
           setWaitingTelegramStart(false);
@@ -227,6 +231,7 @@ const Login = () => {
     const pollInterval = setInterval(checkNow, 3000);
 
     return () => {
+      isMounted = false;
       clearInterval(pollInterval);
       isCheckingTelegramRef.current = false;
     };
@@ -643,16 +648,23 @@ const Login = () => {
       syncRememberedEmail(cleanEmail, rememberMe);
 
       if (data.token && data.user) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        localStorage.setItem('auth_user', JSON.stringify(data.user));
-        if (data.teacher) {
-          localStorage.setItem('teacher', JSON.stringify(data.teacher));
-        }
+        try {
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+          localStorage.setItem('auth_user', JSON.stringify(data.user));
+          if (data.teacher) {
+            localStorage.setItem('teacher', JSON.stringify(data.teacher));
+          }
+          if (data.student) {
+            localStorage.setItem('student', JSON.stringify(data.student));
+          }
+        } catch {}
+
         api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
         if (typeof setUser === 'function') {
           setUser(data.user);
         }
+        window.dispatchEvent(new Event('lms_user_updated'));
 
         navigate(resolveTargetDashboardPath(data.user, detectedRoleName), {
           replace: true,
@@ -700,6 +712,7 @@ const Login = () => {
     triggerAutoVerifyForgotOtp,
   ]);
 
+  // ✅ គាំទ្រទាំងការវាយលេខ ១ ខ្ទង់ និងការបំពេញស្វ័យប្រវត្តិ (AutoFill / Multi-digit input) លើទូរស័ព្ទ
   const handleOtpChange = (index, value) => {
     if (loading) return;
     if (otpError) setOtpError('');
@@ -711,6 +724,20 @@ const Login = () => {
       newDigits[index] = '';
       lastSubmittedSignatureRef.current = '';
       setOtpDigits(newDigits);
+      return;
+    }
+
+    if (numericVal.length > 1) {
+      const chars = numericVal.slice(0, 6).split('');
+      for (let i = 0; i < chars.length; i++) {
+        if (index + i < 6) {
+          newDigits[index + i] = chars[i];
+        }
+      }
+      lastSubmittedSignatureRef.current = '';
+      setOtpDigits(newDigits);
+      const nextFocusIdx = Math.min(5, index + chars.length - 1);
+      otpInputRefs.current[nextFocusIdx]?.focus();
       return;
     }
 
@@ -815,7 +842,7 @@ const Login = () => {
     <div
       className={`login-page-font relative min-h-screen lg:h-screen w-full flex flex-col justify-between px-4 py-4 sm:px-8 sm:py-5 lg:px-12 overflow-x-hidden lg:overflow-hidden select-none transition-colors duration-200 ${
         isDarkMode
-          ? 'bg-gradient-to-br from-blue-950 via-indigo-950 to-slate-950 text-white'
+          ? 'bg-gradient-to-br from-blue-950 via-indigo-900 to-slate-950 text-white'
           : 'bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 text-slate-900'
       }`}
     >
@@ -1068,14 +1095,16 @@ const Login = () => {
                           : 'bg-slate-50 border-slate-200'
                       }`}
                     >
-                      <img
-                        src={logo}
-                        alt="RPITSSVR Logo"
-                        className="h-full w-full object-contain"
-                        onError={(e) => {
-                          e.target.style.display = 'none';
-                        }}
-                      />
+                      {!logoFailed ? (
+                        <img
+                          src={logo}
+                          alt="RPITSSVR Logo"
+                          className="h-full w-full object-contain"
+                          onError={() => setLogoFailed(true)}
+                        />
+                      ) : (
+                        <AcademicCapIcon className="h-8 w-8 text-indigo-500" />
+                      )}
                     </div>
                   </div>
 
@@ -1797,7 +1826,8 @@ const Login = () => {
                         }}
                         type="text"
                         inputMode="numeric"
-                        maxLength={1}
+                        autoComplete="one-time-code"
+                        maxLength={6}
                         disabled={loading}
                         value={digit}
                         onChange={(e) => handleOtpChange(idx, e.target.value)}
