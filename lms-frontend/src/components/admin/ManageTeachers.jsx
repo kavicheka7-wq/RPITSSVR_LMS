@@ -2080,7 +2080,7 @@ const ManageTeachers = () => {
 
                   <div>
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {editingTeacher ? t('ពាក្យសម្ងាត់ (ទុកឲ្យទទេ ដើម្បីរក្សាដដែល)', 'Password (Leave blank to keep)') : t('ពាក្យសម្ងាត់', 'Password')} {!editingTeacher && <span className="text-rose-500">*</span>}
+                      {editingTeacher ? t('ពាក្យសម្ងាត់', 'Password') : t('ពាក្យសម្ងាត់', 'Password')} {!editingTeacher && <span className="text-rose-500">*</span>}
                     </label>
                     {/* ✅ បិទជិតជា password ជានិច្ចដោយគ្មានប៊ូតុងភ្នែក */}
                     <input

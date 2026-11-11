@@ -25,9 +25,7 @@ import {
   ArrowPathIcon,
   DocumentTextIcon,
   SparklesIcon,
-  CalendarDaysIcon,
-  EyeIcon,
-  EyeSlashIcon
+  CalendarDaysIcon
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -47,7 +45,7 @@ const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v8_${uid}`;
 const getAllStudentsCacheKey = (uid) => `cached_admin_students_list_v8_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ
+// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សាទុករូបភាពក្នុង RAM ដើម្បីបង្ហាញលឿន 0ms
 const ADMIN_STUDENTS_Y1_MEM_CACHE = {
   uid: null,
   students: null,
@@ -57,6 +55,7 @@ const ADMIN_STUDENTS_Y1_MEM_CACHE = {
   courses: null,
   studentRoleId: null,
   lastSyncedAt: 0,
+  avatarMap: {},
 };
 
 const readStorageJson = (key, fallback) => {
@@ -65,6 +64,41 @@ const readStorageJson = (key, fallback) => {
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
+  }
+};
+
+// ✅ រក្សាទុកទិន្នន័យចូល localStorage ដោយសុវត្ថិភាព (បើរូប Base64 ធំពេកលើសទំហំ localStorage វានឹងរក្សារូបក្នុង RAM ជំនួស)
+const safeWriteStudentsStorage = (key, list) => {
+  if (!Array.isArray(list)) return;
+  list.forEach((sItem) => {
+    const img = sItem?.profile_image || sItem?.user?.profile_image;
+    if (sItem?.id && img) {
+      ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[sItem.id] = img;
+    }
+  });
+  try {
+    localStorage.setItem(key, JSON.stringify(list));
+  } catch {
+    try {
+      const lightList = list.map((item) => ({
+        ...item,
+        profile_image:
+          item.profile_image && item.profile_image.startsWith('data:')
+            ? null
+            : item.profile_image,
+        user: item.user
+          ? {
+              ...item.user,
+              profile_image:
+                item.user.profile_image &&
+                item.user.profile_image.startsWith('data:')
+                  ? null
+                  : item.user.profile_image,
+            }
+          : item.user,
+      }));
+      localStorage.setItem(key, JSON.stringify(lightList));
+    } catch {}
   }
 };
 
@@ -313,15 +347,6 @@ const ManageStudentsYear1 = () => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
-  const [revealedEmails, setRevealedEmails] = useState({});
-  const [showPasswordInput, setShowPasswordInput] = useState(false);
-
-  const toggleEmailVisibility = useCallback((studentId) => {
-    setRevealedEmails((prev) => ({
-      ...prev,
-      [studentId]: !prev[studentId],
-    }));
-  }, []);
 
   // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
@@ -336,6 +361,7 @@ const ManageStudentsYear1 = () => {
     ADMIN_STUDENTS_Y1_MEM_CACHE.departments = null;
     ADMIN_STUDENTS_Y1_MEM_CACHE.courses = null;
     ADMIN_STUDENTS_Y1_MEM_CACHE.lastSyncedAt = 0;
+    ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap = {};
   }
   ADMIN_STUDENTS_Y1_MEM_CACHE.uid = currentAdminId;
 
@@ -775,10 +801,8 @@ const ManageStudentsYear1 = () => {
       setStudents(prev => {
         const newList = prev.filter(s => !selectedStudents.includes(s.id));
         ADMIN_STUDENTS_Y1_MEM_CACHE.students = newList;
-        try {
-          localStorage.setItem(getStudentsY1CacheKey(currentAdminId), JSON.stringify(newList));
-          localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(newList));
-        } catch(e){}
+        safeWriteStudentsStorage(getStudentsY1CacheKey(currentAdminId), newList);
+        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
         return newList;
       });
 
@@ -890,8 +914,15 @@ const ManageStudentsYear1 = () => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
         const cachedList = readStorageJson(getStudentsY1CacheKey(currentAdminId), null);
         if (Array.isArray(cachedList)) {
-          setStudents(cachedList);
-          ADMIN_STUDENTS_Y1_MEM_CACHE.students = cachedList;
+          const hydratedCached = cachedList.map((item) => {
+            const memImg = ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[item.id];
+            if (memImg && !item.profile_image) {
+              return { ...item, profile_image: memImg };
+            }
+            return item;
+          });
+          setStudents(hydratedCached);
+          ADMIN_STUDENTS_Y1_MEM_CACHE.students = hydratedCached;
         }
         const now = Date.now();
         if (
@@ -918,6 +949,15 @@ const ManageStudentsYear1 = () => {
           : response.data?.data?.data || response.data || [];
         const validRaw = Array.isArray(rawList) ? rawList : [];
         const year1StudentList = validRaw.filter((student) => isYear1Student(student));
+
+        // ✅ រក្សាទុករូបភាពសិស្សក្នុង RAM ភ្លាមៗដើម្បីឱ្យការបង្ហាញរូបភាពលឿនបំផុត (0ms)
+        year1StudentList.forEach((sItem) => {
+          const img = sItem?.profile_image || sItem?.user?.profile_image;
+          if (sItem?.id && img) {
+            ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[sItem.id] = img;
+          }
+        });
+
         const studentMeta = {
           ...(response.data?.meta || { current_page: 1, last_page: 1, per_page: perPage }),
           total: year1StudentList.length,
@@ -931,18 +971,12 @@ const ManageStudentsYear1 = () => {
           ADMIN_STUDENTS_Y1_MEM_CACHE.students = year1StudentList;
           ADMIN_STUDENTS_Y1_MEM_CACHE.meta = studentMeta;
           ADMIN_STUDENTS_Y1_MEM_CACHE.lastSyncedAt = Date.now();
+          safeWriteStudentsStorage(getStudentsY1CacheKey(currentAdminId), year1StudentList);
+          safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, year1StudentList);
           try {
-            localStorage.setItem(
-              getStudentsY1CacheKey(currentAdminId),
-              JSON.stringify(year1StudentList)
-            );
             localStorage.setItem(
               getStudentsY1MetaCacheKey(currentAdminId),
               JSON.stringify(studentMeta)
-            );
-            localStorage.setItem(
-              CACHE_KEY_LEGACY_STUDENTS,
-              JSON.stringify(year1StudentList)
             );
             localStorage.setItem(
               CACHE_KEY_LEGACY_META,
@@ -981,8 +1015,18 @@ const ManageStudentsYear1 = () => {
     setIsSubmitting(true);
     try {
       if (editingStudent) {
+        // ✅ ប្រសិនបើពេល Edit អ៊ីមែលនៅជាទម្រង់បិទបាំង (មានសញ្ញា *) ឱ្យប្រើអ៊ីមែលដើមរបស់សិស្សនោះវិញដោយស្វ័យប្រវត្តិ
+        const resolvedEmail =
+          !formData.email || formData.email.includes('*')
+            ? editingStudent.email
+            : formData.email.trim();
+
         const payload = {};
-        const dataToUpdate = { ...formData, department_id: finalDepartmentId };
+        const dataToUpdate = {
+          ...formData,
+          email: resolvedEmail,
+          department_id: finalDepartmentId,
+        };
         Object.keys(dataToUpdate).forEach((key) => {
           if (dataToUpdate[key] !== null && dataToUpdate[key] !== undefined && dataToUpdate[key] !== '') {
             payload[key] = dataToUpdate[key];
@@ -992,7 +1036,16 @@ const ManageStudentsYear1 = () => {
         if (!formData.password) delete payload.password;
 
         const response = await api.put(`/admin/students/${editingStudent.id}`, payload);
-        const updatedStudent = response.data?.data || response.data;
+        const serverData = response.data?.data || response.data;
+        const updatedStudent = {
+          ...editingStudent,
+          ...dataToUpdate,
+          ...(serverData && typeof serverData === 'object' ? serverData : {}),
+          profile_image:
+            serverData?.profile_image ||
+            editingStudent.profile_image ||
+            ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[editingStudent.id],
+        };
 
         setStudents(prev => {
           const newList = isYear1Student(updatedStudent)
@@ -1000,10 +1053,8 @@ const ManageStudentsYear1 = () => {
             : prev.filter(s => s.id !== editingStudent.id);
           if (page === 1 && !debouncedSearch) {
             ADMIN_STUDENTS_Y1_MEM_CACHE.students = newList;
-            try {
-              localStorage.setItem(getStudentsY1CacheKey(currentAdminId), JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(newList));
-            } catch (e) {}
+            safeWriteStudentsStorage(getStudentsY1CacheKey(currentAdminId), newList);
+            safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
           }
           return newList;
         });
@@ -1038,10 +1089,8 @@ const ManageStudentsYear1 = () => {
             const newList = [newStudent, ...prev].slice(0, perPage);
             if (page === 1 && !debouncedSearch) {
               ADMIN_STUDENTS_Y1_MEM_CACHE.students = newList;
-              try {
-                localStorage.setItem(getStudentsY1CacheKey(currentAdminId), JSON.stringify(newList));
-                localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(newList));
-              } catch (e) {}
+              safeWriteStudentsStorage(getStudentsY1CacheKey(currentAdminId), newList);
+              safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
             }
             return newList;
           });
@@ -1096,10 +1145,8 @@ const ManageStudentsYear1 = () => {
       const newList = prev.filter(s => s.id !== deletedId);
       if (page === 1 && !debouncedSearch) {
         ADMIN_STUDENTS_Y1_MEM_CACHE.students = newList;
-        try {
-          localStorage.setItem(getStudentsY1CacheKey(currentAdminId), JSON.stringify(newList));
-          localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(newList));
-        } catch (e) {}
+        safeWriteStudentsStorage(getStudentsY1CacheKey(currentAdminId), newList);
+        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
       }
       return newList;
     });
@@ -1144,7 +1191,6 @@ const ManageStudentsYear1 = () => {
     });
     setEditingStudent(null);
     setFormError('');
-    setShowPasswordInput(false);
   };
 
   const openCreateModal = () => {
@@ -1152,14 +1198,14 @@ const ManageStudentsYear1 = () => {
     setShowModal(true);
   };
 
+  // ✅ នៅពេលចុចកែប្រែ (Edit) បង្ហាញអ៊ីមែលជាទម្រង់បិទបាំង (ឧ. cla*****30@gmail.com) ដើម្បីការពារឯកជនភាព
   const openEditModal = (student) => {
     setFormError('');
-    setShowPasswordInput(false);
     setEditingStudent(student);
     setFormData({
       first_name: student.first_name || '',
       last_name: student.last_name || '',
-      email: student.email || '',
+      email: maskEmailAddress(student.email || ''),
       password: '',
       status: student.user?.status || student.status || 'active',
       gender: student.gender || 'Male',
@@ -1506,7 +1552,7 @@ const ManageStudentsYear1 = () => {
     worksheet['!rows'] = rows;
   };
 
-  // ✅ នាំចេញ Excel ដោយដាក់សិស្សដែលមានឈ្មោះមុន (លេខរៀងទី 1 ដំបូងគេ) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម
+  // ✅ នាំចេញ Excel ដោយដាក់សិស្សដែលមានឈ្មោះមុន (លេខរៀងទី 1 ដំបូងគេ) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម និងបិទបាំងអ៊ីមែល
   const handleExportExcel = () => {
     if (displayedStudents.length === 0) {
       return;
@@ -1531,7 +1577,7 @@ const ManageStudentsYear1 = () => {
         'នាមខ្លួន': s.first_name || '',
         'នាមត្រកូល': s.last_name || '',
         'ភេទ': s.gender || '',
-        'អ៊ីមែល': s.email || '',
+        'អ៊ីមែល': maskEmailAddress(s.email || ''),
         'លេខទូរស័ព្ទ': s.phone || '',
         'ដេប៉ាតឺម៉ង់': deptDisplay,
         'ឆ្នាំសិក្សា': s.batch_year || 'ជំនាន់ទី , ឆ្នាំទី1',
@@ -2241,12 +2287,14 @@ const ManageStudentsYear1 = () => {
 
                     const isFemale = isFemaleGender(student.gender);
                     const isWeekend = normalizeShiftKey(student.study_shift) === 'Saturday-Sunday';
-                    const rawAvatar = student.profile_image || student.user?.profile_image;
+                    const rawAvatar =
+                      student.profile_image ||
+                      student.user?.profile_image ||
+                      ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[student.id];
                     const avatarUrl = getProfileImageUrl(rawAvatar);
                     const avatarKey = `std_${student.id}`;
                     const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
                     const isActive = String(student.user?.status || student.status || 'active').toLowerCase() === 'active';
-                    const isEmailRevealed = Boolean(revealedEmails[student.id]);
 
                     return (
                       <tr key={student.id} className="std-table-row hover:bg-blue-50/30 transition-colors">
@@ -2261,6 +2309,9 @@ const ManageStudentsYear1 = () => {
                                   <img
                                     src={avatarUrl}
                                     alt={getStudentFullName(student)}
+                                    loading="eager"
+                                    decoding="async"
+                                    fetchpriority="high"
                                     className="h-full w-full object-cover rounded-full"
                                     onError={() =>
                                       setFailedAvatars((prev) => ({
@@ -2315,24 +2366,9 @@ const ManageStudentsYear1 = () => {
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="std-text-secondary text-sm font-medium text-gray-600 flex items-center gap-1.5">
-                            <span className="font-mono tracking-tight">
-                              {isEmailRevealed ? student.email : maskEmailAddress(student.email)}
-                            </span>
-                            {student.email && (
-                              <button
-                                type="button"
-                                onClick={() => toggleEmailVisibility(student.id)}
-                                title={isEmailRevealed ? t('លាក់អ៊ីមែល', 'Hide email') : t('បង្ហាញអ៊ីមែលពេញ', 'Show full email')}
-                                className="p-1 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-gray-100/80 dark:hover:bg-slate-700/60 transition-colors cursor-pointer"
-                              >
-                                {isEmailRevealed ? (
-                                  <EyeSlashIcon className="w-4 h-4" />
-                                ) : (
-                                  <EyeIcon className="w-4 h-4" />
-                                )}
-                              </button>
-                            )}
+                          {/* ✅ បង្ហាញតែអ៊ីមែលដែលបានបិទបាំងដោយគ្មានប៊ូតុងភ្នែក */}
+                          <div className="std-text-secondary text-sm font-medium text-gray-600 font-mono tracking-tight">
+                            {maskEmailAddress(student.email)}
                           </div>
                           {student.phone && (
                             <div className="std-text-secondary text-xs text-gray-400 font-medium mt-0.5">
@@ -2521,12 +2557,27 @@ const ManageStudentsYear1 = () => {
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
                       {t('អ៊ីមែល', 'Email')} <span className="text-rose-500">*</span>
                     </label>
+                    {/* ✅ ពេល Edit បង្ហាញអ៊ីមែលបិទបាំង ហើយបើចុចដើម្បីវាយអ៊ីមែលថ្មី វាជម្រះសញ្ញា * ឱ្យភ្លាម (បើមិនកែទេ ពេល Blur ត្រឡប់មកបិទបាំងដដែល) */}
                     <input
-                      type="email"
+                      type={editingStudent && formData.email.includes('*') ? 'text' : 'email'}
                       name="email"
-                      required
+                      required={!editingStudent}
                       value={formData.email}
+                      onFocus={() => {
+                        if (editingStudent && formData.email.includes('*')) {
+                          setFormData((prev) => ({ ...prev, email: '' }));
+                        }
+                      }}
+                      onBlur={() => {
+                        if (editingStudent && !formData.email.trim()) {
+                          setFormData((prev) => ({
+                            ...prev,
+                            email: maskEmailAddress(editingStudent.email || ''),
+                          }));
+                        }
+                      }}
                       onChange={handleInputChange}
+                      placeholder={editingStudent ? maskEmailAddress(editingStudent.email || '') : ''}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                     />
                   </div>
@@ -2684,29 +2735,16 @@ const ManageStudentsYear1 = () => {
                         : t('ពាក្យសម្ងាត់', 'Password')}{' '}
                       {!editingStudent && <span className="text-rose-500">*</span>}
                     </label>
-                    <div className="relative">
-                      <input
-                        type={showPasswordInput ? 'text' : 'password'}
-                        name="password"
-                        required={!editingStudent}
-                        value={formData.password}
-                        onChange={handleInputChange}
-                        className="std-input w-full pl-4 pr-11 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                        placeholder="••••••••"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPasswordInput((prev) => !prev)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-indigo-600 transition-colors cursor-pointer"
-                        title={showPasswordInput ? t('លាក់ពាក្យសម្ងាត់', 'Hide password') : t('បង្ហាញពាក្យសម្ងាត់', 'Show password')}
-                      >
-                        {showPasswordInput ? (
-                          <EyeSlashIcon className="h-5 w-5" />
-                        ) : (
-                          <EyeIcon className="h-5 w-5" />
-                        )}
-                      </button>
-                    </div>
+                    {/* ✅ បិទជិតជា password ជានិច្ចដោយគ្មានប៊ូតុងភ្នែក */}
+                    <input
+                      type="password"
+                      name="password"
+                      required={!editingStudent}
+                      value={formData.password}
+                      onChange={handleInputChange}
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
+                      placeholder="••••••••"
+                    />
                   </div>
 
                   <div>
@@ -2940,6 +2978,8 @@ const ManageStudentsYear1 = () => {
                                 <img
                                   src={teacherAvatarUrl}
                                   alt="Teacher"
+                                  loading="eager"
+                                  decoding="async"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
                                     setFailedAvatars((prev) => ({
