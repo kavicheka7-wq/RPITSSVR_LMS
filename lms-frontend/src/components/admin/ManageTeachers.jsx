@@ -20,9 +20,7 @@ import {
   Squares2X2Icon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ArrowPathIcon,
-  EyeIcon,
-  EyeSlashIcon
+  ArrowPathIcon
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -39,7 +37,7 @@ const getTeachersMetaCacheKey = (uid) => `cached_admin_teachers_meta_v8_${uid}`;
 const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v8_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ
+// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សាទុករូបភាពក្នុង RAM ដើម្បីបង្ហាញលឿន 0ms
 const ADMIN_TEACHERS_MEM_CACHE = {
   uid: null,
   teachers: null,
@@ -48,6 +46,7 @@ const ADMIN_TEACHERS_MEM_CACHE = {
   courses: null,
   teacherRoleId: null,
   lastSyncedAt: 0,
+  avatarMap: {},
 };
 
 const readStorageJson = (key, fallback) => {
@@ -56,6 +55,41 @@ const readStorageJson = (key, fallback) => {
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
+  }
+};
+
+// ✅ រក្សាទុកទិន្នន័យចូល localStorage ដោយសុវត្ថិភាព (បើរូប Base64 ធំពេកលើសទំហំ localStorage វានឹងរក្សារូបក្នុង RAM ជំនួស)
+const safeWriteTeachersStorage = (key, list) => {
+  if (!Array.isArray(list)) return;
+  list.forEach((tItem) => {
+    const img = tItem?.profile_image || tItem?.user?.profile_image;
+    if (tItem?.id && img) {
+      ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = img;
+    }
+  });
+  try {
+    localStorage.setItem(key, JSON.stringify(list));
+  } catch {
+    try {
+      const lightList = list.map((item) => ({
+        ...item,
+        profile_image:
+          item.profile_image && item.profile_image.startsWith('data:')
+            ? null
+            : item.profile_image,
+        user: item.user
+          ? {
+              ...item.user,
+              profile_image:
+                item.user.profile_image &&
+                item.user.profile_image.startsWith('data:')
+                  ? null
+                  : item.user.profile_image,
+            }
+          : item.user,
+      }));
+      localStorage.setItem(key, JSON.stringify(lightList));
+    } catch {}
   }
 };
 
@@ -229,15 +263,6 @@ const ManageTeachers = () => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
-  const [revealedEmails, setRevealedEmails] = useState({});
-  const [showPasswordInput, setShowPasswordInput] = useState(false);
-
-  const toggleEmailVisibility = useCallback((teacherId) => {
-    setRevealedEmails((prev) => ({
-      ...prev,
-      [teacherId]: !prev[teacherId],
-    }));
-  }, []);
 
   // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
@@ -251,6 +276,7 @@ const ManageTeachers = () => {
     ADMIN_TEACHERS_MEM_CACHE.departments = null;
     ADMIN_TEACHERS_MEM_CACHE.courses = null;
     ADMIN_TEACHERS_MEM_CACHE.lastSyncedAt = 0;
+    ADMIN_TEACHERS_MEM_CACHE.avatarMap = {};
   }
   ADMIN_TEACHERS_MEM_CACHE.uid = currentAdminId;
 
@@ -636,8 +662,15 @@ const ManageTeachers = () => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
         const cachedList = readStorageJson(getTeachersCacheKey(currentAdminId), null);
         if (Array.isArray(cachedList)) {
-          setTeachers(cachedList);
-          ADMIN_TEACHERS_MEM_CACHE.teachers = cachedList;
+          const hydratedCached = cachedList.map((item) => {
+            const memImg = ADMIN_TEACHERS_MEM_CACHE.avatarMap[item.id];
+            if (memImg && !item.profile_image) {
+              return { ...item, profile_image: memImg };
+            }
+            return item;
+          });
+          setTeachers(hydratedCached);
+          ADMIN_TEACHERS_MEM_CACHE.teachers = hydratedCached;
         }
         const now = Date.now();
         if (
@@ -670,6 +703,14 @@ const ManageTeachers = () => {
           : response.data?.data?.data || response.data || [];
         const validList = Array.isArray(teacherList) ? teacherList : [];
 
+        // ✅ រក្សារូបភាពក្នុង RAM ភ្លាមៗដើម្បីឱ្យការបង្ហាញរូបភាពលឿនបំផុត (0ms)
+        validList.forEach((tItem) => {
+          const img = tItem?.profile_image || tItem?.user?.profile_image;
+          if (tItem?.id && img) {
+            ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = img;
+          }
+        });
+
         const teacherMeta = response.data?.meta || {
           current_page:
             response.data?.data?.current_page ||
@@ -694,30 +735,19 @@ const ManageTeachers = () => {
           ADMIN_TEACHERS_MEM_CACHE.teachers = validList;
           ADMIN_TEACHERS_MEM_CACHE.meta = teacherMeta;
           ADMIN_TEACHERS_MEM_CACHE.lastSyncedAt = Date.now();
+          safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), validList);
+          safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, validList);
+          safeWriteTeachersStorage(CACHE_KEY_LEGACY_TEACHERS, validList);
           try {
-            localStorage.setItem(
-              getTeachersCacheKey(currentAdminId),
-              JSON.stringify(validList)
-            );
             localStorage.setItem(
               getTeachersMetaCacheKey(currentAdminId),
               JSON.stringify(teacherMeta)
             );
             localStorage.setItem(
-              CACHE_KEY_SHARED_TEACHERS,
-              JSON.stringify(validList)
-            );
-            localStorage.setItem(
-              CACHE_KEY_LEGACY_TEACHERS,
-              JSON.stringify(validList)
-            );
-            localStorage.setItem(
               CACHE_KEY_LEGACY_META,
               JSON.stringify(teacherMeta)
             );
-          } catch (e) {
-            console.warn('Failed to cache teachers:', e);
-          }
+          } catch (e) {}
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
@@ -755,7 +785,17 @@ const ManageTeachers = () => {
     setIsSubmitting(true);
     try {
       if (editingTeacher) {
-        const dataToUpdate = { ...formData, department_id: finalDepartmentId };
+        // ✅ ប្រសិនបើពេល Edit អ៊ីមែលនៅជាទម្រង់បិទបាំង (មានសញ្ញា *) ឱ្យប្រើអ៊ីមែលដើមរបស់គ្រូនោះវិញដោយស្វ័យប្រវត្តិ
+        const resolvedEmail =
+          !formData.email || formData.email.includes('*')
+            ? editingTeacher.email
+            : formData.email.trim();
+
+        const dataToUpdate = {
+          ...formData,
+          email: resolvedEmail,
+          department_id: finalDepartmentId,
+        };
         const payload = { ...dataToUpdate, role_id: effectiveRoleId };
         if (!payload.password) delete payload.password;
         const response = await api.put(`/admin/teachers/${editingTeacher.id}`, payload);
@@ -765,7 +805,10 @@ const ManageTeachers = () => {
           ...editingTeacher,
           ...dataToUpdate,
           ...(serverData && typeof serverData === 'object' ? serverData : {}),
-          profile_image: serverData?.profile_image || editingTeacher.profile_image,
+          profile_image:
+            serverData?.profile_image ||
+            editingTeacher.profile_image ||
+            ADMIN_TEACHERS_MEM_CACHE.avatarMap[editingTeacher.id],
           department: serverData?.department || matchedDept || editingTeacher.department,
           user: { ...(editingTeacher.user || {}), status: dataToUpdate.status },
         };
@@ -774,11 +817,9 @@ const ManageTeachers = () => {
           const newList = prev.map(item => item.id === editingTeacher.id ? updatedTeacher : item);
           if (page === 1 && !debouncedSearch) {
             ADMIN_TEACHERS_MEM_CACHE.teachers = newList;
-            try {
-              localStorage.setItem(getTeachersCacheKey(currentAdminId), JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_SHARED_TEACHERS, JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_LEGACY_TEACHERS, JSON.stringify(newList));
-            } catch (e) {}
+            safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), newList);
+            safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, newList);
+            safeWriteTeachersStorage(CACHE_KEY_LEGACY_TEACHERS, newList);
           }
           return newList;
         });
@@ -814,11 +855,9 @@ const ManageTeachers = () => {
           const newList = [newTeacher, ...prev].slice(0, perPage);
           if (page === 1 && !debouncedSearch) {
             ADMIN_TEACHERS_MEM_CACHE.teachers = newList;
-            try {
-              localStorage.setItem(getTeachersCacheKey(currentAdminId), JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_SHARED_TEACHERS, JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_LEGACY_TEACHERS, JSON.stringify(newList));
-            } catch (e) {}
+            safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), newList);
+            safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, newList);
+            safeWriteTeachersStorage(CACHE_KEY_LEGACY_TEACHERS, newList);
           }
           return newList;
         });
@@ -880,11 +919,9 @@ const ManageTeachers = () => {
       const newList = prev.filter(item => item.id !== deletedId);
       if (page === 1 && !debouncedSearch) {
         ADMIN_TEACHERS_MEM_CACHE.teachers = newList;
-        try {
-          localStorage.setItem(getTeachersCacheKey(currentAdminId), JSON.stringify(newList));
-          localStorage.setItem(CACHE_KEY_SHARED_TEACHERS, JSON.stringify(newList));
-          localStorage.setItem(CACHE_KEY_LEGACY_TEACHERS, JSON.stringify(newList));
-        } catch (e) {}
+        safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), newList);
+        safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, newList);
+        safeWriteTeachersStorage(CACHE_KEY_LEGACY_TEACHERS, newList);
       }
       return newList;
     });
@@ -937,7 +974,6 @@ const ManageTeachers = () => {
     });
     setEditingTeacher(null);
     setFormError('');
-    setShowPasswordInput(false);
   };
 
   const openCreateModal = () => {
@@ -945,14 +981,14 @@ const ManageTeachers = () => {
     setShowModal(true);
   };
 
+  // ✅ នៅពេលចុចកែប្រែ (Edit) បង្ហាញអ៊ីមែលជាទម្រង់បិទបាំង (ឧ. cla*****30@gmail.com) ដើម្បីការពារឯកជនភាព
   const openEditModal = (teacher) => {
     setFormError('');
-    setShowPasswordInput(false);
     setEditingTeacher(teacher);
     setFormData({
       first_name: teacher.first_name || '',
       last_name: teacher.last_name || '',
-      email: teacher.email || '',
+      email: maskEmailAddress(teacher.email || ''),
       password: '',
       status: teacher.user?.status || teacher.status || 'active',
       gender: teacher.gender || 'Male',
@@ -1058,7 +1094,7 @@ const ManageTeachers = () => {
         'នាមខ្លួន': teacher.first_name || '',
         'នាមត្រកូល': teacher.last_name || '',
         'ភេទ': teacher.gender || '',
-        'អ៊ីមែល': teacher.email || '',
+        'អ៊ីមែល': maskEmailAddress(teacher.email || ''),
         'លេខទូរស័ព្ទ': teacher.phone || '',
         'ដេប៉ាតឺម៉ង់': deptDisplay,
         'ឯកទេស': teacher.specialization || '',
@@ -1664,12 +1700,14 @@ const ManageTeachers = () => {
                     .filter(Boolean);
 
                   const isFemale = isFemaleGender(teacher.gender);
-                  const rawAvatar = teacher.profile_image || teacher.user?.profile_image;
+                  const rawAvatar =
+                    teacher.profile_image ||
+                    teacher.user?.profile_image ||
+                    ADMIN_TEACHERS_MEM_CACHE.avatarMap[teacher.id];
                   const avatarUrl = getProfileImageUrl(rawAvatar);
                   const avatarKey = `tch_${teacher.id}`;
                   const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
                   const isActive = String(teacher.user?.status || teacher.status || 'active').toLowerCase() === 'active';
-                  const isEmailRevealed = Boolean(revealedEmails[teacher.id]);
 
                   return (
                     <tr key={teacher.id} className="tch-table-row hover:bg-blue-50/30 transition-colors">
@@ -1680,6 +1718,9 @@ const ManageTeachers = () => {
                               <img 
                                 src={avatarUrl} 
                                 alt="Profile" 
+                                loading="eager"
+                                decoding="async"
+                                fetchpriority="high"
                                 className="h-full w-full object-cover rounded-full"
                                 onError={() =>
                                   setFailedAvatars((prev) => ({
@@ -1724,24 +1765,9 @@ const ManageTeachers = () => {
                         </span>
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="tch-text-secondary text-sm font-medium text-gray-600 flex items-center gap-1.5">
-                          <span className="font-mono tracking-tight">
-                            {isEmailRevealed ? teacher.email : maskEmailAddress(teacher.email)}
-                          </span>
-                          {teacher.email && (
-                            <button
-                              type="button"
-                              onClick={() => toggleEmailVisibility(teacher.id)}
-                              title={isEmailRevealed ? t('លាក់អ៊ីមែល', 'Hide email') : t('បង្ហាញអ៊ីមែលពេញ', 'Show full email')}
-                              className="p-1 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-gray-100/80 dark:hover:bg-slate-700/60 transition-colors cursor-pointer"
-                            >
-                              {isEmailRevealed ? (
-                                <EyeSlashIcon className="w-4 h-4" />
-                              ) : (
-                                <EyeIcon className="w-4 h-4" />
-                              )}
-                            </button>
-                          )}
+                        {/* ✅ បង្ហាញតែអ៊ីមែលដែលបានបិទបាំងដោយគ្មានប៊ូតុងភ្នែក */}
+                        <div className="tch-text-secondary text-sm font-medium text-gray-600 font-mono tracking-tight">
+                          {maskEmailAddress(teacher.email)}
                         </div>
                         {teacher.phone && (
                           <div className="tch-text-secondary text-xs text-gray-400 font-medium mt-0.5">
@@ -1914,12 +1940,27 @@ const ManageTeachers = () => {
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
                       {t('អ៊ីមែល', 'Email')} <span className="text-rose-500">*</span>
                     </label>
+                    {/* ✅ ពេល Edit បង្ហាញអ៊ីមែលបិទបាំង ហើយបើចុចដើម្បីវាយអ៊ីមែលថ្មី វាជម្រះសញ្ញា * ឱ្យភ្លាម (បើមិនកែទេ ពេល Blur ត្រឡប់មកបិទបាំងដដែល) */}
                     <input
-                      type="email"
+                      type={editingTeacher && formData.email.includes('*') ? 'text' : 'email'}
                       name="email"
-                      required
+                      required={!editingTeacher}
                       value={formData.email}
+                      onFocus={() => {
+                        if (editingTeacher && formData.email.includes('*')) {
+                          setFormData((prev) => ({ ...prev, email: '' }));
+                        }
+                      }}
+                      onBlur={() => {
+                        if (editingTeacher && !formData.email.trim()) {
+                          setFormData((prev) => ({
+                            ...prev,
+                            email: maskEmailAddress(editingTeacher.email || ''),
+                          }));
+                        }
+                      }}
                       onChange={handleInputChange}
+                      placeholder={editingTeacher ? maskEmailAddress(editingTeacher.email || '') : ''}
                       className="tch-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                     />
                   </div>
@@ -2041,29 +2082,16 @@ const ManageTeachers = () => {
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
                       {editingTeacher ? t('ពាក្យសម្ងាត់ (ទុកឲ្យទទេ ដើម្បីរក្សាដដែល)', 'Password (Leave blank to keep)') : t('ពាក្យសម្ងាត់', 'Password')} {!editingTeacher && <span className="text-rose-500">*</span>}
                     </label>
-                    <div className="relative">
-                      <input
-                        type={showPasswordInput ? 'text' : 'password'}
-                        name="password"
-                        required={!editingTeacher}
-                        value={formData.password}
-                        onChange={handleInputChange}
-                        className="tch-input w-full pl-4 pr-11 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                        placeholder="••••••••"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPasswordInput((prev) => !prev)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-indigo-600 transition-colors cursor-pointer"
-                        title={showPasswordInput ? t('លាក់ពាក្យសម្ងាត់', 'Hide password') : t('បង្ហាញពាក្យសម្ងាត់', 'Show password')}
-                      >
-                        {showPasswordInput ? (
-                          <EyeSlashIcon className="h-5 w-5" />
-                        ) : (
-                          <EyeIcon className="h-5 w-5" />
-                        )}
-                      </button>
-                    </div>
+                    {/* ✅ បិទជិតជា password ជានិច្ចដោយគ្មានប៊ូតុងភ្នែក */}
+                    <input
+                      type="password"
+                      name="password"
+                      required={!editingTeacher}
+                      value={formData.password}
+                      onChange={handleInputChange}
+                      className="tch-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
+                      placeholder="••••••••"
+                    />
                   </div>
 
                   <div>
