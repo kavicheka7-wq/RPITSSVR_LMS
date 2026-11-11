@@ -9,6 +9,7 @@ use App\Models\Role;
 use App\Models\Student;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -32,6 +33,62 @@ class AdminStudentController extends Controller
             return null;
         }
         return 'data:' . $mime . ';base64,' . base64_encode($contents);
+    }
+
+    /**
+     * បម្លែងគ្រប់ទម្រង់ថ្ងៃខែឆ្នាំកំណើត (30-04-2005, 30/04/2005, លេខខ្មែរ, ឬលេខ Excel) ទៅជា YYYY-MM-DD សម្រាប់ MySQL
+     */
+    private function normalizeDateOfBirth($value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d');
+        }
+
+        $str = trim((string) $value);
+        if ($str === '' || $str === '-' || strtolower($str) === 'null' || strtolower($str) === 'n/a') {
+            return null;
+        }
+
+        // បម្លែងលេខខ្មែរ (០-៩) ទៅជាលេខសากล (0-9)
+        $str = str_replace(
+            ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'],
+            ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
+            $str
+        );
+
+        // 1. ករណីជាលេខ Serial Date របស់ Excel (ឧទាហរណ៍ 38472)
+        if (is_numeric($str) && (float) $str > 1000 && (float) $str < 100000) {
+            return gmdate('Y-m-d', ((int) round((float) $str) - 25569) * 86400);
+        }
+
+        // 2. ករណីទម្រង់ DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (ឧទាហរណ៍ 30-04-2005)
+        if (preg_match('/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/', $str, $m)) {
+            $first = (int) $m[1];
+            $second = (int) $m[2];
+            $year = (int) $m[3];
+            $day = ($second > 12 && $first <= 12) ? $second : $first;
+            $month = ($second > 12 && $first <= 12) ? $first : $second;
+            if (checkdate($month, $day, $year)) {
+                return sprintf('%04d-%02d-%02d', $year, $month, $day);
+            }
+        }
+
+        // 3. ករណីទម្រង់ YYYY-MM-DD ឬ YYYY/MM/DD
+        if (preg_match('/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})/', $str, $m)) {
+            if (checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+                return sprintf('%04d-%02d-%02d', (int) $m[1], (int) $m[2], (int) $m[3]);
+            }
+        }
+
+        try {
+            return Carbon::parse(str_replace('/', '-', $str))->format('Y-m-d');
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public function index(Request $request)
@@ -108,6 +165,10 @@ class AdminStudentController extends Controller
 
     public function store(Request $request)
     {
+        if ($request->filled('date_of_birth')) {
+            $request->merge(['date_of_birth' => $this->normalizeDateOfBirth($request->input('date_of_birth'))]);
+        }
+
         $validated = $request->validate([
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
@@ -158,7 +219,7 @@ class AdminStudentController extends Controller
                 'first_name' => $cleanFirst,
                 'last_name' => $cleanLast,
                 'gender' => $validated['gender'],
-                'date_of_birth' => $validated['date_of_birth'] ?? null,
+                'date_of_birth' => $this->normalizeDateOfBirth($validated['date_of_birth'] ?? null),
                 'email' => $cleanEmail,
                 'phone' => $validated['phone'] ?? null,
                 'department_id' => $validated['department_id'] ?? null,
@@ -184,6 +245,10 @@ class AdminStudentController extends Controller
 
     public function update(Request $request, Student $student)
     {
+        if ($request->filled('date_of_birth')) {
+            $request->merge(['date_of_birth' => $this->normalizeDateOfBirth($request->input('date_of_birth'))]);
+        }
+
         $validated = $request->validate([
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
@@ -256,7 +321,9 @@ class AdminStudentController extends Controller
                 'first_name' => $cleanFirst,
                 'last_name' => $cleanLast,
                 'gender' => $validated['gender'],
-                'date_of_birth' => $validated['date_of_birth'] ?? $student->date_of_birth,
+                'date_of_birth' => array_key_exists('date_of_birth', $validated)
+                    ? $this->normalizeDateOfBirth($validated['date_of_birth'])
+                    : $student->date_of_birth,
                 'email' => $cleanEmail,
                 'phone' => $validated['phone'] ?? $student->phone,
                 'department_id' => $validated['department_id'] ?? $student->department_id,
@@ -595,7 +662,7 @@ class AdminStudentController extends Controller
                     'first_name' => $cleanFirst,
                     'last_name' => $cleanLast,
                     'gender' => $gender,
-                    'date_of_birth' => !empty($item['date_of_birth']) ? $item['date_of_birth'] : null,
+                    'date_of_birth' => $this->normalizeDateOfBirth($item['date_of_birth'] ?? null),
                     'email' => $cleanEmail,
                     'phone' => $item['phone'] ?? null,
                     'department_id' => $item['department_id'] ?? null,

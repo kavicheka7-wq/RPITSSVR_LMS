@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
@@ -81,6 +82,7 @@ class CourseController extends Controller
 
     /**
      * កំណត់យក teacher_id ដែលត្រឹមត្រូវ ទោះបីជា Frontend បញ្ជូន teachers.id ឬ users.id មកក៏ដោយ
+     * និងការពារកំហុស SQLSTATE[23000] 1452 Foreign Key Constraint (courses_teacher_id_foreign -> users.id)
      */
     private function resolveValidTeacherId($rawTeacherId): ?int
     {
@@ -88,30 +90,50 @@ class CourseController extends Controller
             return null;
         }
 
-        $teacherRow = Teacher::where('id', $rawTeacherId)
-            ->orWhere('user_id', $rawTeacherId)
-            ->first();
+        // 1. ស្វែងរកក្នុងតារាង teachers តាម id មុនគេ (ព្រោះ Dropdown បោះ teacher.id មក) ទើបរកតាម user_id
+        $teacherRow = Teacher::find($rawTeacherId)
+            ?? Teacher::where('user_id', $rawTeacherId)->first();
 
+        if ($teacherRow) {
+            // បើគ្រូមាន user_id ហើយមានក្នុងតារាង users ត្រូវប្រើ user_id ដើម្បីឱ្យត្រូវជាមួយ Foreign Key នៃតារាង courses
+            if (!empty($teacherRow->user_id) && User::where('id', $teacherRow->user_id)->exists()) {
+                return (int) $teacherRow->user_id;
+            }
+
+            // បើគ្រូក្នុងតារាង teachers មិនទាន់មាន user_id ឬរកមិនឃើញក្នុងតារាង users ទេ ភ្ជាប់ឬបង្កើត User ឱ្យគាត់ដោយស្វ័យប្រវត្តិ
+            $linkedUser = null;
+            if (!empty($teacherRow->email)) {
+                $linkedUser = User::where('email', $teacherRow->email)->first();
+            }
+
+            if (!$linkedUser) {
+                $linkedUser = User::create([
+                    'role_id'    => $teacherRow->role_id ?? 2,
+                    'first_name' => $teacherRow->first_name ?? 'Teacher',
+                    'last_name'  => $teacherRow->last_name ?? '',
+                    'email'      => $teacherRow->email ?: ('teacher_' . $teacherRow->id . '_' . time() . '@lms.local'),
+                    'password'   => !empty($teacherRow->password) ? $teacherRow->password : Hash::make('12345678'),
+                    'phone'      => $teacherRow->phone ?? null,
+                    'gender'     => $teacherRow->gender ?? null,
+                    'status'     => 'active',
+                ]);
+            }
+
+            if ($linkedUser && Schema::hasColumn('teachers', 'user_id')) {
+                $teacherRow->user_id = $linkedUser->id;
+                $teacherRow->saveQuietly();
+            }
+
+            return $linkedUser ? (int) $linkedUser->id : (int) $teacherRow->id;
+        }
+
+        // 2. ករណីបោះមកជា users.id ផ្ទាល់
         $userRow = User::find($rawTeacherId);
-
-        if (!$teacherRow && !$userRow) {
-            return null;
+        if ($userRow) {
+            return (int) $userRow->id;
         }
 
-        // ឆែកមើលថាតើ Model Course::teacher() ភ្ជាប់ទៅកាន់ User ឬ Teacher
-        try {
-            $relatedModel = (new Course())->teacher()->getRelated();
-            if ($relatedModel instanceof User) {
-                return (int) ($teacherRow?->user_id ?? $userRow?->id);
-            }
-            if ($relatedModel instanceof Teacher && $teacherRow) {
-                return (int) $teacherRow->id;
-            }
-        } catch (\Throwable $e) {
-            // បន្តទៅការឆែកតាមលំដាប់ខាងក្រោម
-        }
-
-        return (int) ($teacherRow?->id ?? $userRow?->id);
+        return null;
     }
 
     /**
