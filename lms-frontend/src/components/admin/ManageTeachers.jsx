@@ -20,7 +20,9 @@ import {
   Squares2X2Icon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ArrowPathIcon
+  ArrowPathIcon,
+  EyeIcon,
+  EyeSlashIcon
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -57,6 +59,15 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
+// ✅ អនុគមន៍បិទបាំងផ្នែកកណ្ដាលនៃអ៊ីមែល (ឧ. "classit830@gmail.com" -> "cla*****30@gmail.com")
+const maskEmailAddress = (email) => {
+  if (!email || typeof email !== 'string' || !email.includes('@')) return email || '';
+  const [localPart, domain] = email.split('@');
+  if (localPart.length <= 2) return `${localPart[0] || '*'}***@${domain}`;
+  if (localPart.length <= 4) return `${localPart.slice(0, 2)}***@${domain}`;
+  return `${localPart.slice(0, 3)}*****${localPart.slice(-2)}@${domain}`;
+};
+
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
 const resolveAdminUid = (contextUser) => {
   if (contextUser) {
@@ -90,16 +101,53 @@ const DEPT_CARD_THEMES = [
   { bg: 'bg-cyan-50', text: 'text-cyan-600', border: 'border-cyan-100', darkClass: 'tch-dept-cyan' },
 ];
 
-// ✅ អនុគមន៍កាត់យកតែថ្ងៃខែឆ្នាំ (YYYY-MM-DD) ដោយលុប T00:00:00.000000Z ចេញ
+// ✅ អនុគមន៍បម្លែងគ្រប់ទម្រង់ថ្ងៃខែឆ្នាំ (30-04-2005, 30/04/2005, លេខខ្មែរ, ឬលេខ Excel) ទៅជា YYYY-MM-DD
 const formatDateOnly = (dateVal) => {
-  if (!dateVal) return '';
-  const str = String(dateVal).trim();
+  if (dateVal === null || dateVal === undefined || dateVal === '') return '';
+  let str = String(dateVal).trim().replace(/^'+/, '');
+  if (!str || str === '-' || str.toLowerCase() === 'null') return '';
+
+  // បម្លែងលេខខ្មែរ (០-៩) ទៅជាលេខសากล (0-9)
+  const khmerDigits = ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'];
+  khmerDigits.forEach((kd, idx) => {
+    str = str.replace(new RegExp(kd, 'g'), String(idx));
+  });
+
   if (str.includes('T')) {
-    return str.split('T')[0];
+    str = str.split('T')[0];
+  } else if (str.includes(' ') && /^\d{4}-\d{2}-\d{2}\s/.test(str)) {
+    str = str.split(' ')[0];
   }
-  if (str.includes(' ')) {
-    return str.split(' ')[0];
+
+  // 1. ករណីជាលេខ Serial Date របស់ Excel (ឧទាហរណ៍ 38472)
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    const serial = Number(str);
+    if (serial > 1000 && serial < 100000) {
+      const utcDays = Math.floor(serial - 25569);
+      const d = new Date(utcDays * 86400 * 1000);
+      if (!isNaN(d.getTime())) {
+        return d.toISOString().slice(0, 10);
+      }
+    }
   }
+
+  // 2. ករណីទម្រង់ DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (ឧទាហរណ៍ 30-04-2005)
+  const dmyMatch = str.match(/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/);
+  if (dmyMatch) {
+    const first = parseInt(dmyMatch[1], 10);
+    const second = parseInt(dmyMatch[2], 10);
+    const year = dmyMatch[3];
+    const day = second > 12 && first <= 12 ? second : first;
+    const month = second > 12 && first <= 12 ? first : second;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  // 3. ករណីទម្រង់ YYYY-MM-DD ឬ YYYY/MM/DD
+  const ymdMatch = str.match(/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})$/);
+  if (ymdMatch) {
+    return `${ymdMatch[1]}-${String(ymdMatch[2]).padStart(2, '0')}-${String(ymdMatch[3]).padStart(2, '0')}`;
+  }
+
   return str;
 };
 
@@ -181,6 +229,15 @@ const ManageTeachers = () => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
+  const [revealedEmails, setRevealedEmails] = useState({});
+  const [showPasswordInput, setShowPasswordInput] = useState(false);
+
+  const toggleEmailVisibility = useCallback((teacherId) => {
+    setRevealedEmails((prev) => ({
+      ...prev,
+      [teacherId]: !prev[teacherId],
+    }));
+  }, []);
 
   // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
@@ -339,11 +396,21 @@ const ManageTeachers = () => {
       });
     }
 
-    // ៣. ដេប៉ាតឺម៉ង់ពីបញ្ជីមុខវិជ្ជាសរុប (allCourses) ដែលគ្រូនេះទទួលបន្ទុកបង្រៀន
-    if (Array.isArray(allCourses) && allCourses.length > 0 && teacher.id) {
+    // ៣. ដេប៉ាតឺម៉ង់ពីបញ្ជីមុខវិជ្ជាសរុប (allCourses) ដោយផ្គូផ្គងទាំង teacher.id និង teacher.user_id
+    if (Array.isArray(allCourses) && allCourses.length > 0) {
+      const tId = teacher.id ? String(teacher.id) : null;
+      const tUserId = teacher.user_id ? String(teacher.user_id) : null;
+
       allCourses.forEach((c) => {
-        const cTeacherId = c.teacher_id || c.teacher?.id;
-        if (cTeacherId && String(cTeacherId) === String(teacher.id)) {
+        const cTeacherId = c.teacher_id ? String(c.teacher_id) : null;
+        const cNestedId = c.teacher?.id ? String(c.teacher.id) : null;
+        const cNestedUserId = c.teacher?.user_id ? String(c.teacher.user_id) : null;
+
+        const isMatched =
+          (tId && (cTeacherId === tId || cNestedId === tId)) ||
+          (tUserId && (cTeacherId === tUserId || cNestedUserId === tUserId));
+
+        if (isMatched) {
           const cDeptId = c.department_id || c.department?.id;
           if (cDeptId !== undefined && cDeptId !== null && cDeptId !== '') {
             deptSet.add(String(cDeptId));
@@ -870,6 +937,7 @@ const ManageTeachers = () => {
     });
     setEditingTeacher(null);
     setFormError('');
+    setShowPasswordInput(false);
   };
 
   const openCreateModal = () => {
@@ -879,6 +947,7 @@ const ManageTeachers = () => {
 
   const openEditModal = (teacher) => {
     setFormError('');
+    setShowPasswordInput(false);
     setEditingTeacher(teacher);
     setFormData({
       first_name: teacher.first_name || '',
@@ -1021,10 +1090,9 @@ const ManageTeachers = () => {
     });
   };
 
-  // ✅ ទាញយកទម្រង់គំរូ Excel ដែលបំពេញឈ្មោះដេប៉ាតឺម៉ង់ដែលបានចុចចូលឱ្យស្រាប់ និងតម្រៀបអ្នកមានឈ្មោះមុននៅខាងលើដេញចុះមកក្រោម
+  // ✅ ទាញយកទម្រង់គំរូ Excel ដោយមិនយកទិន្នន័យគ្រូបង្រៀនពិតប្រាកដដាក់ចូលឡើយ (ការពារឯកជនភាព និងការពារកំហុសស្ទួនអ៊ីមែលពេល Import)
   const handleDownloadTemplate = () => {
     const defaultDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
-    const sortedTeachersForTemplate = sortTeachersOldestFirst(displayedTeachers);
 
     const blankRow = () => ({
       'first_name': '',
@@ -1040,25 +1108,8 @@ const ManageTeachers = () => {
       'password': ''
     });
 
-    const baseData = sortedTeachersForTemplate.length > 0
-      ? sortedTeachersForTemplate.map((teacher) => ({
-          'first_name': teacher.first_name || '',
-          'last_name': teacher.last_name || '',
-          'email': teacher.email || '',
-          'phone': teacher.phone || '',
-          'gender': teacher.gender || '',
-          'teacher_code': teacher.teacher_code || '',
-          'department': defaultDeptName || teacher.department?.department_name || teacher.department?.name || '',
-          'specialization': teacher.specialization || '',
-          'employment_type': teacher.employment_type || 'Full-time',
-          'date_of_birth': formatDateOnly(teacher.date_of_birth),
-          'password': ''
-        }))
-      : [];
-
-    // បង្កើតជួរទំនេរដែលកំណត់ជា Text Format ('@') ចំនួន 50 ជួរទុកជាស្រេច
-    const extraBlankRowsCount = Math.max(10, 50 - baseData.length);
-    const templateData = [...baseData, ...Array.from({ length: extraBlankRowsCount }, () => blankRow())];
+    // បង្កើតជួរទំនេរដែលកំណត់ជា Text Format ('@') ចំនួន 50 ជួរទុកជាស្រេច (មិនបញ្ចេញឈ្មោះ អ៊ីមែល ឬពាក្យសម្ងាត់ពិតឡើយ)
+    const templateData = Array.from({ length: 50 }, () => blankRow());
 
     const worksheet = XLSX.utils.json_to_sheet(templateData);
     const colWidths = [
@@ -1215,6 +1266,7 @@ const ManageTeachers = () => {
             }
 
             const deptId = findDepartmentId(item.department);
+            const normalizedDob = formatDateOnly(item.date_of_birth);
 
             return {
               rowIndex: excelRowNumber,
@@ -1230,7 +1282,7 @@ const ManageTeachers = () => {
                 department_name: item.department || '',
                 specialization: item.specialization || '',
                 employment_type: cleanEmploymentType,
-                date_of_birth: formatDateOnly(item.date_of_birth),
+                date_of_birth: normalizedDob || null,
                 password: cleanPassword,
                 status: item.status || 'active'
               },
@@ -1616,6 +1668,8 @@ const ManageTeachers = () => {
                   const avatarUrl = getProfileImageUrl(rawAvatar);
                   const avatarKey = `tch_${teacher.id}`;
                   const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+                  const isActive = String(teacher.user?.status || teacher.status || 'active').toLowerCase() === 'active';
+                  const isEmailRevealed = Boolean(revealedEmails[teacher.id]);
 
                   return (
                     <tr key={teacher.id} className="tch-table-row hover:bg-blue-50/30 transition-colors">
@@ -1670,8 +1724,24 @@ const ManageTeachers = () => {
                         </span>
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="tch-text-secondary text-sm font-medium text-gray-600">
-                          {teacher.email}
+                        <div className="tch-text-secondary text-sm font-medium text-gray-600 flex items-center gap-1.5">
+                          <span className="font-mono tracking-tight">
+                            {isEmailRevealed ? teacher.email : maskEmailAddress(teacher.email)}
+                          </span>
+                          {teacher.email && (
+                            <button
+                              type="button"
+                              onClick={() => toggleEmailVisibility(teacher.id)}
+                              title={isEmailRevealed ? t('លាក់អ៊ីមែល', 'Hide email') : t('បង្ហាញអ៊ីមែលពេញ', 'Show full email')}
+                              className="p-1 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-gray-100/80 dark:hover:bg-slate-700/60 transition-colors cursor-pointer"
+                            >
+                              {isEmailRevealed ? (
+                                <EyeSlashIcon className="w-4 h-4" />
+                              ) : (
+                                <EyeIcon className="w-4 h-4" />
+                              )}
+                            </button>
+                          )}
                         </div>
                         {teacher.phone && (
                           <div className="tch-text-secondary text-xs text-gray-400 font-medium mt-0.5">
@@ -1698,11 +1768,11 @@ const ManageTeachers = () => {
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${
-                          teacher.user?.status === 'active' || teacher.status === 'active'
+                          isActive
                             ? 'tch-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-100' 
                             : 'tch-badge-rose bg-rose-50 text-rose-700 border-rose-100'
                         }`}>
-                          {teacher.user?.status === 'active' || teacher.status === 'active' ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
+                          {isActive ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
                         </span>
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap text-center">
@@ -1971,15 +2041,29 @@ const ManageTeachers = () => {
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
                       {editingTeacher ? t('ពាក្យសម្ងាត់ (ទុកឲ្យទទេ ដើម្បីរក្សាដដែល)', 'Password (Leave blank to keep)') : t('ពាក្យសម្ងាត់', 'Password')} {!editingTeacher && <span className="text-rose-500">*</span>}
                     </label>
-                    <input
-                      type="password"
-                      name="password"
-                      required={!editingTeacher}
-                      value={formData.password}
-                      onChange={handleInputChange}
-                      className="tch-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder="••••••••"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPasswordInput ? 'text' : 'password'}
+                        name="password"
+                        required={!editingTeacher}
+                        value={formData.password}
+                        onChange={handleInputChange}
+                        className="tch-input w-full pl-4 pr-11 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
+                        placeholder="••••••••"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswordInput((prev) => !prev)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                        title={showPasswordInput ? t('លាក់ពាក្យសម្ងាត់', 'Hide password') : t('បង្ហាញពាក្យសម្ងាត់', 'Show password')}
+                      >
+                        {showPasswordInput ? (
+                          <EyeSlashIcon className="h-5 w-5" />
+                        ) : (
+                          <EyeIcon className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   <div>

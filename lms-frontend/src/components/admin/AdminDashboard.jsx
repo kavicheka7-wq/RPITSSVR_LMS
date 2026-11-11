@@ -13,7 +13,9 @@ import {
   ClockIcon,
   BuildingLibraryIcon,
   ChevronRightIcon,
-  CheckBadgeIcon
+  CheckBadgeIcon,
+  EyeIcon,
+  EyeSlashIcon
 } from '@heroicons/react/24/outline';
 import {
   AreaChart,
@@ -53,6 +55,15 @@ const readStorageJson = (key, fallback) => {
   } catch {
     return fallback;
   }
+};
+
+// ✅ អនុគមន៍បិទបាំងផ្នែកកណ្ដាលនៃអ៊ីមែល (ឧ. "classit830@gmail.com" -> "cla*****30@gmail.com")
+const maskEmailAddress = (email) => {
+  if (!email || typeof email !== 'string' || !email.includes('@')) return email || '';
+  const [localPart, domain] = email.split('@');
+  if (localPart.length <= 2) return `${localPart[0] || '*'}***@${domain}`;
+  if (localPart.length <= 4) return `${localPart.slice(0, 2)}***@${domain}`;
+  return `${localPart.slice(0, 3)}*****${localPart.slice(-2)}@${domain}`;
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -188,6 +199,14 @@ const AdminDashboard = () => {
   const { t, language } = useLanguage();
   const { getFullName, user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
+  const [revealedEmails, setRevealedEmails] = useState({});
+
+  const toggleEmailVisibility = useCallback((userId) => {
+    setRevealedEmails((prev) => ({
+      ...prev,
+      [userId]: !prev[userId],
+    }));
+  }, []);
 
   // ✅ អនុគមន៍បម្លែងទីតាំងរូបភាពឱ្យគាំទ្រទាំង Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const resolveImageUrl = useCallback((rawPath) => {
@@ -635,7 +654,7 @@ const AdminDashboard = () => {
                 {t('បញ្ជីអ្នកប្រើប្រាស់ដែលបានចុះឈ្មោះថ្មីៗក្នុងប្រព័ន្ធ', 'List of users recently registered in the system')}
               </p>
             </div>
-            <Link to="/admin/students" className="admin-badge-emerald text-xs font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1 bg-emerald-50 border border-emerald-100 px-3 sm:px-4 py-2 rounded-xl transition-colors shrink-0">
+            <Link to="/admin/users" className="admin-badge-emerald text-xs font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1 bg-emerald-50 border border-emerald-100 px-3 sm:px-4 py-2 rounded-xl transition-colors shrink-0">
               {t('មើលទាំងអស់', 'View All')}
               <ChevronRightIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </Link>
@@ -671,6 +690,8 @@ const AdminDashboard = () => {
                       (u.first_name?.[0] || u.name?.[0] || '') +
                       (u.last_name?.[0] || '')
                     ).toUpperCase() || 'U';
+                    const isActive = String(u.status || 'active').toLowerCase() === 'active';
+                    const isEmailRevealed = Boolean(revealedEmails[u.id]);
 
                     return (
                       <tr key={u.id} className="admin-table-row hover:bg-blue-50/30 transition-colors">
@@ -697,7 +718,25 @@ const AdminDashboard = () => {
                           </div>
                         </td>
                         <td className="admin-text-secondary px-4 sm:px-6 py-3.5 sm:py-4 text-xs sm:text-sm text-gray-500 font-medium whitespace-nowrap">
-                          {u.email}
+                          <div className="inline-flex items-center gap-2">
+                            <span className="font-mono tracking-tight">
+                              {isEmailRevealed ? u.email : maskEmailAddress(u.email)}
+                            </span>
+                            {u.email && (
+                              <button
+                                type="button"
+                                onClick={() => toggleEmailVisibility(u.id)}
+                                title={isEmailRevealed ? t('លាក់អ៊ីមែល', 'Hide email') : t('បង្ហាញអ៊ីមែលពេញ', 'Show full email')}
+                                className="p-1 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-gray-100/80 dark:hover:bg-slate-700/60 transition-colors"
+                              >
+                                {isEmailRevealed ? (
+                                  <EyeSlashIcon className="w-4 h-4" />
+                                ) : (
+                                  <EyeIcon className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 sm:px-6 py-3.5 sm:py-4 whitespace-nowrap">
                           <span className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold rounded-xl inline-block ${
@@ -712,11 +751,11 @@ const AdminDashboard = () => {
                         </td>
                         <td className="px-4 sm:px-6 py-3.5 sm:py-4 text-center whitespace-nowrap">
                           <span className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold rounded-xl inline-block ${
-                            u.status === 'active' 
+                            isActive 
                               ? 'admin-badge-emerald bg-emerald-50 text-emerald-700 border border-emerald-200' 
                               : 'admin-badge-inactive bg-gray-100 text-gray-600 border border-gray-200'
                           }`}>
-                            {u.status === 'active' ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
+                            {isActive ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
                           </span>
                         </td>
                       </tr>

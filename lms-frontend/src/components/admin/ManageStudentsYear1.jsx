@@ -25,7 +25,9 @@ import {
   ArrowPathIcon,
   DocumentTextIcon,
   SparklesIcon,
-  CalendarDaysIcon
+  CalendarDaysIcon,
+  EyeIcon,
+  EyeSlashIcon
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -66,6 +68,15 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
+// ✅ អនុគមន៍បិទបាំងផ្នែកកណ្ដាលនៃអ៊ីមែល (ឧ. "classit830@gmail.com" -> "cla*****30@gmail.com")
+const maskEmailAddress = (email) => {
+  if (!email || typeof email !== 'string' || !email.includes('@')) return email || '';
+  const [localPart, domain] = email.split('@');
+  if (localPart.length <= 2) return `${localPart[0] || '*'}***@${domain}`;
+  if (localPart.length <= 4) return `${localPart.slice(0, 2)}***@${domain}`;
+  return `${localPart.slice(0, 3)}*****${localPart.slice(-2)}@${domain}`;
+};
+
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
 const resolveAdminUid = (contextUser) => {
   if (contextUser) {
@@ -98,12 +109,53 @@ const DEPT_CARD_THEMES = [
   { bg: 'bg-cyan-50', text: 'text-cyan-600', border: 'border-cyan-100', darkClass: 'std-dept-cyan' },
 ];
 
-// ✅ អនុគមន៍កាត់យកតែថ្ងៃខែឆ្នាំ (YYYY-MM-DD) ដោយលុប T00:00:00.000000Z ចេញ
+// ✅ អនុគមន៍បម្លែងគ្រប់ទម្រង់ថ្ងៃខែឆ្នាំ (30-04-2005, 30/04/2005, លេខខ្មែរ, ឬលេខ Excel) ទៅជា YYYY-MM-DD
 const formatDateOnly = (dateVal) => {
-  if (!dateVal) return '';
-  const str = String(dateVal).trim();
-  if (str.includes('T')) return str.split('T')[0];
-  if (str.includes(' ')) return str.split(' ')[0];
+  if (dateVal === null || dateVal === undefined || dateVal === '') return '';
+  let str = String(dateVal).trim().replace(/^'+/, '');
+  if (!str || str === '-' || str.toLowerCase() === 'null') return '';
+
+  // បម្លែងលេខខ្មែរ (០-៩) ទៅជាលេខសากล (0-9)
+  const khmerDigits = ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'];
+  khmerDigits.forEach((kd, idx) => {
+    str = str.replace(new RegExp(kd, 'g'), String(idx));
+  });
+
+  if (str.includes('T')) {
+    str = str.split('T')[0];
+  } else if (str.includes(' ') && /^\d{4}-\d{2}-\d{2}\s/.test(str)) {
+    str = str.split(' ')[0];
+  }
+
+  // 1. ករណីជាលេខ Serial Date របស់ Excel (ឧទាហរណ៍ 38472)
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    const serial = Number(str);
+    if (serial > 1000 && serial < 100000) {
+      const utcDays = Math.floor(serial - 25569);
+      const d = new Date(utcDays * 86400 * 1000);
+      if (!isNaN(d.getTime())) {
+        return d.toISOString().slice(0, 10);
+      }
+    }
+  }
+
+  // 2. ករណីទម្រង់ DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (ឧទាហរណ៍ 30-04-2005)
+  const dmyMatch = str.match(/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/);
+  if (dmyMatch) {
+    const first = parseInt(dmyMatch[1], 10);
+    const second = parseInt(dmyMatch[2], 10);
+    const year = dmyMatch[3];
+    const day = second > 12 && first <= 12 ? second : first;
+    const month = second > 12 && first <= 12 ? first : second;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  // 3. ករណីទម្រង់ YYYY-MM-DD ឬ YYYY/MM/DD
+  const ymdMatch = str.match(/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})$/);
+  if (ymdMatch) {
+    return `${ymdMatch[1]}-${String(ymdMatch[2]).padStart(2, '0')}-${String(ymdMatch[3]).padStart(2, '0')}`;
+  }
+
   return str;
 };
 
@@ -144,6 +196,22 @@ const normalizeShiftKey = (shiftVal) => {
     return 'Monday-Friday';
   }
   return s ? shiftVal : 'Monday-Friday';
+};
+
+// ✅ អនុគមន៍បម្លែងកម្រិតសិក្សាពី Excel (ទោះវាយជាខ្មែរ ឬអង់គ្លេស) ឱ្យត្រូវជាមួយប្រព័ន្ធ
+const normalizeDegreeLevel = (degVal) => {
+  if (!degVal) return '';
+  const d = degVal.toString().trim().toLowerCase();
+  if (d.includes('រង') || d.includes('associate') || d.includes('ជាន់ខ្ពស់បច្ចេកទេស')) {
+    return 'Associate Degree';
+  }
+  if (d.includes('ជាន់ខ្ពស់') || d.includes('master') || d.includes('អនុបណ្ឌិត')) {
+    return 'Master Degree';
+  }
+  if (d.includes('បរិញ្ញាបត្រ') || d.includes('bachelor')) {
+    return 'Bachelor Degree';
+  }
+  return degVal.toString().trim();
 };
 
 const isYear1Student = (student) => {
@@ -245,6 +313,15 @@ const ManageStudentsYear1 = () => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
+  const [revealedEmails, setRevealedEmails] = useState({});
+  const [showPasswordInput, setShowPasswordInput] = useState(false);
+
+  const toggleEmailVisibility = useCallback((studentId) => {
+    setRevealedEmails((prev) => ({
+      ...prev,
+      [studentId]: !prev[studentId],
+    }));
+  }, []);
 
   // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
@@ -1067,6 +1144,7 @@ const ManageStudentsYear1 = () => {
     });
     setEditingStudent(null);
     setFormError('');
+    setShowPasswordInput(false);
   };
 
   const openCreateModal = () => {
@@ -1076,19 +1154,20 @@ const ManageStudentsYear1 = () => {
 
   const openEditModal = (student) => {
     setFormError('');
+    setShowPasswordInput(false);
     setEditingStudent(student);
     setFormData({
       first_name: student.first_name || '',
       last_name: student.last_name || '',
       email: student.email || '',
       password: '',
-      status: student.user?.status || 'active',
+      status: student.user?.status || student.status || 'active',
       gender: student.gender || 'Male',
       phone: student.phone || '',
       student_code: student.student_code || '',
       department_id: student.department_id || student.department?.id || '',
       batch_year: student.batch_year || '',
-      degree_level: student.degree_level || '',
+      degree_level: normalizeDegreeLevel(student.degree_level),
       study_shift: normalizeShiftKey(student.study_shift),
       date_of_birth: formatDateOnly(student.date_of_birth),
       address: student.address || '',
@@ -1485,20 +1564,10 @@ const ManageStudentsYear1 = () => {
     });
   };
 
-  // ✅ ទាញយកទម្រង់គំរូ Excel ដោយដាក់អ្នកមានឈ្មោះមុននៅខាងលើដេញចុះមកក្រោមដូចគ្នា
+  // ✅ ទាញយកទម្រង់គំរូ Excel ដោយមិនយកទិន្នន័យសិស្សពិតប្រាកដដាក់ចូលឡើយ (ការពារឯកជនភាព និងការពារកំហុសស្ទួនអ៊ីមែលពេល Import)
   const handleDownloadTemplate = () => {
     const defaultDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
-    const defaultShift = selectedShift !== 'all' ? selectedShift : '';
-    const formatBatchYearTemplate = (val) => {
-      if (!val || val.toString().trim() === '' || val.toString().trim() === 'ឆ្នាំទី១' || val.toString().trim() === 'ឆ្នាំទី1') {
-        return 'ជំនាន់ទី , ឆ្នាំទី1';
-      }
-      const str = val.toString().trim().replace(/ឆ្នាំទី\s*១/g, 'ឆ្នាំទី1');
-      if (!str.includes('ជំនាន់')) {
-        return `ជំនាន់ទី , ${str}`;
-      }
-      return str;
-    };
+    const defaultShift = selectedShift !== 'all' ? selectedShift : 'Monday-Friday';
 
     const blankRow = () => ({
       'first_name': '',
@@ -1509,35 +1578,15 @@ const ManageStudentsYear1 = () => {
       'student_code': '',
       'department': defaultDeptName,
       'batch_year': 'ជំនាន់ទី , ឆ្នាំទី1',
-      'degree_level': '',
+      'degree_level': 'Bachelor Degree',
       'study_shift': defaultShift,
       'address': '',
       'date_of_birth': '',
       'password': ''
     });
 
-    const sortedStudentsForTemplate = sortStudentsOldestFirst(displayedStudents);
-
-    const baseData = sortedStudentsForTemplate.length > 0
-      ? sortedStudentsForTemplate.map((s) => ({
-          'first_name': s.first_name || '',
-          'last_name': s.last_name || '',
-          'email': s.email || '',
-          'phone': s.phone || '',
-          'gender': s.gender || '',
-          'student_code': s.student_code || '',
-          'department': defaultDeptName || s.department?.department_name || s.department?.name || '',
-          'batch_year': formatBatchYearTemplate(s.batch_year),
-          'degree_level': s.degree_level || '',
-          'study_shift': s.study_shift || defaultShift,
-          'address': s.address || '',
-          'date_of_birth': formatDateOnly(s.date_of_birth),
-          'password': ''
-        }))
-      : [];
-
-    const extraBlankRowsCount = Math.max(10, 50 - baseData.length);
-    const templateData = [...baseData, ...Array.from({ length: extraBlankRowsCount }, () => blankRow())];
+    // បង្កើតជួរទំនេរដែលកំណត់ជា Text Format ('@') ចំនួន 50 ជួរទុកជាស្រេច (មិនបញ្ចេញឈ្មោះ អ៊ីមែល ឬពាក្យសម្ងាត់ពិតឡើយ)
+    const templateData = Array.from({ length: 50 }, () => blankRow());
 
     const worksheet = XLSX.utils.json_to_sheet(templateData);
 
@@ -1637,6 +1686,9 @@ const ManageStudentsYear1 = () => {
           return;
         }
 
+        const existingEmails = new Set(students.map((sItem) => sItem.email?.toLowerCase()).filter(Boolean));
+        const fileEmails = new Set();
+
         const parsedRows = nonEmptyRows.map(({ row, excelRowNumber }) => {
           const item = {};
           Object.keys(row).forEach(k => { item[normalizeHeaderKey(k)] = row[k]?.toString().trim(); });
@@ -1651,6 +1703,12 @@ const ManageStudentsYear1 = () => {
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             if (!emailRegex.test(item.email)) {
               errors.push(t('អ៊ីមែលមិនត្រឹមត្រូវ', 'Invalid Email Format'));
+            } else if (existingEmails.has(item.email.toLowerCase())) {
+              errors.push(t('អ៊ីមែលនេះមានក្នុងប្រព័ន្ធរួចហើយ', 'Email already exists'));
+            } else if (fileEmails.has(item.email.toLowerCase())) {
+              errors.push(t('អ៊ីមែលស្ទួនក្នុងឯកសារនេះ', 'Duplicate email in file'));
+            } else {
+              fileEmails.add(item.email.toLowerCase());
             }
           }
 
@@ -1678,6 +1736,8 @@ const ManageStudentsYear1 = () => {
             cleanBatchYear = 'ឆ្នាំទី1';
           }
 
+          const normalizedDob = formatDateOnly(item.date_of_birth);
+
           return {
             rowIndex: excelRowNumber,
             raw: row,
@@ -1690,10 +1750,10 @@ const ManageStudentsYear1 = () => {
               student_code: (item.student_code || '').replace(/^'+/, '').trim(),
               department_id: findDepartmentId(item.department),
               batch_year: cleanBatchYear,
-              degree_level: item.degree_level || '',
+              degree_level: normalizeDegreeLevel(item.degree_level) || 'Bachelor Degree',
               study_shift: studyShift,
               address: item.address || '',
-              date_of_birth: formatDateOnly(item.date_of_birth),
+              date_of_birth: normalizedDob || null,
               password: cleanPassword,
               status: item.status || 'active'
             },
@@ -1765,11 +1825,12 @@ const ManageStudentsYear1 = () => {
   };
 
   const getDegreeLevelLabel = (level) => {
+    const norm = normalizeDegreeLevel(level);
     if (language === 'km') {
       const levels = { 'Associate Degree': 'បរិញ្ញាបត្ររង', 'Bachelor Degree': 'បរិញ្ញាបត្រ', 'Master Degree': 'បរិញ្ញាបត្រជាន់ខ្ពស់' };
-      return levels[level] || level || '—';
+      return levels[norm] || level || '—';
     }
-    return level || '—';
+    return norm || level || '—';
   };
 
   // ✅ អនុគមន៍បង្ហាញឈ្មោះភេទជាភាសាខ្មែរ ឬអង់គ្លេស
@@ -2184,6 +2245,8 @@ const ManageStudentsYear1 = () => {
                     const avatarUrl = getProfileImageUrl(rawAvatar);
                     const avatarKey = `std_${student.id}`;
                     const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+                    const isActive = String(student.user?.status || student.status || 'active').toLowerCase() === 'active';
+                    const isEmailRevealed = Boolean(revealedEmails[student.id]);
 
                     return (
                       <tr key={student.id} className="std-table-row hover:bg-blue-50/30 transition-colors">
@@ -2252,8 +2315,24 @@ const ManageStudentsYear1 = () => {
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="std-text-secondary text-sm font-medium text-gray-600">
-                            {student.email}
+                          <div className="std-text-secondary text-sm font-medium text-gray-600 flex items-center gap-1.5">
+                            <span className="font-mono tracking-tight">
+                              {isEmailRevealed ? student.email : maskEmailAddress(student.email)}
+                            </span>
+                            {student.email && (
+                              <button
+                                type="button"
+                                onClick={() => toggleEmailVisibility(student.id)}
+                                title={isEmailRevealed ? t('លាក់អ៊ីមែល', 'Hide email') : t('បង្ហាញអ៊ីមែលពេញ', 'Show full email')}
+                                className="p-1 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-gray-100/80 dark:hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              >
+                                {isEmailRevealed ? (
+                                  <EyeSlashIcon className="w-4 h-4" />
+                                ) : (
+                                  <EyeIcon className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
                           </div>
                           {student.phone && (
                             <div className="std-text-secondary text-xs text-gray-400 font-medium mt-0.5">
@@ -2288,8 +2367,8 @@ const ManageStudentsYear1 = () => {
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${student.user?.status === 'active' ? 'std-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-100' : 'std-badge-rose bg-rose-50 text-rose-700 border-rose-100'}`}>
-                            {student.user?.status === 'active' ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
+                          <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${isActive ? 'std-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-100' : 'std-badge-rose bg-rose-50 text-rose-700 border-rose-100'}`}>
+                            {isActive ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-center">
@@ -2605,15 +2684,29 @@ const ManageStudentsYear1 = () => {
                         : t('ពាក្យសម្ងាត់', 'Password')}{' '}
                       {!editingStudent && <span className="text-rose-500">*</span>}
                     </label>
-                    <input
-                      type="password"
-                      name="password"
-                      required={!editingStudent}
-                      value={formData.password}
-                      onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder="••••••••"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPasswordInput ? 'text' : 'password'}
+                        name="password"
+                        required={!editingStudent}
+                        value={formData.password}
+                        onChange={handleInputChange}
+                        className="std-input w-full pl-4 pr-11 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
+                        placeholder="••••••••"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswordInput((prev) => !prev)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                        title={showPasswordInput ? t('លាក់ពាក្យសម្ងាត់', 'Hide password') : t('បង្ហាញពាក្យសម្ងាត់', 'Show password')}
+                      >
+                        {showPasswordInput ? (
+                          <EyeSlashIcon className="h-5 w-5" />
+                        ) : (
+                          <EyeIcon className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   <div>
