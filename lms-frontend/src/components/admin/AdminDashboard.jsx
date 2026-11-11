@@ -13,9 +13,7 @@ import {
   ClockIcon,
   BuildingLibraryIcon,
   ChevronRightIcon,
-  CheckBadgeIcon,
-  EyeIcon,
-  EyeSlashIcon
+  CheckBadgeIcon
 } from '@heroicons/react/24/outline';
 import {
   AreaChart,
@@ -39,13 +37,14 @@ const CACHE_KEY_SHARED_USERS = 'cached_admin_recent_users';
 const getStatsCacheKey = (uid) => `cached_admin_dashboard_stats_v8_${uid}`;
 const getUsersCacheKey = (uid) => `cached_admin_recent_users_v8_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ
+// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សាទុករូបភាពក្នុង RAM ដើម្បីបង្ហាញលឿន 0ms
 const ADMIN_DASH_MEM_CACHE = {
   uid: null,
   stats: null,
   recentUsers: null,
   lastSyncedAt: 0,
   prefetchedUid: null,
+  avatarMap: {},
 };
 
 const readStorageJson = (key, fallback) => {
@@ -54,6 +53,46 @@ const readStorageJson = (key, fallback) => {
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
+  }
+};
+
+// ✅ រក្សាទុកបញ្ជីចូល localStorage ដោយសុវត្ថិភាព (បើរូប Base64 ធំពេកលើសទំហំ localStorage វានឹងរក្សារូបក្នុង RAM ជំនួស)
+const safeWriteListStorage = (key, list, saveToAvatarMap = false) => {
+  if (!Array.isArray(list)) return;
+  if (saveToAvatarMap) {
+    list.forEach((uItem) => {
+      const img =
+        uItem?.profile_image ||
+        uItem?.teacher?.profile_image ||
+        uItem?.student?.profile_image;
+      if (uItem?.id && img) {
+        ADMIN_DASH_MEM_CACHE.avatarMap[uItem.id] = img;
+      }
+    });
+  }
+  try {
+    localStorage.setItem(key, JSON.stringify(list));
+  } catch {
+    try {
+      const lightList = list.map((item) => ({
+        ...item,
+        profile_image:
+          item.profile_image && item.profile_image.startsWith('data:')
+            ? null
+            : item.profile_image,
+        user: item.user
+          ? {
+              ...item.user,
+              profile_image:
+                item.user.profile_image &&
+                item.user.profile_image.startsWith('data:')
+                  ? null
+                  : item.user.profile_image,
+            }
+          : item.user,
+      }));
+      localStorage.setItem(key, JSON.stringify(lightList));
+    } catch {}
   }
 };
 
@@ -122,16 +161,8 @@ const prefetchAllAdminPagesData = (uid) => {
       .then((res) => {
         const data = res.data?.data || res.data || [];
         if (Array.isArray(data)) {
-          try {
-            localStorage.setItem(
-              `cached_admin_departments_list_v8_${uid}`,
-              JSON.stringify(data)
-            );
-            localStorage.setItem(
-              'cached_admin_departments_list',
-              JSON.stringify(data)
-            );
-          } catch {}
+          safeWriteListStorage(`cached_admin_departments_list_v8_${uid}`, data);
+          safeWriteListStorage('cached_admin_departments_list', data);
         }
       })
       .catch(() => {});
@@ -141,16 +172,8 @@ const prefetchAllAdminPagesData = (uid) => {
       .then((res) => {
         const data = res.data?.data || res.data || [];
         if (Array.isArray(data)) {
-          try {
-            localStorage.setItem(
-              `cached_admin_courses_list_v8_${uid}`,
-              JSON.stringify(data)
-            );
-            localStorage.setItem(
-              'cached_admin_courses_list',
-              JSON.stringify(data)
-            );
-          } catch {}
+          safeWriteListStorage(`cached_admin_courses_list_v8_${uid}`, data);
+          safeWriteListStorage('cached_admin_courses_list', data);
         }
       })
       .catch(() => {});
@@ -160,16 +183,8 @@ const prefetchAllAdminPagesData = (uid) => {
       .then((res) => {
         const data = res.data?.data || res.data || [];
         if (Array.isArray(data)) {
-          try {
-            localStorage.setItem(
-              `cached_admin_teachers_list_v8_${uid}`,
-              JSON.stringify(data)
-            );
-            localStorage.setItem(
-              'cached_admin_teachers_list',
-              JSON.stringify(data)
-            );
-          } catch {}
+          safeWriteListStorage(`cached_admin_teachers_list_v8_${uid}`, data);
+          safeWriteListStorage('cached_admin_teachers_list', data);
         }
       })
       .catch(() => {});
@@ -179,16 +194,8 @@ const prefetchAllAdminPagesData = (uid) => {
       .then((res) => {
         const data = res.data?.data || res.data || [];
         if (Array.isArray(data)) {
-          try {
-            localStorage.setItem(
-              `cached_admin_students_list_v8_${uid}`,
-              JSON.stringify(data)
-            );
-            localStorage.setItem(
-              'cached_admin_students_list',
-              JSON.stringify(data)
-            );
-          } catch {}
+          safeWriteListStorage(`cached_admin_students_list_v8_${uid}`, data);
+          safeWriteListStorage('cached_admin_students_list', data);
         }
       })
       .catch(() => {});
@@ -199,14 +206,6 @@ const AdminDashboard = () => {
   const { t, language } = useLanguage();
   const { getFullName, user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
-  const [revealedEmails, setRevealedEmails] = useState({});
-
-  const toggleEmailVisibility = useCallback((userId) => {
-    setRevealedEmails((prev) => ({
-      ...prev,
-      [userId]: !prev[userId],
-    }));
-  }, []);
 
   // ✅ អនុគមន៍បម្លែងទីតាំងរូបភាពឱ្យគាំទ្រទាំង Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const resolveImageUrl = useCallback((rawPath) => {
@@ -242,6 +241,7 @@ const AdminDashboard = () => {
     ADMIN_DASH_MEM_CACHE.stats = null;
     ADMIN_DASH_MEM_CACHE.recentUsers = null;
     ADMIN_DASH_MEM_CACHE.lastSyncedAt = 0;
+    ADMIN_DASH_MEM_CACHE.avatarMap = {};
   }
   ADMIN_DASH_MEM_CACHE.uid = currentAdminId;
 
@@ -272,6 +272,7 @@ const AdminDashboard = () => {
   // ✅ ធ្វើបច្ចុប្បន្នភាពរូបភាពប្រវត្តិរូបរបស់ Admin បច្ចុប្បន្នក្នុងតារាង Recent Users ភ្លាមៗនៅពេលប្ដូររូបលើ Navbar
   useEffect(() => {
     if (!user?.id || !user?.profile_image) return;
+    ADMIN_DASH_MEM_CACHE.avatarMap[user.id] = user.profile_image;
     setFailedAvatars((prev) => {
       if (!prev[user.id]) return prev;
       const next = { ...prev };
@@ -293,16 +294,8 @@ const AdminDashboard = () => {
       });
       if (changed) {
         ADMIN_DASH_MEM_CACHE.recentUsers = updated;
-        try {
-          localStorage.setItem(
-            getUsersCacheKey(currentAdminId),
-            JSON.stringify(updated)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_USERS,
-            JSON.stringify(updated)
-          );
-        } catch {}
+        safeWriteListStorage(getUsersCacheKey(currentAdminId), updated, true);
+        safeWriteListStorage(CACHE_KEY_SHARED_USERS, updated, false);
       }
       return changed ? updated : prev;
     });
@@ -347,8 +340,15 @@ const AdminDashboard = () => {
       ADMIN_DASH_MEM_CACHE.stats = cachedSt;
     }
     if (Array.isArray(cachedUs)) {
-      setRecentUsers(cachedUs);
-      ADMIN_DASH_MEM_CACHE.recentUsers = cachedUs;
+      const hydratedUsers = cachedUs.map((uItem) => {
+        const memImg = ADMIN_DASH_MEM_CACHE.avatarMap[uItem.id];
+        if (memImg && !uItem.profile_image) {
+          return { ...uItem, profile_image: memImg };
+        }
+        return uItem;
+      });
+      setRecentUsers(hydratedUsers);
+      ADMIN_DASH_MEM_CACHE.recentUsers = hydratedUsers;
     }
 
     const now = Date.now();
@@ -392,20 +392,19 @@ const AdminDashboard = () => {
       .then((res) => {
         const rawUsers = res.data?.data || res.data || [];
         const fetchedUsers = Array.isArray(rawUsers) ? rawUsers : [];
+        fetchedUsers.forEach((uItem) => {
+          const img =
+            uItem?.profile_image ||
+            uItem?.teacher?.profile_image ||
+            uItem?.student?.profile_image;
+          if (uItem?.id && img) {
+            ADMIN_DASH_MEM_CACHE.avatarMap[uItem.id] = img;
+          }
+        });
         setRecentUsers(fetchedUsers);
         ADMIN_DASH_MEM_CACHE.recentUsers = fetchedUsers;
-        try {
-          localStorage.setItem(
-            getUsersCacheKey(currentAdminId),
-            JSON.stringify(fetchedUsers)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_USERS,
-            JSON.stringify(fetchedUsers)
-          );
-        } catch (e) {
-          console.warn('Failed to cache recent users:', e);
-        }
+        safeWriteListStorage(getUsersCacheKey(currentAdminId), fetchedUsers, true);
+        safeWriteListStorage(CACHE_KEY_SHARED_USERS, fetchedUsers, false);
       })
       .catch((err) => {
         console.error('Users API error:', err);
@@ -644,7 +643,7 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* ✅ ផ្នែកអ្នកប្រើប្រាស់ថ្មីៗ (Recent Users Table) - គ្មាន Skeleton Loading */}
+      {/* ✅ ផ្នែកអ្នកប្រើប្រាស់ថ្មីៗ (Recent Users Table) - បន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែក */}
       <div className="w-full">
         <div className="admin-surface-card bg-white rounded-2xl sm:rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden">
           <div className="admin-card-divider px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 flex items-center justify-between gap-3">
@@ -670,7 +669,7 @@ const AdminDashboard = () => {
                   <th className="px-4 sm:px-6 py-3.5 sm:py-4 text-center whitespace-nowrap">{t('ស្ថានភាព', 'Status')}</th>
                 </tr>
               </thead>
-              <tbody className="admin-table-body divide-y divide-gray-100 text-sm">
+              <tbody className="admin-table-body text-sm">
                 {recentUsers.length === 0 ? (
                   <tr>
                     <td colSpan="4" className="admin-text-muted px-6 py-10 text-center text-gray-400 font-bold">
@@ -683,7 +682,8 @@ const AdminDashboard = () => {
                       (Number(u.id) === Number(user?.id) && user?.profile_image) ||
                       u.profile_image ||
                       u.teacher?.profile_image ||
-                      u.student?.profile_image;
+                      u.student?.profile_image ||
+                      ADMIN_DASH_MEM_CACHE.avatarMap[u.id];
                     const avatarUrl = resolveImageUrl(rawAvatar);
                     const hasAvatar = Boolean(avatarUrl && !failedAvatars[u.id]);
                     const initials = (
@@ -691,7 +691,6 @@ const AdminDashboard = () => {
                       (u.last_name?.[0] || '')
                     ).toUpperCase() || 'U';
                     const isActive = String(u.status || 'active').toLowerCase() === 'active';
-                    const isEmailRevealed = Boolean(revealedEmails[u.id]);
 
                     return (
                       <tr key={u.id} className="admin-table-row hover:bg-blue-50/30 transition-colors">
@@ -702,6 +701,9 @@ const AdminDashboard = () => {
                                 <img
                                   src={avatarUrl}
                                   alt={u.first_name || u.name || 'User'}
+                                  loading="eager"
+                                  decoding="async"
+                                  fetchpriority="high"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
                                     setFailedAvatars((prev) => ({
@@ -717,26 +719,8 @@ const AdminDashboard = () => {
                             <span>{u.first_name || u.name} {u.last_name || ''}</span>
                           </div>
                         </td>
-                        <td className="admin-text-secondary px-4 sm:px-6 py-3.5 sm:py-4 text-xs sm:text-sm text-gray-500 font-medium whitespace-nowrap">
-                          <div className="inline-flex items-center gap-2">
-                            <span className="font-mono tracking-tight">
-                              {isEmailRevealed ? u.email : maskEmailAddress(u.email)}
-                            </span>
-                            {u.email && (
-                              <button
-                                type="button"
-                                onClick={() => toggleEmailVisibility(u.id)}
-                                title={isEmailRevealed ? t('លាក់អ៊ីមែល', 'Hide email') : t('បង្ហាញអ៊ីមែលពេញ', 'Show full email')}
-                                className="p-1 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-gray-100/80 dark:hover:bg-slate-700/60 transition-colors"
-                              >
-                                {isEmailRevealed ? (
-                                  <EyeSlashIcon className="w-4 h-4" />
-                                ) : (
-                                  <EyeIcon className="w-4 h-4" />
-                                )}
-                              </button>
-                            )}
-                          </div>
+                        <td className="admin-text-secondary px-4 sm:px-6 py-3.5 sm:py-4 text-xs sm:text-sm text-gray-500 font-medium whitespace-nowrap font-mono tracking-tight">
+                          {maskEmailAddress(u.email)}
                         </td>
                         <td className="px-4 sm:px-6 py-3.5 sm:py-4 whitespace-nowrap">
                           <span className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold rounded-xl inline-block ${
@@ -768,8 +752,13 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* ✅ CSS សម្រាប់កំណត់ពណ៌ទម្រង់យប់ (Dark Mode) */}
+      {/* ✅ CSS សម្រាប់កំណត់ពណ៌ទម្រង់ថ្ងៃ និងទម្រង់យប់ (Dark Mode) */}
       <style>{`
+        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
+        .admin-table-row + .admin-table-row > td {
+          border-top: 1px solid #f1f5f9;
+        }
+
         html.dark .admin-surface-card {
           background-color: #1e293b !important;
           border-color: #334155 !important;
@@ -832,14 +821,17 @@ const AdminDashboard = () => {
           stroke: #334155 !important;
         }
 
-        /* តារាងអ្នកប្រើប្រាស់ថ្មីៗ */
+        /* ✅ តារាងអ្នកប្រើប្រាស់ថ្មីៗ និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ (គ្មានបន្ទាត់ពណ៌សភ្លឺ) */
         html.dark .admin-table-head {
           background-color: rgba(15, 23, 42, 0.6) !important;
-          border-color: #334155 !important;
+          border-color: rgba(51, 65, 85, 0.7) !important;
           color: #94a3b8 !important;
         }
-        html.dark .admin-table-body > tr + tr {
-          border-color: #334155 !important;
+        html.dark .admin-table-body {
+          background-color: #1e293b !important;
+        }
+        html.dark .admin-table-row + .admin-table-row > td {
+          border-top: 1px solid rgba(51, 65, 85, 0.55) !important;
         }
         html.dark .admin-table-row:hover {
           background-color: rgba(59, 130, 246, 0.08) !important;
