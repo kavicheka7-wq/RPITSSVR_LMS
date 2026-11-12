@@ -103,16 +103,8 @@ const AppContent = () => {
     };
   }, []);
 
-  // 🔴 ទីតាំងដែលធ្វើឱ្យចេញអេក្រង់ស (White Screen) ពីមុន ត្រូវបានដោះស្រាយដោយជំនួសផ្ទាំង Loading
   if (loading && !user) {
-    return (
-      <div className="flex flex-col h-screen w-full items-center justify-center bg-gray-50 dark:bg-slate-950">
-        <div className="animate-spin rounded-full h-14 w-14 border-t-4 border-b-4 border-blue-600 mb-5 shadow-sm"></div>
-        <p className="text-gray-600 dark:text-gray-300 font-extrabold text-sm tracking-widest animate-pulse">
-          កំពុងរៀបចំទិន្នន័យ...
-        </p>
-      </div>
-    );
+    return null;
   }
 
   // ✅ កំណត់សិទ្ធិតួនាទីរបស់អ្នកប្រើប្រាស់ (Role Resolver - គាំទ្រទាំងលេខ និងអក្សរ)
@@ -166,7 +158,7 @@ const AppContent = () => {
 
   // ✅ User is logged in: Navbar លាតពេញអេក្រង់ 100% នៅខាងលើ ហើយផ្ទៃខាងក្រោមជាអ្នក Scroll
   return (
-    <div className="flex flex-col h-screen w-full overflow-hidden bg-gray-50 dark:bg-slate-950 animate-fadeIn">
+    <div className="flex flex-col h-screen w-full overflow-hidden bg-gray-50 dark:bg-slate-950">
       {/* 1. Navbar ពេញអេក្រង់ 100% ដល់គែមស្ដាំបំផុត គ្មាន Scrollbar មកបាំង */}
       <div className="w-full shrink-0 z-40">
         <Navbar />

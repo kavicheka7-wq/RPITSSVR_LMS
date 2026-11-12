@@ -24,7 +24,8 @@ const readStoredJson = (key) => {
 
 const readValidTokenSync = () => {
   try {
-    const raw = localStorage.getItem('token') || localStorage.getItem('auth_token');
+    const raw =
+      localStorage.getItem('token') || localStorage.getItem('auth_token');
     if (!raw || raw === 'undefined' || raw === 'null') return null;
     return raw;
   } catch {
@@ -40,8 +41,9 @@ if (initialBootToken) {
 
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(() => readValidTokenSync());
+  const skipNextFetchRef = useRef(false);
 
-  // ✅ អានទិន្នន័យពី localStorage មកប្រើភ្លាមៗ ដើម្បីបញ្ចៀសការរង់ចាំ Loading
+  // ✅ អានទិន្នន័យ User និង Teacher ពី localStorage ភ្លាមៗក្នុង 0 វិនាទី
   const [user, setUser] = useState(() => {
     const savedToken = readValidTokenSync();
     if (!savedToken) return null;
@@ -55,14 +57,11 @@ export const AuthProvider = ({ children }) => {
     return readStoredJson('teacher');
   });
 
-  // ✅ បិទ Loading ជានិច្ចប្រសិនបើមាន Token និង User ក្នុង Cache រួចហើយ
   const [loading, setLoading] = useState(() => {
     const savedToken = readValidTokenSync();
     const savedUser = readStoredJson('user') || readStoredJson('auth_user');
     return Boolean(savedToken && !savedUser);
   });
-
-  const skipNextFetchRef = useRef(false);
 
   const clearAuthStorage = useCallback(() => {
     try {
@@ -119,14 +118,22 @@ export const AuthProvider = ({ children }) => {
     []
   );
 
-  // ✅ មុខងារទាញទិន្នន័យ (Background Sync) ដោយមិនរំខានដល់ការបង្ហាញទំព័រ
   const fetchUser = useCallback(async () => {
     try {
       const response = await api.get('/user');
       const resData = response.data || {};
-      const userData = resData.user || resData.data?.user || resData.data || resData;
-      const teacherData = resData.teacher || resData.data?.teacher || userData?.teacher || null;
-      const studentData = resData.student || resData.data?.student || userData?.student || null;
+      const userData =
+        resData.user || resData.data?.user || resData.data || resData;
+      const teacherData =
+        resData.teacher ||
+        resData.data?.teacher ||
+        userData?.teacher ||
+        null;
+      const studentData =
+        resData.student ||
+        resData.data?.student ||
+        userData?.student ||
+        null;
 
       if (userData && (userData.id || userData.user_id || userData.email)) {
         const enrichedUser = {
@@ -135,7 +142,6 @@ export const AuthProvider = ({ children }) => {
           ...(studentData ? { student: studentData } : {}),
         };
 
-        // ធ្វើបច្ចុប្បន្នភាព State យ៉ាងស្ងៀមស្ងាត់
         setUser(enrichedUser);
         setTeacher(teacherData);
 
@@ -145,14 +151,19 @@ export const AuthProvider = ({ children }) => {
 
           if (teacherData) {
             localStorage.setItem('teacher', JSON.stringify(teacherData));
+          } else {
+            localStorage.removeItem('teacher');
           }
+
           if (studentData) {
             localStorage.setItem('student', JSON.stringify(studentData));
+          } else {
+            localStorage.removeItem('student');
           }
         } catch {}
       }
     } catch (error) {
-      console.error('Error Background Syncing User:', error);
+      console.error('Error fetching user:', error);
       const status = error.response?.status;
       if (status === 401 || status === 403) {
         clearAuthStorage();
@@ -162,7 +173,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, [clearAuthStorage]);
 
-  // ✅ ពេល Refresh ទំព័រ (F5), ប្រសិនបើមាន Cache ហើយ មិនបាច់រង់ចាំ Loading ទេ ឱ្យ UI លោតចេញភ្លាមៗ រួចចាំហៅ API ពីក្រោយ
   useEffect(() => {
     if (token) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -171,15 +181,7 @@ export const AuthProvider = ({ children }) => {
         setLoading(false);
         return;
       }
-      
-      const cachedUser = readStoredJson('user') || readStoredJson('auth_user');
-      if (cachedUser) {
-        setLoading(false); // ដោះសោរ Loading ភ្លាមៗក្នុង 0ms ឱ្យ App.jsx បង្ហាញ Layout
-        // ពន្យារការហៅ API សុំទិន្នន័យ ៥០០ មីលីវិនាទី ដើម្បីទុក Bandwidth ឱ្យទំព័រផ្សេងៗដើរមុន
-        setTimeout(() => { fetchUser(); }, 500); 
-      } else {
-        fetchUser(); // បើគ្មាន Cache ទាល់តែសោះ ទើបបង្ខំឱ្យរង់ចាំ API
-      }
+      fetchUser();
     } else {
       delete api.defaults.headers.common['Authorization'];
       setLoading(false);
@@ -199,9 +201,12 @@ export const AuthProvider = ({ children }) => {
       }
 
       api.defaults.headers.common['Authorization'] = `Bearer ${latestToken}`;
-      const latestUserRaw = readStoredJson('user') || readStoredJson('auth_user');
-      const latestUser = latestUserRaw?.user || latestUserRaw?.data || latestUserRaw || null;
-      const latestTeacher = readStoredJson('teacher') || latestUser?.teacher || null;
+      const latestUserRaw =
+        readStoredJson('user') || readStoredJson('auth_user');
+      const latestUser =
+        latestUserRaw?.user || latestUserRaw?.data || latestUserRaw || null;
+      const latestTeacher =
+        readStoredJson('teacher') || latestUser?.teacher || null;
 
       setToken((prev) => {
         if (prev !== latestToken) {
