@@ -24,30 +24,19 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនី Admin ម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យ និងរូបភាពល្បឿន 0 វិនាទី (0ms Instant Avatar & Data Cache)
 // ============================================================================
 const CACHE_KEY_SHARED_TEACHERS = 'cached_admin_teachers_list';
 const CACHE_KEY_LEGACY_TEACHERS = 'cached_admin_teachers_page1';
 const CACHE_KEY_LEGACY_META = 'cached_admin_teachers_meta';
 const CACHE_KEY_SHARED_DEPTS = 'cached_admin_departments_list';
 const CACHE_KEY_SHARED_COURSES = 'cached_admin_courses_list';
+const AVATAR_STORAGE_KEY = 'cached_admin_teachers_avatars_v8';
 
 const getTeachersCacheKey = (uid) => `cached_admin_teachers_list_v8_${uid}`;
 const getTeachersMetaCacheKey = (uid) => `cached_admin_teachers_meta_v8_${uid}`;
 const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v8_${uid}`;
-
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សាទុករូបភាពក្នុង RAM ដើម្បីបង្ហាញលឿន 0ms
-const ADMIN_TEACHERS_MEM_CACHE = {
-  uid: null,
-  teachers: null,
-  meta: null,
-  departments: null,
-  courses: null,
-  teacherRoleId: null,
-  lastSyncedAt: 0,
-  avatarMap: {},
-};
 
 const readStorageJson = (key, fallback) => {
   try {
@@ -58,39 +47,164 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ រក្សាទុកទិន្នន័យចូល localStorage ដោយសុវត្ថិភាព (បើរូប Base64 ធំពេកលើសទំហំ localStorage វានឹងរក្សារូបក្នុង RAM ជំនួស)
-const safeWriteTeachersStorage = (key, list) => {
+// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + អានរូបភាពពី localStorage តាំងពីវិនាទីទី 0
+const ADMIN_TEACHERS_MEM_CACHE = {
+  uid: null,
+  teachers: null,
+  meta: null,
+  departments: null,
+  courses: null,
+  teacherRoleId: null,
+  lastSyncedAt: 0,
+  avatarMap: readStorageJson(AVATAR_STORAGE_KEY, {}) || {},
+};
+
+let avatarPersistTimer = null;
+const scheduleAvatarMapPersist = (uid) => {
+  if (avatarPersistTimer) clearTimeout(avatarPersistTimer);
+  avatarPersistTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(
+        AVATAR_STORAGE_KEY,
+        JSON.stringify(ADMIN_TEACHERS_MEM_CACHE.avatarMap)
+      );
+      if (uid && Array.isArray(ADMIN_TEACHERS_MEM_CACHE.teachers)) {
+        const updatedCompact = ADMIN_TEACHERS_MEM_CACHE.teachers.map((item) => {
+          const tiny = ADMIN_TEACHERS_MEM_CACHE.avatarMap[item.id];
+          return {
+            ...item,
+            profile_image:
+              tiny && tiny.length < 25000
+                ? tiny
+                : item.profile_image && !item.profile_image.startsWith('data:')
+                ? item.profile_image
+                : null,
+            user: item.user
+              ? {
+                  id: item.user.id,
+                  status: item.user.status,
+                  email: item.user.email,
+                }
+              : item.user,
+          };
+        });
+        localStorage.setItem(getTeachersCacheKey(uid), JSON.stringify(updatedCompact));
+        localStorage.setItem(CACHE_KEY_SHARED_TEACHERS, JSON.stringify(updatedCompact));
+      }
+    } catch {}
+  }, 120);
+};
+
+// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail តូចច្បាស់ (~3KB) ដើម្បីរក្សាទុកក្នុង localStorage សម្រាប់បង្ហាញភ្លាមៗក្នុង 0 វិនាទី
+const compressBase64Avatar = (dataUrl, callback) => {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
+    callback(dataUrl);
+    return;
+  }
+  if (dataUrl.length < 16000) {
+    callback(dataUrl);
+    return;
+  }
+  try {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 88;
+        let width = img.width || maxSize;
+        let height = img.height || maxSize;
+        if (width > height) {
+          if (width > maxSize) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/webp', 0.76);
+        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+      } catch {
+        callback(dataUrl);
+      }
+    };
+    img.onerror = () => callback(dataUrl);
+    img.src = dataUrl;
+  } catch {
+    callback(dataUrl);
+  }
+};
+
+// ✅ រក្សាទុកទាំងទិន្នន័យ និងរូបភាពគ្រូបង្រៀនចូលក្នុង localStorage ដើម្បីបើកភ្លាមឃើញរូបភ្លាមក្នុង 0ms
+const safeWriteTeachersStorage = (key, list, uid = null) => {
   if (!Array.isArray(list)) return;
+
   list.forEach((tItem) => {
-    const img = tItem?.profile_image || tItem?.user?.profile_image;
-    if (tItem?.id && img) {
-      ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = img;
+    const rawImg = tItem?.profile_image || tItem?.user?.profile_image;
+    if (tItem?.id && rawImg) {
+      const existingCached = ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id];
+      if (existingCached && existingCached.length < 18000 && rawImg.startsWith('data:')) {
+        return;
+      }
+      if (!existingCached) {
+        ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = rawImg;
+      }
+      compressBase64Avatar(rawImg, (tinyImg) => {
+        if (tinyImg) {
+          ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = tinyImg;
+          scheduleAvatarMapPersist(uid || ADMIN_TEACHERS_MEM_CACHE.uid);
+        }
+      });
     }
   });
+
+  const compactList = list.map((item) => {
+    const cachedTiny = ADMIN_TEACHERS_MEM_CACHE.avatarMap[item.id];
+    const slimImage =
+      cachedTiny && cachedTiny.length < 25000
+        ? cachedTiny
+        : item.profile_image && !item.profile_image.startsWith('data:')
+        ? item.profile_image
+        : null;
+
+    return {
+      ...item,
+      profile_image: slimImage,
+      user: item.user
+        ? {
+            id: item.user.id,
+            status: item.user.status,
+            email: item.user.email,
+          }
+        : item.user,
+    };
+  });
+
   try {
-    localStorage.setItem(key, JSON.stringify(list));
-  } catch {
-    try {
-      const lightList = list.map((item) => ({
-        ...item,
-        profile_image:
-          item.profile_image && item.profile_image.startsWith('data:')
-            ? null
-            : item.profile_image,
-        user: item.user
-          ? {
-              ...item.user,
-              profile_image:
-                item.user.profile_image &&
-                item.user.profile_image.startsWith('data:')
-                  ? null
-                  : item.user.profile_image,
-            }
-          : item.user,
-      }));
-      localStorage.setItem(key, JSON.stringify(lightList));
-    } catch {}
-  }
+    localStorage.setItem(key, JSON.stringify(compactList));
+  } catch {}
+};
+
+// ✅ បញ្ចូលរូបភាពពី Cache មកភ្ជាប់ជាមួយបញ្ជីគ្រូបង្រៀនភ្លាមៗក្នុង 0 វិនាទី
+const hydrateTeachersWithAvatars = (list) => {
+  if (!Array.isArray(list)) return [];
+  return list.map((item) => {
+    const img =
+      ADMIN_TEACHERS_MEM_CACHE.avatarMap[item.id] ||
+      item.profile_image ||
+      item.user?.profile_image ||
+      null;
+    if (img && item.profile_image !== img) {
+      return { ...item, profile_image: img };
+    }
+    return item;
+  });
 };
 
 // ✅ អនុគមន៍បិទបាំងផ្នែកកណ្ដាលនៃអ៊ីមែល (ឧ. "classit830@gmail.com" -> "cla*****30@gmail.com")
@@ -141,7 +255,6 @@ const formatDateOnly = (dateVal) => {
   let str = String(dateVal).trim().replace(/^'+/, '');
   if (!str || str === '-' || str.toLowerCase() === 'null') return '';
 
-  // បម្លែងលេខខ្មែរ (០-៩) ទៅជាលេខសากล (0-9)
   const khmerDigits = ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'];
   khmerDigits.forEach((kd, idx) => {
     str = str.replace(new RegExp(kd, 'g'), String(idx));
@@ -153,7 +266,6 @@ const formatDateOnly = (dateVal) => {
     str = str.split(' ')[0];
   }
 
-  // 1. ករណីជាលេខ Serial Date របស់ Excel (ឧទាហរណ៍ 38472)
   if (/^\d+(\.\d+)?$/.test(str)) {
     const serial = Number(str);
     if (serial > 1000 && serial < 100000) {
@@ -165,7 +277,6 @@ const formatDateOnly = (dateVal) => {
     }
   }
 
-  // 2. ករណីទម្រង់ DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (ឧទាហរណ៍ 30-04-2005)
   const dmyMatch = str.match(/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/);
   if (dmyMatch) {
     const first = parseInt(dmyMatch[1], 10);
@@ -176,7 +287,6 @@ const formatDateOnly = (dateVal) => {
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 
-  // 3. ករណីទម្រង់ YYYY-MM-DD ឬ YYYY/MM/DD
   const ymdMatch = str.match(/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})$/);
   if (ymdMatch) {
     return `${ymdMatch[1]}-${String(ymdMatch[2]).padStart(2, '0')}-${String(ymdMatch[3]).padStart(2, '0')}`;
@@ -264,7 +374,6 @@ const ManageTeachers = () => {
   const { user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
 
-  // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
 
   if (
@@ -276,22 +385,21 @@ const ManageTeachers = () => {
     ADMIN_TEACHERS_MEM_CACHE.departments = null;
     ADMIN_TEACHERS_MEM_CACHE.courses = null;
     ADMIN_TEACHERS_MEM_CACHE.lastSyncedAt = 0;
-    ADMIN_TEACHERS_MEM_CACHE.avatarMap = {};
   }
   ADMIN_TEACHERS_MEM_CACHE.uid = currentAdminId;
 
-  // ✅ ១. State សម្រាប់ផ្ទុកបញ្ជីគ្រូបង្រៀន ដេប៉ាតឺម៉ង់ និងមុខវិជ្ជា (អានទិន្នន័យពី Cache មកបង្ហាញភ្លាមៗក្នុង 0 វិនាទី)
   const [teachers, setTeachers] = useState(() => {
     if (Array.isArray(ADMIN_TEACHERS_MEM_CACHE.teachers)) {
-      return ADMIN_TEACHERS_MEM_CACHE.teachers;
+      return hydrateTeachersWithAvatars(ADMIN_TEACHERS_MEM_CACHE.teachers);
     }
     const cached =
       readStorageJson(getTeachersCacheKey(currentAdminId), null) ||
       readStorageJson(CACHE_KEY_SHARED_TEACHERS, null) ||
       readStorageJson(CACHE_KEY_LEGACY_TEACHERS, []);
     if (Array.isArray(cached)) {
-      ADMIN_TEACHERS_MEM_CACHE.teachers = cached;
-      return cached;
+      const hydrated = hydrateTeachersWithAvatars(cached);
+      ADMIN_TEACHERS_MEM_CACHE.teachers = hydrated;
+      return hydrated;
     }
     return [];
   });
@@ -337,7 +445,6 @@ const ManageTeachers = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
-  // ២. State និង Ref សម្រាប់គ្រប់គ្រងកាតដេប៉ាតឺម៉ង់ និងការអូសកាតឆ្វេង-ស្ដាំ
   const [selectedDepartment, setSelectedDepartment] = useState('all');
   const cardsScrollRef = useRef(null);
   const [isDraggingCards, setIsDraggingCards] = useState(false);
@@ -349,10 +456,8 @@ const ManageTeachers = () => {
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
-  // ៣. Ref សម្រាប់ផ្តាច់ API Request ចាស់ៗពេលអ្នកប្រើវាយអក្សរ Search លឿនៗ (AbortController)
   const abortControllerRef = useRef(null);
 
-  // ៤. State សម្រាប់ការបែងចែកទំព័រ (Pagination - ដំឡើង perPage ទៅ 200 ដូចទំព័រសិស្ស)
   const [page, setPage] = useState(1);
   const [perPage] = useState(200);
   const [meta, setMeta] = useState(() => {
@@ -372,7 +477,6 @@ const ManageTeachers = () => {
     };
   });
 
-  // ៥. State សម្រាប់ Modal បញ្ជាក់ការលុបគ្រូបង្រៀន និងនាំចូល Excel
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [teacherToDelete, setTeacherToDelete] = useState(null);
 
@@ -381,7 +485,6 @@ const ManageTeachers = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState('');
 
-  // ✅ ៦. កំណត់ gender, employment_type និង status ជា '' នៅពេលដំបូង ដើម្បីឱ្យលោតពាក្យ «ជ្រើសរើស...»
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -401,18 +504,15 @@ const ManageTeachers = () => {
   // 📌 ផ្នែកទី៣៖ ការច្រោះទិន្នន័យ គណនាចំនួនគ្រូតាមដេប៉ាតឺម៉ង់ និងមុខងារស្វែងរករហ័ស
   // ============================================================================
 
-  // ✅ អនុគមន៍ទាញយក ID ដេប៉ាតឺម៉ង់ទាំងអស់របស់គ្រូម្នាក់ (ទាំងដេប៉ាតឺម៉ង់គោល + ដេប៉ាតឺម៉ង់នៃមុខវិជ្ជាដែលគ្រូទទួលបន្ទុកបង្រៀន)
   const getTeacherDepartmentIds = useCallback((teacher) => {
     if (!teacher) return [];
     const deptSet = new Set();
 
-    // ១. ដេប៉ាតឺម៉ង់គោលរបស់គ្រូ
     const primaryDeptId = teacher.department_id || teacher.department?.id;
     if (primaryDeptId !== undefined && primaryDeptId !== null && primaryDeptId !== '') {
       deptSet.add(String(primaryDeptId));
     }
 
-    // ២. ដេប៉ាតឺម៉ង់ពីទិន្នន័យ courses ដែលភ្ជាប់មកជាមួយ API (បើមាន)
     if (Array.isArray(teacher.courses)) {
       teacher.courses.forEach((c) => {
         const cDeptId = c.department_id || c.department?.id;
@@ -422,7 +522,6 @@ const ManageTeachers = () => {
       });
     }
 
-    // ៣. ដេប៉ាតឺម៉ង់ពីបញ្ជីមុខវិជ្ជាសរុប (allCourses) ដោយផ្គូផ្គងទាំង teacher.id និង teacher.user_id
     if (Array.isArray(allCourses) && allCourses.length > 0) {
       const tId = teacher.id ? String(teacher.id) : null;
       const tUserId = teacher.user_id ? String(teacher.user_id) : null;
@@ -448,13 +547,12 @@ const ManageTeachers = () => {
     return Array.from(deptSet);
   }, [allCourses]);
 
-  // កែសម្រួល Debounce សម្រាប់ Search ឱ្យដើរលឿន (150ms) និងទាញ Cache មកវិញភ្លាមពេលលុបអក្សរអស់
   useEffect(() => {
     if (!searchTerm.trim()) {
       setDebouncedSearch('');
       setPage(1);
       if (Array.isArray(ADMIN_TEACHERS_MEM_CACHE.teachers)) {
-        setTeachers(ADMIN_TEACHERS_MEM_CACHE.teachers);
+        setTeachers(hydrateTeachersWithAvatars(ADMIN_TEACHERS_MEM_CACHE.teachers));
         if (ADMIN_TEACHERS_MEM_CACHE.meta) {
           setMeta(ADMIN_TEACHERS_MEM_CACHE.meta);
         }
@@ -469,7 +567,6 @@ const ManageTeachers = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // ✅ គណនាចំនួនគ្រូសរុប និងតាមដេប៉ាតឺម៉ង់នីមួយៗ (បើគ្រូម្នាក់បង្រៀនមុខវិជ្ជាក្នុង ២ ដេប៉ាតឺម៉ង់ នឹងរាប់បញ្ចូលក្នុងកាតដេប៉ាតឺម៉ង់ទាំង ២)
   const departmentCounts = useMemo(() => {
     if (debouncedSearch.trim() !== '') {
       return prevCountsRef.current;
@@ -493,7 +590,6 @@ const ManageTeachers = () => {
     return counts;
   }, [teachers, departments, debouncedSearch, getTeacherDepartmentIds]);
 
-  // ច្រោះបញ្ជីគ្រូបង្រៀនតាមដេប៉ាតឺម៉ង់ដែលបានចុចជ្រើសរើស និងតាមពាក្យស្វែងរក
   const displayedTeachers = useMemo(() => {
     const list = Array.isArray(teachers) ? teachers : [];
     const filteredByDept = selectedDepartment === 'all'
@@ -523,7 +619,6 @@ const ManageTeachers = () => {
     return departments.find((d) => String(d.id) === String(selectedDepartment)) || null;
   }, [selectedDepartment, departments]);
 
-  // ✅ គណនាលេខទំព័រសម្រាប់ Sliding Window Pagination
   const paginationPages = useMemo(() => {
     const current = Number(meta.current_page || 1);
     const last = Number(meta.last_page || 1);
@@ -650,25 +745,12 @@ const ManageTeachers = () => {
     } catch (error) {}
   }, [currentAdminId]);
 
-  useEffect(() => {
-    fetchDepartments();
-    fetchTeacherRole();
-    fetchCoursesList();
-  }, [fetchDepartments, fetchTeacherRole, fetchCoursesList]);
-
-  // អនុគមន៍ទាញបញ្ជីគ្រូបង្រៀនពី API `/admin/teachers`
   const fetchTeachers = useCallback(
     async (forceRefresh = false) => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
         const cachedList = readStorageJson(getTeachersCacheKey(currentAdminId), null);
-        if (Array.isArray(cachedList)) {
-          const hydratedCached = cachedList.map((item) => {
-            const memImg = ADMIN_TEACHERS_MEM_CACHE.avatarMap[item.id];
-            if (memImg && !item.profile_image) {
-              return { ...item, profile_image: memImg };
-            }
-            return item;
-          });
+        if (Array.isArray(cachedList) && cachedList.length > 0) {
+          const hydratedCached = hydrateTeachersWithAvatars(cachedList);
           setTeachers(hydratedCached);
           ADMIN_TEACHERS_MEM_CACHE.teachers = hydratedCached;
         }
@@ -703,14 +785,6 @@ const ManageTeachers = () => {
           : response.data?.data?.data || response.data || [];
         const validList = Array.isArray(teacherList) ? teacherList : [];
 
-        // ✅ រក្សារូបភាពក្នុង RAM ភ្លាមៗដើម្បីឱ្យការបង្ហាញរូបភាពលឿនបំផុត (0ms)
-        validList.forEach((tItem) => {
-          const img = tItem?.profile_image || tItem?.user?.profile_image;
-          if (tItem?.id && img) {
-            ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = img;
-          }
-        });
-
         const teacherMeta = response.data?.meta || {
           current_page:
             response.data?.data?.current_page ||
@@ -726,25 +800,20 @@ const ManageTeachers = () => {
             response.data?.data?.per_page || response.data?.per_page || perPage,
         };
 
-        setTeachers(validList);
+        const hydratedList = hydrateTeachersWithAvatars(validList);
+        setTeachers(hydratedList);
         setMeta(teacherMeta);
 
-        // រក្សាទុកទិន្នន័យទំព័រទី១ ក្នុង Cache នៅពេលមិនមានការ Search
         if (page === 1 && !debouncedSearch) {
           ADMIN_TEACHERS_MEM_CACHE.uid = currentAdminId;
-          ADMIN_TEACHERS_MEM_CACHE.teachers = validList;
+          ADMIN_TEACHERS_MEM_CACHE.teachers = hydratedList;
           ADMIN_TEACHERS_MEM_CACHE.meta = teacherMeta;
           ADMIN_TEACHERS_MEM_CACHE.lastSyncedAt = Date.now();
-          safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), validList);
-          safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, validList);
-          safeWriteTeachersStorage(CACHE_KEY_LEGACY_TEACHERS, validList);
+          safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), hydratedList, currentAdminId);
+          safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, hydratedList, currentAdminId);
           try {
             localStorage.setItem(
               getTeachersMetaCacheKey(currentAdminId),
-              JSON.stringify(teacherMeta)
-            );
-            localStorage.setItem(
-              CACHE_KEY_LEGACY_META,
               JSON.stringify(teacherMeta)
             );
           } catch (e) {}
@@ -761,7 +830,13 @@ const ManageTeachers = () => {
 
   useEffect(() => {
     fetchTeachers(false);
-  }, [fetchTeachers]);
+    const timer = setTimeout(() => {
+      fetchDepartments();
+      fetchTeacherRole();
+      fetchCoursesList();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [fetchTeachers, fetchDepartments, fetchTeacherRole, fetchCoursesList]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -772,7 +847,6 @@ const ManageTeachers = () => {
     });
   };
 
-  // បង្កើតគណនីគ្រូថ្មី និងកែប្រែព័ត៌មានគ្រូដោយ Update State លើអេក្រង់ភ្លាមៗ
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -785,7 +859,6 @@ const ManageTeachers = () => {
     setIsSubmitting(true);
     try {
       if (editingTeacher) {
-        // ✅ ប្រសិនបើពេល Edit អ៊ីមែលនៅជាទម្រង់បិទបាំង (មានសញ្ញា *) ឱ្យប្រើអ៊ីមែលដើមរបស់គ្រូនោះវិញដោយស្វ័យប្រវត្តិ
         const resolvedEmail =
           !formData.email || formData.email.includes('*')
             ? editingTeacher.email
@@ -817,9 +890,8 @@ const ManageTeachers = () => {
           const newList = prev.map(item => item.id === editingTeacher.id ? updatedTeacher : item);
           if (page === 1 && !debouncedSearch) {
             ADMIN_TEACHERS_MEM_CACHE.teachers = newList;
-            safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), newList);
-            safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, newList);
-            safeWriteTeachersStorage(CACHE_KEY_LEGACY_TEACHERS, newList);
+            safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), newList, currentAdminId);
+            safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, newList, currentAdminId);
           }
           return newList;
         });
@@ -855,9 +927,8 @@ const ManageTeachers = () => {
           const newList = [newTeacher, ...prev].slice(0, perPage);
           if (page === 1 && !debouncedSearch) {
             ADMIN_TEACHERS_MEM_CACHE.teachers = newList;
-            safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), newList);
-            safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, newList);
-            safeWriteTeachersStorage(CACHE_KEY_LEGACY_TEACHERS, newList);
+            safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), newList, currentAdminId);
+            safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, newList, currentAdminId);
           }
           return newList;
         });
@@ -866,7 +937,6 @@ const ManageTeachers = () => {
           ADMIN_TEACHERS_MEM_CACHE.meta = newMeta;
           try {
             localStorage.setItem(getTeachersMetaCacheKey(currentAdminId), JSON.stringify(newMeta));
-            localStorage.setItem(CACHE_KEY_LEGACY_META, JSON.stringify(newMeta));
           } catch (e) {}
           return newMeta;
         });
@@ -902,7 +972,6 @@ const ManageTeachers = () => {
     setShowDeleteModal(true);
   };
 
-  // លុបឈ្មោះគ្រូចេញពីអេក្រង់ និងបិទ Modal ភ្លាមៗក្នុង 0 វិនាទី (Optimistic UI)
   const confirmDelete = async () => {
     if (!teacherToDelete || isDeleting) return;
 
@@ -919,9 +988,8 @@ const ManageTeachers = () => {
       const newList = prev.filter(item => item.id !== deletedId);
       if (page === 1 && !debouncedSearch) {
         ADMIN_TEACHERS_MEM_CACHE.teachers = newList;
-        safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), newList);
-        safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, newList);
-        safeWriteTeachersStorage(CACHE_KEY_LEGACY_TEACHERS, newList);
+        safeWriteTeachersStorage(getTeachersCacheKey(currentAdminId), newList, currentAdminId);
+        safeWriteTeachersStorage(CACHE_KEY_SHARED_TEACHERS, newList, currentAdminId);
       }
       return newList;
     });
@@ -930,7 +998,6 @@ const ManageTeachers = () => {
       ADMIN_TEACHERS_MEM_CACHE.meta = newMeta;
       try {
         localStorage.setItem(getTeachersMetaCacheKey(currentAdminId), JSON.stringify(newMeta));
-        localStorage.setItem(CACHE_KEY_LEGACY_META, JSON.stringify(newMeta));
       } catch (e) {}
       return newMeta;
     });
@@ -956,7 +1023,6 @@ const ManageTeachers = () => {
     }
   };
 
-  // ✅ កំណត់ gender: '', employment_type: '', និង status: '' នៅពេលបើកទម្រង់បន្ថែមគ្រូថ្មី ដើម្បីឱ្យលោតពាក្យ «ជ្រើសរើស...»
   const resetForm = () => {
     setFormData({
       first_name: '',
@@ -981,7 +1047,6 @@ const ManageTeachers = () => {
     setShowModal(true);
   };
 
-  // ✅ នៅពេលចុចកែប្រែ (Edit) បង្ហាញអ៊ីមែលជាទម្រង់បិទបាំង (ឧ. cla*****30@gmail.com) ដើម្បីការពារឯកជនភាព
   const openEditModal = (teacher) => {
     setFormError('');
     setEditingTeacher(teacher);
@@ -1006,7 +1071,6 @@ const ManageTeachers = () => {
   // 📌 ផ្នែកទី៦៖ មុខងារនាំចេញ និងនាំចូលទិន្នន័យគ្រូបង្រៀនតាមរយៈឯកសារ Excel (.xlsx)
   // ============================================================================
 
-  // ✅ មុខងារកំណត់ Font អក្សរខ្មែរ (Khmer OS Siemreap) ពណ៌ក្បាលតារាង ស៊ុម និង Text Format ('@') ការពារកុំឱ្យដាច់លេខ 0 ខាងមុខ
   const applyExcelStyling = (worksheet, colWidths = [], textColumnIndices = []) => {
     if (!worksheet || !worksheet['!ref']) return;
     const range = XLSX.utils.decode_range(worksheet['!ref']);
@@ -1021,7 +1085,6 @@ const ManageTeachers = () => {
         const isHeader = R === 0;
         const isTextCol = !isHeader && textColumnIndices.includes(C);
 
-        // បង្ខំឱ្យក្រឡាជាប្រភេទ Text ('s') និងទម្រង់ '@' ដើម្បីកុំឱ្យដាច់លេខ 0 ខាងមុខក្នុង Excel
         if (isTextCol) {
           worksheet[cellAddress].t = 's';
           worksheet[cellAddress].z = '@';
@@ -1060,7 +1123,6 @@ const ManageTeachers = () => {
       worksheet['!cols'] = colWidths;
     }
 
-    // កំណត់កម្ពស់ជួរ (Row Height) ដើម្បីកុំឱ្យដាច់ជើងអក្សរខ្មែរ
     const rows = [];
     for (let R = range.s.r; R <= range.e.r; ++R) {
       rows.push({ hpt: R === 0 ? 28 : 22 });
@@ -1068,7 +1130,6 @@ const ManageTeachers = () => {
     worksheet['!rows'] = rows;
   };
 
-  // ✅ នាំចេញបញ្ជីគ្រូបង្រៀនតាមដេប៉ាតឺម៉ង់ ដោយដាក់គ្រូដែលមានឈ្មោះមុន (លេខរៀងទី 1) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម
   const handleExportExcel = () => {
     if (!displayedTeachers || displayedTeachers.length === 0) {
       return;
@@ -1126,7 +1187,6 @@ const ManageTeachers = () => {
     });
   };
 
-  // ✅ ទាញយកទម្រង់គំរូ Excel ដោយមិនយកទិន្នន័យគ្រូបង្រៀនពិតប្រាកដដាក់ចូលឡើយ (ការពារឯកជនភាព និងការពារកំហុសស្ទួនអ៊ីមែលពេល Import)
   const handleDownloadTemplate = () => {
     const defaultDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
 
@@ -1144,7 +1204,6 @@ const ManageTeachers = () => {
       'password': ''
     });
 
-    // បង្កើតជួរទំនេរដែលកំណត់ជា Text Format ('@') ចំនួន 50 ជួរទុកជាស្រេច (មិនបញ្ចេញឈ្មោះ អ៊ីមែល ឬពាក្យសម្ងាត់ពិតឡើយ)
     const templateData = Array.from({ length: 50 }, () => blankRow());
 
     const worksheet = XLSX.utils.json_to_sheet(templateData);
@@ -1153,7 +1212,6 @@ const ManageTeachers = () => {
       { wch: 12 }, { wch: 18 }, { wch: 28 }, { wch: 22 },
       { wch: 18 }, { wch: 16 }, { wch: 16 }
     ];
-    // ជួរឈរទី 3 (phone), ទី 5 (teacher_code), ទី 8 (employment_type), ទី 9 (date_of_birth) និងទី 10 (password) ត្រូវកំណត់ជា Text Format ('@')
     applyExcelStyling(worksheet, colWidths, [3, 5, 8, 9, 10]);
 
     const workbook = XLSX.utils.book_new();
@@ -1171,7 +1229,6 @@ const ManageTeachers = () => {
     });
   };
 
-  // ✅ ប្រសិនបើយើងបានចុចចូលកាតដេប៉ាតឺម៉ង់ណាមួយហើយ ពេលនាំចូល Excel វានឹងចាប់យកដេប៉ាតឺម៉ង់នោះឱ្យគ្រូគ្រប់រូបដោយស្វ័យប្រវត្តិ
   const findDepartmentId = (deptNameOrCode) => {
     if (selectedDepartment !== 'all') {
       return selectedDepartment;
@@ -1187,7 +1244,6 @@ const ManageTeachers = () => {
     return found ? found.id : null;
   };
 
-  // អនុគមន៍បម្លែងឈ្មោះក្បាលជួរឈរក្នុង Excel ឱ្យត្រូវជាមួយ Key របស់ប្រព័ន្ធ
   const normalizeHeaderKey = (key) => {
     const k = key.toString().trim().toLowerCase();
     if (k.includes('first') || k.includes('នាមខ្លួន')) return 'first_name';
@@ -1205,7 +1261,6 @@ const ManageTeachers = () => {
     return key;
   };
 
-  // ✅ អាន និងពិនិត្យទិន្នន័យពីឯកសារ Excel សម្រាប់នាំចូល (Import)
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1339,7 +1394,6 @@ const ManageTeachers = () => {
     reader.readAsArrayBuffer(file);
   };
 
-  // បញ្ជូនទិន្នន័យគ្រូដែលត្រឹមត្រូវទៅកាន់ Backend API `/admin/teachers/import`
   const handleConfirmImport = async () => {
     if (!importPreview || importPreview.length === 0 || isImporting) return;
     const validItems = importPreview.filter(r => r.isValid).map(r => r.data);
@@ -1384,7 +1438,6 @@ const ManageTeachers = () => {
     }
   };
 
-  // ✅ អនុគមន៍បង្ហាញឈ្មោះភេទជាភាសាខ្មែរ ឬអង់គ្លេស
   const getGenderLabel = (gender) => {
     const g = (gender || '').toString().trim().toLowerCase();
     if (language === 'km') {
@@ -1402,7 +1455,6 @@ const ManageTeachers = () => {
     return g === 'female' || g === 'f' || g === 'ស្រី';
   };
 
-  // ✅ អនុគមន៍បង្ហាញប្រភេទការងារជាភាសាខ្មែរ ឬអង់គ្លេស
   const getEmploymentTypeLabel = (type) => {
     if (language === 'km') {
       const types = {
@@ -1415,7 +1467,6 @@ const ManageTeachers = () => {
     return type || 'Full-time';
   };
 
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getProfileImageUrl = useCallback((imagePath) => {
     if (!imagePath || typeof imagePath !== 'string') return null;
     const trimmed = imagePath.trim();
@@ -1463,7 +1514,6 @@ const ManageTeachers = () => {
             </p>
           </div>
 
-          {/* ✅ បិទ/លាក់ប៊ូតុងទាំង ៣ នៅពេលឈរលើ «គ្រូបង្រៀនទាំងអស់» (បង្ហាញតែពេលចុចលើកាតដេប៉ាតឺម៉ង់ណាមួយប៉ុណ្ណោះ) */}
           {selectedDepartment !== 'all' && (
             <div className="flex flex-wrap items-center gap-3 shrink-0 animate-fadeIn">
               <button
@@ -1701,9 +1751,9 @@ const ManageTeachers = () => {
 
                   const isFemale = isFemaleGender(teacher.gender);
                   const rawAvatar =
+                    ADMIN_TEACHERS_MEM_CACHE.avatarMap[teacher.id] ||
                     teacher.profile_image ||
-                    teacher.user?.profile_image ||
-                    ADMIN_TEACHERS_MEM_CACHE.avatarMap[teacher.id];
+                    teacher.user?.profile_image;
                   const avatarUrl = getProfileImageUrl(rawAvatar);
                   const avatarKey = `tch_${teacher.id}`;
                   const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
@@ -1737,7 +1787,6 @@ const ManageTeachers = () => {
                             <div className="tch-text-primary text-sm font-extrabold text-gray-900">
                               {getTeacherFullName(teacher)}
                             </div>
-                            {/* ✅ បង្ហាញផ្លាកភេទ (ប្រុស/ស្រី) អមជាមួយឯកទេស (specialization) នៅខាងក្រោមឈ្មោះគ្រូ */}
                             <div className="flex items-center gap-1.5 mt-1">
                               <span
                                 className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
@@ -1765,7 +1814,6 @@ const ManageTeachers = () => {
                         </span>
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap">
-                        {/* ✅ បង្ហាញតែអ៊ីមែលដែលបានបិទបាំងដោយគ្មានប៊ូតុងភ្នែក */}
                         <div className="tch-text-secondary text-sm font-medium text-gray-600 font-mono tracking-tight">
                           {maskEmailAddress(teacher.email)}
                         </div>
@@ -1940,7 +1988,6 @@ const ManageTeachers = () => {
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
                       {t('អ៊ីមែល', 'Email')} <span className="text-rose-500">*</span>
                     </label>
-                    {/* ✅ ពេល Edit បង្ហាញអ៊ីមែលបិទបាំង ហើយបើចុចដើម្បីវាយអ៊ីមែលថ្មី វាជម្រះសញ្ញា * ឱ្យភ្លាម (បើមិនកែទេ ពេល Blur ត្រឡប់មកបិទបាំងដដែល) */}
                     <input
                       type={editingTeacher && formData.email.includes('*') ? 'text' : 'email'}
                       name="email"
@@ -2022,7 +2069,6 @@ const ManageTeachers = () => {
                     />
                   </div>
 
-                  {/* ✅ បិទកន្លែងដេប៉ាតឺម៉ង់ទាំងពេលបន្ថែមគ្រូបង្រៀនថ្មី និងពេលកែប្រែ (Edit) */}
                   <div>
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
                       {t('ដេប៉ាតឺម៉ង់', 'Department')} <span className="text-rose-500">*</span>
@@ -2082,7 +2128,6 @@ const ManageTeachers = () => {
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
                       {editingTeacher ? t('ពាក្យសម្ងាត់', 'Password') : t('ពាក្យសម្ងាត់', 'Password')} {!editingTeacher && <span className="text-rose-500">*</span>}
                     </label>
-                    {/* ✅ បិទជិតជា password ជានិច្ចដោយគ្មានប៊ូតុងភ្នែក */}
                     <input
                       type="password"
                       name="password"
@@ -2347,7 +2392,6 @@ const ManageTeachers = () => {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
         .tch-table-row + .tch-table-row > td {
           border-top: 1px solid #f1f5f9;
         }
@@ -2377,7 +2421,6 @@ const ManageTeachers = () => {
           color: #cbd5e1 !important;
         }
 
-        /* ប៊ូតុងព្រួញអូសកាតដេប៉ាតឺម៉ង់ */
         html.dark .tch-scroll-arrow {
           background-color: rgba(30, 41, 59, 0.9) !important;
           border-color: #475569 !important;
@@ -2389,7 +2432,6 @@ const ManageTeachers = () => {
           color: #ffffff !important;
         }
 
-        /* ប្រអប់ Icon លើកាតដេប៉ាតឺម៉ង់ក្នុងទម្រង់យប់ */
         html.dark .tch-dept-blue { background-color: rgba(59, 130, 246, 0.15) !important; color: #60a5fa !important; border-color: rgba(59, 130, 246, 0.3) !important; }
         html.dark .tch-dept-emerald { background-color: rgba(16, 185, 129, 0.15) !important; color: #34d399 !important; border-color: rgba(16, 185, 129, 0.3) !important; }
         html.dark .tch-dept-indigo { background-color: rgba(99, 102, 241, 0.15) !important; color: #818cf8 !important; border-color: rgba(99, 102, 241, 0.3) !important; }
@@ -2398,7 +2440,6 @@ const ManageTeachers = () => {
         html.dark .tch-dept-purple { background-color: rgba(168, 85, 247, 0.15) !important; color: #c084fc !important; border-color: rgba(168, 85, 247, 0.3) !important; }
         html.dark .tch-dept-cyan { background-color: rgba(6, 182, 212, 0.15) !important; color: #22d3ee !important; border-color: rgba(6, 182, 212, 0.3) !important; }
 
-        /* ប្រអប់ Input និង Select ក្នុងទម្រង់យប់ */
         html.dark .tch-input {
           background-color: #0f172a !important;
           border-color: #334155 !important;
@@ -2417,7 +2458,6 @@ const ManageTeachers = () => {
           opacity: 0.6;
         }
 
-        /* ✅ តារាងគ្រូបង្រៀន និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         html.dark .tch-table-head {
           background-color: #0f172a !important;
           border-color: rgba(51, 65, 85, 0.7) !important;
@@ -2438,7 +2478,6 @@ const ManageTeachers = () => {
           background-color: rgba(244, 63, 94, 0.12) !important;
         }
 
-        /* ផ្លាកសញ្ញា (Badges) ក្នុងទម្រង់យប់ */
         html.dark .tch-badge-blue {
           background-color: rgba(59, 130, 246, 0.15) !important;
           color: #60a5fa !important;
@@ -2466,7 +2505,6 @@ const ManageTeachers = () => {
           color: #fb7185 !important;
         }
 
-        /* ប៊ូតុងសកម្មភាព និង Pagination */
         html.dark .tch-action-edit {
           color: #818cf8 !important;
         }
@@ -2497,7 +2535,6 @@ const ManageTeachers = () => {
           color: #ffffff !important;
         }
 
-        /* ផ្ទាំង Modal បន្ថែម/កែប្រែ, Import Excel និងលុប */
         html.dark .tch-modal-card {
           background-color: #1e293b !important;
           border-color: #334155 !important;
@@ -2518,7 +2555,6 @@ const ManageTeachers = () => {
           color: #ffffff !important;
         }
 
-        /* ប្រអប់ Import Excel ក្នុង Modal */
         html.dark .tch-import-info {
           background-color: rgba(16, 185, 129, 0.1) !important;
           border-color: rgba(16, 185, 129, 0.25) !important;
@@ -2546,7 +2582,6 @@ const ManageTeachers = () => {
           border-color: #10b981 !important;
         }
 
-        /* Modal បញ្ជាក់ការលុប */
         html.dark .tch-delete-title {
           color: #fb7185 !important;
         }

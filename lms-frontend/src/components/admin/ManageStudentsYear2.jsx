@@ -29,7 +29,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី ១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនី Admin ម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី ១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យ និងរូបភាពល្បឿន 0 វិនាទី (0ms Instant Avatar & Data Cache)
 // ============================================================================
 const CACHE_KEY_LEGACY_STUDENTS = 'cached_admin_students_year2_only';
 const CACHE_KEY_LEGACY_META = 'cached_admin_students_year2_only_meta';
@@ -37,6 +37,7 @@ const CACHE_KEY_LEGACY_ENROLLED_MAP = 'cached_student_enrolled_depts_map_y2';
 const CACHE_KEY_SHARED_STUDENTS = 'cached_admin_students_list';
 const CACHE_KEY_SHARED_DEPTS = 'cached_admin_departments_list';
 const CACHE_KEY_SHARED_COURSES = 'cached_admin_courses_list';
+const AVATAR_STUDENT_Y2_STORAGE_KEY = 'cached_admin_students_y2_avatars_v8';
 
 const getStudentsY2CacheKey = (uid) => `cached_admin_students_year2_v8_${uid}`;
 const getStudentsY2MetaCacheKey = (uid) => `cached_admin_students_year2_meta_v8_${uid}`;
@@ -44,19 +45,6 @@ const getEnrolledDeptsMapKey = (uid) => `cached_student_enrolled_depts_map_y2_v8
 const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v8_${uid}`;
 const getAllStudentsCacheKey = (uid) => `cached_admin_students_list_v8_${uid}`;
-
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សាទុករូបភាពក្នុង RAM ដើម្បីបង្ហាញលឿន 0ms
-const ADMIN_STUDENTS_Y2_MEM_CACHE = {
-  uid: null,
-  students: null,
-  meta: null,
-  enrolledDeptsMap: null,
-  departments: null,
-  courses: null,
-  studentRoleId: null,
-  lastSyncedAt: 0,
-  avatarMap: {},
-};
 
 const readStorageJson = (key, fallback) => {
   try {
@@ -67,39 +55,165 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ រក្សាទុកទិន្នន័យចូល localStorage ដោយសុវត្ថិភាព (បើរូប Base64 ធំពេកលើសទំហំ localStorage វានឹងរក្សារូបក្នុង RAM ជំនួស)
-const safeWriteStudentsStorage = (key, list) => {
+// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + អានរូបភាពពី localStorage តាំងពីវិនាទីទី 0
+const ADMIN_STUDENTS_Y2_MEM_CACHE = {
+  uid: null,
+  students: null,
+  meta: null,
+  enrolledDeptsMap: null,
+  departments: null,
+  courses: null,
+  studentRoleId: null,
+  lastSyncedAt: 0,
+  avatarMap: readStorageJson(AVATAR_STUDENT_Y2_STORAGE_KEY, {}) || {},
+};
+
+let avatarY2PersistTimer = null;
+const scheduleAvatarY2MapPersist = (uid) => {
+  if (avatarY2PersistTimer) clearTimeout(avatarY2PersistTimer);
+  avatarY2PersistTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(
+        AVATAR_STUDENT_Y2_STORAGE_KEY,
+        JSON.stringify(ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap)
+      );
+      if (uid && Array.isArray(ADMIN_STUDENTS_Y2_MEM_CACHE.students)) {
+        const updatedCompact = ADMIN_STUDENTS_Y2_MEM_CACHE.students.map((item) => {
+          const tiny = ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[item.id];
+          return {
+            ...item,
+            profile_image:
+              tiny && tiny.length < 25000
+                ? tiny
+                : item.profile_image && !item.profile_image.startsWith('data:')
+                ? item.profile_image
+                : null,
+            user: item.user
+              ? {
+                  id: item.user.id,
+                  status: item.user.status,
+                  email: item.user.email,
+                }
+              : item.user,
+          };
+        });
+        localStorage.setItem(getStudentsY2CacheKey(uid), JSON.stringify(updatedCompact));
+        localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(updatedCompact));
+      }
+    } catch {}
+  }, 120);
+};
+
+// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail តូចច្បាស់ (~3KB) ដើម្បីរក្សាទុកក្នុង localStorage សម្រាប់បង្ហាញភ្លាមៗក្នុង 0 វិនាទី
+const compressBase64Avatar = (dataUrl, callback) => {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
+    callback(dataUrl);
+    return;
+  }
+  if (dataUrl.length < 16000) {
+    callback(dataUrl);
+    return;
+  }
+  try {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 88;
+        let width = img.width || maxSize;
+        let height = img.height || maxSize;
+        if (width > height) {
+          if (width > maxSize) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/webp', 0.76);
+        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+      } catch {
+        callback(dataUrl);
+      }
+    };
+    img.onerror = () => callback(dataUrl);
+    img.src = dataUrl;
+  } catch {
+    callback(dataUrl);
+  }
+};
+
+// ✅ រក្សាទុកទាំងទិន្នន័យ និងរូបភាពសិស្សចូលក្នុង localStorage ដើម្បីបើកភ្លាមឃើញរូបភ្លាមក្នុង 0ms
+const safeWriteStudentsStorage = (key, list, uid = null) => {
   if (!Array.isArray(list)) return;
+
   list.forEach((sItem) => {
-    const img = sItem?.profile_image || sItem?.user?.profile_image;
-    if (sItem?.id && img) {
-      ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id] = img;
+    const rawImg = sItem?.profile_image || sItem?.user?.profile_image;
+    if (sItem?.id && rawImg) {
+      const existingCached = ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id];
+      if (existingCached && existingCached.length < 18000 && rawImg.startsWith('data:')) {
+        return;
+      }
+      if (!existingCached) {
+        ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id] = rawImg;
+      }
+      compressBase64Avatar(rawImg, (tinyImg) => {
+        if (tinyImg) {
+          ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id] = tinyImg;
+          scheduleAvatarY2MapPersist(uid || ADMIN_STUDENTS_Y2_MEM_CACHE.uid);
+        }
+      });
     }
   });
+
+  const compactList = list.map((item) => {
+    const cachedTiny = ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[item.id];
+    const slimImage =
+      cachedTiny && cachedTiny.length < 25000
+        ? cachedTiny
+        : item.profile_image && !item.profile_image.startsWith('data:')
+        ? item.profile_image
+        : null;
+
+    return {
+      ...item,
+      profile_image: slimImage,
+      user: item.user
+        ? {
+            id: item.user.id,
+            status: item.user.status,
+            email: item.user.email,
+          }
+        : item.user,
+    };
+  });
+
   try {
-    localStorage.setItem(key, JSON.stringify(list));
-  } catch {
-    try {
-      const lightList = list.map((item) => ({
-        ...item,
-        profile_image:
-          item.profile_image && item.profile_image.startsWith('data:')
-            ? null
-            : item.profile_image,
-        user: item.user
-          ? {
-              ...item.user,
-              profile_image:
-                item.user.profile_image &&
-                item.user.profile_image.startsWith('data:')
-                  ? null
-                  : item.user.profile_image,
-            }
-          : item.user,
-      }));
-      localStorage.setItem(key, JSON.stringify(lightList));
-    } catch {}
-  }
+    localStorage.setItem(key, JSON.stringify(compactList));
+  } catch {}
+};
+
+// ✅ បញ្ចូលរូបភាពពី Cache មកភ្ជាប់ជាមួយបញ្ជីសិស្សភ្លាមៗក្នុង 0 វិនាទី
+const hydrateStudentsWithAvatars = (list) => {
+  if (!Array.isArray(list)) return [];
+  return list.map((item) => {
+    const img =
+      ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[item.id] ||
+      item.profile_image ||
+      item.user?.profile_image ||
+      null;
+    if (img && item.profile_image !== img) {
+      return { ...item, profile_image: img };
+    }
+    return item;
+  });
 };
 
 // ✅ អនុគមន៍បិទបាំងផ្នែកកណ្ដាលនៃអ៊ីមែល (ឧ. "classit830@gmail.com" -> "cla*****30@gmail.com")
@@ -149,7 +263,6 @@ const formatDateOnly = (dateVal) => {
   let str = String(dateVal).trim().replace(/^'+/, '');
   if (!str || str === '-' || str.toLowerCase() === 'null') return '';
 
-  // បម្លែងលេខខ្មែរ (០-៩) ទៅជាលេខសากล (0-9)
   const khmerDigits = ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'];
   khmerDigits.forEach((kd, idx) => {
     str = str.replace(new RegExp(kd, 'g'), String(idx));
@@ -161,7 +274,6 @@ const formatDateOnly = (dateVal) => {
     str = str.split(' ')[0];
   }
 
-  // 1. ករណីជាលេខ Serial Date របស់ Excel (ឧទាហរណ៍ 38472)
   if (/^\d+(\.\d+)?$/.test(str)) {
     const serial = Number(str);
     if (serial > 1000 && serial < 100000) {
@@ -173,7 +285,6 @@ const formatDateOnly = (dateVal) => {
     }
   }
 
-  // 2. ករណីទម្រង់ DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (ឧទាហរណ៍ 30-04-2005)
   const dmyMatch = str.match(/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/);
   if (dmyMatch) {
     const first = parseInt(dmyMatch[1], 10);
@@ -184,7 +295,6 @@ const formatDateOnly = (dateVal) => {
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 
-  // 3. ករណីទម្រង់ YYYY-MM-DD ឬ YYYY/MM/DD
   const ymdMatch = str.match(/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})$/);
   if (ymdMatch) {
     return `${ymdMatch[1]}-${String(ymdMatch[2]).padStart(2, '0')}-${String(ymdMatch[3]).padStart(2, '0')}`;
@@ -351,7 +461,6 @@ const ManageStudentsYear2 = () => {
   const { user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
 
-  // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
 
   if (
@@ -364,34 +473,33 @@ const ManageStudentsYear2 = () => {
     ADMIN_STUDENTS_Y2_MEM_CACHE.departments = null;
     ADMIN_STUDENTS_Y2_MEM_CACHE.courses = null;
     ADMIN_STUDENTS_Y2_MEM_CACHE.lastSyncedAt = 0;
-    ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap = {};
   }
   ADMIN_STUDENTS_Y2_MEM_CACHE.uid = currentAdminId;
 
-  // ✅ ១. អានទិន្នន័យពី Cache មកបង្ហាញភ្លាមៗក្នុង 0 វិនាទី (គ្មាន Skeleton Loading)
+  // ✅ ១. អានទិន្នន័យ + រូបភាពពី Cache មកបង្ហាញភ្លាមៗក្នុង 0 វិនាទី
   const [students, setStudents] = useState(() => {
     if (Array.isArray(ADMIN_STUDENTS_Y2_MEM_CACHE.students)) {
-      return ADMIN_STUDENTS_Y2_MEM_CACHE.students;
+      return hydrateStudentsWithAvatars(ADMIN_STUDENTS_Y2_MEM_CACHE.students);
     }
     const cachedY2 =
       readStorageJson(getStudentsY2CacheKey(currentAdminId), null) ||
       readStorageJson(CACHE_KEY_LEGACY_STUDENTS, null);
     if (Array.isArray(cachedY2)) {
-      ADMIN_STUDENTS_Y2_MEM_CACHE.students = cachedY2;
-      return cachedY2;
+      const hydrated = hydrateStudentsWithAvatars(cachedY2);
+      ADMIN_STUDENTS_Y2_MEM_CACHE.students = hydrated;
+      return hydrated;
     }
     const allPrefetched =
       readStorageJson(getAllStudentsCacheKey(currentAdminId), null) ||
       readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
     if (Array.isArray(allPrefetched)) {
-      const filtered = allPrefetched.filter((s) => isYear2Student(s));
+      const filtered = hydrateStudentsWithAvatars(allPrefetched.filter((s) => isYear2Student(s)));
       ADMIN_STUDENTS_Y2_MEM_CACHE.students = filtered;
       return filtered;
     }
     return [];
   });
 
-  // ✅ រក្សាទុកបញ្ជីដេប៉ាតឺម៉ង់នៃមុខវិជ្ជាដែលសិស្សនីមួយៗបានចុះឈ្មោះរៀន { [studentId]: ['1', '2'] }
   const [enrolledDeptsMap, setEnrolledDeptsMap] = useState(() => {
     if (ADMIN_STUDENTS_Y2_MEM_CACHE.enrolledDeptsMap) {
       return ADMIN_STUDENTS_Y2_MEM_CACHE.enrolledDeptsMap;
@@ -441,7 +549,6 @@ const ManageStudentsYear2 = () => {
   const [importError, setImportError] = useState('');
 
   const [selectedDepartment, setSelectedDepartment] = useState('all');
-  // ✅ State សម្រាប់បែងចែកសិស្សតាមវេនសិក្សា ('all' | 'Monday-Friday' | 'Saturday-Sunday')
   const [selectedShift, setSelectedShift] = useState('all');
 
   const cardsScrollRef = useRef(null);
@@ -488,7 +595,6 @@ const ManageStudentsYear2 = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState(''); 
   
-  // States សម្រាប់គ្រប់គ្រងការចុះឈ្មោះមុខវិជ្ជា (ទាំងសិស្សម្នាក់ៗ និងជាក្រុម)
   const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentEnrollments, setStudentEnrollments] = useState([]);
@@ -497,14 +603,12 @@ const ManageStudentsYear2 = () => {
   const [enrollDeptFilter, setEnrollDeptFilter] = useState('student_dept');
   const [isEnrollingCourses, setIsEnrollingCourses] = useState(false);
 
-  // State សម្រាប់ចុះឈ្មោះមុខវិជ្ជាជាក្រុម (Bulk Enroll Modal)
   const [showBulkEnrollModal, setShowBulkEnrollModal] = useState(false);
   const [bulkSelectedCourses, setBulkSelectedCourses] = useState([]);
   const [bulkCourseSearch, setBulkCourseSearch] = useState('');
   const [bulkCourseDeptFilter, setBulkCourseDeptFilter] = useState('all');
   const [isBulkEnrolling, setIsBulkEnrolling] = useState(false);
   
-  // ✅ កំណត់ gender, study_shift និង status ជា '' នៅពេលដំបូង ដើម្បីឱ្យលោតពាក្យ «ជ្រើសរើស...» ដូចប្រអប់ដេប៉ាតឺម៉ង់
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -531,18 +635,15 @@ const ManageStudentsYear2 = () => {
   // 📌 ផ្នែកទី ៣៖ ការច្រោះទិន្នន័យ និងគណនាចំនួនសិស្សតាមដេប៉ាតឺម៉ង់ និងវេនសិក្សា
   // ============================================================================
 
-  // ✅ អនុគមន៍ទាញយក ID ដេប៉ាតឺម៉ង់ទាំងអស់របស់សិស្សម្នាក់ (ទាំងដេប៉ាតឺម៉ង់គោល + ដេប៉ាតឺម៉ង់នៃមុខវិជ្ជាដែលបានចុះឈ្មោះរៀន)
   const getStudentDepartmentIds = useCallback((student) => {
     if (!student) return [];
     const deptSet = new Set();
 
-    // ១. ដេប៉ាតឺម៉ង់គោលរបស់សិស្ស
     const primaryDeptId = student.department_id || student.department?.id;
     if (primaryDeptId !== undefined && primaryDeptId !== null && primaryDeptId !== '') {
       deptSet.add(String(primaryDeptId));
     }
 
-    // ២. ដេប៉ាតឺម៉ង់ពីទិន្នន័យ enrollments ឬ courses ដែលភ្ជាប់មកជាមួយ API (បើមាន)
     if (Array.isArray(student.enrollments)) {
       student.enrollments.forEach((enr) => {
         const cDeptId = enr.course?.department_id || enr.course?.department?.id || enr.department_id;
@@ -565,7 +666,6 @@ const ManageStudentsYear2 = () => {
       });
     }
 
-    // ៣. ដេប៉ាតឺម៉ង់ដែលបានកត់ត្រាទុកក្នុង enrolledDeptsMap ពេលចុះឈ្មោះមុខវិជ្ជា
     const mappedDepts = enrolledDeptsMap[student.id];
     if (Array.isArray(mappedDepts)) {
       mappedDepts.forEach((dId) => {
@@ -578,7 +678,6 @@ const ManageStudentsYear2 = () => {
     return Array.from(deptSet);
   }, [allCourses, enrolledDeptsMap]);
 
-  // ✅ អនុគមន៍ធ្វើបច្ចុប្បន្នភាពបញ្ជីដេប៉ាតឺម៉ង់របស់សិស្សភ្លាមៗនៅពេលចុះឈ្មោះ ឬលុបមុខវិជ្ជា
   const syncStudentEnrolledDepts = useCallback((studentId, enrollmentsList, coursesCatalog = allCourses) => {
     if (!studentId) return;
     const deptIds = new Set();
@@ -608,7 +707,6 @@ const ManageStudentsYear2 = () => {
     return (students || []).filter((student) => isYear2Student(student));
   }, [students]);
 
-  // ✅ គណនាចំនួនសិស្សតាមដេប៉ាតឺម៉ង់ (បើសិស្សរៀនមុខវិជ្ជាក្នុង ២ ដេប៉ាតឺម៉ង់ នឹងរាប់បញ្ចូលក្នុងកាតដេប៉ាតឺម៉ង់ទាំង ២)
   const departmentCounts = useMemo(() => {
     if (debouncedSearch.trim() !== '') {
       return prevCountsRef.current;
@@ -631,7 +729,6 @@ const ManageStudentsYear2 = () => {
     return counts;
   }, [year2StudentsAll, departments, debouncedSearch, getStudentDepartmentIds]);
 
-  // ✅ គណនាចំនួនសិស្សតាមវេនសិក្សា (ចន្ទ-សុក្រ vs សៅរ៍-អាទិត្យ) នៅក្នុងដេប៉ាតឺម៉ង់ដែលបានជ្រើសរើស
   const shiftCounts = useMemo(() => {
     const baseList = selectedDepartment === 'all'
       ? year2StudentsAll
@@ -657,7 +754,6 @@ const ManageStudentsYear2 = () => {
       ? year2StudentsAll
       : year2StudentsAll.filter((student) => getStudentDepartmentIds(student).includes(String(selectedDepartment)));
 
-    // ✅ ច្រោះតាមវេនសិក្សា (ចន្ទ-សុក្រ ឬ សៅរ៍-អាទិត្យ)
     const filteredByShift = selectedShift === 'all'
       ? filteredByDept
       : filteredByDept.filter((student) => normalizeShiftKey(student.study_shift) === selectedShift);
@@ -681,7 +777,6 @@ const ManageStudentsYear2 = () => {
     });
   }, [year2StudentsAll, selectedDepartment, selectedShift, searchTerm, getStudentDepartmentIds]);
 
-  // ✅ គណនាលេខទំព័រសម្រាប់ Sliding Window Pagination
   const paginationPages = useMemo(() => {
     const current = Number(meta.current_page || 1);
     const last = Number(meta.last_page || 1);
@@ -804,8 +899,8 @@ const ManageStudentsYear2 = () => {
       setStudents(prev => {
         const newList = prev.filter(s => !selectedStudents.includes(s.id));
         ADMIN_STUDENTS_Y2_MEM_CACHE.students = newList;
-        safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList);
-        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
+        safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList, currentAdminId);
+        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList, currentAdminId);
         return newList;
       });
 
@@ -851,7 +946,7 @@ const ManageStudentsYear2 = () => {
       setDebouncedSearch('');
       setPage(1);
       if (Array.isArray(ADMIN_STUDENTS_Y2_MEM_CACHE.students)) {
-        setStudents(ADMIN_STUDENTS_Y2_MEM_CACHE.students);
+        setStudents(hydrateStudentsWithAvatars(ADMIN_STUDENTS_Y2_MEM_CACHE.students));
         if (ADMIN_STUDENTS_Y2_MEM_CACHE.meta) {
           setMeta(ADMIN_STUDENTS_Y2_MEM_CACHE.meta);
         }
@@ -906,24 +1001,12 @@ const ManageStudentsYear2 = () => {
     } catch (error) {}
   }, [currentAdminId]);
 
-  useEffect(() => {
-    fetchDepartments();
-    fetchStudentRole();
-    fetchCoursesList();
-  }, [fetchDepartments, fetchStudentRole, fetchCoursesList]);
-
   const fetchStudents = useCallback(
     async (forceRefresh = false) => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
         const cachedList = readStorageJson(getStudentsY2CacheKey(currentAdminId), null);
-        if (Array.isArray(cachedList)) {
-          const hydratedCached = cachedList.map((item) => {
-            const memImg = ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[item.id];
-            if (memImg && !item.profile_image) {
-              return { ...item, profile_image: memImg };
-            }
-            return item;
-          });
+        if (Array.isArray(cachedList) && cachedList.length > 0) {
+          const hydratedCached = hydrateStudentsWithAvatars(cachedList);
           setStudents(hydratedCached);
           ADMIN_STUDENTS_Y2_MEM_CACHE.students = hydratedCached;
         }
@@ -953,29 +1036,22 @@ const ManageStudentsYear2 = () => {
         const validRaw = Array.isArray(rawList) ? rawList : [];
         const year2StudentList = validRaw.filter((student) => isYear2Student(student));
 
-        // ✅ រក្សាទុករូបភាពសិស្សក្នុង RAM ភ្លាមៗដើម្បីឱ្យការបង្ហាញរូបភាពលឿនបំផុត (0ms)
-        year2StudentList.forEach((sItem) => {
-          const img = sItem?.profile_image || sItem?.user?.profile_image;
-          if (sItem?.id && img) {
-            ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id] = img;
-          }
-        });
-
         const studentMeta = {
           ...(response.data?.meta || { current_page: 1, last_page: 1, per_page: perPage }),
           total: year2StudentList.length,
         };
 
-        setStudents(year2StudentList);
+        const hydratedList = hydrateStudentsWithAvatars(year2StudentList);
+        setStudents(hydratedList);
         setMeta(studentMeta);
 
         if (page === 1 && !debouncedSearch) {
           ADMIN_STUDENTS_Y2_MEM_CACHE.uid = currentAdminId;
-          ADMIN_STUDENTS_Y2_MEM_CACHE.students = year2StudentList;
+          ADMIN_STUDENTS_Y2_MEM_CACHE.students = hydratedList;
           ADMIN_STUDENTS_Y2_MEM_CACHE.meta = studentMeta;
           ADMIN_STUDENTS_Y2_MEM_CACHE.lastSyncedAt = Date.now();
-          safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), year2StudentList);
-          safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, year2StudentList);
+          safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), hydratedList, currentAdminId);
+          safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, hydratedList, currentAdminId);
           try {
             localStorage.setItem(
               getStudentsY2MetaCacheKey(currentAdminId),
@@ -998,7 +1074,13 @@ const ManageStudentsYear2 = () => {
   useEffect(() => {
     fetchStudents(false);
     setSelectedStudents([]);
-  }, [fetchStudents]);
+    const timer = setTimeout(() => {
+      fetchDepartments();
+      fetchStudentRole();
+      fetchCoursesList();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [fetchStudents, fetchDepartments, fetchStudentRole, fetchCoursesList]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -1018,7 +1100,6 @@ const ManageStudentsYear2 = () => {
     setIsSubmitting(true);
     try {
       if (editingStudent) {
-        // ✅ ប្រសិនបើពេល Edit អ៊ីមែលនៅជាទម្រង់បិទបាំង (មានសញ្ញា *) ឱ្យប្រើអ៊ីមែលដើមរបស់សិស្សនោះវិញដោយស្វ័យប្រវត្តិ
         const resolvedEmail =
           !formData.email || formData.email.includes('*')
             ? editingStudent.email
@@ -1056,8 +1137,8 @@ const ManageStudentsYear2 = () => {
             : prev.filter(s => s.id !== editingStudent.id);
           if (page === 1 && !debouncedSearch) {
             ADMIN_STUDENTS_Y2_MEM_CACHE.students = newList;
-            safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList);
-            safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
+            safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList, currentAdminId);
+            safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList, currentAdminId);
           }
           return newList;
         });
@@ -1092,8 +1173,8 @@ const ManageStudentsYear2 = () => {
             const newList = [newStudent, ...prev].slice(0, perPage);
             if (page === 1 && !debouncedSearch) {
               ADMIN_STUDENTS_Y2_MEM_CACHE.students = newList;
-              safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList);
-              safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
+              safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList, currentAdminId);
+              safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList, currentAdminId);
             }
             return newList;
           });
@@ -1145,8 +1226,8 @@ const ManageStudentsYear2 = () => {
       const newList = prev.filter(s => s.id !== deletedId);
       if (page === 1 && !debouncedSearch) {
         ADMIN_STUDENTS_Y2_MEM_CACHE.students = newList;
-        safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList);
-        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
+        safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList, currentAdminId);
+        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList, currentAdminId);
       }
       return newList;
     });
@@ -1173,7 +1254,6 @@ const ManageStudentsYear2 = () => {
     }
   };
 
-  // ✅ ចាប់យកដេប៉ាតឺម៉ង់ និងវេនសិក្សាដែលកំពុងជ្រើសរើសជាស្រេចនៅពេលបើកទម្រង់បន្ថែមសិស្សថ្មី
   const resetForm = () => {
     setFormData({
       first_name: '',
@@ -1200,7 +1280,6 @@ const ManageStudentsYear2 = () => {
     setShowModal(true);
   };
 
-  // ✅ នៅពេលចុចកែប្រែ (Edit) បង្ហាញអ៊ីមែលជាទម្រង់បិទបាំង (ឧ. cla*****30@gmail.com) ដើម្បីការពារឯកជនភាព
   const openEditModal = (student) => {
     setFormError('');
     setEditingStudent(student);
@@ -1243,7 +1322,6 @@ const ManageStudentsYear2 = () => {
       const fetchedCourses = coursesData || [];
       setStudentEnrollments(fetchedEnrollments);
       setAllCourses(fetchedCourses);
-      // ✅ កត់ត្រាដេប៉ាតឺម៉ង់នៃមុខវិជ្ជាដែលសិស្សកំពុងរៀនភ្លាមៗ
       syncStudentEnrolledDepts(student.id, fetchedEnrollments, fetchedCourses);
     } catch (error) {
       console.error('Cannot fetch enrollment details:', error);
@@ -1306,7 +1384,6 @@ const ManageStudentsYear2 = () => {
       const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
       const updatedEnrollments = enrollmentsRes.data.data || [];
       setStudentEnrollments(updatedEnrollments);
-      // ✅ ធ្វើបច្ចុប្បន្នភាពដេប៉ាតឺម៉ង់របស់សិស្សភ្លាមៗ (បើរៀនមុខវិជ្ជាដេប៉ាតឺម៉ង់ទី ២ នឹងបង្ហាញឈ្មោះក្នុងដេប៉ាតឺម៉ង់ទី ២ ភ្លាម)
       syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
       setSelectedCoursesToEnroll([]);
 
@@ -1434,7 +1511,6 @@ const ManageStudentsYear2 = () => {
         )
       );
 
-      // ✅ ធ្វើបច្ចុប្បន្នភាពដេប៉ាតឺម៉ង់របស់សិស្សទាំងអស់ដែលបានចុះឈ្មោះជាក្រុមភ្លាមៗ
       const newlyAddedDeptIds = allCourses
         .filter((c) => bulkSelectedCourses.includes(Number(c.id)))
         .map((c) => String(c.department_id || c.department?.id || ''))
@@ -1482,7 +1558,6 @@ const ManageStudentsYear2 = () => {
       const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
       const updatedEnrollments = enrollmentsRes.data.data || [];
       setStudentEnrollments(updatedEnrollments);
-      // ✅ ធ្វើបច្ចុប្បន្នភាពដេប៉ាតឺម៉ង់របស់សិស្សឡើងវិញពេលលុបមុខវិជ្ជាចេញ
       syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
     } catch (error) {
       console.error('Failed to unenroll:', error);
@@ -1554,7 +1629,6 @@ const ManageStudentsYear2 = () => {
     worksheet['!rows'] = rows;
   };
 
-  // ✅ នាំចេញ Excel ដោយដាក់សិស្សដែលមានឈ្មោះមុន (លេខរៀងទី 1 ដំបូងគេ) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម និងបិទបាំងអ៊ីមែល
   const handleExportExcel = () => {
     if (displayedStudents.length === 0) {
       return;
@@ -1612,7 +1686,6 @@ const ManageStudentsYear2 = () => {
     });
   };
 
-  // ✅ ទាញយកទម្រង់គំរូ Excel ដោយមិនយកទិន្នន័យសិស្សពិតប្រាកដដាក់ចូលឡើយ (ការពារឯកជនភាព និងការពារកំហុសស្ទួនអ៊ីមែលពេល Import)
   const handleDownloadTemplate = () => {
     const defaultDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
     const defaultShift = selectedShift !== 'all' ? selectedShift : 'Monday-Friday';
@@ -1633,7 +1706,6 @@ const ManageStudentsYear2 = () => {
       'password': ''
     });
 
-    // បង្កើតជួរទំនេរដែលកំណត់ជា Text Format ('@') ចំនួន 50 ជួរទុកជាស្រេច (មិនបញ្ចេញឈ្មោះ អ៊ីមែល ឬពាក្យសម្ងាត់ពិតឡើយ)
     const templateData = Array.from({ length: 50 }, () => blankRow());
 
     const worksheet = XLSX.utils.json_to_sheet(templateData);
@@ -1660,7 +1732,6 @@ const ManageStudentsYear2 = () => {
     });
   };
 
-  // ✅ ប្រសិនបើយើងបានចុចចូលកាតដេប៉ាតឺម៉ង់ណាមួយហើយ ពេលនាំចូល Excel វានឹងចាប់យកដេប៉ាតឺម៉ង់នោះឱ្យសិស្សគ្រប់រូបដោយស្វ័យប្រវត្តិ
   const findDepartmentId = (deptNameOrCode) => {
     if (selectedDepartment !== 'all') {
       return selectedDepartment;
@@ -1881,7 +1952,6 @@ const ManageStudentsYear2 = () => {
     return norm || level || '—';
   };
 
-  // ✅ អនុគមន៍បង្ហាញឈ្មោះភេទជាភាសាខ្មែរ ឬអង់គ្លេស
   const getGenderLabel = (gender) => {
     const g = (gender || '').toString().trim().toLowerCase();
     if (language === 'km') {
@@ -1899,7 +1969,6 @@ const ManageStudentsYear2 = () => {
     return g === 'female' || g === 'f' || g === 'ស្រី';
   };
 
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getProfileImageUrl = useCallback((imagePath) => {
     if (!imagePath || typeof imagePath !== 'string') return null;
     const trimmed = imagePath.trim();
@@ -1946,7 +2015,6 @@ const ManageStudentsYear2 = () => {
             </p>
           </div>
 
-          {/* ✅ ជម្រើសទី ១៖ បិទ/លាក់ប៊ូតុងទាំង ៣ នៅពេលឈរលើ «សិស្សទាំងអស់» (បង្ហាញតែពេលចុចលើកាតដេប៉ាតឺម៉ង់ណាមួយប៉ុណ្ណោះ) */}
           {selectedDepartment !== 'all' && (
             <div className="flex flex-wrap items-center gap-3 shrink-0 animate-fadeIn">
               <button
@@ -2075,7 +2143,6 @@ const ManageStudentsYear2 = () => {
       {/* 9.3. ប្រអប់ស្វែងរកសិស្ស + ប្តូររវាង «វេនសិក្សា» និង «សកម្មភាពជាក្រុម» ក្នុងជួរតែមួយ */}
       {/* ------------------------------------------------------------------ */}
       <div className="std-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col lg:flex-row gap-4 items-center justify-between">
-        {/* ប្រអប់ Search នៅខាងឆ្វេង */}
         <div className="relative w-full lg:max-w-md shrink-0">
           <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
@@ -2096,7 +2163,6 @@ const ManageStudentsYear2 = () => {
           )}
         </div>
 
-        {/* ✅ ផ្នែកខាងស្ដាំ៖ បើមានធីកសិស្ស លាក់កន្លែងវេនសិន ហើយបង្ហាញប៊ូតុងសកម្មភាពជាក្រុមជំនួសវិញក្នុងជួរតែមួយ */}
         {selectedStudents.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-end animate-fadeIn">
             <button
@@ -2118,7 +2184,6 @@ const ManageStudentsYear2 = () => {
             </button>
           </div>
         ) : (
-          /* នៅពេលមិនទាន់ធីកសិស្ស បង្ហាញប៊ូតុងវេនសិក្សាធម្មតា */
           <div className="std-shift-tabs flex flex-wrap items-center gap-1.5 bg-gray-100/80 p-1.5 rounded-xl border border-gray-200/60 w-full lg:w-auto justify-center sm:justify-start animate-fadeIn">
             <button
               type="button"
@@ -2290,9 +2355,9 @@ const ManageStudentsYear2 = () => {
                     const isFemale = isFemaleGender(student.gender);
                     const isWeekend = normalizeShiftKey(student.study_shift) === 'Saturday-Sunday';
                     const rawAvatar =
+                      ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[student.id] ||
                       student.profile_image ||
-                      student.user?.profile_image ||
-                      ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[student.id];
+                      student.user?.profile_image;
                     const avatarUrl = getProfileImageUrl(rawAvatar);
                     const avatarKey = `std_${student.id}`;
                     const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
@@ -2340,7 +2405,6 @@ const ManageStudentsYear2 = () => {
                               <div className="std-text-primary text-sm font-extrabold text-gray-900">
                                 {getStudentFullName(student)}
                               </div>
-                              {/* ✅ បង្ហាញផ្លាកភេទ (ប្រុស/ស្រី) អមជាមួយជំនាន់សិក្សា (batch_year) នៅខាងក្រោមឈ្មោះសិស្ស */}
                               <div className="flex items-center gap-1.5 mt-1">
                                 <span
                                   className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
@@ -2368,7 +2432,6 @@ const ManageStudentsYear2 = () => {
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          {/* ✅ បង្ហាញតែអ៊ីមែលដែលបានបិទបាំងដោយគ្មានប៊ូតុងភ្នែក */}
                           <div className="std-text-secondary text-sm font-medium text-gray-600 font-mono tracking-tight">
                             {maskEmailAddress(student.email)}
                           </div>
@@ -2559,7 +2622,6 @@ const ManageStudentsYear2 = () => {
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
                       {t('អ៊ីមែល', 'Email')} <span className="text-rose-500">*</span>
                     </label>
-                    {/* ✅ ពេល Edit បង្ហាញអ៊ីមែលបិទបាំង ហើយបើចុចដើម្បីវាយអ៊ីមែលថ្មី វាជម្រះសញ្ញា * ឱ្យភ្លាម (បើមិនកែទេ ពេល Blur ត្រឡប់មកបិទបាំងដដែល) */}
                     <input
                       type={editingStudent && formData.email.includes('*') ? 'text' : 'email'}
                       name="email"
@@ -2643,7 +2705,6 @@ const ManageStudentsYear2 = () => {
                     />
                   </div>
 
-                  {/* ✅ បិទកន្លែងដេប៉ាតឺម៉ង់ទាំងពេលបន្ថែមសិស្សថ្មី និងពេលកែប្រែ (Edit) */}
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
                       {t('ដេប៉ាតឺម៉ង់', 'Department')} <span className="text-rose-500">*</span>
@@ -2737,7 +2798,6 @@ const ManageStudentsYear2 = () => {
                         : t('ពាក្យសម្ងាត់', 'Password')}{' '}
                       {!editingStudent && <span className="text-rose-500">*</span>}
                     </label>
-                    {/* ✅ បិទជិតជា password ជានិច្ចដោយគ្មានប៊ូតុងភ្នែក */}
                     <input
                       type="password"
                       name="password"
@@ -3486,7 +3546,6 @@ const ManageStudentsYear2 = () => {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
         .std-table-row + .std-table-row > td {
           border-top: 1px solid #f1f5f9;
         }
@@ -3532,7 +3591,6 @@ const ManageStudentsYear2 = () => {
           color: #cbd5e1 !important;
         }
 
-        /* ប៊ូតុងព្រួញអូសកាតដេប៉ាតឺម៉ង់ */
         html.dark .std-scroll-arrow {
           background-color: rgba(30, 41, 59, 0.9) !important;
           border-color: #475569 !important;
@@ -3544,7 +3602,6 @@ const ManageStudentsYear2 = () => {
           color: #ffffff !important;
         }
 
-        /* ប្រអប់ Icon លើកាតដេប៉ាតឺម៉ង់ក្នុងទម្រង់យប់ */
         html.dark .std-dept-blue { background-color: rgba(59, 130, 246, 0.15) !important; color: #60a5fa !important; border-color: rgba(59, 130, 246, 0.3) !important; }
         html.dark .std-dept-emerald { background-color: rgba(16, 185, 129, 0.15) !important; color: #34d399 !important; border-color: rgba(16, 185, 129, 0.3) !important; }
         html.dark .std-dept-indigo { background-color: rgba(99, 102, 241, 0.15) !important; color: #818cf8 !important; border-color: rgba(99, 102, 241, 0.3) !important; }
@@ -3553,7 +3610,6 @@ const ManageStudentsYear2 = () => {
         html.dark .std-dept-purple { background-color: rgba(168, 85, 247, 0.15) !important; color: #c084fc !important; border-color: rgba(168, 85, 247, 0.3) !important; }
         html.dark .std-dept-cyan { background-color: rgba(6, 182, 212, 0.15) !important; color: #22d3ee !important; border-color: rgba(6, 182, 212, 0.3) !important; }
 
-        /* ប្រអប់ Input, Select, Textarea និង Checkbox */
         html.dark .std-input {
           background-color: #0f172a !important;
           border-color: #334155 !important;
@@ -3580,7 +3636,6 @@ const ManageStudentsYear2 = () => {
           background-color: #334155 !important;
         }
 
-        /* ✅ តារាងសិស្ស និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         html.dark .std-table-head {
           background-color: #0f172a !important;
           border-color: rgba(51, 65, 85, 0.7) !important;
@@ -3599,7 +3654,6 @@ const ManageStudentsYear2 = () => {
           background-color: rgba(59, 130, 246, 0.08) !important;
         }
 
-        /* ផ្លាកសញ្ញា (Badges) ក្នុងទម្រង់យប់ */
         html.dark .std-badge-blue {
           background-color: rgba(59, 130, 246, 0.15) !important;
           color: #60a5fa !important;
@@ -3636,7 +3690,6 @@ const ManageStudentsYear2 = () => {
           color: #fb7185 !important;
         }
 
-        /* ប៊ូតុងសកម្មភាព និង Pagination */
         html.dark .std-action-enroll {
           color: #34d399 !important;
         }
@@ -3675,7 +3728,6 @@ const ManageStudentsYear2 = () => {
           color: #ffffff !important;
         }
 
-        /* ផ្ទាំង Modal ទាំងអស់ */
         html.dark .std-modal-card {
           background-color: #1e293b !important;
           border-color: #334155 !important;
@@ -3696,7 +3748,6 @@ const ManageStudentsYear2 = () => {
           color: #ffffff !important;
         }
 
-        /* ផ្ទាំងចុះឈ្មោះមុខវិជ្ជា (Enrollment Modal) */
         html.dark .std-enroll-box {
           background-color: rgba(15, 23, 42, 0.6) !important;
           border-color: #334155 !important;
@@ -3709,7 +3760,6 @@ const ManageStudentsYear2 = () => {
           border-color: #10b981 !important;
         }
 
-        /* ផ្ទាំង Import Excel */
         html.dark .std-import-info {
           background-color: rgba(16, 185, 129, 0.1) !important;
           border-color: rgba(16, 185, 129, 0.25) !important;
@@ -3737,7 +3787,6 @@ const ManageStudentsYear2 = () => {
           border-color: #10b981 !important;
         }
 
-        /* ផ្ទាំងលុប និងឡើងឆ្នាំសិក្សា */
         html.dark .std-delete-title {
           color: #fb7185 !important;
         }

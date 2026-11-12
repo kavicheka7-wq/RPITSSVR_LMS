@@ -20,19 +20,78 @@ use Illuminate\Validation\Rule;
 class AdminStudentController extends Controller
 {
     /**
-     * បម្លែងរូបភាពដែលបានបង្ហោះ ទៅជា Base64 Data URI (ការពារបាត់រូបលើ Railway)
+     * បម្លែង និងបង្រួមរូបភាពដែលបានបង្ហោះ ទៅជា Base64 Data URI ស្រាលបំផុត (ការពារបាត់រូបលើ Railway និងបង្ហាញលឿន 0ms)
      */
     private function encodeUploadedImageToBase64($file): ?string
     {
         if (!$file || !$file->isValid()) {
             return null;
         }
-        $mime = $file->getMimeType() ?: 'image/jpeg';
-        $contents = file_get_contents($file->getRealPath());
+
+        $realPath = $file->getRealPath();
+        $contents = file_get_contents($realPath);
         if ($contents === false) {
             return null;
         }
+
+        // បង្រួមទំហំរូបភាពឱ្យតូចល្មម (Max 240x240px) ប្រសិនបើ Server មាន GD Extension
+        if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
+            $srcImg = @imagecreatefromstring($contents);
+            if ($srcImg !== false) {
+                $width = imagesx($srcImg);
+                $height = imagesy($srcImg);
+                $maxDim = 240;
+
+                if ($width > $maxDim || $height > $maxDim) {
+                    if ($width > $height) {
+                        $newWidth = $maxDim;
+                        $newHeight = (int) round(($height * $maxDim) / $width);
+                    } else {
+                        $newHeight = $maxDim;
+                        $newWidth = (int) round(($width * $maxDim) / $height);
+                    }
+                } else {
+                    $newWidth = $width;
+                    $newHeight = $height;
+                }
+
+                $dstImg = imagecreatetruecolor($newWidth, $newHeight);
+                $white = imagecolorallocate($dstImg, 255, 255, 255);
+                imagefilledrectangle($dstImg, 0, 0, $newWidth, $newHeight, $white);
+                imagecopyresampled($dstImg, $srcImg, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+
+                ob_start();
+                imagejpeg($dstImg, null, 82);
+                $compressedContents = ob_get_clean();
+
+                imagedestroy($srcImg);
+                imagedestroy($dstImg);
+
+                if ($compressedContents !== false && strlen($compressedContents) < strlen($contents)) {
+                    return 'data:image/jpeg;base64,' . base64_encode($compressedContents);
+                }
+            }
+        }
+
+        $mime = $file->getMimeType() ?: 'image/jpeg';
         return 'data:' . $mime . ';base64,' . base64_encode($contents);
+    }
+
+    /**
+     * រៀបចំទិន្នន័យសិស្សដោយភ្ជាប់រូបភាពពី user (បើខ្វះ) រួចលុបរូបភាពស្ទួនក្នុង relation user ចេញដើម្បីឱ្យ JSON ស្រាលជាងមុន 2 ដង
+     */
+    private function deduplicateStudentAvatar($student)
+    {
+        if (!$student) {
+            return $student;
+        }
+        if (empty($student->profile_image) && !empty($student->user?->profile_image)) {
+            $student->profile_image = $student->user->profile_image;
+        }
+        if ($student->relationLoaded('user') && $student->user) {
+            unset($student->user->profile_image);
+        }
+        return $student;
     }
 
     /**
@@ -151,8 +210,13 @@ class AdminStudentController extends Controller
 
         $students = $query->orderBy('id', 'desc')->paginate($perPage);
 
+        // ✅ ភ្ជាប់រូបភាព និងលុបរូបភាពស្ទួនក្នុង user ចេញ ដើម្បីឱ្យទាញទិន្នន័យលឿនបំផុត
+        $items = collect($students->items())->map(function ($student) {
+            return $this->deduplicateStudentAvatar($student);
+        })->all();
+
         return response()->json([
-            'data' => $students->items(),
+            'data' => $items,
             'meta' => [
                 'current_page' => $students->currentPage(),
                 'last_page' => $students->lastPage(),
@@ -230,7 +294,8 @@ class AdminStudentController extends Controller
                 'profile_image' => $profileImagePath,
             ]);
 
-            return $student->load(['department', 'user', 'role']);
+            $loaded = $student->load(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+            return $this->deduplicateStudentAvatar($loaded);
         });
 
         // ✅ លុប Cache ពេលបង្កើតសិស្សថ្មី
@@ -304,7 +369,7 @@ class AdminStudentController extends Controller
                     'gender' => $validated['gender'] ?? $student->user->gender,
                     'status' => $validated['status'] ?? $student->user->status,
                     'role_id' => $validated['role_id'],
-                    'profile_image' => $profileImagePath,
+                    'profile_image' => $profileImagePath ?? $student->user->profile_image,
                 ];
 
                 if (!empty($validated['password'])) {
@@ -339,9 +404,12 @@ class AdminStudentController extends Controller
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
+        $freshStudent = $student->fresh(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+        $this->deduplicateStudentAvatar($freshStudent);
+
         return response()->json([
             'message' => 'បានកែប្រែព័ត៌មានសិស្សដោយជោគជ័យ',
-            'data' => $student->fresh(['department', 'user', 'role']),
+            'data' => $freshStudent,
         ]);
     }
 
@@ -381,20 +449,41 @@ class AdminStudentController extends Controller
                 ->where('student_id', $student->user_id)
                 ->get();
 
-            // ✅ ទាញយករូបភាពគ្រូពីតារាង teachers មកភ្ជាប់ បើក្នុង course.teacher គ្មានរូបភាព
-            $enrollments->each(function ($enrollment) {
+            // ✅ ទាញយករូបភាពគ្រូពីតារាង teachers ក្នុង Query តែម្តង (បំបាត់បញ្ហា N+1 Query)
+            $teacherUserIds = [];
+            $teacherEmails = [];
+            foreach ($enrollments as $enrollment) {
                 $teacher = $enrollment->course?->teacher;
                 if ($teacher && empty($teacher->profile_image)) {
-                    $teacherRecord = DB::table('teachers')
-                        ->where('user_id', $teacher->id)
-                        ->orWhere('email', $teacher->email)
-                        ->first();
-
-                    if ($teacherRecord && !empty($teacherRecord->profile_image)) {
-                        $teacher->profile_image = $teacherRecord->profile_image;
+                    if (!empty($teacher->id)) {
+                        $teacherUserIds[] = $teacher->id;
+                    }
+                    if (!empty($teacher->email)) {
+                        $teacherEmails[] = $teacher->email;
                     }
                 }
-            });
+            }
+
+            if (!empty($teacherUserIds) || !empty($teacherEmails)) {
+                $teacherRecords = DB::table('teachers')
+                    ->whereIn('user_id', array_unique($teacherUserIds))
+                    ->orWhereIn('email', array_unique($teacherEmails))
+                    ->select(['user_id', 'email', 'profile_image'])
+                    ->get();
+
+                $byUserId = $teacherRecords->keyBy('user_id');
+                $byEmail = $teacherRecords->keyBy('email');
+
+                $enrollments->each(function ($enrollment) use ($byUserId, $byEmail) {
+                    $teacher = $enrollment->course?->teacher;
+                    if ($teacher && empty($teacher->profile_image)) {
+                        $matched = $byUserId->get($teacher->id) ?? $byEmail->get($teacher->email);
+                        if ($matched && !empty($matched->profile_image)) {
+                            $teacher->profile_image = $matched->profile_image;
+                        }
+                    }
+                });
+            }
 
             return response()->json([
                 'data' => $enrollments,
@@ -438,6 +527,7 @@ class AdminStudentController extends Controller
                         $teacherRecord = DB::table('teachers')
                             ->where('user_id', $teacher->id)
                             ->orWhere('email', $teacher->email)
+                            ->select(['profile_image'])
                             ->first();
 
                         if ($teacherRecord && !empty($teacherRecord->profile_image)) {
@@ -492,10 +582,7 @@ class AdminStudentController extends Controller
                 ->orderBy('id', 'asc')
                 ->chunk(500, function ($chunk) use (&$students) {
                     foreach ($chunk as $student) {
-                        if (empty($student->profile_image) && !empty($student->user?->profile_image)) {
-                            $student->profile_image = $student->user->profile_image;
-                        }
-                        $students[] = $student;
+                        $students[] = $this->deduplicateStudentAvatar($student);
                     }
                 });
 

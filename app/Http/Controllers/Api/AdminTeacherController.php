@@ -18,19 +18,78 @@ use Illuminate\Validation\Rule;
 class AdminTeacherController extends Controller
 {
     /**
-     * បម្លែងរូបភាពដែលបានបង្ហោះ ទៅជា Base64 Data URI (ការពារបាត់រូបលើ Railway)
+     * បម្លែង និងបង្រួមរូបភាពដែលបានបង្ហោះ ទៅជា Base64 Data URI ស្រាលបំផុត (ការពារបាត់រូបលើ Railway និងបង្ហាញលឿន 0ms)
      */
     private function encodeUploadedImageToBase64($file): ?string
     {
         if (!$file || !$file->isValid()) {
             return null;
         }
-        $mime = $file->getMimeType() ?: 'image/jpeg';
-        $contents = file_get_contents($file->getRealPath());
+
+        $realPath = $file->getRealPath();
+        $contents = file_get_contents($realPath);
         if ($contents === false) {
             return null;
         }
+
+        // បង្រួមទំហំរូបភាពឱ្យតូចល្មម (Max 240x240px) ប្រសិនបើ Server មាន GD Extension
+        if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
+            $srcImg = @imagecreatefromstring($contents);
+            if ($srcImg !== false) {
+                $width = imagesx($srcImg);
+                $height = imagesy($srcImg);
+                $maxDim = 240;
+
+                if ($width > $maxDim || $height > $maxDim) {
+                    if ($width > $height) {
+                        $newWidth = $maxDim;
+                        $newHeight = (int) round(($height * $maxDim) / $width);
+                    } else {
+                        $newHeight = $maxDim;
+                        $newWidth = (int) round(($width * $maxDim) / $height);
+                    }
+                } else {
+                    $newWidth = $width;
+                    $newHeight = $height;
+                }
+
+                $dstImg = imagecreatetruecolor($newWidth, $newHeight);
+                $white = imagecolorallocate($dstImg, 255, 255, 255);
+                imagefilledrectangle($dstImg, 0, 0, $newWidth, $newHeight, $white);
+                imagecopyresampled($dstImg, $srcImg, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+
+                ob_start();
+                imagejpeg($dstImg, null, 82);
+                $compressedContents = ob_get_clean();
+
+                imagedestroy($srcImg);
+                imagedestroy($dstImg);
+
+                if ($compressedContents !== false && strlen($compressedContents) < strlen($contents)) {
+                    return 'data:image/jpeg;base64,' . base64_encode($compressedContents);
+                }
+            }
+        }
+
+        $mime = $file->getMimeType() ?: 'image/jpeg';
         return 'data:' . $mime . ';base64,' . base64_encode($contents);
+    }
+
+    /**
+     * រៀបចំទិន្នន័យគ្រូបង្រៀនដោយភ្ជាប់រូបភាពពី user (បើខ្វះ) រួចលុបរូបភាពស្ទួនក្នុង relation user ចេញដើម្បីឱ្យ JSON ស្រាលជាងមុន 2 ដង
+     */
+    private function deduplicateTeacherAvatar($teacher)
+    {
+        if (!$teacher) {
+            return $teacher;
+        }
+        if (empty($teacher->profile_image) && !empty($teacher->user?->profile_image)) {
+            $teacher->profile_image = $teacher->user->profile_image;
+        }
+        if ($teacher->relationLoaded('user') && $teacher->user) {
+            unset($teacher->user->profile_image);
+        }
+        return $teacher;
     }
 
     /**
@@ -132,12 +191,9 @@ class AdminTeacherController extends Controller
 
         $teachers = $query->orderBy('first_name')->paginate($perPage);
 
-        // ប្រសិនបើក្នុងតារាង teachers គ្មានរូបភាព តែក្នុងតារាង users មានរូបភាព ឱ្យភ្ជាប់មកជាមួយ
+        // ✅ ភ្ជាប់រូបភាព និងលុបរូបភាពស្ទួនក្នុង user ចេញ ដើម្បីឱ្យទាញទិន្នន័យលឿនបំផុត
         $items = collect($teachers->items())->map(function ($teacher) {
-            if (empty($teacher->profile_image) && !empty($teacher->user?->profile_image)) {
-                $teacher->profile_image = $teacher->user->profile_image;
-            }
-            return $teacher;
+            return $this->deduplicateTeacherAvatar($teacher);
         })->all();
 
         return response()->json([
@@ -222,7 +278,8 @@ class AdminTeacherController extends Controller
                 'profile_image' => $profileImagePath,
             ]);
 
-            return $teacher->load(['department', 'user', 'role']);
+            $loaded = $teacher->load(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+            return $this->deduplicateTeacherAvatar($loaded);
         });
 
         Cache::forget('admin_dashboard_stats');
@@ -240,10 +297,8 @@ class AdminTeacherController extends Controller
      */
     public function show(Teacher $teacher)
     {
-        $loaded = $teacher->load(['department', 'user', 'role']);
-        if (empty($loaded->profile_image) && !empty($loaded->user?->profile_image)) {
-            $loaded->profile_image = $loaded->user->profile_image;
-        }
+        $loaded = $teacher->load(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+        $this->deduplicateTeacherAvatar($loaded);
 
         return response()->json([
             'data' => $loaded,
@@ -344,9 +399,12 @@ class AdminTeacherController extends Controller
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
+        $freshTeacher = $teacher->fresh(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+        $this->deduplicateTeacherAvatar($freshTeacher);
+
         return response()->json([
             'message' => 'បានកែប្រែព័ត៌មានគ្រូបង្រៀនដោយជោគជ័យ',
-            'data' => $teacher->fresh(['department', 'user', 'role']),
+            'data' => $freshTeacher,
         ]);
     }
 
@@ -404,10 +462,7 @@ class AdminTeacherController extends Controller
                 ->orderBy('first_name')
                 ->chunk(500, function ($chunk) use (&$teachers) {
                     foreach ($chunk as $teacher) {
-                        if (empty($teacher->profile_image) && !empty($teacher->user?->profile_image)) {
-                            $teacher->profile_image = $teacher->user->profile_image;
-                        }
-                        $teachers[] = $teacher;
+                        $teachers[] = $this->deduplicateTeacherAvatar($teacher);
                     }
                 });
 
