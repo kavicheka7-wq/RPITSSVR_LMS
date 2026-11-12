@@ -46,6 +46,7 @@ const ADMIN_COURSES_MEM_CACHE = {
   departments: null,
   teachers: null,
   lastSyncedAt: 0,
+  lastTeachersSyncedAt: 0,
 };
 
 const readStorageJson = (key, fallback) => {
@@ -57,34 +58,36 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ រក្សាទុកទិន្នន័យចូល localStorage ដោយសុវត្ថិភាព (ការពារករណីពេញទំហំ Quota ដោយសាររូបភាព Base64)
+// ✅ សម្អាតរូបភាព Base64 ចេញមុនពេលរក្សាទុកក្នុង localStorage ដើម្បីឱ្យលឿន 0ms និងមិនពេញទំហំផ្ទុក
+const stripHeavyImages = (list) => {
+  if (!Array.isArray(list)) return list;
+  return list.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const copy = { ...item };
+    if (copy.profile_image && String(copy.profile_image).startsWith('data:')) {
+      delete copy.profile_image;
+    }
+    if (copy.teacher && typeof copy.teacher === 'object') {
+      copy.teacher = { ...copy.teacher };
+      if (copy.teacher.profile_image && String(copy.teacher.profile_image).startsWith('data:')) {
+        delete copy.teacher.profile_image;
+      }
+    }
+    if (copy.teacher_profile && typeof copy.teacher_profile === 'object') {
+      copy.teacher_profile = { ...copy.teacher_profile };
+      if (copy.teacher_profile.profile_image && String(copy.teacher_profile.profile_image).startsWith('data:')) {
+        delete copy.teacher_profile.profile_image;
+      }
+    }
+    return copy;
+  });
+};
+
 const safeWriteStorage = (key, value) => {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    if (Array.isArray(value)) {
-      try {
-        const lightList = value.map((item) => ({
-          ...item,
-          profile_image:
-            item?.profile_image && String(item.profile_image).startsWith('data:')
-              ? null
-              : item?.profile_image,
-          teacher: item?.teacher
-            ? {
-                ...item.teacher,
-                profile_image:
-                  item.teacher.profile_image &&
-                  String(item.teacher.profile_image).startsWith('data:')
-                    ? null
-                    : item.teacher.profile_image,
-              }
-            : item?.teacher,
-        }));
-        localStorage.setItem(key, JSON.stringify(lightList));
-      } catch {}
-    }
-  }
+    const cleanVal = Array.isArray(value) ? stripHeavyImages(value) : value;
+    localStorage.setItem(key, JSON.stringify(cleanVal));
+  } catch {}
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -135,6 +138,12 @@ const getTeacherFullName = (teacher) => {
 // ✅ ផ្គូផ្គងគ្រូបង្រៀនពីមុខវិជ្ជា ទោះបីជា course.teacher_id រក្សាទុកជា teachers.id ឬ users.id ក៏ដោយ
 const resolveCourseTeacher = (course, teachersList = []) => {
   if (!course) return null;
+  if (course.teacher_profile && (course.teacher_profile.first_name || course.teacher_profile.last_name)) {
+    return course.teacher_profile;
+  }
+  if (course.teacher && (course.teacher.first_name || course.teacher.last_name)) {
+    return course.teacher;
+  }
   const rawTid = course.teacher_id || course.teacher?.id || course.teacher?.user_id;
   if (rawTid && Array.isArray(teachersList) && teachersList.length > 0) {
     const found = teachersList.find(
@@ -144,7 +153,7 @@ const resolveCourseTeacher = (course, teachersList = []) => {
     );
     if (found) return found;
   }
-  return course.teacher_profile || course.teacher || null;
+  return null;
 };
 
 // ✅ តម្រៀបមុខវិជ្ជាដែលមានឈ្មោះមុន (លេខកូដតូច ឬ ID តូច) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម
@@ -222,6 +231,7 @@ const ManageCourses = () => {
     ADMIN_COURSES_MEM_CACHE.departments = null;
     ADMIN_COURSES_MEM_CACHE.teachers = null;
     ADMIN_COURSES_MEM_CACHE.lastSyncedAt = 0;
+    ADMIN_COURSES_MEM_CACHE.lastTeachersSyncedAt = 0;
   }
   ADMIN_COURSES_MEM_CACHE.uid = currentAdminId;
 
@@ -506,15 +516,27 @@ const ManageCourses = () => {
     }
   }, [currentAdminId]);
 
-  const fetchTeachers = useCallback(async () => {
+  const fetchTeachers = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (
+      !force &&
+      Array.isArray(ADMIN_COURSES_MEM_CACHE.teachers) &&
+      ADMIN_COURSES_MEM_CACHE.teachers.length > 0 &&
+      now - ADMIN_COURSES_MEM_CACHE.lastTeachersSyncedAt < 60000
+    ) {
+      return;
+    }
+
     try {
       const response = await api.get('/admin/teachers', { params: { per_page: 200 } });
       const teachersData = response.data?.data?.data || response.data?.data || response.data || [];
       if (Array.isArray(teachersData)) {
-        setTeachers(teachersData);
-        ADMIN_COURSES_MEM_CACHE.teachers = teachersData;
-        safeWriteStorage(getTeachersCacheKey(currentAdminId), teachersData);
-        safeWriteStorage(CACHE_KEY_SHARED_TEACHERS, teachersData);
+        const lightTeachers = stripHeavyImages(teachersData);
+        setTeachers(lightTeachers);
+        ADMIN_COURSES_MEM_CACHE.teachers = lightTeachers;
+        ADMIN_COURSES_MEM_CACHE.lastTeachersSyncedAt = Date.now();
+        safeWriteStorage(getTeachersCacheKey(currentAdminId), lightTeachers);
+        safeWriteStorage(CACHE_KEY_SHARED_TEACHERS, lightTeachers);
       }
     } catch (error) {
       console.error('Error fetching teachers:', error);
@@ -523,14 +545,20 @@ const ManageCourses = () => {
 
   useEffect(() => {
     fetchDepartments();
-    fetchTeachers();
+    // ✅ ប្រសិនបើមានបញ្ជីគ្រូបង្រៀនក្នុង Cache រួចហើយ ពន្យារពេល 300ms សិន ដើម្បីទុកផ្លូវឱ្យ API /admin/courses ទាញមកដល់មុនក្នុង 0ms!
+    if (Array.isArray(ADMIN_COURSES_MEM_CACHE.teachers) && ADMIN_COURSES_MEM_CACHE.teachers.length > 0) {
+      const t = setTimeout(() => fetchTeachers(false), 300);
+      return () => clearTimeout(t);
+    } else {
+      fetchTeachers(false);
+    }
   }, [fetchDepartments, fetchTeachers]);
 
   const fetchCourses = useCallback(
     async (forceRefresh = false) => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
         const cachedList = readStorageJson(getCoursesCacheKey(currentAdminId), null);
-        if (Array.isArray(cachedList)) {
+        if (Array.isArray(cachedList) && cachedList.length > 0) {
           setCourses(cachedList);
           ADMIN_COURSES_MEM_CACHE.courses = cachedList;
         }
@@ -583,19 +611,18 @@ const ManageCourses = () => {
           };
         }
 
-        setCourses(fetchedCourses);
+        const lightCourses = stripHeavyImages(fetchedCourses);
+        setCourses(lightCourses);
         setMeta(newMeta);
 
         if (page === 1 && !debouncedSearch) {
           ADMIN_COURSES_MEM_CACHE.uid = currentAdminId;
-          ADMIN_COURSES_MEM_CACHE.courses = fetchedCourses;
+          ADMIN_COURSES_MEM_CACHE.courses = lightCourses;
           ADMIN_COURSES_MEM_CACHE.meta = newMeta;
           ADMIN_COURSES_MEM_CACHE.lastSyncedAt = Date.now();
-          safeWriteStorage(getCoursesCacheKey(currentAdminId), fetchedCourses);
-          safeWriteStorage(CACHE_KEY_SHARED_COURSES, fetchedCourses);
-          safeWriteStorage(CACHE_KEY_LEGACY_COURSES, fetchedCourses);
+          safeWriteStorage(getCoursesCacheKey(currentAdminId), lightCourses);
+          safeWriteStorage(CACHE_KEY_SHARED_COURSES, lightCourses);
           safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
-          safeWriteStorage(CACHE_KEY_LEGACY_META, newMeta);
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
@@ -675,7 +702,6 @@ const ManageCourses = () => {
             ADMIN_COURSES_MEM_CACHE.courses = newList;
             safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
             safeWriteStorage(CACHE_KEY_SHARED_COURSES, newList);
-            safeWriteStorage(CACHE_KEY_LEGACY_COURSES, newList);
           }
           return newList;
         });
@@ -705,7 +731,6 @@ const ManageCourses = () => {
             ADMIN_COURSES_MEM_CACHE.courses = newList;
             safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
             safeWriteStorage(CACHE_KEY_SHARED_COURSES, newList);
-            safeWriteStorage(CACHE_KEY_LEGACY_COURSES, newList);
           }
           return newList;
         });
@@ -713,7 +738,6 @@ const ManageCourses = () => {
           const newMeta = { ...prev, total: (prev.total || 0) + 1 };
           ADMIN_COURSES_MEM_CACHE.meta = newMeta;
           safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
-          safeWriteStorage(CACHE_KEY_LEGACY_META, newMeta);
           return newMeta;
         });
 
@@ -774,7 +798,6 @@ const ManageCourses = () => {
         ADMIN_COURSES_MEM_CACHE.courses = newList;
         safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
         safeWriteStorage(CACHE_KEY_SHARED_COURSES, newList);
-        safeWriteStorage(CACHE_KEY_LEGACY_COURSES, newList);
       }
       return newList;
     });
@@ -782,7 +805,6 @@ const ManageCourses = () => {
       const newMeta = { ...prev, total: Math.max(0, (prev.total || 1) - 1) };
       ADMIN_COURSES_MEM_CACHE.meta = newMeta;
       safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
-      safeWriteStorage(CACHE_KEY_LEGACY_META, newMeta);
       return newMeta;
     });
 
@@ -823,6 +845,9 @@ const ManageCourses = () => {
 
   const openCreateModal = () => {
     resetForm();
+    if (!teachers || teachers.length === 0) {
+      fetchTeachers(true);
+    }
     setShowModal(true);
   };
 
@@ -830,6 +855,9 @@ const ManageCourses = () => {
   const openEditModal = (course) => {
     setFormError('');
     setEditingCourse(course);
+    if (!teachers || teachers.length === 0) {
+      fetchTeachers(true);
+    }
     const matchedTeacher = resolveCourseTeacher(course, teachers);
     const resolvedDropdownTeacherId =
       matchedTeacher?.id || course.teacher_id || course.teacher?.id || '';
