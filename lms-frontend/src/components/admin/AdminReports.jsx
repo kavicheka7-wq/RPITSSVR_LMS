@@ -65,7 +65,7 @@ const DEFAULT_OVERVIEW_STATE = {
   enrollment_trend: [],
 };
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ
+// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សារូបភាពក្នុង RAM
 const ADMIN_REPORTS_MEM_CACHE = {
   uid: null,
   overview: null,
@@ -77,6 +77,7 @@ const ADMIN_REPORTS_MEM_CACHE = {
   departments: null,
   courses: null,
   lastSyncedOverviewAt: 0,
+  avatarMap: {},
 };
 
 const readStorageJson = (key, fallback) => {
@@ -86,6 +87,35 @@ const readStorageJson = (key, fallback) => {
   } catch {
     return fallback;
   }
+};
+
+// ✅ រក្សាទុកទិន្នន័យរបាយការណ៍ចូល localStorage ដោយសុវត្ថិភាព (ការពារករណីពេញទំហំ Quota ដោយសាររូបភាព Base64)
+const safeWriteReportStorage = (key, payload) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch {
+    try {
+      if (payload && typeof payload === 'object' && Array.isArray(payload.data)) {
+        const lightData = payload.data.map((row) => ({
+          ...row,
+          profile_image:
+            row?.profile_image && String(row.profile_image).startsWith('data:')
+              ? null
+              : row?.profile_image,
+        }));
+        localStorage.setItem(key, JSON.stringify({ ...payload, data: lightData }));
+      }
+    } catch {}
+  }
+};
+
+// ✅ អនុគមន៍បិទបាំងផ្នែកកណ្ដាលនៃអ៊ីមែល (ឧ. "classit830@gmail.com" -> "cla*****30@gmail.com")
+const maskEmailAddress = (email) => {
+  if (!email || typeof email !== 'string' || !email.includes('@')) return email || '';
+  const [localPart, domain] = email.split('@');
+  if (localPart.length <= 2) return `${localPart[0] || '*'}***@${domain}`;
+  if (localPart.length <= 4) return `${localPart.slice(0, 2)}***@${domain}`;
+  return `${localPart.slice(0, 3)}*****${localPart.slice(-2)}@${domain}`;
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -276,6 +306,7 @@ const AdminReports = () => {
     ADMIN_REPORTS_MEM_CACHE.departments = null;
     ADMIN_REPORTS_MEM_CACHE.courses = null;
     ADMIN_REPORTS_MEM_CACHE.lastSyncedOverviewAt = 0;
+    ADMIN_REPORTS_MEM_CACHE.avatarMap = {};
   }
   ADMIN_REPORTS_MEM_CACHE.uid = currentAdminId;
 
@@ -470,18 +501,8 @@ const AdminReports = () => {
         ADMIN_REPORTS_MEM_CACHE.uid = currentAdminId;
         ADMIN_REPORTS_MEM_CACHE.overview = formatted;
         ADMIN_REPORTS_MEM_CACHE.lastSyncedOverviewAt = Date.now();
-        try {
-          localStorage.setItem(
-            getOverviewCacheKey(currentAdminId),
-            JSON.stringify(formatted)
-          );
-          localStorage.setItem(
-            CACHE_KEY_LEGACY_OVERVIEW,
-            JSON.stringify(formatted)
-          );
-        } catch (e) {
-          console.warn('Failed to cache overview report:', e);
-        }
+        safeWriteReportStorage(getOverviewCacheKey(currentAdminId), formatted);
+        safeWriteReportStorage(CACHE_KEY_LEGACY_OVERVIEW, formatted);
       } else if (activeTab === 'enrollments') {
         const params = {
           department_id: selectedDept,
@@ -493,9 +514,21 @@ const AdminReports = () => {
         };
         res = await api.get('/admin/reports/enrollments', { ...config, params });
         const d = res.data || {};
+        const rows = Array.isArray(d.data) ? d.data : [];
+        rows.forEach((r) => {
+          const img =
+            r?.profile_image ||
+            r?.student?.profile_image ||
+            r?.student?.user?.profile_image ||
+            r?.user?.profile_image;
+          const keyId = r?.student_id || r?.student_code;
+          if (keyId && img) {
+            ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`] = img;
+          }
+        });
         const formattedEnr = {
           ...d,
-          data: Array.isArray(d.data) ? d.data : [],
+          data: rows,
           summary: d.summary || {},
         };
         setEnrollmentData(formattedEnr);
@@ -503,12 +536,7 @@ const AdminReports = () => {
         if (isDefaultFilter && enrollmentPage === 1) {
           ADMIN_REPORTS_MEM_CACHE.enrollments = formattedEnr;
           ADMIN_REPORTS_MEM_CACHE.enrollmentMeta = d.meta || {};
-          try {
-            localStorage.setItem(
-              getEnrollmentsCacheKey(currentAdminId),
-              JSON.stringify(formattedEnr)
-            );
-          } catch {}
+          safeWriteReportStorage(getEnrollmentsCacheKey(currentAdminId), formattedEnr);
         }
       } else if (activeTab === 'attendance') {
         const params = {
@@ -529,12 +557,7 @@ const AdminReports = () => {
         setAttendanceData(formattedAtt);
         if (isDefaultFilter) {
           ADMIN_REPORTS_MEM_CACHE.attendance = formattedAtt;
-          try {
-            localStorage.setItem(
-              getAttendanceCacheKey(currentAdminId),
-              JSON.stringify(formattedAtt)
-            );
-          } catch {}
+          safeWriteReportStorage(getAttendanceCacheKey(currentAdminId), formattedAtt);
         }
       } else if (activeTab === 'academic') {
         const params = {
@@ -546,9 +569,21 @@ const AdminReports = () => {
         };
         res = await api.get('/admin/reports/academic', { ...config, params });
         const d = res.data || {};
+        const rows = Array.isArray(d.data) ? d.data : [];
+        rows.forEach((r) => {
+          const img =
+            r?.profile_image ||
+            r?.student?.profile_image ||
+            r?.student?.user?.profile_image ||
+            r?.user?.profile_image;
+          const keyId = r?.student_id || r?.student_code;
+          if (keyId && img) {
+            ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`] = img;
+          }
+        });
         const formattedAcad = {
           ...d,
-          data: Array.isArray(d.data) ? d.data : [],
+          data: rows,
           summary: d.summary || {},
         };
         setAcademicData(formattedAcad);
@@ -556,12 +591,7 @@ const AdminReports = () => {
         if (isDefaultFilter && academicPage === 1) {
           ADMIN_REPORTS_MEM_CACHE.academic = formattedAcad;
           ADMIN_REPORTS_MEM_CACHE.academicMeta = d.meta || {};
-          try {
-            localStorage.setItem(
-              getAcademicCacheKey(currentAdminId),
-              JSON.stringify(formattedAcad)
-            );
-          } catch {}
+          safeWriteReportStorage(getAcademicCacheKey(currentAdminId), formattedAcad);
         }
       }
     } catch (err) {
@@ -876,7 +906,7 @@ const AdminReports = () => {
         [t('ល.រ', 'No')]: offset + idx + 1,
         [t('លេខកូដសិស្ស', 'Student Code')]: r.student_code || '',
         [t('ឈ្មោះសិស្ស', 'Student Name')]: r.student_name || '',
-        [t('អ៊ីមែល', 'Email')]: r.email || '',
+        [t('អ៊ីមែល', 'Email')]: maskEmailAddress(r.email || ''),
         [t('មុខវិជ្ជា', 'Course')]: r.course_name || '',
         [t('ដេប៉ាតឺម៉ង់', 'Department')]: r.department_name || '',
         [t('ថ្ងៃចុះឈ្មោះ', 'Enrolled Date')]: formatDateOnly(r.enrolled_date),
@@ -1496,7 +1526,7 @@ const AdminReports = () => {
                   </h3>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-100">
+                  <table className="min-w-full border-collapse">
                     <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
                       <tr>
                         <th className="px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider w-12 whitespace-nowrap">{t('ល.រ', 'No')}</th>
@@ -1506,7 +1536,7 @@ const AdminReports = () => {
                         <th className="px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider w-28 whitespace-nowrap">{t('ចំនួនគ្រូ', 'Teachers')}</th>
                       </tr>
                     </thead>
-                    <tbody className="rep-table-body bg-white divide-y divide-gray-100">
+                    <tbody className="rep-table-body bg-white">
                       {departmentChartData.length === 0 ? (
                         <tr><td colSpan="5" className="px-6 py-10 text-center text-gray-400 font-bold">{t('មិនរកឃើញទិន្នន័យទេ', 'No records found')}</td></tr>
                       ) : (
@@ -1582,7 +1612,7 @@ const AdminReports = () => {
                   </h3>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-100">
+                  <table className="min-w-full border-collapse">
                     <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
                       <tr>
                         <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">{t('លេខកូដសិស្ស', 'Student Code')}</th>
@@ -1593,7 +1623,7 @@ const AdminReports = () => {
                         <th className="px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">{t('ស្ថានភាព', 'Status')}</th>
                       </tr>
                     </thead>
-                    <tbody className="rep-table-body bg-white divide-y divide-gray-100">
+                    <tbody className="rep-table-body bg-white">
                       {(!Array.isArray(enrollmentData?.data) || enrollmentData.data.length === 0) ? (
                         <tr>
                           <td colSpan="6" className="px-6 py-16 text-center text-gray-400 font-bold">
@@ -1602,11 +1632,13 @@ const AdminReports = () => {
                         </tr>
                       ) : (
                         enrollmentData.data.map((item, idx) => {
+                          const stdKey = item.student_id || item.student_code;
                           const rawAvatar =
                             item.profile_image ||
                             item.student?.profile_image ||
                             item.student?.user?.profile_image ||
-                            item.user?.profile_image;
+                            item.user?.profile_image ||
+                            (stdKey ? ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] : null);
                           const avatarUrl = resolveImageUrl(rawAvatar);
                           const avatarKey = `enr_${item.id || item.student_id || idx}`;
                           const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
@@ -1620,6 +1652,8 @@ const AdminReports = () => {
                                     <img
                                       src={avatarUrl}
                                       alt={item.student_name || 'Student'}
+                                      loading="eager"
+                                      decoding="async"
                                       className="no-print h-8 w-8 rounded-full object-cover shrink-0 border border-blue-200 shadow-2xs"
                                       onError={() =>
                                         setFailedAvatars((prev) => ({
@@ -1631,7 +1665,10 @@ const AdminReports = () => {
                                   )}
                                   <div>
                                     <div className="rep-text-primary font-extrabold text-gray-900 text-sm">{item.student_name || '—'}</div>
-                                    <div className="rep-text-secondary text-xs text-gray-500 font-medium">{item.email || ''}</div>
+                                    {/* ✅ បង្ហាញតែអ៊ីមែលដែលបានបិទបាំងផ្នែកកណ្ដាល */}
+                                    <div className="rep-text-secondary text-xs text-gray-500 font-medium font-mono tracking-tight">
+                                      {maskEmailAddress(item.email || '')}
+                                    </div>
                                   </div>
                                 </div>
                               </td>
@@ -1905,6 +1942,8 @@ const AdminReports = () => {
                                       <img
                                         src={teacherAvatarUrl}
                                         alt={teacherName}
+                                        loading="eager"
+                                        decoding="async"
                                         className="w-4 h-4 rounded-full object-cover shrink-0 border border-indigo-200"
                                         onError={() =>
                                           setFailedAvatars((prev) => ({
@@ -2149,7 +2188,7 @@ const AdminReports = () => {
                   </h3>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-100">
+                  <table className="min-w-full border-collapse">
                     <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
                       <tr>
                         <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">{t('លេខកូដសិស្ស', 'Student Code')}</th>
@@ -2161,7 +2200,7 @@ const AdminReports = () => {
                         <th className="px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">{t('លទ្ធផល', 'Result')}</th>
                       </tr>
                     </thead>
-                    <tbody className="rep-table-body bg-white divide-y divide-gray-100">
+                    <tbody className="rep-table-body bg-white">
                       {enrichedAcademicRows.length === 0 ? (
                         <tr>
                           <td colSpan="7" className="px-6 py-16 text-center text-gray-400 font-bold">
@@ -2171,11 +2210,13 @@ const AdminReports = () => {
                       ) : (
                         enrichedAcademicRows.map((g, idx) => {
                           const { assignPts20, quizPts20, totalPoints, status } = g.computed;
+                          const stdKey = g.student_id || g.student_code;
                           const rawAvatar =
                             g.profile_image ||
                             g.student?.profile_image ||
                             g.student?.user?.profile_image ||
-                            g.user?.profile_image;
+                            g.user?.profile_image ||
+                            (stdKey ? ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] : null);
                           const avatarUrl = resolveImageUrl(rawAvatar);
                           const avatarKey = `acad_${g.id || g.student_id || idx}`;
                           const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
@@ -2189,6 +2230,8 @@ const AdminReports = () => {
                                     <img
                                       src={avatarUrl}
                                       alt={g.student_name || 'Student'}
+                                      loading="eager"
+                                      decoding="async"
                                       className="no-print h-8 w-8 rounded-full object-cover shrink-0 border border-blue-200 shadow-2xs"
                                       onError={() =>
                                         setFailedAvatars((prev) => ({
@@ -2267,6 +2310,11 @@ const AdminReports = () => {
       {/* 📌 ផ្នែកទី ១១៖ CSS សម្រាប់កំណត់ទម្រង់យប់ (DARK MODE) និងទម្រង់បោះពុម្ព (PRINT) */}
       {/* ==================================================================== */}
       <style>{`
+        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
+        .rep-table-row + .rep-table-row > td {
+          border-top: 1px solid #f1f5f9;
+        }
+
         html.dark .rep-page-bg {
           background-color: transparent !important;
         }
@@ -2368,6 +2416,7 @@ const AdminReports = () => {
           opacity: 0.6;
         }
 
+        /* ✅ តារាងរបាយការណ៍ និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         .rep-table-head {
           background-color: #f8fafc;
           border-bottom: 1px solid #e2e8f0;
@@ -2375,20 +2424,19 @@ const AdminReports = () => {
         html.dark .rep-table-bar,
         html.dark .rep-table-head {
           background-color: #0f172a !important;
-          border-color: #334155 !important;
+          border-color: rgba(51, 65, 85, 0.7) !important;
         }
         html.dark .rep-table-head th {
           color: #94a3b8 !important;
         }
         html.dark .rep-table-body {
           background-color: #1e293b !important;
-          border-color: #334155 !important;
         }
-        html.dark .rep-table-body > tr {
-          border-color: #334155 !important;
+        html.dark .rep-table-row + .rep-table-row > td {
+          border-top: 1px solid rgba(51, 65, 85, 0.55) !important;
         }
         html.dark .rep-table-row:hover {
-          background-color: rgba(59, 130, 246, 0.1) !important;
+          background-color: rgba(59, 130, 246, 0.08) !important;
         }
 
         html.dark .rep-stat-blue {

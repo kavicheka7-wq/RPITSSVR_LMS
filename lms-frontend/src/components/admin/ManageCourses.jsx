@@ -57,6 +57,36 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
+// ✅ រក្សាទុកទិន្នន័យចូល localStorage ដោយសុវត្ថិភាព (ការពារករណីពេញទំហំ Quota ដោយសាររូបភាព Base64)
+const safeWriteStorage = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    if (Array.isArray(value)) {
+      try {
+        const lightList = value.map((item) => ({
+          ...item,
+          profile_image:
+            item?.profile_image && String(item.profile_image).startsWith('data:')
+              ? null
+              : item?.profile_image,
+          teacher: item?.teacher
+            ? {
+                ...item.teacher,
+                profile_image:
+                  item.teacher.profile_image &&
+                  String(item.teacher.profile_image).startsWith('data:')
+                    ? null
+                    : item.teacher.profile_image,
+              }
+            : item?.teacher,
+        }));
+        localStorage.setItem(key, JSON.stringify(lightList));
+      } catch {}
+    }
+  }
+};
+
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
 const resolveAdminUid = (contextUser) => {
   if (contextUser) {
@@ -100,6 +130,21 @@ const getDepartmentDisplayName = (deptObjOrName) => {
 const getTeacherFullName = (teacher) => {
   if (!teacher) return '';
   return `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim();
+};
+
+// ✅ ផ្គូផ្គងគ្រូបង្រៀនពីមុខវិជ្ជា ទោះបីជា course.teacher_id រក្សាទុកជា teachers.id ឬ users.id ក៏ដោយ
+const resolveCourseTeacher = (course, teachersList = []) => {
+  if (!course) return null;
+  const rawTid = course.teacher_id || course.teacher?.id || course.teacher?.user_id;
+  if (rawTid && Array.isArray(teachersList) && teachersList.length > 0) {
+    const found = teachersList.find(
+      (tItem) =>
+        String(tItem.id) === String(rawTid) ||
+        (tItem.user_id && String(tItem.user_id) === String(rawTid))
+    );
+    if (found) return found;
+  }
+  return course.teacher_profile || course.teacher || null;
 };
 
 // ✅ តម្រៀបមុខវិជ្ជាដែលមានឈ្មោះមុន (លេខកូដតូច ឬ ID តូច) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម
@@ -320,7 +365,7 @@ const ManageCourses = () => {
       const courseCode = course.course_code?.toLowerCase() || '';
       const matchedDeptObj = course.department || departments.find(d => String(d.id) === String(course.department_id));
       const deptName = getDepartmentDisplayName(matchedDeptObj).toLowerCase();
-      const matchedTeacher = course.teacher || teachers.find(tItem => String(tItem.id) === String(course.teacher_id));
+      const matchedTeacher = resolveCourseTeacher(course, teachers);
       const teacherName = matchedTeacher ? getTeacherFullName(matchedTeacher).toLowerCase() : '';
 
       return (
@@ -344,7 +389,9 @@ const ManageCourses = () => {
       (tItem) =>
         String(tItem.department_id || tItem.department?.id) ===
           String(formData.department_id) ||
-        (formData.teacher_id && String(tItem.id) === String(formData.teacher_id))
+        (formData.teacher_id &&
+          (String(tItem.id) === String(formData.teacher_id) ||
+            (tItem.user_id && String(tItem.user_id) === String(formData.teacher_id))))
     );
     return deptTeachers.length > 0 ? deptTeachers : teachers;
   }, [teachers, formData.department_id, formData.teacher_id]);
@@ -451,10 +498,8 @@ const ManageCourses = () => {
       if (Array.isArray(data)) {
         setDepartments(data);
         ADMIN_COURSES_MEM_CACHE.departments = data;
-        try {
-          localStorage.setItem(getDeptsCacheKey(currentAdminId), JSON.stringify(data));
-          localStorage.setItem(CACHE_KEY_SHARED_DEPTS, JSON.stringify(data));
-        } catch {}
+        safeWriteStorage(getDeptsCacheKey(currentAdminId), data);
+        safeWriteStorage(CACHE_KEY_SHARED_DEPTS, data);
       }
     } catch (error) {
       console.error('Error fetching departments:', error);
@@ -468,10 +513,8 @@ const ManageCourses = () => {
       if (Array.isArray(teachersData)) {
         setTeachers(teachersData);
         ADMIN_COURSES_MEM_CACHE.teachers = teachersData;
-        try {
-          localStorage.setItem(getTeachersCacheKey(currentAdminId), JSON.stringify(teachersData));
-          localStorage.setItem(CACHE_KEY_SHARED_TEACHERS, JSON.stringify(teachersData));
-        } catch {}
+        safeWriteStorage(getTeachersCacheKey(currentAdminId), teachersData);
+        safeWriteStorage(CACHE_KEY_SHARED_TEACHERS, teachersData);
       }
     } catch (error) {
       console.error('Error fetching teachers:', error);
@@ -533,10 +576,10 @@ const ManageCourses = () => {
         } else if (Array.isArray(data)) {
           fetchedCourses = data;
           newMeta = {
-            current_page: 1,
-            last_page: 1,
-            total: data.length,
-            per_page: data.length || perPage,
+            current_page: response.data?.meta?.current_page || 1,
+            last_page: response.data?.meta?.last_page || 1,
+            total: response.data?.meta?.total ?? data.length,
+            per_page: response.data?.meta?.per_page || data.length || perPage,
           };
         }
 
@@ -548,30 +591,11 @@ const ManageCourses = () => {
           ADMIN_COURSES_MEM_CACHE.courses = fetchedCourses;
           ADMIN_COURSES_MEM_CACHE.meta = newMeta;
           ADMIN_COURSES_MEM_CACHE.lastSyncedAt = Date.now();
-          try {
-            localStorage.setItem(
-              getCoursesCacheKey(currentAdminId),
-              JSON.stringify(fetchedCourses)
-            );
-            localStorage.setItem(
-              getCoursesMetaCacheKey(currentAdminId),
-              JSON.stringify(newMeta)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_COURSES,
-              JSON.stringify(fetchedCourses)
-            );
-            localStorage.setItem(
-              CACHE_KEY_LEGACY_COURSES,
-              JSON.stringify(fetchedCourses)
-            );
-            localStorage.setItem(
-              CACHE_KEY_LEGACY_META,
-              JSON.stringify(newMeta)
-            );
-          } catch (e) {
-            console.warn('Failed to cache courses:', e);
-          }
+          safeWriteStorage(getCoursesCacheKey(currentAdminId), fetchedCourses);
+          safeWriteStorage(CACHE_KEY_SHARED_COURSES, fetchedCourses);
+          safeWriteStorage(CACHE_KEY_LEGACY_COURSES, fetchedCourses);
+          safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
+          safeWriteStorage(CACHE_KEY_LEGACY_META, newMeta);
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
@@ -625,7 +649,11 @@ const ManageCourses = () => {
     }
 
     const matchedDept = departments.find(d => String(d.id) === String(payload.department_id));
-    const matchedTeacher = teachers.find(tItem => String(tItem.id) === String(payload.teacher_id));
+    const matchedTeacher = teachers.find(
+      (tItem) =>
+        String(tItem.id) === String(payload.teacher_id) ||
+        (tItem.user_id && String(tItem.user_id) === String(payload.teacher_id))
+    );
 
     setIsSubmitting(true);
     try {
@@ -645,11 +673,9 @@ const ManageCourses = () => {
           const newList = prev.map(c => c.id === editingCourse.id ? updatedCourse : c);
           if (page === 1 && !debouncedSearch) {
             ADMIN_COURSES_MEM_CACHE.courses = newList;
-            try {
-              localStorage.setItem(getCoursesCacheKey(currentAdminId), JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_LEGACY_COURSES, JSON.stringify(newList));
-            } catch (e) {}
+            safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
+            safeWriteStorage(CACHE_KEY_SHARED_COURSES, newList);
+            safeWriteStorage(CACHE_KEY_LEGACY_COURSES, newList);
           }
           return newList;
         });
@@ -677,21 +703,17 @@ const ManageCourses = () => {
           const newList = [newCourse, ...prev].slice(0, perPage);
           if (page === 1 && !debouncedSearch) {
             ADMIN_COURSES_MEM_CACHE.courses = newList;
-            try {
-              localStorage.setItem(getCoursesCacheKey(currentAdminId), JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_LEGACY_COURSES, JSON.stringify(newList));
-            } catch (e) {}
+            safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
+            safeWriteStorage(CACHE_KEY_SHARED_COURSES, newList);
+            safeWriteStorage(CACHE_KEY_LEGACY_COURSES, newList);
           }
           return newList;
         });
         setMeta(prev => {
           const newMeta = { ...prev, total: (prev.total || 0) + 1 };
           ADMIN_COURSES_MEM_CACHE.meta = newMeta;
-          try {
-            localStorage.setItem(getCoursesMetaCacheKey(currentAdminId), JSON.stringify(newMeta));
-            localStorage.setItem(CACHE_KEY_LEGACY_META, JSON.stringify(newMeta));
-          } catch (e) {}
+          safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
+          safeWriteStorage(CACHE_KEY_LEGACY_META, newMeta);
           return newMeta;
         });
 
@@ -750,21 +772,17 @@ const ManageCourses = () => {
       const newList = prev.filter(c => c.id !== deletedId);
       if (page === 1 && !debouncedSearch) {
         ADMIN_COURSES_MEM_CACHE.courses = newList;
-        try {
-          localStorage.setItem(getCoursesCacheKey(currentAdminId), JSON.stringify(newList));
-          localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(newList));
-          localStorage.setItem(CACHE_KEY_LEGACY_COURSES, JSON.stringify(newList));
-        } catch (e) {}
+        safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
+        safeWriteStorage(CACHE_KEY_SHARED_COURSES, newList);
+        safeWriteStorage(CACHE_KEY_LEGACY_COURSES, newList);
       }
       return newList;
     });
     setMeta(prev => {
       const newMeta = { ...prev, total: Math.max(0, (prev.total || 1) - 1) };
       ADMIN_COURSES_MEM_CACHE.meta = newMeta;
-      try {
-        localStorage.setItem(getCoursesMetaCacheKey(currentAdminId), JSON.stringify(newMeta));
-        localStorage.setItem(CACHE_KEY_LEGACY_META, JSON.stringify(newMeta));
-      } catch (e) {}
+      safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
+      safeWriteStorage(CACHE_KEY_LEGACY_META, newMeta);
       return newMeta;
     });
 
@@ -808,16 +826,21 @@ const ManageCourses = () => {
     setShowModal(true);
   };
 
+  // ✅ ផ្គូផ្គងគ្រូបង្រៀនឱ្យត្រូវជាមួយ teacher.id នៅក្នុង Dropdown ទោះបីជា course.teacher_id ជា user_id ក៏ដោយ
   const openEditModal = (course) => {
     setFormError('');
     setEditingCourse(course);
+    const matchedTeacher = resolveCourseTeacher(course, teachers);
+    const resolvedDropdownTeacherId =
+      matchedTeacher?.id || course.teacher_id || course.teacher?.id || '';
+
     setFormData({
       course_code: course.course_code || '',
       course_name: course.course_name || '',
       credit: course.credit ?? 3,
       description: course.description || '',
       department_id: course.department_id || course.department?.id || '',
-      teacher_id: course.teacher_id || course.teacher?.id || '',
+      teacher_id: resolvedDropdownTeacherId,
     });
     setShowModal(true);
   };
@@ -896,7 +919,7 @@ const ManageCourses = () => {
 
     const exportData = sortedCoursesForExport.map((c, idx) => {
       const matchedDeptObj = c.department || departments.find(d => String(d.id) === String(c.department_id)) || activeDepartmentObj;
-      const matchedTeacher = c.teacher || teachers.find(tItem => String(tItem.id) === String(c.teacher_id));
+      const matchedTeacher = resolveCourseTeacher(c, teachers);
       return {
         'ល.រ': idx + 1,
         'កូដមុខវិជ្ជា': c.course_code || '',
@@ -929,10 +952,9 @@ const ManageCourses = () => {
     });
   };
 
-  // ✅ ទាញយកទម្រង់គំរូ Excel ដែលបំពេញឈ្មោះដេប៉ាតឺម៉ង់ដែលបានចុចចូលឱ្យស្រាប់ និងតម្រៀបមុខវិជ្ជាដែលមានឈ្មោះមុននៅខាងលើដេញចុះមកក្រោម
+  // ✅ ទាញយកទម្រង់គំរូ Excel ដោយដាក់ជួរទំនេរចំនួន ៥០ ជួរ (ការពារកំហុសស្ទួនកូដមុខវិជ្ជាចាស់ៗពេល Import)
   const handleDownloadTemplate = () => {
     const defaultDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
-    const sortedCoursesForTemplate = sortCoursesOldestFirst(displayedCourses);
 
     const blankRow = () => ({
       'course_code': '',
@@ -943,23 +965,7 @@ const ManageCourses = () => {
       'description': ''
     });
 
-    const baseData = sortedCoursesForTemplate.length > 0
-      ? sortedCoursesForTemplate.map((c) => {
-          const matchedDeptObj = c.department || departments.find(d => String(d.id) === String(c.department_id));
-          const matchedTeacher = c.teacher || teachers.find(tItem => String(tItem.id) === String(c.teacher_id));
-          return {
-            'course_code': c.course_code || '',
-            'course_name': c.course_name || '',
-            'credit': String(c.credit ?? 3),
-            'department': defaultDeptName || (matchedDeptObj ? getDepartmentDisplayName(matchedDeptObj) : ''),
-            'teacher': matchedTeacher ? getTeacherFullName(matchedTeacher) : '',
-            'description': c.description || ''
-          };
-        })
-      : [];
-
-    const extraBlankRowsCount = Math.max(10, 50 - baseData.length);
-    const templateData = [...baseData, ...Array.from({ length: extraBlankRowsCount }, () => blankRow())];
+    const templateData = Array.from({ length: 50 }, () => blankRow());
 
     const worksheet = XLSX.utils.json_to_sheet(templateData);
     const colWidths = [
@@ -1012,7 +1018,8 @@ const ManageCourses = () => {
         reverseName === search ||
         (tItem.email && tItem.email.toLowerCase() === search) ||
         (tItem.teacher_code && tItem.teacher_code.toLowerCase() === search) ||
-        (tItem.id && tItem.id.toString() === search)
+        (tItem.id && tItem.id.toString() === search) ||
+        (tItem.user_id && tItem.user_id.toString() === search)
       );
     });
     return found ? found.id : null;
@@ -1409,7 +1416,7 @@ const ManageCourses = () => {
               ) : (
                 displayedCourses.map((course) => {
                   const matchedDeptObj = course.department || departments.find(d => String(d.id) === String(course.department_id));
-                  const teacher = course.teacher || teachers.find(tItem => String(tItem.id) === String(course.teacher_id));
+                  const teacher = resolveCourseTeacher(course, teachers);
 
                   return (
                     <tr key={course.id} className="crs-table-row hover:bg-blue-50/30 transition-colors">

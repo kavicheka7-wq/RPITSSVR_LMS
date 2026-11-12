@@ -45,7 +45,7 @@ const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v8_${uid}`;
 const getAllStudentsCacheKey = (uid) => `cached_admin_students_list_v8_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ
+// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សាទុករូបភាពក្នុង RAM ដើម្បីបង្ហាញលឿន 0ms
 const ADMIN_STUDENTS_Y3_MEM_CACHE = {
   uid: null,
   students: null,
@@ -55,6 +55,7 @@ const ADMIN_STUDENTS_Y3_MEM_CACHE = {
   courses: null,
   studentRoleId: null,
   lastSyncedAt: 0,
+  avatarMap: {},
 };
 
 const readStorageJson = (key, fallback) => {
@@ -64,6 +65,50 @@ const readStorageJson = (key, fallback) => {
   } catch {
     return fallback;
   }
+};
+
+// ✅ រក្សាទុកទិន្នន័យចូល localStorage ដោយសុវត្ថិភាព (បើរូប Base64 ធំពេកលើសទំហំ localStorage វានឹងរក្សារូបក្នុង RAM ជំនួស)
+const safeWriteStudentsStorage = (key, list) => {
+  if (!Array.isArray(list)) return;
+  list.forEach((sItem) => {
+    const img = sItem?.profile_image || sItem?.user?.profile_image;
+    if (sItem?.id && img) {
+      ADMIN_STUDENTS_Y3_MEM_CACHE.avatarMap[sItem.id] = img;
+    }
+  });
+  try {
+    localStorage.setItem(key, JSON.stringify(list));
+  } catch {
+    try {
+      const lightList = list.map((item) => ({
+        ...item,
+        profile_image:
+          item.profile_image && item.profile_image.startsWith('data:')
+            ? null
+            : item.profile_image,
+        user: item.user
+          ? {
+              ...item.user,
+              profile_image:
+                item.user.profile_image &&
+                item.user.profile_image.startsWith('data:')
+                  ? null
+                  : item.user.profile_image,
+            }
+          : item.user,
+      }));
+      localStorage.setItem(key, JSON.stringify(lightList));
+    } catch {}
+  }
+};
+
+// ✅ អនុគមន៍បិទបាំងផ្នែកកណ្ដាលនៃអ៊ីមែល (ឧ. "classit830@gmail.com" -> "cla*****30@gmail.com")
+const maskEmailAddress = (email) => {
+  if (!email || typeof email !== 'string' || !email.includes('@')) return email || '';
+  const [localPart, domain] = email.split('@');
+  if (localPart.length <= 2) return `${localPart[0] || '*'}***@${domain}`;
+  if (localPart.length <= 4) return `${localPart.slice(0, 2)}***@${domain}`;
+  return `${localPart.slice(0, 3)}*****${localPart.slice(-2)}@${domain}`;
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -99,12 +144,53 @@ const DEPT_CARD_THEMES = [
   { bg: 'bg-cyan-50', text: 'text-cyan-600', border: 'border-cyan-100', darkClass: 'std-dept-cyan' },
 ];
 
-// ✅ អនុគមន៍កាត់យកតែថ្ងៃខែឆ្នាំ (YYYY-MM-DD) ដោយលុប T00:00:00.000000Z ចេញ
+// ✅ អនុគមន៍បម្លែងគ្រប់ទម្រង់ថ្ងៃខែឆ្នាំ (30-04-2005, 30/04/2005, លេខខ្មែរ, ឬលេខ Excel) ទៅជា YYYY-MM-DD
 const formatDateOnly = (dateVal) => {
-  if (!dateVal) return '';
-  const str = String(dateVal).trim();
-  if (str.includes('T')) return str.split('T')[0];
-  if (str.includes(' ')) return str.split(' ')[0];
+  if (dateVal === null || dateVal === undefined || dateVal === '') return '';
+  let str = String(dateVal).trim().replace(/^'+/, '');
+  if (!str || str === '-' || str.toLowerCase() === 'null') return '';
+
+  // បម្លែងលេខខ្មែរ (០-៩) ទៅជាលេខសากล (0-9)
+  const khmerDigits = ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'];
+  khmerDigits.forEach((kd, idx) => {
+    str = str.replace(new RegExp(kd, 'g'), String(idx));
+  });
+
+  if (str.includes('T')) {
+    str = str.split('T')[0];
+  } else if (str.includes(' ') && /^\d{4}-\d{2}-\d{2}\s/.test(str)) {
+    str = str.split(' ')[0];
+  }
+
+  // 1. ករណីជាលេខ Serial Date របស់ Excel (ឧទាហរណ៍ 38472)
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    const serial = Number(str);
+    if (serial > 1000 && serial < 100000) {
+      const utcDays = Math.floor(serial - 25569);
+      const d = new Date(utcDays * 86400 * 1000);
+      if (!isNaN(d.getTime())) {
+        return d.toISOString().slice(0, 10);
+      }
+    }
+  }
+
+  // 2. ករណីទម្រង់ DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (ឧទាហរណ៍ 30-04-2005)
+  const dmyMatch = str.match(/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/);
+  if (dmyMatch) {
+    const first = parseInt(dmyMatch[1], 10);
+    const second = parseInt(dmyMatch[2], 10);
+    const year = dmyMatch[3];
+    const day = second > 12 && first <= 12 ? second : first;
+    const month = second > 12 && first <= 12 ? first : second;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  // 3. ករណីទម្រង់ YYYY-MM-DD ឬ YYYY/MM/DD
+  const ymdMatch = str.match(/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})$/);
+  if (ymdMatch) {
+    return `${ymdMatch[1]}-${String(ymdMatch[2]).padStart(2, '0')}-${String(ymdMatch[3]).padStart(2, '0')}`;
+  }
+
   return str;
 };
 
@@ -146,6 +232,22 @@ const normalizeShiftKey = (shiftVal) => {
     return 'Monday-Friday';
   }
   return s ? shiftVal : 'Monday-Friday';
+};
+
+// ✅ អនុគមន៍បម្លែងកម្រិតសិក្សាពី Excel (ទោះវាយជាខ្មែរ ឬអង់គ្លេស) ឱ្យត្រូវជាមួយប្រព័ន្ធ
+const normalizeDegreeLevel = (degVal) => {
+  if (!degVal) return '';
+  const d = degVal.toString().trim().toLowerCase();
+  if (d.includes('រង') || d.includes('associate') || d.includes('ជាន់ខ្ពស់បច្ចេកទេស')) {
+    return 'Associate Degree';
+  }
+  if (d.includes('ជាន់ខ្ពស់') || d.includes('master') || d.includes('អនុបណ្ឌិត')) {
+    return 'Master Degree';
+  }
+  if (d.includes('បរិញ្ញាបត្រ') || d.includes('bachelor')) {
+    return 'Bachelor Degree';
+  }
+  return degVal.toString().trim();
 };
 
 // ✅ អនុគមន៍ត្រួតពិនិត្យថា តើសិស្សនោះពិតជានិស្សិត "ឆ្នាំទី៣" មែនឬទេ
@@ -264,6 +366,7 @@ const ManageStudentsYear3 = () => {
     ADMIN_STUDENTS_Y3_MEM_CACHE.departments = null;
     ADMIN_STUDENTS_Y3_MEM_CACHE.courses = null;
     ADMIN_STUDENTS_Y3_MEM_CACHE.lastSyncedAt = 0;
+    ADMIN_STUDENTS_Y3_MEM_CACHE.avatarMap = {};
   }
   ADMIN_STUDENTS_Y3_MEM_CACHE.uid = currentAdminId;
 
@@ -709,10 +812,8 @@ const ManageStudentsYear3 = () => {
       setStudents(prev => {
         const newList = prev.filter(s => !selectedStudents.includes(s.id));
         ADMIN_STUDENTS_Y3_MEM_CACHE.students = newList;
-        try {
-          localStorage.setItem(getStudentsY3CacheKey(currentAdminId), JSON.stringify(newList));
-          localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(newList));
-        } catch(e){}
+        safeWriteStudentsStorage(getStudentsY3CacheKey(currentAdminId), newList);
+        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
         return newList;
       });
 
@@ -825,8 +926,15 @@ const ManageStudentsYear3 = () => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
         const cachedList = readStorageJson(getStudentsY3CacheKey(currentAdminId), null);
         if (Array.isArray(cachedList)) {
-          setStudents(cachedList);
-          ADMIN_STUDENTS_Y3_MEM_CACHE.students = cachedList;
+          const hydratedCached = cachedList.map((item) => {
+            const memImg = ADMIN_STUDENTS_Y3_MEM_CACHE.avatarMap[item.id];
+            if (memImg && !item.profile_image) {
+              return { ...item, profile_image: memImg };
+            }
+            return item;
+          });
+          setStudents(hydratedCached);
+          ADMIN_STUDENTS_Y3_MEM_CACHE.students = hydratedCached;
         }
         const now = Date.now();
         if (
@@ -853,6 +961,15 @@ const ManageStudentsYear3 = () => {
           : response.data?.data?.data || response.data || [];
         const validRaw = Array.isArray(rawList) ? rawList : [];
         const year3StudentList = validRaw.filter((student) => isYear3Student(student));
+
+        // ✅ រក្សាទុករូបភាពសិស្សក្នុង RAM ភ្លាមៗដើម្បីឱ្យការបង្ហាញរូបភាពលឿនបំផុត (0ms)
+        year3StudentList.forEach((sItem) => {
+          const img = sItem?.profile_image || sItem?.user?.profile_image;
+          if (sItem?.id && img) {
+            ADMIN_STUDENTS_Y3_MEM_CACHE.avatarMap[sItem.id] = img;
+          }
+        });
+
         const studentMeta = {
           ...(response.data?.meta || { current_page: 1, last_page: 1, per_page: perPage }),
           total: year3StudentList.length,
@@ -866,18 +983,12 @@ const ManageStudentsYear3 = () => {
           ADMIN_STUDENTS_Y3_MEM_CACHE.students = year3StudentList;
           ADMIN_STUDENTS_Y3_MEM_CACHE.meta = studentMeta;
           ADMIN_STUDENTS_Y3_MEM_CACHE.lastSyncedAt = Date.now();
+          safeWriteStudentsStorage(getStudentsY3CacheKey(currentAdminId), year3StudentList);
+          safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, year3StudentList);
           try {
-            localStorage.setItem(
-              getStudentsY3CacheKey(currentAdminId),
-              JSON.stringify(year3StudentList)
-            );
             localStorage.setItem(
               getStudentsY3MetaCacheKey(currentAdminId),
               JSON.stringify(studentMeta)
-            );
-            localStorage.setItem(
-              CACHE_KEY_LEGACY_STUDENTS,
-              JSON.stringify(year3StudentList)
             );
             localStorage.setItem(
               CACHE_KEY_LEGACY_META,
@@ -916,8 +1027,18 @@ const ManageStudentsYear3 = () => {
     setIsSubmitting(true);
     try {
       if (editingStudent) {
+        // ✅ ប្រសិនបើពេល Edit អ៊ីមែលនៅជាទម្រង់បិទបាំង (មានសញ្ញា *) ឱ្យប្រើអ៊ីមែលដើមរបស់សិស្សនោះវិញដោយស្វ័យប្រវត្តិ
+        const resolvedEmail =
+          !formData.email || formData.email.includes('*')
+            ? editingStudent.email
+            : formData.email.trim();
+
         const payload = {};
-        const dataToUpdate = { ...formData, department_id: finalDepartmentId };
+        const dataToUpdate = {
+          ...formData,
+          email: resolvedEmail,
+          department_id: finalDepartmentId,
+        };
         Object.keys(dataToUpdate).forEach((key) => {
           if (dataToUpdate[key] !== null && dataToUpdate[key] !== undefined && dataToUpdate[key] !== '') {
             payload[key] = dataToUpdate[key];
@@ -927,7 +1048,16 @@ const ManageStudentsYear3 = () => {
         if (!formData.password) delete payload.password;
 
         const response = await api.put(`/admin/students/${editingStudent.id}`, payload);
-        const updatedStudent = response.data?.data || response.data;
+        const serverData = response.data?.data || response.data;
+        const updatedStudent = {
+          ...editingStudent,
+          ...dataToUpdate,
+          ...(serverData && typeof serverData === 'object' ? serverData : {}),
+          profile_image:
+            serverData?.profile_image ||
+            editingStudent.profile_image ||
+            ADMIN_STUDENTS_Y3_MEM_CACHE.avatarMap[editingStudent.id],
+        };
 
         setStudents(prev => {
           const newList = isYear3Student(updatedStudent)
@@ -935,10 +1065,8 @@ const ManageStudentsYear3 = () => {
             : prev.filter(s => s.id !== editingStudent.id);
           if (page === 1 && !debouncedSearch) {
             ADMIN_STUDENTS_Y3_MEM_CACHE.students = newList;
-            try {
-              localStorage.setItem(getStudentsY3CacheKey(currentAdminId), JSON.stringify(newList));
-              localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(newList));
-            } catch (e) {}
+            safeWriteStudentsStorage(getStudentsY3CacheKey(currentAdminId), newList);
+            safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
           }
           return newList;
         });
@@ -973,10 +1101,8 @@ const ManageStudentsYear3 = () => {
             const newList = [newStudent, ...prev].slice(0, perPage);
             if (page === 1 && !debouncedSearch) {
               ADMIN_STUDENTS_Y3_MEM_CACHE.students = newList;
-              try {
-                localStorage.setItem(getStudentsY3CacheKey(currentAdminId), JSON.stringify(newList));
-                localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(newList));
-              } catch (e) {}
+              safeWriteStudentsStorage(getStudentsY3CacheKey(currentAdminId), newList);
+              safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
             }
             return newList;
           });
@@ -1028,10 +1154,8 @@ const ManageStudentsYear3 = () => {
       const newList = prev.filter(s => s.id !== deletedId);
       if (page === 1 && !debouncedSearch) {
         ADMIN_STUDENTS_Y3_MEM_CACHE.students = newList;
-        try {
-          localStorage.setItem(getStudentsY3CacheKey(currentAdminId), JSON.stringify(newList));
-          localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(newList));
-        } catch (e) {}
+        safeWriteStudentsStorage(getStudentsY3CacheKey(currentAdminId), newList);
+        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList);
       }
       return newList;
     });
@@ -1085,21 +1209,22 @@ const ManageStudentsYear3 = () => {
     setShowModal(true);
   };
 
+  // ✅ នៅពេលចុចកែប្រែ (Edit) បង្ហាញអ៊ីមែលជាទម្រង់បិទបាំង (ឧ. cla*****30@gmail.com) ដើម្បីការពារឯកជនភាព
   const openEditModal = (student) => {
     setFormError('');
     setEditingStudent(student);
     setFormData({
       first_name: student.first_name || '',
       last_name: student.last_name || '',
-      email: student.email || '',
+      email: maskEmailAddress(student.email || ''),
       password: '',
-      status: student.user?.status || 'active',
+      status: student.user?.status || student.status || 'active',
       gender: student.gender || 'Male',
       phone: student.phone || '',
       student_code: student.student_code || '',
       department_id: student.department_id || student.department?.id || '',
       batch_year: student.batch_year || '',
-      degree_level: student.degree_level || '',
+      degree_level: normalizeDegreeLevel(student.degree_level),
       study_shift: normalizeShiftKey(student.study_shift),
       date_of_birth: formatDateOnly(student.date_of_birth),
       address: student.address || '',
@@ -1440,7 +1565,7 @@ const ManageStudentsYear3 = () => {
     worksheet['!rows'] = rows;
   };
 
-  // ✅ នាំចេញ Excel ដោយដាក់សិស្សដែលមានឈ្មោះមុន (លេខរៀងទី 1 ដំបូងគេ) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម
+  // ✅ នាំចេញ Excel ដោយដាក់សិស្សដែលមានឈ្មោះមុន (លេខរៀងទី 1 ដំបូងគេ) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម និងបិទបាំងអ៊ីមែល
   const handleExportExcel = () => {
     if (displayedStudents.length === 0) {
       return;
@@ -1465,7 +1590,7 @@ const ManageStudentsYear3 = () => {
         'នាមខ្លួន': s.first_name || '',
         'នាមត្រកូល': s.last_name || '',
         'ភេទ': s.gender || '',
-        'អ៊ីមែល': s.email || '',
+        'អ៊ីមែល': maskEmailAddress(s.email || ''),
         'លេខទូរស័ព្ទ': s.phone || '',
         'ដេប៉ាតឺម៉ង់': deptDisplay,
         'ឆ្នាំសិក្សា': s.batch_year || 'ជំនាន់ទី , ឆ្នាំទី3',
@@ -1498,20 +1623,10 @@ const ManageStudentsYear3 = () => {
     });
   };
 
-  // ✅ ទាញយកទម្រង់គំរូ Excel ដោយដាក់អ្នកមានឈ្មោះមុននៅខាងលើដេញចុះមកក្រោម និងប្រើលេខ 3 ជំនួសលេខខ្មែរ
+  // ✅ ទាញយកទម្រង់គំរូ Excel ដោយមិនយកទិន្នន័យសិស្សពិតប្រាកដដាក់ចូលឡើយ (ការពារឯកជនភាព និងការពារកំហុសស្ទួនអ៊ីមែលពេល Import)
   const handleDownloadTemplate = () => {
     const defaultDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
-    const defaultShift = selectedShift !== 'all' ? selectedShift : '';
-    const formatBatchYearTemplate = (val) => {
-      if (!val || val.toString().trim() === '' || val.toString().trim() === 'ឆ្នាំទី៣' || val.toString().trim() === 'ឆ្នាំទី3') {
-        return 'ជំនាន់ទី , ឆ្នាំទី3';
-      }
-      const str = val.toString().trim().replace(/ឆ្នាំទី\s*៣/g, 'ឆ្នាំទី3');
-      if (!str.includes('ជំនាន់')) {
-        return `ជំនាន់ទី , ${str}`;
-      }
-      return str;
-    };
+    const defaultShift = selectedShift !== 'all' ? selectedShift : 'Monday-Friday';
 
     const blankRow = () => ({
       'first_name': '',
@@ -1522,35 +1637,15 @@ const ManageStudentsYear3 = () => {
       'student_code': '',
       'department': defaultDeptName,
       'batch_year': 'ជំនាន់ទី , ឆ្នាំទី3',
-      'degree_level': '',
+      'degree_level': 'Bachelor Degree',
       'study_shift': defaultShift,
       'address': '',
       'date_of_birth': '',
       'password': ''
     });
 
-    const sortedStudentsForTemplate = sortStudentsOldestFirst(displayedStudents);
-
-    const baseData = sortedStudentsForTemplate.length > 0
-      ? sortedStudentsForTemplate.map((s) => ({
-          'first_name': s.first_name || '',
-          'last_name': s.last_name || '',
-          'email': s.email || '',
-          'phone': s.phone || '',
-          'gender': s.gender || '',
-          'student_code': s.student_code || '',
-          'department': defaultDeptName || s.department?.department_name || s.department?.name || '',
-          'batch_year': formatBatchYearTemplate(s.batch_year),
-          'degree_level': s.degree_level || '',
-          'study_shift': s.study_shift || defaultShift,
-          'address': s.address || '',
-          'date_of_birth': formatDateOnly(s.date_of_birth),
-          'password': ''
-        }))
-      : [];
-
-    const extraBlankRowsCount = Math.max(10, 50 - baseData.length);
-    const templateData = [...baseData, ...Array.from({ length: extraBlankRowsCount }, () => blankRow())];
+    // បង្កើតជួរទំនេរដែលកំណត់ជា Text Format ('@') ចំនួន 50 ជួរទុកជាស្រេច (មិនបញ្ចេញឈ្មោះ អ៊ីមែល ឬពាក្យសម្ងាត់ពិតឡើយ)
+    const templateData = Array.from({ length: 50 }, () => blankRow());
 
     const worksheet = XLSX.utils.json_to_sheet(templateData);
 
@@ -1650,6 +1745,9 @@ const ManageStudentsYear3 = () => {
           return;
         }
 
+        const existingEmails = new Set(students.map((sItem) => sItem.email?.toLowerCase()).filter(Boolean));
+        const fileEmails = new Set();
+
         const parsedRows = nonEmptyRows.map(({ row, excelRowNumber }) => {
           const item = {};
           Object.keys(row).forEach(k => { item[normalizeHeaderKey(k)] = row[k]?.toString().trim(); });
@@ -1664,6 +1762,12 @@ const ManageStudentsYear3 = () => {
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             if (!emailRegex.test(item.email)) {
               errors.push(t('អ៊ីមែលមិនត្រឹមត្រូវ', 'Invalid Email Format'));
+            } else if (existingEmails.has(item.email.toLowerCase())) {
+              errors.push(t('អ៊ីមែលនេះមានក្នុងប្រព័ន្ធរួចហើយ', 'Email already exists'));
+            } else if (fileEmails.has(item.email.toLowerCase())) {
+              errors.push(t('អ៊ីមែលស្ទួនក្នុងឯកសារនេះ', 'Duplicate email in file'));
+            } else {
+              fileEmails.add(item.email.toLowerCase());
             }
           }
 
@@ -1691,6 +1795,8 @@ const ManageStudentsYear3 = () => {
             cleanBatchYear = 'ឆ្នាំទី3';
           }
 
+          const normalizedDob = formatDateOnly(item.date_of_birth);
+
           return {
             rowIndex: excelRowNumber,
             raw: row,
@@ -1703,10 +1809,10 @@ const ManageStudentsYear3 = () => {
               student_code: (item.student_code || '').replace(/^'+/, '').trim(),
               department_id: findDepartmentId(item.department),
               batch_year: cleanBatchYear,
-              degree_level: item.degree_level || '',
+              degree_level: normalizeDegreeLevel(item.degree_level) || 'Bachelor Degree',
               study_shift: studyShift,
               address: item.address || '',
-              date_of_birth: formatDateOnly(item.date_of_birth),
+              date_of_birth: normalizedDob || null,
               password: cleanPassword,
               status: item.status || 'active'
             },
@@ -1778,11 +1884,12 @@ const ManageStudentsYear3 = () => {
   };
 
   const getDegreeLevelLabel = (level) => {
+    const norm = normalizeDegreeLevel(level);
     if (language === 'km') {
       const levels = { 'Associate Degree': 'បរិញ្ញាបត្ររង', 'Bachelor Degree': 'បរិញ្ញាបត្រ', 'Master Degree': 'បរិញ្ញាបត្រជាន់ខ្ពស់' };
-      return levels[level] || level || '—';
+      return levels[norm] || level || '—';
     }
-    return level || '—';
+    return norm || level || '—';
   };
 
   // ✅ អនុគមន៍បង្ហាញឈ្មោះភេទជាភាសាខ្មែរ ឬអង់គ្លេស
@@ -2194,10 +2301,14 @@ const ManageStudentsYear3 = () => {
 
                     const isFemale = isFemaleGender(student.gender);
                     const isWeekend = normalizeShiftKey(student.study_shift) === 'Saturday-Sunday';
-                    const rawAvatar = student.profile_image || student.user?.profile_image;
+                    const rawAvatar =
+                      student.profile_image ||
+                      student.user?.profile_image ||
+                      ADMIN_STUDENTS_Y3_MEM_CACHE.avatarMap[student.id];
                     const avatarUrl = getProfileImageUrl(rawAvatar);
                     const avatarKey = `std_${student.id}`;
                     const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+                    const isActive = String(student.user?.status || student.status || 'active').toLowerCase() === 'active';
 
                     return (
                       <tr key={student.id} className="std-table-row hover:bg-blue-50/30 transition-colors">
@@ -2212,6 +2323,9 @@ const ManageStudentsYear3 = () => {
                                   <img
                                     src={avatarUrl}
                                     alt={getStudentFullName(student)}
+                                    loading="eager"
+                                    decoding="async"
+                                    fetchpriority="high"
                                     className="h-full w-full object-cover rounded-full"
                                     onError={() =>
                                       setFailedAvatars((prev) => ({
@@ -2266,8 +2380,9 @@ const ManageStudentsYear3 = () => {
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="std-text-secondary text-sm font-medium text-gray-600">
-                            {student.email}
+                          {/* ✅ បង្ហាញតែអ៊ីមែលដែលបានបិទបាំងដោយគ្មានប៊ូតុងភ្នែក */}
+                          <div className="std-text-secondary text-sm font-medium text-gray-600 font-mono tracking-tight">
+                            {maskEmailAddress(student.email)}
                           </div>
                           {student.phone && (
                             <div className="std-text-secondary text-xs text-gray-400 font-medium mt-0.5">
@@ -2302,8 +2417,8 @@ const ManageStudentsYear3 = () => {
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${student.user?.status === 'active' ? 'std-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-100' : 'std-badge-rose bg-rose-50 text-rose-700 border-rose-100'}`}>
-                            {student.user?.status === 'active' ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
+                          <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${isActive ? 'std-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-100' : 'std-badge-rose bg-rose-50 text-rose-700 border-rose-100'}`}>
+                            {isActive ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-center">
@@ -2456,12 +2571,27 @@ const ManageStudentsYear3 = () => {
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
                       {t('អ៊ីមែល', 'Email')} <span className="text-rose-500">*</span>
                     </label>
+                    {/* ✅ ពេល Edit បង្ហាញអ៊ីមែលបិទបាំង ហើយបើចុចដើម្បីវាយអ៊ីមែលថ្មី វាជម្រះសញ្ញា * ឱ្យភ្លាម (បើមិនកែទេ ពេល Blur ត្រឡប់មកបិទបាំងដដែល) */}
                     <input
-                      type="email"
+                      type={editingStudent && formData.email.includes('*') ? 'text' : 'email'}
                       name="email"
-                      required
+                      required={!editingStudent}
                       value={formData.email}
+                      onFocus={() => {
+                        if (editingStudent && formData.email.includes('*')) {
+                          setFormData((prev) => ({ ...prev, email: '' }));
+                        }
+                      }}
+                      onBlur={() => {
+                        if (editingStudent && !formData.email.trim()) {
+                          setFormData((prev) => ({
+                            ...prev,
+                            email: maskEmailAddress(editingStudent.email || ''),
+                          }));
+                        }
+                      }}
                       onChange={handleInputChange}
+                      placeholder={editingStudent ? maskEmailAddress(editingStudent.email || '') : ''}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                     />
                   </div>
@@ -2619,6 +2749,7 @@ const ManageStudentsYear3 = () => {
                         : t('ពាក្យសម្ងាត់', 'Password')}{' '}
                       {!editingStudent && <span className="text-rose-500">*</span>}
                     </label>
+                    {/* ✅ បិទជិតជា password ជានិច្ចដោយគ្មានប៊ូតុងភ្នែក */}
                     <input
                       type="password"
                       name="password"
@@ -2861,6 +2992,8 @@ const ManageStudentsYear3 = () => {
                                 <img
                                   src={teacherAvatarUrl}
                                   alt="Teacher"
+                                  loading="eager"
+                                  decoding="async"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
                                     setFailedAvatars((prev) => ({
