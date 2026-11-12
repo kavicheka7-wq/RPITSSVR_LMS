@@ -42,6 +42,7 @@ import {
 const CACHE_KEY_LEGACY_OVERVIEW = 'cached_admin_report_overview';
 const CACHE_KEY_SHARED_DEPTS = 'cached_admin_departments_list';
 const CACHE_KEY_SHARED_COURSES = 'cached_admin_courses_list';
+const AVATAR_REPORTS_STORAGE_KEY = 'cached_admin_reports_avatars_v8';
 
 const getOverviewCacheKey = (uid) => `cached_admin_report_overview_v8_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_admin_report_enrollments_v8_${uid}`;
@@ -65,6 +66,15 @@ const DEFAULT_OVERVIEW_STATE = {
   enrollment_trend: [],
 };
 
+const readStorageJson = (key, fallback) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw !== null ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 // ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សារូបភាពក្នុង RAM
 const ADMIN_REPORTS_MEM_CACHE = {
   uid: null,
@@ -77,48 +87,134 @@ const ADMIN_REPORTS_MEM_CACHE = {
   departments: null,
   courses: null,
   lastSyncedOverviewAt: 0,
-  avatarMap: {},
+  avatarMap: readStorageJson(AVATAR_REPORTS_STORAGE_KEY, {}) || {},
 };
 
-const readStorageJson = (key, fallback) => {
+let reportAvatarPersistTimer = null;
+const scheduleReportAvatarMapPersist = (uid) => {
+  if (reportAvatarPersistTimer) clearTimeout(reportAvatarPersistTimer);
+  reportAvatarPersistTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(
+        AVATAR_REPORTS_STORAGE_KEY,
+        JSON.stringify(ADMIN_REPORTS_MEM_CACHE.avatarMap)
+      );
+
+      // រក្សាទុកបញ្ជីពិន្ទុ និងការចុះឈ្មោះ ដែលគ្មានរូបភាព Base64 ដើម ដើម្បីឱ្យផ្ទុកលឿន
+      if (uid && ADMIN_REPORTS_MEM_CACHE.enrollments && Array.isArray(ADMIN_REPORTS_MEM_CACHE.enrollments.data)) {
+        const compactEnr = ADMIN_REPORTS_MEM_CACHE.enrollments.data.map((r) => {
+          const keyId = r.student_id || r.student_code;
+          const tiny = ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`];
+          return {
+            ...r,
+            profile_image: tiny && tiny.length < 25000 ? tiny : null,
+            student: r.student ? { ...r.student, profile_image: null, user: null } : null,
+            user: null,
+          };
+        });
+        localStorage.setItem(getEnrollmentsCacheKey(uid), JSON.stringify({ ...ADMIN_REPORTS_MEM_CACHE.enrollments, data: compactEnr }));
+      }
+
+      if (uid && ADMIN_REPORTS_MEM_CACHE.academic && Array.isArray(ADMIN_REPORTS_MEM_CACHE.academic.data)) {
+        const compactAcad = ADMIN_REPORTS_MEM_CACHE.academic.data.map((r) => {
+          const keyId = r.student_id || r.student_code;
+          const tiny = ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`];
+          return {
+            ...r,
+            profile_image: tiny && tiny.length < 25000 ? tiny : null,
+            student: r.student ? { ...r.student, profile_image: null, user: null } : null,
+            user: null,
+          };
+        });
+        localStorage.setItem(getAcademicCacheKey(uid), JSON.stringify({ ...ADMIN_REPORTS_MEM_CACHE.academic, data: compactAcad }));
+      }
+    } catch {}
+  }, 150);
+};
+
+// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail ស្រាលបំផុត (~3KB)
+const compressBase64Avatar = (dataUrl, callback) => {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
+    callback(dataUrl);
+    return;
+  }
+  if (dataUrl.length < 16000) {
+    callback(dataUrl);
+    return;
+  }
   try {
-    const raw = localStorage.getItem(key);
-    return raw !== null ? JSON.parse(raw) : fallback;
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 80;
+        let width = img.width || maxSize;
+        let height = img.height || maxSize;
+        if (width > height) {
+          if (width > maxSize) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/webp', 0.76);
+        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+      } catch {
+        callback(dataUrl);
+      }
+    };
+    img.onerror = () => callback(dataUrl);
+    img.src = dataUrl;
   } catch {
-    return fallback;
+    callback(dataUrl);
   }
 };
 
-// ✅ រក្សាទុកទិន្នន័យរបាយការណ៍ចូល localStorage ដោយសុវត្ថិភាព (ការពារករណីពេញទំហំ Quota ដោយសាររូបភាព Base64)
+const processReportAvatars = (rows, prefix, uid) => {
+  if (!Array.isArray(rows)) return;
+  rows.forEach((r) => {
+    const rawImg =
+      r?.profile_image ||
+      r?.student?.profile_image ||
+      r?.student?.user?.profile_image ||
+      r?.user?.profile_image ||
+      r?.teacher_profile_image ||
+      r?.teacher?.profile_image ||
+      r?.course?.teacher?.profile_image;
+    
+    const keyId = r?.student_id || r?.student_code || r?.course_id;
+    if (keyId && rawImg) {
+      const cacheKey = `${prefix}_${keyId}`;
+      const existing = ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey];
+      if (existing && existing.length < 18000 && rawImg.startsWith('data:')) return;
+      if (!existing) {
+        ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey] = rawImg;
+      }
+      compressBase64Avatar(rawImg, (tiny) => {
+        if (tiny) {
+          ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey] = tiny;
+          scheduleReportAvatarMapPersist(uid);
+        }
+      });
+    }
+  });
+};
+
 const safeWriteReportStorage = (key, payload) => {
   try {
     localStorage.setItem(key, JSON.stringify(payload));
-  } catch {
-    try {
-      if (payload && typeof payload === 'object' && Array.isArray(payload.data)) {
-        const lightData = payload.data.map((row) => ({
-          ...row,
-          profile_image:
-            row?.profile_image && String(row.profile_image).startsWith('data:')
-              ? null
-              : row?.profile_image,
-        }));
-        localStorage.setItem(key, JSON.stringify({ ...payload, data: lightData }));
-      }
-    } catch {}
-  }
+  } catch {}
 };
 
-// ✅ អនុគមន៍បិទបាំងផ្នែកកណ្ដាលនៃអ៊ីមែល (ឧ. "classit830@gmail.com" -> "cla*****30@gmail.com")
-const maskEmailAddress = (email) => {
-  if (!email || typeof email !== 'string' || !email.includes('@')) return email || '';
-  const [localPart, domain] = email.split('@');
-  if (localPart.length <= 2) return `${localPart[0] || '*'}***@${domain}`;
-  if (localPart.length <= 4) return `${localPart.slice(0, 2)}***@${domain}`;
-  return `${localPart.slice(0, 3)}*****${localPart.slice(-2)}@${domain}`;
-};
-
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រង
 const resolveAdminUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -141,7 +237,7 @@ const resolveAdminUid = (contextUser) => {
   return 'default_admin';
 };
 
-// ✅ អនុគមន៍កាត់យកតែថ្ងៃខែឆ្នាំ (YYYY-MM-DD) ដោយលុប T00:00:00.000000Z ចេញ
+// ✅ អនុគមន៍កាត់យកតែថ្ងៃខែឆ្នាំ (YYYY-MM-DD)
 const formatDateOnly = (dateVal) => {
   if (!dateVal) return '—';
   const str = String(dateVal).trim();
@@ -150,7 +246,7 @@ const formatDateOnly = (dateVal) => {
   return str;
 };
 
-// ✅ បម្លែងពិន្ទុឆៅលើ 100 មកជាពិន្ទុតាមទម្ងន់ពិតប្រាកដ (ឧ. កិច្ចការ 20%, សំណួរខ្លី 20%, ពាក់កណ្តាលឆមាស 25%, ប្រឡងបញ្ចប់ 35%)
+// ✅ បម្លែងពិន្ទុឆៅលើ 100 មកជាពិន្ទុតាមទម្ងន់ពិតប្រាកដ
 const toWeightedScore = (rawVal100, maxWeight) => {
   if (rawVal100 === null || rawVal100 === undefined || rawVal100 === '') return null;
   const num = Number(rawVal100);
@@ -159,7 +255,7 @@ const toWeightedScore = (rawVal100, maxWeight) => {
   return Math.min(maxWeight, Math.max(0, Math.round(scaled * 100) / 100));
 };
 
-// ✅ គណនាពិន្ទុលម្អិតរបស់សិស្សម្នាក់ៗក្នុងរបាយការណ៍ ឱ្យត្រូវគ្នា ១០០% ជាមួយ ViewScores.jsx និង TeacherManageGrades.jsx
+// ✅ គណនាពិន្ទុលម្អិតរបស់សិស្សម្នាក់ៗ
 const computeAcademicRowMetrics = (g) => {
   const assignPts20 = toWeightedScore(
     g?.assignment_score ?? g?.auto_assignment_score,
@@ -195,7 +291,6 @@ const computeAcademicRowMetrics = (g) => {
       ? Math.round(anyGradedParts.reduce((acc, v) => acc + v, 0) * 100) / 100
       : null;
 
-  // បើ final_score ពី Backend ស្មើ 0 ឬ null ប៉ុន្តែមានពិន្ទុតាមផ្នែក (ដូចជាសំណួរខ្លីបាន 10) ឱ្យយកផលបូកពិន្ទុពិតប្រាកដ
   let totalPoints = sumOfParts !== null ? sumOfParts : rawFinal ?? 0;
   if (rawFinal !== null && rawFinal > totalPoints) {
     totalPoints = rawFinal;
@@ -219,7 +314,6 @@ const computeAcademicRowMetrics = (g) => {
   };
 };
 
-// ✅ អនុគមន៍សម្រាប់បញ្ជូនសារជូនដំណឹងចូលទៅកាន់រូបកណ្ដឹង (NotificationBell) នៅលើ Navbar
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr = localStorage.getItem('auth_user') || localStorage.getItem('user');
@@ -270,7 +364,24 @@ const AdminReports = () => {
   const { user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
 
-  // ✅ អនុគមន៍បម្លែងទីតាំងរូបភាពឱ្យគាំទ្រទាំង Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  // ✅ អនុគមន៍បង្ហាញឈ្មោះភេទជាភាសាខ្មែរ ឬអង់គ្លេស សម្រាប់ដាក់ក្នុងផ្លាកសញ្ញា (Badge)
+  const getGenderLabel = useCallback((gender) => {
+    const g = (gender || '').toString().trim().toLowerCase();
+    if (language === 'km') {
+      if (g === 'male' || g === 'm' || g === 'ប្រុស') return 'ប្រុស';
+      if (g === 'female' || g === 'f' || g === 'ស្រី') return 'ស្រី';
+      return gender ? 'ផ្សេងៗ' : '—';
+    }
+    if (g === 'male' || g === 'm' || g === 'ប្រុស') return 'Male';
+    if (g === 'female' || g === 'f' || g === 'ស្រី') return 'Female';
+    return gender || '—';
+  }, [language]);
+
+  const isFemaleGender = useCallback((gender) => {
+    const g = (gender || '').toString().trim().toLowerCase();
+    return g === 'female' || g === 'f' || g === 'ស្រី';
+  }, []);
+
   const resolveImageUrl = useCallback((rawPath) => {
     if (!rawPath || typeof rawPath !== 'string') return null;
     const trimmed = rawPath.trim();
@@ -290,7 +401,6 @@ const AdminReports = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
 
   if (
@@ -310,10 +420,8 @@ const AdminReports = () => {
   }
   ADMIN_REPORTS_MEM_CACHE.uid = currentAdminId;
 
-  // 2.1. State សម្រាប់កំណត់ផ្ទាំងរបាយការណ៍ដែលកំពុងបើក ('overview' | 'enrollments' | 'academic' | 'attendance')
   const [activeTab, setActiveTab] = useState('overview');
 
-  // ✅ 2.2. អានទិន្នន័យពី Cache មកបង្ហាញភ្លាមៗក្នុង 0 វិនាទី (គ្មាន Skeleton Loading)
   const [overviewData, setOverviewData] = useState(() => {
     if (ADMIN_REPORTS_MEM_CACHE.overview) return ADMIN_REPORTS_MEM_CACHE.overview;
     const cached =
@@ -326,7 +434,6 @@ const AdminReports = () => {
     return DEFAULT_OVERVIEW_STATE;
   });
 
-  // 2.3. States សម្រាប់ប្រអប់តម្រងទិន្នន័យ (Filters: ដេប៉ាតឺម៉ង់, មុខវិជ្ជា, ស្ថានភាព, ថ្ងៃខែ និងពាក្យស្វែងរក)
   const [departments, setDepartments] = useState(() => {
     if (Array.isArray(ADMIN_REPORTS_MEM_CACHE.departments)) {
       return ADMIN_REPORTS_MEM_CACHE.departments;
@@ -363,7 +470,6 @@ const AdminReports = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
-  // 2.4. States សម្រាប់ការបែងចែកទំព័រ (Pagination) និងផ្ទុកទិន្នន័យតាមផ្ទាំងរបាយការណ៍នីមួយៗ
   const [enrollmentPage, setEnrollmentPage] = useState(1);
   const [enrollmentMeta, setEnrollmentMeta] = useState(
     () => ADMIN_REPORTS_MEM_CACHE.enrollmentMeta || {}
@@ -403,7 +509,6 @@ const AdminReports = () => {
     return cached;
   });
 
-  // Ref សម្រាប់ផ្តាច់ (Cancel) ការហៅ API ចាស់ៗចោល នៅពេលអ្នកប្រើប្តូរ Tab ឬប្តូរ Filter លឿនៗ
   const abortControllerRef = useRef(null);
 
   // ==========================================================================
@@ -432,16 +537,13 @@ const AdminReports = () => {
           localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(courseList));
         } catch {}
       }
-    } catch (err) {
-      console.error('Error fetching metadata:', err);
-    }
+    } catch (err) {}
   }, [currentAdminId]);
 
   useEffect(() => {
     fetchMetadata();
   }, [fetchMetadata]);
 
-  // ✅ ច្រោះបញ្ជីមុខវិជ្ជាតាមដេប៉ាតឺម៉ង់ដែលបានជ្រើសរើសក្នុងប្រអប់ Filter
   const filteredCourses = useMemo(() => {
     if (!selectedDept) return courses;
     return courses.filter(
@@ -449,7 +551,6 @@ const AdminReports = () => {
     );
   }, [courses, selectedDept]);
 
-  // 3.2. មុខងារពន្យារពេលស្វែងរក (Debounce Search 150ms)
   useEffect(() => {
     if (!searchQuery.trim()) {
       setDebouncedSearch('');
@@ -465,7 +566,6 @@ const AdminReports = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // 3.3. អនុគមន៍គោលសម្រាប់ទាញយកទិន្នន័យរបាយការណ៍ទាំង ៤ ប្រភេទពី Backend API
   const fetchReportData = useCallback(async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -515,28 +615,15 @@ const AdminReports = () => {
         res = await api.get('/admin/reports/enrollments', { ...config, params });
         const d = res.data || {};
         const rows = Array.isArray(d.data) ? d.data : [];
-        rows.forEach((r) => {
-          const img =
-            r?.profile_image ||
-            r?.student?.profile_image ||
-            r?.student?.user?.profile_image ||
-            r?.user?.profile_image;
-          const keyId = r?.student_id || r?.student_code;
-          if (keyId && img) {
-            ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`] = img;
-          }
-        });
-        const formattedEnr = {
-          ...d,
-          data: rows,
-          summary: d.summary || {},
-        };
+        
+        processReportAvatars(rows, 'std', currentAdminId);
+
+        const formattedEnr = { ...d, data: rows, summary: d.summary || {} };
         setEnrollmentData(formattedEnr);
         setEnrollmentMeta(d.meta || {});
         if (isDefaultFilter && enrollmentPage === 1) {
           ADMIN_REPORTS_MEM_CACHE.enrollments = formattedEnr;
           ADMIN_REPORTS_MEM_CACHE.enrollmentMeta = d.meta || {};
-          safeWriteReportStorage(getEnrollmentsCacheKey(currentAdminId), formattedEnr);
         }
       } else if (activeTab === 'attendance') {
         const params = {
@@ -549,11 +636,12 @@ const AdminReports = () => {
         const d = res.data || {};
         const formattedAtt = {
           ...d,
-          course_breakdown: Array.isArray(d.course_breakdown)
-            ? d.course_breakdown
-            : [],
+          course_breakdown: Array.isArray(d.course_breakdown) ? d.course_breakdown : [],
           summary: d.summary || {},
         };
+        
+        processReportAvatars(formattedAtt.course_breakdown, 'att_t', currentAdminId);
+        
         setAttendanceData(formattedAtt);
         if (isDefaultFilter) {
           ADMIN_REPORTS_MEM_CACHE.attendance = formattedAtt;
@@ -570,36 +658,19 @@ const AdminReports = () => {
         res = await api.get('/admin/reports/academic', { ...config, params });
         const d = res.data || {};
         const rows = Array.isArray(d.data) ? d.data : [];
-        rows.forEach((r) => {
-          const img =
-            r?.profile_image ||
-            r?.student?.profile_image ||
-            r?.student?.user?.profile_image ||
-            r?.user?.profile_image;
-          const keyId = r?.student_id || r?.student_code;
-          if (keyId && img) {
-            ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`] = img;
-          }
-        });
-        const formattedAcad = {
-          ...d,
-          data: rows,
-          summary: d.summary || {},
-        };
+        
+        processReportAvatars(rows, 'std', currentAdminId);
+
+        const formattedAcad = { ...d, data: rows, summary: d.summary || {} };
         setAcademicData(formattedAcad);
         setAcademicMeta(d.meta || {});
         if (isDefaultFilter && academicPage === 1) {
           ADMIN_REPORTS_MEM_CACHE.academic = formattedAcad;
           ADMIN_REPORTS_MEM_CACHE.academicMeta = d.meta || {};
-          safeWriteReportStorage(getAcademicCacheKey(currentAdminId), formattedAcad);
         }
       }
     } catch (err) {
-      if (
-        err.name !== 'CanceledError' &&
-        err.name !== 'AbortError' &&
-        err.code !== 'ERR_CANCELED'
-      ) {
+      if (err.name !== 'CanceledError' && err.name !== 'AbortError' && err.code !== 'ERR_CANCELED') {
         console.error('Failed to load report data:', err);
       }
     }
@@ -629,7 +700,6 @@ const AdminReports = () => {
   // 📌 ផ្នែកទី ៤៖ ការគណនា និងរៀបចំទិន្នន័យសម្រាប់ក្រាហ្វ និងស្ថិតិ (MEMOIZED DATA)
   // ==========================================================================
 
-  // ✅ អនុគមន៍បកប្រែស្ថានភាពចុះឈ្មោះសិក្សាជាភាសាខ្មែរ ឬអង់គ្លេស
   const getEnrollmentStatusLabel = useCallback((status) => {
     const s = (status || '').toString().toLowerCase().trim();
     if (s === 'active') return t('កំពុងសិក្សា', 'Active');
@@ -638,7 +708,6 @@ const AdminReports = () => {
     return status || '—';
   }, [t]);
 
-  // ✅ អនុគមន៍ទាញយកព័ត៌មានតម្រងដែលកំពុងជ្រើសរើស សម្រាប់ដាក់បង្ហាញលើក្បាលលិខិតពេលបោះពុម្ព (Print)
   const activeFilterPrintSummary = useMemo(() => {
     if (activeTab === 'overview') return '';
     const parts = [];
@@ -663,7 +732,6 @@ const AdminReports = () => {
     return parts.join(' | ');
   }, [activeTab, selectedDept, selectedCourse, selectedStatus, dateFrom, dateTo, departments, courses, t, getEnrollmentStatusLabel]);
 
-  // 4.1. រៀបចំទិន្នន័យសម្រាប់ក្រាហ្វបង្គោល (BarChart) បង្ហាញចំនួនសិស្ស និងគ្រូតាមដេប៉ាតឺម៉ង់
   const departmentChartData = useMemo(() => {
     const rawList = Array.isArray(overviewData?.department_distribution)
       ? overviewData.department_distribution
@@ -685,7 +753,6 @@ const AdminReports = () => {
     });
   }, [overviewData, t]);
 
-  // 4.2. រៀបចំទិន្នន័យសម្រាប់ក្រាហ្វខ្សែកោង (AreaChart) បង្ហាញកំណើនការចុះឈ្មោះក្នុងរយៈពេល ៦ ខែចុងក្រោយ
   const enrollmentTrendChartData = useMemo(() => {
     const rawTrend = Array.isArray(overviewData?.enrollment_trend)
       ? overviewData.enrollment_trend
@@ -727,7 +794,6 @@ const AdminReports = () => {
     return sixMonths;
   }, [overviewData]);
 
-  // 4.3. គណនាស្ថិតិវត្តមានសរុប និងភាគរយ (%) សម្រាប់បង្ហាញលើកាតទាំង ៥ និងតារាងបោះពុម្ព
   const attendanceStatsComputed = useMemo(() => {
     const total = Number(attendanceData.summary?.total_records || 0);
     const present = Number(attendanceData.summary?.present || 0);
@@ -755,7 +821,6 @@ const AdminReports = () => {
     };
   }, [attendanceData]);
 
-  // ✅ 4.4. គណនាពិន្ទុលម្អិតរបស់សិស្សម្នាក់ៗ និងស្ថិតិ «ប្រឡងជាប់ / ប្រឡងធ្លាក់ / រង់ចាំពិន្ទុ» (ជំនួសឱ្យនិទ្ទេស A-F)
   const enrichedAcademicRows = useMemo(() => {
     const rows = Array.isArray(academicData?.data) ? academicData.data : [];
     return rows.map((r) => ({
@@ -890,7 +955,6 @@ const AdminReports = () => {
     worksheet['!rows'] = rows;
   };
 
-  // 5.2. អនុគមន៍ទាញយកទិន្នន័យរបាយការណ៍តាម Tab បច្ចុប្បន្នចេញជាឯកសារ Excel (.xlsx)
   const handleExportExcel = () => {
     let exportRows = [];
     let colWidths = [];
@@ -906,13 +970,13 @@ const AdminReports = () => {
         [t('ល.រ', 'No')]: offset + idx + 1,
         [t('លេខកូដសិស្ស', 'Student Code')]: r.student_code || '',
         [t('ឈ្មោះសិស្ស', 'Student Name')]: r.student_name || '',
-        [t('អ៊ីមែល', 'Email')]: maskEmailAddress(r.email || ''),
+        [t('ភេទ', 'Gender')]: getGenderLabel(r.student?.gender || r.user?.gender || r.gender),
         [t('មុខវិជ្ជា', 'Course')]: r.course_name || '',
         [t('ដេប៉ាតឺម៉ង់', 'Department')]: r.department_name || '',
         [t('ថ្ងៃចុះឈ្មោះ', 'Enrolled Date')]: formatDateOnly(r.enrolled_date),
         [t('ស្ថានភាព', 'Status')]: getEnrollmentStatusLabel(r.status),
       }));
-      colWidths = [{ wch: 8 }, { wch: 18 }, { wch: 24 }, { wch: 28 }, { wch: 26 }, { wch: 26 }, { wch: 16 }, { wch: 16 }];
+      colWidths = [{ wch: 8 }, { wch: 18 }, { wch: 24 }, { wch: 10 }, { wch: 28 }, { wch: 26 }, { wch: 16 }, { wch: 16 }];
       textCols = [1, 6];
     } else if (activeTab === 'attendance') {
       sheetName = 'Attendance';
@@ -954,6 +1018,7 @@ const AdminReports = () => {
           [t('ល.រ', 'No')]: offset + idx + 1,
           [t('លេខកូដសិស្ស', 'Student Code')]: r.student_code || '',
           [t('ឈ្មោះសិស្ស', 'Student Name')]: r.student_name || '',
+          [t('ភេទ', 'Gender')]: getGenderLabel(r.student?.gender || r.user?.gender || r.gender),
           [t('កូដមុខវិជ្ជា', 'Course Code')]: r.course_code || '',
           [t('ឈ្មោះមុខវិជ្ជា', 'Course Name')]: r.course_name || '',
           [t('ដេប៉ាតឺម៉ង់', 'Department')]: r.department_name || '',
@@ -963,8 +1028,8 @@ const AdminReports = () => {
           [t('លទ្ធផល', 'Result')]: resultLabel,
         };
       });
-      colWidths = [{ wch: 8 }, { wch: 18 }, { wch: 24 }, { wch: 16 }, { wch: 26 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 20 }];
-      textCols = [1, 3];
+      colWidths = [{ wch: 8 }, { wch: 18 }, { wch: 24 }, { wch: 10 }, { wch: 16 }, { wch: 26 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 20 }];
+      textCols = [1, 4];
     } else {
       sheetName = 'Overview';
       exportRows = departmentChartData.map((r, idx) => ({
@@ -999,12 +1064,10 @@ const AdminReports = () => {
     });
   };
 
-  // 5.3. អនុគមន៍បើកផ្ទាំងបោះពុម្ពរបាយការណ៍ផ្លូវការ (Print Report)
   const handlePrint = () => {
     window.print();
   };
 
-  // 5.4. អនុគមន៍កំណត់ចំណងជើងរបាយការណ៍ផ្លូវការតាម Tab ដែលកំពុងជ្រើសរើស
   const getActiveReportTitle = () => {
     if (activeTab === 'enrollments') return t('របាយការណ៍ការចុះឈ្មោះសិក្សា', 'Student Enrollment Report');
     if (activeTab === 'attendance') return t('របាយការណ៍ស្ថិតិវត្តមានសិស្ស', 'Student Attendance Report');
@@ -1018,7 +1081,6 @@ const AdminReports = () => {
     return { bg: 'bg-rose-500', text: 'text-rose-600' };
   };
 
-  // ✅ 5.5. Component រងសម្រាប់បង្ហាញប៊ូតុងប្តូរទំព័រ (Sliding Window Pagination Bar)
   const Pagination = ({ meta, onPageChange }) => {
     if (!meta || !meta.last_page || meta.last_page <= 1) return null;
     const current = Number(meta.current_page || 1);
@@ -1072,7 +1134,6 @@ const AdminReports = () => {
     );
   };
 
-  // គណនារង្វាស់រង្វង់ភាគរយ (SVG Circle Progress) សម្រាប់កាតធំ អត្រាវត្តមានសរុប
   const ringRadius = 30;
   const ringCircumference = 2 * Math.PI * ringRadius;
   const ringOffset = ringCircumference - (Math.min(100, Math.max(0, attendanceStatsComputed.overallRate)) / 100) * ringCircumference;
@@ -1634,14 +1695,17 @@ const AdminReports = () => {
                         enrollmentData.data.map((item, idx) => {
                           const stdKey = item.student_id || item.student_code;
                           const rawAvatar =
+                            ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] ||
                             item.profile_image ||
                             item.student?.profile_image ||
                             item.student?.user?.profile_image ||
-                            item.user?.profile_image ||
-                            (stdKey ? ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] : null);
+                            item.user?.profile_image;
                           const avatarUrl = resolveImageUrl(rawAvatar);
-                          const avatarKey = `enr_${item.id || item.student_id || idx}`;
+                          const avatarKey = `enr_${item.id || stdKey || idx}`;
                           const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+                          
+                          const studentGender = item.student?.gender || item.user?.gender || item.gender;
+                          const isFemale = isFemaleGender(studentGender);
 
                           return (
                             <tr key={item.id || idx} className="rep-table-row hover:bg-blue-50/30 transition-colors">
@@ -1652,7 +1716,7 @@ const AdminReports = () => {
                                     <img
                                       src={avatarUrl}
                                       alt={item.student_name || 'Student'}
-                                      loading="eager"
+                                      loading="lazy"
                                       decoding="async"
                                       className="no-print h-8 w-8 rounded-full object-cover shrink-0 border border-blue-200 shadow-2xs"
                                       onError={() =>
@@ -1665,9 +1729,17 @@ const AdminReports = () => {
                                   )}
                                   <div>
                                     <div className="rep-text-primary font-extrabold text-gray-900 text-sm">{item.student_name || '—'}</div>
-                                    {/* ✅ បង្ហាញតែអ៊ីមែលដែលបានបិទបាំងផ្នែកកណ្ដាល */}
-                                    <div className="rep-text-secondary text-xs text-gray-500 font-medium font-mono tracking-tight">
-                                      {maskEmailAddress(item.email || '')}
+                                    {/* ✅ បង្ហាញផ្លាកសញ្ញាភេទ ជំនួសការបង្ហាញអ៊ីមែល */}
+                                    <div className="flex items-center gap-1.5 mt-1">
+                                      <span
+                                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
+                                          isFemale
+                                            ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
+                                            : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
+                                        }`}
+                                      >
+                                        {getGenderLabel(studentGender)}
+                                      </span>
                                     </div>
                                   </div>
                                 </div>
@@ -1915,6 +1987,7 @@ const AdminReports = () => {
                                        || t('មិនស្គាល់គ្រូបង្រៀន', 'Unknown Teacher');
 
                         const rawTeacherAvatar =
+                          ADMIN_REPORTS_MEM_CACHE.avatarMap[`att_t_${item.course_id || index}`] ||
                           item.teacher_profile_image ||
                           item.teacher?.profile_image ||
                           item.teacher?.user?.profile_image ||
@@ -1942,7 +2015,7 @@ const AdminReports = () => {
                                       <img
                                         src={teacherAvatarUrl}
                                         alt={teacherName}
-                                        loading="eager"
+                                        loading="lazy"
                                         decoding="async"
                                         className="w-4 h-4 rounded-full object-cover shrink-0 border border-indigo-200"
                                         onError={() =>
@@ -2212,14 +2285,17 @@ const AdminReports = () => {
                           const { assignPts20, quizPts20, totalPoints, status } = g.computed;
                           const stdKey = g.student_id || g.student_code;
                           const rawAvatar =
+                            ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] ||
                             g.profile_image ||
                             g.student?.profile_image ||
                             g.student?.user?.profile_image ||
-                            g.user?.profile_image ||
-                            (stdKey ? ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] : null);
+                            g.user?.profile_image;
                           const avatarUrl = resolveImageUrl(rawAvatar);
-                          const avatarKey = `acad_${g.id || g.student_id || idx}`;
+                          const avatarKey = `acad_${g.id || stdKey || idx}`;
                           const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+                          
+                          const studentGender = g.student?.gender || g.user?.gender || g.gender;
+                          const isFemale = isFemaleGender(studentGender);
 
                           return (
                             <tr key={g.id || idx} className="rep-table-row hover:bg-blue-50/30 transition-colors">
@@ -2230,7 +2306,7 @@ const AdminReports = () => {
                                     <img
                                       src={avatarUrl}
                                       alt={g.student_name || 'Student'}
-                                      loading="eager"
+                                      loading="lazy"
                                       decoding="async"
                                       className="no-print h-8 w-8 rounded-full object-cover shrink-0 border border-blue-200 shadow-2xs"
                                       onError={() =>
@@ -2241,7 +2317,21 @@ const AdminReports = () => {
                                       }
                                     />
                                   )}
-                                  <span>{g.student_name || '—'}</span>
+                                  <div>
+                                    <div className="rep-text-primary font-extrabold text-gray-900 text-sm">{g.student_name || '—'}</div>
+                                    {/* ✅ បង្ហាញផ្លាកសញ្ញាភេទ ជំនួសការបង្ហាញអ៊ីមែល */}
+                                    <div className="flex items-center gap-1.5 mt-1">
+                                      <span
+                                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
+                                          isFemale
+                                            ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
+                                            : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
+                                        }`}
+                                      >
+                                        {getGenderLabel(studentGender)}
+                                      </span>
+                                    </div>
+                                  </div>
                                 </div>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
