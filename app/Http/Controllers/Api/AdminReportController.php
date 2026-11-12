@@ -172,20 +172,20 @@ class AdminReportController extends Controller
 
         $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
 
-        // ✅ ប្រើ with() សម្រាប់ Eager Loading ព្រមទាំង select columns ចាំបាច់
+        // ✅ បន្ថែម 'gender' ចូលទៅក្នុង select របស់ user(student)
         $paginated = $baseQuery
             ->with([
-                'student:id,first_name,last_name,email,profile_image',
+                'student:id,first_name,last_name,email,gender,profile_image',
                 'course:id,course_name,course_code,department_id',
                 'course.department:id,department_name',
             ])
             ->orderBy('created_at', 'desc')
             ->paginate($perPage);
 
-        // ✅ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1)
+        // ✅ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1) ហើយថែម gender 
         $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter();
         $studentProfiles = Student::whereIn('user_id', $studentIds)
-            ->select('id', 'user_id', 'student_code', 'batch_year', 'study_shift', 'profile_image')
+            ->select('id', 'user_id', 'student_code', 'gender', 'batch_year', 'study_shift', 'profile_image')
             ->get()
             ->keyBy('user_id');
 
@@ -211,6 +211,7 @@ class AdminReportController extends Controller
                     : 'N/A',
                 'student_code' => $studentProfile->student_code ?? ('STD-' . $enr->student_id),
                 'student_image' => $studentProfile->profile_image ?? $studentUser->profile_image ?? null,
+                'gender' => $studentProfile->gender ?? $studentUser->gender ?? null, // ✅ បញ្ជូន Gender ទៅ Frontend
                 'batch_year' => $studentProfile->batch_year ?? null,
                 'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
                 'email' => $studentUser->email ?? 'N/A',
@@ -451,19 +452,20 @@ class AdminReportController extends Controller
 
         $perPage = max(1, min(200, (int) ($request->per_page ?? 50)));
 
+        // ✅ បន្ថែម 'gender' ចូលទៅក្នុង select របស់ user(student)
         $paginated = (clone $baseQuery)
             ->with([
-                'student:id,first_name,last_name,email,profile_image',
+                'student:id,first_name,last_name,email,gender,profile_image',
                 'course:id,course_name,course_code,department_id',
                 'course.department:id,department_name',
             ])
             ->orderBy('id', 'desc')
             ->paginate($perPage);
 
-        // ✅ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1)
+        // ✅ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1) ហើយថែម gender 
         $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter();
         $studentProfiles = Student::whereIn('user_id', $studentIds)
-            ->select('id', 'user_id', 'student_code', 'batch_year', 'study_shift', 'profile_image')
+            ->select('id', 'user_id', 'student_code', 'gender', 'batch_year', 'study_shift', 'profile_image')
             ->get()
             ->keyBy('user_id');
 
@@ -479,6 +481,7 @@ class AdminReportController extends Controller
                     : 'N/A',
                 'student_code' => $studentProfile->student_code ?? ('STD-' . $g->student_id),
                 'student_image' => $studentProfile->profile_image ?? $studentUser->profile_image ?? null,
+                'gender' => $studentProfile->gender ?? $studentUser->gender ?? null, // ✅ បញ្ជូន Gender ទៅ Frontend
                 'batch_year' => $studentProfile->batch_year ?? null,
                 'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
                 'course_name' => $g->course->course_name ?? 'N/A',
