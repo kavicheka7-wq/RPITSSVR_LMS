@@ -21,7 +21,7 @@ use Illuminate\Validation\ValidationException;
 class CourseController extends Controller
 {
     /**
-     * ផ្គូផ្គង និងបំពេញព័ត៌មានគ្រូបង្រៀន (រួមទាំង profile_image) សម្រាប់បញ្ជីមុខវិជ្ជា ដោយគ្មានបញ្ហា N+1 Query
+     * ផ្គូផ្គង និងបំពេញព័ត៌មានគ្រូបង្រៀនសម្រាប់បញ្ជីមុខវិជ្ជា ក្នុងល្បឿនលឿនបំផុត (មិនទាញ Base64 profile_image ធ្ងន់ៗមកជាមួយទេ)
      */
     private function attachTeacherDetailsToCollection($courses)
     {
@@ -35,8 +35,10 @@ class CourseController extends Controller
             return $courses;
         }
 
+        // ✅ ទាញតែជួរឈរអក្សរស្រាលៗប៉ុណ្ណោះ (មិនទាញ profile_image Base64 ដែលធ្វើឱ្យយឺត Network ឡើយ)
         $teachersById = Teacher::whereIn('id', $teacherIds)
             ->orWhereIn('user_id', $teacherIds)
+            ->select(['id', 'user_id', 'teacher_code', 'first_name', 'last_name', 'email', 'phone', 'department_id'])
             ->get();
 
         $mapById = $teachersById->keyBy('id');
@@ -50,7 +52,7 @@ class CourseController extends Controller
             ->all();
 
         $usersMap = User::whereIn('id', $userIdsToFetch)
-            ->select('id', 'first_name', 'last_name', 'email', 'phone', 'profile_image')
+            ->select(['id', 'first_name', 'last_name', 'email', 'phone'])
             ->get()
             ->keyBy('id');
 
@@ -59,20 +61,11 @@ class CourseController extends Controller
             $tProfile = $mapById->get($tid) ?? $mapByUserId->get($tid);
             $uProfile = $usersMap->get($tProfile?->user_id ?? $tid);
 
-            if ($course->teacher) {
-                if (empty($course->teacher->profile_image)) {
-                    $course->teacher->profile_image = $tProfile?->profile_image
-                        ?? $uProfile?->profile_image
-                        ?? null;
-                }
-            } elseif ($tProfile || $uProfile) {
+            if ($tProfile || $uProfile) {
                 $course->setRelation('teacher', $tProfile ?? $uProfile);
             }
 
             if ($tProfile) {
-                if (empty($tProfile->profile_image) && !empty($uProfile?->profile_image)) {
-                    $tProfile->profile_image = $uProfile->profile_image;
-                }
                 $course->setAttribute('teacher_profile', $tProfile);
             }
         }
@@ -90,17 +83,14 @@ class CourseController extends Controller
             return null;
         }
 
-        // 1. ស្វែងរកក្នុងតារាង teachers តាម id មុនគេ (ព្រោះ Dropdown បោះ teacher.id មក) ទើបរកតាម user_id
         $teacherRow = Teacher::find($rawTeacherId)
             ?? Teacher::where('user_id', $rawTeacherId)->first();
 
         if ($teacherRow) {
-            // បើគ្រូមាន user_id ហើយមានក្នុងតារាង users ត្រូវប្រើ user_id ដើម្បីឱ្យត្រូវជាមួយ Foreign Key នៃតារាង courses
             if (!empty($teacherRow->user_id) && User::where('id', $teacherRow->user_id)->exists()) {
                 return (int) $teacherRow->user_id;
             }
 
-            // បើគ្រូក្នុងតារាង teachers មិនទាន់មាន user_id ឬរកមិនឃើញក្នុងតារាង users ទេ ភ្ជាប់ឬបង្កើត User ឱ្យគាត់ដោយស្វ័យប្រវត្តិ
             $linkedUser = null;
             if (!empty($teacherRow->email)) {
                 $linkedUser = User::where('email', $teacherRow->email)->first();
@@ -119,7 +109,7 @@ class CourseController extends Controller
                 ]);
             }
 
-            if ($linkedUser && Schema::hasColumn('teachers', 'user_id')) {
+            if ($linkedUser) {
                 $teacherRow->user_id = $linkedUser->id;
                 $teacherRow->saveQuietly();
             }
@@ -127,7 +117,6 @@ class CourseController extends Controller
             return $linkedUser ? (int) $linkedUser->id : (int) $teacherRow->id;
         }
 
-        // 2. ករណីបោះមកជា users.id ផ្ទាល់
         $userRow = User::find($rawTeacherId);
         if ($userRow) {
             return (int) $userRow->id;
@@ -143,27 +132,21 @@ class CourseController extends Controller
     public function index(Request $request)
     {
         try {
-            $selectCols = [
-                'id',
-                'course_code',
-                'course_name',
-                'credit',
-                'description',
-                'department_id',
-                'teacher_id',
-                'created_at',
-            ];
-
-            if (Schema::hasColumn('courses', 'year')) {
-                $selectCols[] = 'year';
-            }
-
+            // ✅ ប្រើ with(['department:id,department_name']) ស្រាលបំផុត ហើយភ្ជាប់គ្រូតាម attachTeacherDetailsToCollection
             $query = Course::with([
                 'department:id,department_name',
-                'teacher',
             ])
                 ->withCount('enrollments')
-                ->select($selectCols);
+                ->select([
+                    'id',
+                    'course_code',
+                    'course_name',
+                    'credit',
+                    'description',
+                    'department_id',
+                    'teacher_id',
+                    'created_at',
+                ]);
 
             if ($request->filled('department_id')) {
                 $query->where('department_id', $request->department_id);
@@ -171,7 +154,7 @@ class CourseController extends Controller
 
             if ($request->filled('teacher_id')) {
                 $tid = $request->teacher_id;
-                $matchedTeacher = Teacher::where('id', $tid)->orWhere('user_id', $tid)->first();
+                $matchedTeacher = Teacher::where('id', $tid)->orWhere('user_id', $tid)->first(['id', 'user_id']);
                 $possibleIds = array_values(array_unique(array_filter([
                     $tid,
                     $matchedTeacher?->id,
@@ -201,11 +184,6 @@ class CourseController extends Controller
                       ->orWhere('description', 'like', "%{$search}%")
                       ->orWhereHas('department', function ($dq) use ($search) {
                           $dq->where('department_name', 'like', "%{$search}%");
-                      })
-                      ->orWhereHas('teacher', function ($tq) use ($search) {
-                          $tq->where('first_name', 'like', "%{$search}%")
-                             ->orWhere('last_name', 'like', "%{$search}%")
-                             ->orWhere(DB::raw("CONCAT(first_name, ' ', last_name)"), 'like', "%{$search}%");
                       });
 
                     if (!empty($tIds)) {
@@ -265,10 +243,6 @@ class CourseController extends Controller
                 'teacher_id' => 'required',
             ];
 
-            if (Schema::hasColumn('courses', 'year')) {
-                $rules['year'] = 'nullable|string|max:20';
-            }
-
             $validated = $request->validate($rules);
 
             $resolvedTeacherId = $this->resolveValidTeacherId($validated['teacher_id']);
@@ -283,10 +257,9 @@ class CourseController extends Controller
             $validated['teacher_id'] = $resolvedTeacherId;
 
             $course = Course::create($validated);
-            $course->load(['department', 'teacher']);
+            $course->load(['department:id,department_name']);
             $this->attachTeacherDetailsToCollection([$course]);
 
-            // ✅ លុប Cache ពេលបង្កើតមុខវិជ្ជាថ្មី
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
 
@@ -314,7 +287,7 @@ class CourseController extends Controller
     public function show(Course $course)
     {
         try {
-            $course->load(['department', 'teacher']);
+            $course->load(['department:id,department_name']);
             $this->attachTeacherDetailsToCollection([$course]);
 
             return response()->json([
@@ -350,10 +323,6 @@ class CourseController extends Controller
                 'teacher_id' => 'required',
             ];
 
-            if (Schema::hasColumn('courses', 'year')) {
-                $rules['year'] = 'nullable|string|max:20';
-            }
-
             $validated = $request->validate($rules);
 
             $resolvedTeacherId = $this->resolveValidTeacherId($validated['teacher_id']);
@@ -369,11 +338,10 @@ class CourseController extends Controller
 
             $course->update($validated);
 
-            // ✅ លុប Cache ពេលកែប្រែមុខវិជ្ជា
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
 
-            $freshCourse = $course->fresh(['department', 'teacher']);
+            $freshCourse = $course->fresh(['department:id,department_name']);
             $this->attachTeacherDetailsToCollection([$freshCourse]);
 
             return response()->json([
@@ -409,7 +377,6 @@ class CourseController extends Controller
             $courseName = $course->course_name;
             $course->delete();
 
-            // ✅ លុប Cache ពេលលុបមុខវិជ្ជា
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
 
@@ -433,8 +400,7 @@ class CourseController extends Controller
         try {
             $department = Department::findOrFail($departmentId);
 
-            $courses = Course::with(['teacher'])
-                ->withCount('enrollments')
+            $courses = Course::withCount('enrollments')
                 ->where('department_id', $departmentId)
                 ->orderBy('course_name')
                 ->get();
@@ -484,7 +450,7 @@ class CourseController extends Controller
                 $userTeacher?->id,
             ])));
 
-            $courses = Course::with(['department'])
+            $courses = Course::with(['department:id,department_name'])
                 ->withCount('enrollments')
                 ->whereIn('teacher_id', $possibleIds)
                 ->orderBy('course_name')
@@ -559,7 +525,7 @@ class CourseController extends Controller
 
             $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
 
-            $courses = Course::with(['department', 'teacher'])
+            $courses = Course::with(['department:id,department_name'])
                 ->withCount('enrollments')
                 ->where(function ($q) use ($keyword) {
                     $q->where('course_name', 'LIKE', "%{$keyword}%")
@@ -567,11 +533,6 @@ class CourseController extends Controller
                       ->orWhere('description', 'LIKE', "%{$keyword}%")
                       ->orWhereHas('department', function ($query) use ($keyword) {
                           $query->where('department_name', 'LIKE', "%{$keyword}%");
-                      })
-                      ->orWhereHas('teacher', function ($query) use ($keyword) {
-                          $query->where('first_name', 'LIKE', "%{$keyword}%")
-                                ->orWhere('last_name', 'LIKE', "%{$keyword}%")
-                                ->orWhere(DB::raw("CONCAT(first_name, ' ', last_name)"), 'LIKE', "%{$keyword}%");
                       });
                 })
                 ->orderBy('course_name')
