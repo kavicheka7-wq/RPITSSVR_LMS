@@ -13,6 +13,8 @@ const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
 
+const AUTH_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v1';
+
 const readStoredJson = (key) => {
   try {
     const raw = localStorage.getItem(key);
@@ -33,6 +35,113 @@ const readValidTokenSync = () => {
   }
 };
 
+// ✅ អនុគមន៍ញែក និងរក្សាទុកទិន្នន័យ User/Teacher ដោយមិនឱ្យពេញទំហំ localStorage ជាដាច់ខាត
+const persistAuthSessionSafely = (newToken, enrichedUser, resolvedTeacher, resolvedStudent) => {
+  try {
+    if (newToken) {
+      localStorage.setItem('token', newToken);
+    }
+
+    // ទាញយករូបភាព Profile មករក្សាទុកដាច់ដោយឡែកតែ ១ កន្លែង (ជៀសវាងស្ទួន ៣-៤ កន្លែង)
+    const avatarImg =
+      resolvedTeacher?.profile_image ||
+      resolvedStudent?.profile_image ||
+      enrichedUser?.profile_image ||
+      enrichedUser?.teacher?.profile_image ||
+      enrichedUser?.student?.profile_image ||
+      null;
+
+    if (avatarImg) {
+      try {
+        localStorage.setItem(AUTH_AVATAR_CACHE_KEY, avatarImg);
+      } catch {}
+    }
+
+    // បង្កើតទិន្នន័យគណនីដែលតូចស្រាល (Slim Object) សម្រាប់ធានាថាការ Save ចូល localStorage ជោគជ័យ 100%
+    const makeSlimPerson = (person) => {
+      if (!person || typeof person !== 'object') return person;
+      const isHeavyBase64 =
+        typeof person.profile_image === 'string' &&
+        person.profile_image.startsWith('data:') &&
+        person.profile_image.length > 20000;
+      return {
+        ...person,
+        profile_image: isHeavyBase64 ? '__CACHED_AVATAR__' : person.profile_image,
+      };
+    };
+
+    const slimTeacher = makeSlimPerson(resolvedTeacher);
+    const slimStudent = makeSlimPerson(resolvedStudent);
+    const slimUser = {
+      ...makeSlimPerson(enrichedUser),
+      ...(slimTeacher ? { teacher: slimTeacher } : {}),
+      ...(slimStudent ? { student: slimStudent } : {}),
+    };
+
+    const serializedUser = JSON.stringify(slimUser);
+    localStorage.setItem('user', serializedUser);
+    localStorage.setItem('auth_user', serializedUser);
+
+    if (slimTeacher) {
+      localStorage.setItem('teacher', JSON.stringify(slimTeacher));
+    } else {
+      localStorage.removeItem('teacher');
+    }
+
+    if (slimStudent) {
+      localStorage.setItem('student', JSON.stringify(slimStudent));
+    } else {
+      localStorage.removeItem('student');
+    }
+  } catch {
+    // Fallback ករណី localStorage ពេញខ្លាំង៖ លុបរូបភាពចេញសិន តែរក្សាឈ្មោះ និងសិទ្ធិ (Role) ឱ្យនៅដដែល ដើម្បីកុំឱ្យ F5 ចេញអេក្រង់ស
+    try {
+      const stripImg = (obj) => {
+        if (!obj || typeof obj !== 'object') return obj;
+        const copy = { ...obj };
+        delete copy.profile_image;
+        return copy;
+      };
+      const minimalTeacher = stripImg(resolvedTeacher);
+      const minimalStudent = stripImg(resolvedStudent);
+      const minimalUser = {
+        ...stripImg(enrichedUser),
+        ...(minimalTeacher ? { teacher: minimalTeacher } : {}),
+        ...(minimalStudent ? { student: minimalStudent } : {}),
+      };
+      localStorage.setItem('user', JSON.stringify(minimalUser));
+      localStorage.setItem('auth_user', JSON.stringify(minimalUser));
+      if (minimalTeacher) localStorage.setItem('teacher', JSON.stringify(minimalTeacher));
+      if (minimalStudent) localStorage.setItem('student', JSON.stringify(minimalStudent));
+    } catch {}
+  }
+};
+
+// ✅ អនុគមន៍ភ្ជាប់រូបភាពពី Cache មកដាក់ក្នុង User និង Teacher វិញភ្លាមៗក្នុង 0ms
+const hydratePersonWithAvatar = (person) => {
+  if (!person || typeof person !== 'object') return person;
+  const cachedAvatar = (() => {
+    try {
+      return localStorage.getItem(AUTH_AVATAR_CACHE_KEY);
+    } catch {
+      return null;
+    }
+  })();
+
+  const restoreImg = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    if (obj.profile_image === '__CACHED_AVATAR__' || (!obj.profile_image && cachedAvatar)) {
+      return { ...obj, profile_image: cachedAvatar };
+    }
+    return obj;
+  };
+
+  const hydrated = restoreImg(person);
+  if (hydrated.teacher) hydrated.teacher = restoreImg(hydrated.teacher);
+  if (hydrated.student) hydrated.student = restoreImg(hydrated.student);
+  return hydrated;
+};
+
 // ✅ កំណត់ Authorization Header ភ្លាមៗតាំងពីវិនាទីដំបូង មុនពេល Component កូនៗហៅ API
 const initialBootToken = readValidTokenSync();
 if (initialBootToken) {
@@ -48,13 +157,15 @@ export const AuthProvider = ({ children }) => {
     const savedToken = readValidTokenSync();
     if (!savedToken) return null;
     const rawUser = readStoredJson('user') || readStoredJson('auth_user');
-    return rawUser?.user || rawUser?.data || rawUser || null;
+    const extracted = rawUser?.user || rawUser?.data || rawUser || null;
+    return hydratePersonWithAvatar(extracted);
   });
 
   const [teacher, setTeacher] = useState(() => {
     const savedToken = readValidTokenSync();
     if (!savedToken) return null;
-    return readStoredJson('teacher');
+    const rawTeacher = readStoredJson('teacher');
+    return hydratePersonWithAvatar(rawTeacher);
   });
 
   const [loading, setLoading] = useState(() => {
@@ -71,6 +182,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.removeItem('student');
       localStorage.removeItem('user');
       localStorage.removeItem('auth_user');
+      localStorage.removeItem(AUTH_AVATAR_CACHE_KEY);
     } catch {}
     setToken(null);
     setUser(null);
@@ -90,23 +202,12 @@ export const AuthProvider = ({ children }) => {
         ...(resolvedStudent ? { student: resolvedStudent } : {}),
       };
 
-      try {
-        localStorage.setItem('token', newToken);
-        localStorage.setItem('user', JSON.stringify(enrichedUser));
-        localStorage.setItem('auth_user', JSON.stringify(enrichedUser));
-
-        if (resolvedTeacher) {
-          localStorage.setItem('teacher', JSON.stringify(resolvedTeacher));
-        } else {
-          localStorage.removeItem('teacher');
-        }
-
-        if (resolvedStudent) {
-          localStorage.setItem('student', JSON.stringify(resolvedStudent));
-        } else {
-          localStorage.removeItem('student');
-        }
-      } catch {}
+      persistAuthSessionSafely(
+        newToken,
+        enrichedUser,
+        resolvedTeacher,
+        resolvedStudent
+      );
 
       api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       skipNextFetchRef.current = true;
@@ -145,22 +246,12 @@ export const AuthProvider = ({ children }) => {
         setUser(enrichedUser);
         setTeacher(teacherData);
 
-        try {
-          localStorage.setItem('user', JSON.stringify(enrichedUser));
-          localStorage.setItem('auth_user', JSON.stringify(enrichedUser));
-
-          if (teacherData) {
-            localStorage.setItem('teacher', JSON.stringify(teacherData));
-          } else {
-            localStorage.removeItem('teacher');
-          }
-
-          if (studentData) {
-            localStorage.setItem('student', JSON.stringify(studentData));
-          } else {
-            localStorage.removeItem('student');
-          }
-        } catch {}
+        persistAuthSessionSafely(
+          readValidTokenSync(),
+          enrichedUser,
+          teacherData,
+          studentData
+        );
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -181,7 +272,17 @@ export const AuthProvider = ({ children }) => {
         setLoading(false);
         return;
       }
-      fetchUser();
+
+      const cachedUser = readStoredJson('user') || readStoredJson('auth_user');
+      if (cachedUser) {
+        setLoading(false);
+        const timer = setTimeout(() => {
+          fetchUser();
+        }, 400);
+        return () => clearTimeout(timer);
+      } else {
+        fetchUser();
+      }
     } else {
       delete api.defaults.headers.common['Authorization'];
       setLoading(false);
@@ -203,10 +304,12 @@ export const AuthProvider = ({ children }) => {
       api.defaults.headers.common['Authorization'] = `Bearer ${latestToken}`;
       const latestUserRaw =
         readStoredJson('user') || readStoredJson('auth_user');
-      const latestUser =
-        latestUserRaw?.user || latestUserRaw?.data || latestUserRaw || null;
-      const latestTeacher =
-        readStoredJson('teacher') || latestUser?.teacher || null;
+      const latestUser = hydratePersonWithAvatar(
+        latestUserRaw?.user || latestUserRaw?.data || latestUserRaw || null
+      );
+      const latestTeacher = hydratePersonWithAvatar(
+        readStoredJson('teacher') || latestUser?.teacher || null
+      );
 
       setToken((prev) => {
         if (prev !== latestToken) {
@@ -471,7 +574,12 @@ export const AuthProvider = ({ children }) => {
   );
 
   const getTeacherData = useCallback(() => {
-    return teacher || readStoredJson('teacher') || user?.teacher || null;
+    return (
+      teacher ||
+      hydratePersonWithAvatar(readStoredJson('teacher')) ||
+      user?.teacher ||
+      null
+    );
   }, [teacher, user?.teacher]);
 
   const getFullName = useCallback(() => {
