@@ -18,114 +18,49 @@ use App\Models\Teacher;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 class StudentController extends Controller
 {
-    /**
-     * ✅ រក្សាទុក Profile និងបញ្ជី ID របស់សិស្សក្នុង Request Memory ដើម្បីកុំឱ្យរត់ Query ស្ទួនៗក្នុង Request តែមួយ
-     */
-    private ?Student $cachedStudentProfile = null;
-    private bool $studentProfileResolved = false;
-    private ?array $cachedStudentIds = null;
-
-    /**
-     * ✅ HELPER: សម្អាត Cache របស់ផ្ទាំងសិស្សនៅពេលសិស្សប្រគល់កិច្ចការ ឬធ្វើតេស្តចប់
-     */
-    private function clearStudentDashboardCache(): void
-    {
-        $uid = auth()->id();
-        if ($uid) {
-            Cache::forget("student_dashboard_v2_{$uid}");
-        }
-    }
-
-    /**
-     * ✅ HELPER: ជួរឈរសុវត្ថិភាពសម្រាប់តារាង lesson_files (មិនទាញជួរឈរ file_data Base64 ធំៗដាច់ខាត)
-     */
-    private function safeLessonFileColumns(): array
-    {
-        $cols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
-        if (Schema::hasColumn('lesson_files', 'mime_type')) {
-            $cols[] = 'mime_type';
-        }
-        return $cols;
-    }
-
-    /**
-     * ✅ HELPER: ជួរឈរសុវត្ថិភាពសម្រាប់តារាង assignment_submissions (មិនទាញជួរឈរ file_data Base64 ធំៗដាច់ខាត)
-     */
-    private function safeSubmissionColumns(): array
-    {
-        return [
-            'id',
-            'assignment_id',
-            'student_id',
-            'file_path',
-            'submitted_at',
-            'score',
-            'feedback',
-            'created_at',
-            'updated_at',
-        ];
-    }
+    private ?Student $cachedProfile = null;
+    private bool $profileResolved = false;
 
     /**
      * ✅ HELPER METHOD: ទាញយក Profile សិស្សឱ្យជាក់លាក់ (តែ ១ ដងគត់ក្នុង ១ Request)
      */
-    private function resolveStudentProfile($user = null): ?Student
+    private function resolveStudentProfile($user)
     {
-        $user = $user ?: auth()->user();
         if (!$user) {
             return null;
         }
-
-        if ($this->studentProfileResolved) {
-            return $this->cachedStudentProfile;
+        if ($this->profileResolved) {
+            return $this->cachedProfile;
         }
-
-        if ($user->relationLoaded('student') && $user->student) {
-            $this->cachedStudentProfile = $user->student;
-            $this->studentProfileResolved = true;
-            return $this->cachedStudentProfile;
-        }
-
         $profile = Student::where('user_id', $user->id)->first();
         if (!$profile && !empty($user->email)) {
             $profile = Student::where('email', $user->email)->first();
         }
-
-        $this->cachedStudentProfile = $profile;
-        $this->studentProfileResolved = true;
-
-        return $this->cachedStudentProfile;
+        $this->cachedProfile = $profile;
+        $this->profileResolved = true;
+        return $profile;
     }
 
     /**
      * HELPER METHOD: ទាញយកបញ្ជី ID ទាំងអស់របស់សិស្សម្នាក់ (ទាំង users.id និង students.id)
      */
-    private function getStudentAllIds($user = null): array
+    private function getStudentAllIds($user)
     {
-        $user = $user ?: auth()->user();
         if (!$user) {
             return [];
         }
-
-        if ($this->cachedStudentIds !== null) {
-            return $this->cachedStudentIds;
-        }
-
         $studentProfile = $this->resolveStudentProfile($user);
-        $this->cachedStudentIds = array_values(array_unique(array_filter([
+        return array_values(array_unique(array_filter([
             (int) $user->id,
             $studentProfile ? (int) $studentProfile->id : null,
             ($studentProfile && $studentProfile->user_id) ? (int) $studentProfile->user_id : null,
         ])));
-
-        return $this->cachedStudentIds;
     }
 
     /**
@@ -149,7 +84,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: ស្រង់យកលេខឆ្នាំសិក្សា (1, 2, 3, 4) ពី batch_year, កូដសិស្ស, អ៊ីមែល, កូដមុខវិជ្ជា ឬឆមាស
+     * ✅ HELPER METHOD: ស្រង់យកលេខឆ្នាំសិក្សា (1, 2, 3, 4)
      */
     private function parseAcademicYearNumber($text, $code = '', $semester = null)
     {
@@ -197,44 +132,44 @@ class StudentController extends Controller
     }
 
     /**
-     * HELPER METHOD: រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនឱ្យត្រឹមត្រូវ ១០០% ដោយមិនស្ទួនទិន្នន័យរូបភាពធំៗ
+     * HELPER METHOD: រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយប្រើ Static Bulk Cache (រត់តែ ១ Query គត់ លឿនបំផុត)
      */
-    private function formatTeacherData($course, bool $includeAvatar = true)
+    private function formatTeacherData($course)
     {
         if (!$course) {
             return null;
         }
 
-        static $teachersById = [];
-        static $teachersByUserId = [];
-        static $teacherUsersById = [];
+        static $teachersById = null;
+        static $teachersByUserId = null;
+        static $teacherUsersById = null;
 
-        $tid = $course->teacher_id;
-        $teacherProfile = $course->relationLoaded('teacherProfile') ? $course->teacherProfile : null;
-        $teacherUser = $course->relationLoaded('teacher') ? $course->teacher : null;
+        if ($teachersById === null) {
+            $allTeachers = Teacher::all();
+            $teachersById = $allTeachers->keyBy('id');
+            $teachersByUserId = $allTeachers->whereNotNull('user_id')->keyBy('user_id');
 
-        if (!$teacherProfile && $tid) {
-            if (!array_key_exists($tid, $teachersById) && !array_key_exists($tid, $teachersByUserId)) {
-                $foundTch = Teacher::where('id', $tid)->orWhere('user_id', $tid)->first();
-                if ($foundTch) {
-                    $teachersById[$foundTch->id] = $foundTch;
-                    if ($foundTch->user_id) {
-                        $teachersByUserId[$foundTch->user_id] = $foundTch;
-                    }
-                } else {
-                    $teachersById[$tid] = null;
-                }
-            }
-            $teacherProfile = $teachersByUserId[$tid] ?? ($teachersById[$tid] ?? null);
+            $teacherUserIds = $allTeachers->pluck('user_id')->filter()->unique()->values()->all();
+            $teacherUsersById = User::where('role_id', 2)
+                ->orWhereIn('id', $teacherUserIds)
+                ->get(['id', 'first_name', 'last_name', 'email', 'profile_image'])
+                ->keyBy('id');
         }
 
+        $tid = $course->teacher_id;
+        $teacherProfile = $course->teacherProfile;
+        $teacherUser = $course->teacher;
+
+        if (!$teacherProfile && $tid) {
+            $teacherProfile = $teachersByUserId->get($tid) ?? $teachersById->get($tid);
+        }
         if (!$teacherUser && $tid) {
-            $lookupUid = ($teacherProfile && $teacherProfile->user_id) ? $teacherProfile->user_id : $tid;
-            if (!array_key_exists($lookupUid, $teacherUsersById)) {
-                $teacherUsersById[$lookupUid] = User::select('id', 'first_name', 'last_name', 'email', 'profile_image')
-                    ->find($lookupUid);
+            if ($teacherProfile && $teacherProfile->user_id) {
+                $teacherUser = $teacherUsersById->get($teacherProfile->user_id);
             }
-            $teacherUser = $teacherUsersById[$lookupUid];
+            if (!$teacherUser) {
+                $teacherUser = $teacherUsersById->get($tid);
+            }
         }
 
         $firstName = $teacherProfile->first_name ?? ($teacherUser->first_name ?? '');
@@ -246,23 +181,21 @@ class StudentController extends Controller
         }
 
         $profileImg = null;
-        if ($includeAvatar) {
-            if ($teacherProfile && !empty($teacherProfile->profile_image)) {
-                $profileImg = trim((string) $teacherProfile->profile_image);
-            } elseif ($teacherUser && !empty($teacherUser->profile_image)) {
-                $profileImg = trim((string) $teacherUser->profile_image);
-            }
+        if ($teacherProfile && !empty($teacherProfile->profile_image)) {
+            $profileImg = trim((string) $teacherProfile->profile_image);
+        } elseif ($teacherUser && !empty($teacherUser->profile_image)) {
+            $profileImg = trim((string) $teacherUser->profile_image);
+        }
 
-            if (
-                $profileImg &&
-                !str_starts_with($profileImg, 'data:') &&
-                !str_starts_with($profileImg, 'http://') &&
-                !str_starts_with($profileImg, 'https://') &&
-                !str_starts_with($profileImg, '//')
-            ) {
-                $cleanImg = preg_replace('/^\/?storage\//', '', ltrim($profileImg, '/'));
-                $profileImg = asset('storage/' . $cleanImg);
-            }
+        if (
+            $profileImg &&
+            !str_starts_with($profileImg, 'data:') &&
+            !str_starts_with($profileImg, 'http://') &&
+            !str_starts_with($profileImg, 'https://') &&
+            !str_starts_with($profileImg, '//')
+        ) {
+            $cleanImg = preg_replace('/^\/?storage\//', '', ltrim($profileImg, '/'));
+            $profileImg = asset('storage/' . $cleanImg);
         }
 
         $resolvedTeacherKey = $teacherProfile
@@ -278,26 +211,10 @@ class StudentController extends Controller
             'first_name' => $firstName,
             'last_name' => $lastName,
             'email' => $teacherProfile->email ?? ($teacherUser->email ?? ''),
-            // ✅ ដាក់តែក្នុង profile_image ១ កន្លែងគត់ (មិនដាក់ស្ទួនក្នុង profile_image_url ឱ្យទំហំរូបភាពកើនទ្វេដងទេ)
             'profile_image' => $profileImg,
+            'profile_image_url' => $profileImg,
             'specialization' => $teacherProfile->specialization ?? null,
         ];
-    }
-
-    /**
-     * ✅ HELPER: ភ្ជាប់ព័ត៌មានគ្រូបង្រៀនទៅលើ Course Model ដោយមិនឱ្យស្ទួនរូបភាព Base64 ៣-៤ កន្លែង
-     */
-    private function attachCleanTeacherToCourse($course, bool $includeAvatar = true): ?array
-    {
-        if (!$course) {
-            return null;
-        }
-        $teacherData = $this->formatTeacherData($course, $includeAvatar);
-        $course->unsetRelation('teacher');
-        $course->unsetRelation('teacherProfile');
-        $course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
-        $course->setAttribute('teacher_profile', $teacherData);
-        return $teacherData;
     }
 
     /**
@@ -311,36 +228,21 @@ class StudentController extends Controller
             return $courseYearsMap;
         }
 
+        $allStudents = Student::all(['id', 'user_id', 'batch_year', 'student_code', 'email', 'department_id']);
+        $studentsById = $allStudents->keyBy('id');
+        $studentsByUserId = $allStudents->whereNotNull('user_id')->keyBy('user_id');
+
         $enrollmentsInDept = Enrollment::whereIn('course_id', $deptCourseIds)
             ->where(function ($q) {
                 $q->whereNull('status')
                   ->orWhere('status', 'active')
                   ->orWhere('status', '');
             })
-            ->get(['course_id', 'student_id']);
+            ->get();
 
         if ($enrollmentsInDept->isEmpty()) {
-            $enrollmentsInDept = Enrollment::whereIn('course_id', $deptCourseIds)
-                ->get(['course_id', 'student_id']);
+            $enrollmentsInDept = Enrollment::whereIn('course_id', $deptCourseIds)->get();
         }
-
-        $rawStudentIds = $enrollmentsInDept->pluck('student_id')
-            ->filter()
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-
-        // ✅ ទាញតែសិស្សណាដែលពាក់ព័ន្ធនឹងមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់នេះប៉ុណ្ណោះ (មិនប្រើ Student::all() ទាញសិស្សទូទាំងសាលាទេ)
-        $matchedStudents = !empty($rawStudentIds)
-            ? Student::select('id', 'user_id', 'batch_year', 'student_code', 'email', 'department_id')
-                ->whereIn('id', $rawStudentIds)
-                ->orWhereIn('user_id', $rawStudentIds)
-                ->get()
-            : collect();
-
-        $studentsById = $matchedStudents->keyBy('id');
-        $studentsByUserId = $matchedStudents->whereNotNull('user_id')->keyBy('user_id');
 
         $onlyMatchesStudentPK = false;
         foreach ($enrollmentsInDept as $enr) {
@@ -355,6 +257,14 @@ class StudentController extends Controller
         foreach ($enrollmentsInDept as $enr) {
             $cid = (int) $enr->course_id;
             $val = (int) $enr->student_id;
+
+            $enrYear = $this->parseAcademicYearNumber(
+                ($enr->year ?? '') . ' ' . ($enr->academic_year ?? '') . ' ' . ($enr->batch_year ?? '')
+            );
+            if ($enrYear) {
+                $freqByCourse[$cid][$enrYear] = ($freqByCourse[$cid][$enrYear] ?? 0) + 1;
+                continue;
+            }
 
             $matchedStudent = null;
             if (!$onlyMatchesStudentPK && isset($studentsByUserId[$val])) {
@@ -416,79 +326,70 @@ class StudentController extends Controller
     public function dashboard()
     {
         $student = auth()->user();
-        $userId = $student->id ?? 0;
-        $cacheKey = "student_dashboard_v2_{$userId}";
+        $studentIds = $this->getStudentAllIds($student);
 
-        // ✅ ប្រើ Cache ៤៥ វិនាទី សម្រាប់ផ្ទាំង Student Dashboard ដើម្បីឱ្យបើកភ្លាមលឿនដូចហោះលើ Online
-        $payload = Cache::remember($cacheKey, 45, function () use ($student) {
-            $studentIds = $this->getStudentAllIds($student);
+        $enrollments = Enrollment::whereIn('student_id', $studentIds)
+            ->with(['course' => function ($query) {
+                $query->with(['teacher', 'teacherProfile', 'department'])
+                      ->withCount(['lessons', 'assignments', 'quizzes']);
+            }])
+            ->where(function ($q) {
+                $q->whereNull('status')
+                  ->orWhere('status', 'active')
+                  ->orWhere('status', '');
+            })
+            ->get();
 
-            $enrollments = Enrollment::whereIn('student_id', $studentIds)
-                ->with(['course' => function ($query) {
-                    $query->with([
-                        'teacher:id,first_name,last_name,email',
-                        'teacherProfile:id,user_id,first_name,last_name,email,specialization',
-                        'department:id,department_name,department_code',
-                    ])->withCount(['lessons', 'assignments', 'quizzes']);
-                }])
-                ->where(function ($q) {
-                    $q->whereNull('status')
-                      ->orWhere('status', 'active')
-                      ->orWhere('status', '');
-                })
-                ->get();
+        $stats = [
+            'total_courses' => $enrollments->count(),
+            'total_lessons' => 0,
+            'total_assignments' => 0,
+            'total_quizzes' => 0,
+            'average_score' => 0,
+        ];
 
-            $stats = [
-                'total_courses' => $enrollments->count(),
-                'total_lessons' => 0,
-                'total_assignments' => 0,
-                'total_quizzes' => 0,
-                'average_score' => 0,
-            ];
-
-            foreach ($enrollments as $enrollment) {
-                if ($enrollment->course) {
-                    // លើ Dashboard មិនបង្ហាញរូបថតគ្រូទេ ដូច្នេះដាក់ $includeAvatar = false ដើម្បីឱ្យ JSON ស្រាលបំផុត
-                    $this->attachCleanTeacherToCourse($enrollment->course, false);
-                }
-                $stats['total_lessons'] += $enrollment->course->lessons_count ?? 0;
-                $stats['total_assignments'] += $enrollment->course->assignments_count ?? 0;
-                $stats['total_quizzes'] += $enrollment->course->quizzes_count ?? 0;
+        foreach ($enrollments as $enrollment) {
+            if ($enrollment->course) {
+                $teacherData = $this->formatTeacherData($enrollment->course);
+                $enrollment->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                $enrollment->course->setAttribute('teacher_profile', $teacherData);
             }
+            $stats['total_lessons'] += $enrollment->course->lessons_count ?? 0;
+            $stats['total_assignments'] += $enrollment->course->assignments_count ?? 0;
+            $stats['total_quizzes'] += $enrollment->course->quizzes_count ?? 0;
+        }
 
-            $avgFinal = Grade::whereIn('student_id', $studentIds)
-                ->whereNotNull('final_score')
-                ->avg('final_score');
+        $grades = Grade::whereIn('student_id', $studentIds)
+            ->whereNotNull('final_score')
+            ->get();
 
-            if ($avgFinal !== null) {
-                $stats['average_score'] = round((float) $avgFinal, 2);
-            }
+        if ($grades->count() > 0) {
+            $stats['average_score'] = round($grades->avg('final_score'), 2);
+        }
 
-            return [
-                'stats' => $stats,
-                'enrollments' => $enrollments,
-                'recent_activity' => $this->getRecentActivity($studentIds),
-            ];
-        });
-
-        return response()->json($payload);
+        return response()->json([
+            'stats' => $stats,
+            'enrollments' => $enrollments,
+            'recent_activity' => $this->getRecentActivity($studentIds),
+        ]);
     }
 
     private function getRecentActivity($studentIds)
     {
         $ids = is_array($studentIds) ? $studentIds : [$studentIds];
 
-        // ✅ សំខាន់បំផុត៖ ប្រើ select() មិនទាញជួរឈរ file_data (Base64 រាប់មេកាបៃ) ដាច់ខាត!
-        $submissions = AssignmentSubmission::select($this->safeSubmissionColumns())
+        // ✅ មិនទាញយកជួរឈរ file_data Base64 ធំៗក្នុង recent_activity ឡើយ
+        $submissions = AssignmentSubmission::select([
+            'id', 'assignment_id', 'student_id', 'file_path', 'submitted_at', 'score', 'feedback', 'created_at', 'updated_at',
+        ])
             ->whereIn('student_id', $ids)
-            ->with('assignment:id,course_id,title,due_date,total_score')
+            ->with('assignment')
             ->orderBy('submitted_at', 'desc')
             ->limit(5)
             ->get();
 
-        $attempts = QuizAttempt::select('id', 'quiz_id', 'student_id', 'score', 'started_at', 'submitted_at')
-            ->whereIn('student_id', $ids)
-            ->with('quiz:id,course_id,title,duration,total_mark,start_date,end_date')
+        $attempts = QuizAttempt::whereIn('student_id', $ids)
+            ->with('quiz')
             ->orderBy('submitted_at', 'desc')
             ->limit(5)
             ->get();
@@ -518,11 +419,8 @@ class StudentController extends Controller
 
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
 
-        $query = Course::with([
-            'teacher:id,first_name,last_name,email,profile_image',
-            'teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
-            'department:id,department_name,department_code',
-        ])->withCount(['lessons', 'assignments', 'quizzes']);
+        $query = Course::with(['teacher', 'teacherProfile', 'department'])
+            ->withCount(['lessons', 'assignments', 'quizzes']);
 
         if (!empty($enrolledCourseIds)) {
             $query->whereIn('id', $enrolledCourseIds);
@@ -530,11 +428,8 @@ class StudentController extends Controller
             $query->where('department_id', $deptId);
         }
 
-        // បើហៅពី Dropdown (?all=true) មិនបាច់ភ្ជាប់រូបថតគ្រូ Base64 ធំៗទៅជាមួយទេ
-        $includeAvatar = !$request->boolean('all');
-
-        $formatCourse = function ($course) use ($includeAvatar) {
-            $teacherData = $this->formatTeacherData($course, $includeAvatar);
+        $formatCourse = function ($course) {
+            $teacherData = $this->formatTeacherData($course);
             $teacherName = $teacherData['name'] ?? 'គ្រូបង្រៀន';
 
             return [
@@ -549,9 +444,8 @@ class StudentController extends Controller
                 'department' => $course->department,
                 'teacher_id' => $course->teacher_id,
                 'teacher_name' => $teacherName,
-                // ✅ ដាក់តែក្នុង teacher_profile (និងដាក់ teacher ដោយមិនស្ទួនរូបភាព Base64 ២ ដង)
+                'teacher' => $teacherData,
                 'teacher_profile' => $teacherData,
-                'teacher' => $teacherData ? array_merge($teacherData, ['profile_image' => null]) : null,
                 'lessons_count' => (int) ($course->lessons_count ?? 0),
                 'assignments_count' => (int) ($course->assignments_count ?? 0),
                 'quizzes_count' => (int) ($course->quizzes_count ?? 0),
@@ -605,24 +499,23 @@ class StudentController extends Controller
             ];
 
             $paginated = (clone $baseQuery)
-                ->with([
-                    'course.teacher:id,first_name,last_name,email,profile_image',
-                    'course.teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
-                ])
+                ->with(['course.teacher', 'course.teacherProfile', 'student'])
                 ->orderBy('attendance_date', 'desc')
                 ->paginate($perPage);
 
-            // ✅ កត់ចំណាំមុខវិជ្ជាដែលបានបញ្ជូនរូបថតគ្រូរួចហើយ ដើម្បីកុំឱ្យដាក់រូបថត Base64 គ្រូដដែលៗស្ទួន ២០ ដងក្នុង ២០ ជួរវត្តមាន!
-            $sentAvatarForCourse = [];
+            $formattedAttendance = collect($paginated->items())->map(function ($record) use ($studentProfile) {
+                $teacherData = $this->formatTeacherData($record->course);
 
-            $formattedAttendance = collect($paginated->items())->map(function ($record) use ($studentProfile, &$sentAvatarForCourse) {
-                $cid = (int) $record->course_id;
-                $includeAvatar = !isset($sentAvatarForCourse[$cid]);
-                $sentAvatarForCourse[$cid] = true;
+                $studentData = $record->student;
+                if ($studentData && $studentProfile) {
+                    $studentData->study_shift = $studentProfile->study_shift;
+                    $studentData->student_code = $studentProfile->student_code;
+                }
 
-                $courseData = $record->course ? clone $record->course : null;
-                if ($courseData) {
-                    $this->attachCleanTeacherToCourse($courseData, $includeAvatar);
+                $courseData = $record->course;
+                if ($courseData && $teacherData) {
+                    $courseData->teacher_name = $teacherData['name'];
+                    $courseData->setAttribute('teacher_profile', $teacherData);
                 }
 
                 return [
@@ -632,14 +525,9 @@ class StudentController extends Controller
                     'attendance_date' => $record->attendance_date,
                     'status' => $record->status,
                     'late_time' => $record->late_time ?? null,
-                    'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
                     'created_at' => $record->created_at ? Carbon::parse($record->created_at)->format('Y-m-d H:i:s') : null,
                     'course' => $courseData,
-                    'student' => [
-                        'id' => $record->student_id,
-                        'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
-                        'student_code' => $studentProfile->student_code ?? null,
-                    ],
+                    'student' => $studentData,
                 ];
             });
 
@@ -674,7 +562,7 @@ class StudentController extends Controller
         return response()->json($attendance);
     }
 
-    // View Scores (គាំទ្រទាំង ៤ ផ្នែក៖ កិច្ចការ 20%, សំណួរខ្លី 20%, ពាក់កណ្ដាលឆមាស 25%, និងប្រឡងបញ្ចប់ 35%)
+    // View Scores
     public function getScores()
     {
         $student = auth()->user();
@@ -689,11 +577,7 @@ class StudentController extends Controller
             })
             ->pluck('course_id');
 
-        $coursesQuery = Course::with([
-            'teacher:id,first_name,last_name,email,profile_image',
-            'teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
-            'department:id,department_name,department_code',
-        ]);
+        $coursesQuery = Course::with(['teacher', 'teacherProfile', 'department']);
         if ($enrolledCourseIds->isNotEmpty()) {
             $courses = $coursesQuery->whereIn('id', $enrolledCourseIds)->get();
         } elseif ($studentProfile && $studentProfile->department_id) {
@@ -705,13 +589,13 @@ class StudentController extends Controller
         $grades = Grade::whereIn('student_id', $studentIds)->get()->keyBy('course_id');
         $courseIds = $courses->pluck('id');
 
-        // ✅ ទាញតែជួរឈរ id, course_id, និងពិន្ទុប៉ុណ្ណោះ (មិនទាញ file_data Base64 ធំៗឡើយ!)
         $allAssignments = Assignment::select('id', 'course_id', 'total_score')
             ->whereIn('course_id', $courseIds)
             ->get()
             ->groupBy('course_id');
         $allAssignmentIds = $allAssignments->flatten()->pluck('id');
 
+        // ✅ ទាញតែ score ប៉ុណ្ណោះ មិនទាញជួរឈរ file_data ធំៗឡើយ
         $allSubmissions = $allAssignmentIds->isNotEmpty()
             ? AssignmentSubmission::select('id', 'assignment_id', 'student_id', 'score')
                 ->whereIn('assignment_id', $allAssignmentIds)
@@ -750,7 +634,7 @@ class StudentController extends Controller
                     $submissions = $allSubmissions->get($assign->id, collect());
                     if ($submissions->isNotEmpty()) {
                         $subScore = $submissions->max('score');
-                        $maxScore = $assign->total_score ?? 20;
+                        $maxScore = $assign->total_score ?? $assign->marks ?? 20;
                         if ($maxScore > 0) {
                             $totalEarned += $subScore;
                             $totalMax += $maxScore;
@@ -822,7 +706,7 @@ class StudentController extends Controller
                 else $gradeLetter = 'F';
             }
 
-            $teacherData = $this->formatTeacherData($course, true);
+            $teacherData = $this->formatTeacherData($course);
 
             return [
                 'id' => $grade ? $grade->id : null,
@@ -835,8 +719,8 @@ class StudentController extends Controller
                     'description' => $course->description,
                     'teacher_id' => $course->teacher_id,
                     'teacher_name' => $teacherData['name'] ?? 'គ្រូបង្រៀន',
+                    'teacher' => $teacherData,
                     'teacher_profile' => $teacherData,
-                    'teacher' => $teacherData ? array_merge($teacherData, ['profile_image' => null]) : null,
                     'department' => $course->department,
                 ],
                 'assignment_score' => $assignScore,
@@ -881,7 +765,9 @@ class StudentController extends Controller
                   ->orWhere('status', '');
             })
             ->pluck('course_id')
-            ->map(fn ($id) => (int) $id)
+            ->map(function ($id) {
+                return (int) $id;
+            })
             ->toArray();
 
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
@@ -891,11 +777,7 @@ class StudentController extends Controller
                 ->value('department_id');
         }
 
-        $coursesQuery = Course::with([
-            'teacher:id,first_name,last_name,email,profile_image',
-            'teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
-            'department:id,department_name,department_code',
-        ]);
+        $coursesQuery = Course::with(['teacher', 'teacherProfile', 'department']);
         if ($deptId) {
             $coursesQuery->where(function ($q) use ($deptId, $enrolledCourseIds) {
                 $q->where('department_id', $deptId);
@@ -939,13 +821,20 @@ class StudentController extends Controller
 
         $studentCurrentYear = $detectedYear ?? 1;
 
-        // ✅ សំខាន់បំផុត៖ ប្រើ safeLessonFileColumns() មិនទាញជួរឈរ file_data (Base64 រាប់សិបមេកាបៃ) មកជាមួយបញ្ជីមេរៀនដាច់ខាត!
-        $safeFileCols = $this->safeLessonFileColumns();
+        // ✅ សំខាន់បំផុត៖ មិនទាញយកជួរឈរ file_data (Base64 រាប់មេកាបៃ) ពីតារាង lesson_files ឡើយ
+        $fileCols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
+        if (Schema::hasColumn('lesson_files', 'mime_type')) {
+            $fileCols[] = 'mime_type';
+        }
+
         $lessonsQuery = Lesson::with([
-            'files' => function ($q) use ($safeFileCols) {
-                $q->select($safeFileCols);
+            'files' => function ($q) use ($fileCols) {
+                $q->select($fileCols);
             },
-            'videos:id,lesson_id,title,video_url,duration,created_at,updated_at',
+            'videos',
+            'course.teacher',
+            'course.teacherProfile',
+            'course.department',
         ])->orderBy('lesson_order', 'asc');
 
         if (!empty($deptCourseIds)) {
@@ -954,7 +843,7 @@ class StudentController extends Controller
 
         $lessons = $lessonsQuery->get()->map(function ($lesson) use ($enrolledCourseIds, $studentProfile, $studentCurrentYear, $courseYearsMap, $deptCourses) {
             $cid = (int) $lesson->course_id;
-            $course = $deptCourses->get($cid) ?? $lesson->course;
+            $course = $lesson->course ?? $deptCourses->get($cid);
             $isEnrolled = in_array($cid, $enrolledCourseIds, true);
 
             $yearInfo = $courseYearsMap[$cid] ?? null;
@@ -967,8 +856,7 @@ class StudentController extends Controller
             $primaryYear = $explicitCourseY ?? ($yearInfo['primary_year'] ?? ($isEnrolled ? $studentCurrentYear : 1));
             $yearsList = $yearInfo['years_list'] ?? [(string) $primaryYear];
 
-            // នៅក្នុងមេរៀននីមួយៗ មិនបាច់ដាក់រូបថតគ្រូ Base64 ស្ទួនគ្រប់មេរៀនទេ (ព្រោះមាននៅក្នុង department_courses រួចហើយ)
-            $teacherSlim = $this->formatTeacherData($course, false);
+            $teacherData = $this->formatTeacherData($course);
 
             $studyStatus = 'current_class';
             if ((int) $primaryYear < (int) $studentCurrentYear) {
@@ -989,7 +877,7 @@ class StudentController extends Controller
                 'study_status' => $studyStatus,
                 'student_current_year' => (int) $studentCurrentYear,
                 'student_study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
-                'teacher' => $teacherSlim,
+                'teacher' => $teacherData,
                 'course' => $course ? [
                     'id' => $course->id,
                     'course_code' => $course->course_code,
@@ -1004,15 +892,15 @@ class StudentController extends Controller
                     'department_id' => $course->department_id,
                     'department' => $course->department,
                     'teacher_id' => $course->teacher_id,
-                    'teacher_name' => $teacherSlim['name'] ?? 'គ្រូបង្រៀន',
-                    'teacher_profile' => $teacherSlim,
+                    'teacher_name' => $teacherData['name'] ?? 'គ្រូបង្រៀន',
+                    'teacher' => $teacherData,
+                    'teacher_profile' => $teacherData,
                 ] : null,
                 'files' => $lesson->files ?? [],
                 'videos' => $lesson->videos ?? [],
             ];
         });
 
-        // ៧. បញ្ជូនបញ្ជីមុខវិជ្ជាទាំងអស់ក្នុងដេប៉ាតឺម៉ង់ទៅជាមួយ (ភ្ជាប់រូបថតគ្រូតែ ១ ដងគត់ក្នុង ១ មុខវិជ្ជា)
         $formattedDeptCourses = $deptCourses->values()->map(function ($crs) use ($courseYearsMap, $enrolledCourseIds, $studentCurrentYear) {
             $cid = (int) $crs->id;
             $isEnrolled = in_array($cid, $enrolledCourseIds, true);
@@ -1027,7 +915,7 @@ class StudentController extends Controller
             $primaryYear = (int) ($explicitCourseY ?? ($yearInfo['primary_year'] ?? ($isEnrolled ? $studentCurrentYear : 1)));
             $yearsList = $yearInfo['years_list'] ?? [(string) $primaryYear];
 
-            $teacherData = $this->formatTeacherData($crs, true);
+            $teacherData = $this->formatTeacherData($crs);
 
             $studyStatus = 'current_class';
             if ($primaryYear < (int) $studentCurrentYear) {
@@ -1052,8 +940,8 @@ class StudentController extends Controller
                 'department' => $crs->department,
                 'teacher_id' => $crs->teacher_id,
                 'teacher_name' => $teacherData['name'] ?? 'គ្រូបង្រៀន',
+                'teacher' => $teacherData,
                 'teacher_profile' => $teacherData,
-                'teacher' => $teacherData ? array_merge($teacherData, ['profile_image' => null]) : null,
             ];
         });
 
@@ -1064,7 +952,7 @@ class StudentController extends Controller
         ]);
     }
 
-    // ✅ អានឯកសារមេរៀនជា Base64 (គាំទ្រទាំងការអានពី Disk និងការអានពី Database លើ Railway)
+    // ✅ អានឯកសារមេរៀនជា Base64
     public function readLessonFile(Request $request)
     {
         $path = trim((string) $request->query('path', ''));
@@ -1127,35 +1015,36 @@ class StudentController extends Controller
     // View Lessons by Course
     public function getCourseLessons($courseId)
     {
-        $course = Course::with([
-            'teacher:id,first_name,last_name,email,profile_image',
-            'teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
-            'department:id,department_name,department_code',
-        ])->find($courseId);
+        $course = Course::with(['teacher', 'teacherProfile', 'department'])->find($courseId);
         $courseYearsMap = $course ? $this->buildCourseYearsMap(collect([$course->id => $course])) : [];
         $yearInfo = $courseYearsMap[(int) $courseId] ?? ['primary_year' => 1, 'years_list' => ['1']];
 
-        $safeFileCols = $this->safeLessonFileColumns();
+        $fileCols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
+        if (Schema::hasColumn('lesson_files', 'mime_type')) {
+            $fileCols[] = 'mime_type';
+        }
 
         $lessons = Lesson::with([
-            'files' => function ($q) use ($safeFileCols) {
-                $q->select($safeFileCols);
+            'files' => function ($q) use ($fileCols) {
+                $q->select($fileCols);
             },
-            'videos:id,lesson_id,title,video_url,duration,created_at,updated_at',
-            'course.teacher:id,first_name,last_name,email,profile_image',
-            'course.teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
-            'course.department:id,department_name,department_code',
+            'videos',
+            'course.teacher',
+            'course.teacherProfile',
+            'course.department',
         ])
             ->where('course_id', $courseId)
             ->orderBy('lesson_order')
             ->get()
-            ->map(function ($lesson, $idx) use ($yearInfo) {
+            ->map(function ($lesson) use ($yearInfo) {
                 $lesson->year = (int) $yearInfo['primary_year'];
                 $lesson->years_list = $yearInfo['years_list'];
                 if ($lesson->course) {
-                    $this->attachCleanTeacherToCourse($lesson->course, $idx === 0);
+                    $teacherData = $this->formatTeacherData($lesson->course);
                     $lesson->course->year = (int) $yearInfo['primary_year'];
                     $lesson->course->years_list = $yearInfo['years_list'];
+                    $lesson->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                    $lesson->course->setAttribute('teacher_profile', $teacherData);
                 }
                 return $lesson;
             });
@@ -1205,11 +1094,7 @@ class StudentController extends Controller
         }
 
         $submission = AssignmentSubmission::create($submissionData);
-
-        // ✅ លាក់ file_data ពេលបញ្ជូនត្រឡប់ទៅឱ្យ React វិញ ដើម្បីឱ្យការ Upload ចប់ភ្លាមៗដោយមិនទាញទិន្នន័យធំមកវិញ
         $submission->makeHidden(['file_data']);
-
-        $this->clearStudentDashboardCache();
 
         return response()->json([
             'submission' => $submission,
@@ -1274,11 +1159,7 @@ class StudentController extends Controller
         $student = auth()->user();
         $studentIds = $this->getStudentAllIds($student);
 
-        $quiz = Quiz::with([
-            'course:id,course_code,course_name,department_id,teacher_id',
-            'questions:id,quiz_id,question_text,question_type,mark',
-            'questions.options:id,question_id,option_text,is_correct',
-        ])->findOrFail($quizId);
+        $quiz = Quiz::with(['course', 'questions.options'])->findOrFail($quizId);
 
         $attempt = QuizAttempt::where('quiz_id', $quizId)
             ->whereIn('student_id', $studentIds)
@@ -1394,8 +1275,6 @@ class StudentController extends Controller
             );
         }
 
-        $this->clearStudentDashboardCache();
-
         return response()->json([
             'attempt' => $attempt,
             'score' => $score,
@@ -1423,12 +1302,8 @@ class StudentController extends Controller
 
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
 
-        // នៅក្នុង StudentAssignments.jsx មិនបង្ហាញរូបថតគ្រូបង្រៀនទេ ដូច្នេះមិនបាច់ទាញ profile_image ធំៗរបស់គ្រូមកជាមួយឡើយ
-        $query = Assignment::with([
-            'course.teacher:id,first_name,last_name,email',
-            'course.teacherProfile:id,user_id,first_name,last_name,email,specialization',
-            'course.department:id,department_name,department_code',
-        ])->orderBy('due_date', 'asc');
+        $query = Assignment::with(['course.teacher', 'course.teacherProfile', 'course.department'])
+            ->orderBy('due_date', 'asc');
 
         if ($request->filled('course_id') && $request->course_id !== 'all') {
             $query->where('course_id', $request->course_id);
@@ -1443,20 +1318,21 @@ class StudentController extends Controller
         $paginated = $query->paginate($perPage);
         $assignmentIds = collect($paginated->items())->pluck('id');
 
-        // ✅ សំខាន់បំផុត៖ ប្រើ select($this->safeSubmissionColumns()) មិនទាញជួរឈរ file_data (Base64 រាប់មេកាបៃ) ដាច់ខាត!
-        $submissions = $assignmentIds->isNotEmpty()
-            ? AssignmentSubmission::select($this->safeSubmissionColumns())
-                ->whereIn('student_id', $studentIds)
-                ->whereIn('assignment_id', $assignmentIds)
-                ->get()
-                ->keyBy('assignment_id')
-            : collect();
+        // ✅ មិនទាញយកជួរឈរ file_data Base64 ធំៗឡើយ
+        $submissions = AssignmentSubmission::select([
+            'id', 'assignment_id', 'student_id', 'file_path', 'submitted_at', 'score', 'feedback', 'created_at', 'updated_at',
+        ])
+            ->whereIn('student_id', $studentIds)
+            ->whereIn('assignment_id', $assignmentIds)
+            ->get()
+            ->keyBy('assignment_id');
 
         $items = collect($paginated->items())->map(function ($assignment) use ($submissions) {
             $submission = $submissions->get($assignment->id);
-            $courseData = $assignment->course ? clone $assignment->course : null;
-            if ($courseData) {
-                $this->attachCleanTeacherToCourse($courseData, false);
+            if ($assignment->course) {
+                $teacherData = $this->formatTeacherData($assignment->course);
+                $assignment->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                $assignment->course->setAttribute('teacher_profile', $teacherData);
             }
 
             return [
@@ -1467,7 +1343,7 @@ class StudentController extends Controller
                 'due_date' => $assignment->due_date,
                 'marks' => $assignment->marks ?? $assignment->total_score ?? 20,
                 'total_score' => $assignment->total_score ?? $assignment->marks ?? 20,
-                'course' => $courseData,
+                'course' => $assignment->course,
                 'submission' => $submission ? [
                     'id' => $submission->id,
                     'file_path' => $submission->file_path,
@@ -1508,12 +1384,7 @@ class StudentController extends Controller
 
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
 
-        // នៅក្នុង StudentQuizzes.jsx មិនបង្ហាញរូបថតគ្រូបង្រៀនទេ ដូច្នេះមិនបាច់ទាញ profile_image ធំៗរបស់គ្រូមកជាមួយឡើយ
-        $query = Quiz::with([
-            'course.teacher:id,first_name,last_name,email',
-            'course.teacherProfile:id,user_id,first_name,last_name,email,specialization',
-            'course.department:id,department_name,department_code',
-        ])
+        $query = Quiz::with(['course.teacher', 'course.teacherProfile', 'course.department'])
             ->withSum('questions as questions_total_mark', 'mark')
             ->orderBy('start_date', 'asc');
 
@@ -1530,21 +1401,19 @@ class StudentController extends Controller
         $paginated = $query->paginate($perPage);
         $quizIds = collect($paginated->items())->pluck('id');
 
-        $attempts = $quizIds->isNotEmpty()
-            ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score', 'started_at', 'submitted_at')
-                ->whereIn('student_id', $studentIds)
-                ->whereIn('quiz_id', $quizIds)
-                ->get()
-                ->keyBy('quiz_id')
-            : collect();
+        $attempts = QuizAttempt::whereIn('student_id', $studentIds)
+            ->whereIn('quiz_id', $quizIds)
+            ->get()
+            ->keyBy('quiz_id');
 
         $items = collect($paginated->items())->map(function ($quiz) use ($attempts) {
             $attempt = $attempts->get($quiz->id);
             $resolvedTotalMark = $quiz->total_mark ?? $quiz->questions_total_mark ?? 20;
 
-            $courseData = $quiz->course ? clone $quiz->course : null;
-            if ($courseData) {
-                $this->attachCleanTeacherToCourse($courseData, false);
+            if ($quiz->course) {
+                $teacherData = $this->formatTeacherData($quiz->course);
+                $quiz->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                $quiz->course->setAttribute('teacher_profile', $teacherData);
             }
 
             return [
@@ -1556,7 +1425,7 @@ class StudentController extends Controller
                 'total_mark' => $resolvedTotalMark,
                 'start_date' => $quiz->start_date,
                 'end_date' => $quiz->end_date,
-                'course' => $courseData,
+                'course' => $quiz->course,
                 'attempt' => $attempt ? [
                     'id' => $attempt->id,
                     'score' => $attempt->score,
