@@ -53,16 +53,68 @@ import logo from '../../assets/image/PRIT.png';
 import NotificationBell from './NotificationBell';
 
 const EMPTY_USER_OBJ = Object.freeze({});
+const AUTH_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v2';
+const LEGACY_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v1';
+
 const getTelegramLinkCacheKey = (email) =>
   `lms_tg_link_url_${email || 'default'}`;
+
+const readRawStorageItem = (key) => {
+  try {
+    const fromSession = sessionStorage.getItem(key);
+    if (fromSession && fromSession !== 'undefined' && fromSession !== 'null') {
+      return fromSession;
+    }
+  } catch {}
+  try {
+    const fromLocal = localStorage.getItem(key);
+    if (fromLocal && fromLocal !== 'undefined' && fromLocal !== 'null') {
+      return fromLocal;
+    }
+  } catch {}
+  return null;
+};
+
+const readCachedAvatarSync = () => {
+  return (
+    readRawStorageItem(AUTH_AVATAR_CACHE_KEY) ||
+    readRawStorageItem(LEGACY_AVATAR_CACHE_KEY) ||
+    null
+  );
+};
+
+const hydrateEntityWithCachedAvatar = (entity) => {
+  if (!entity || typeof entity !== 'object') return entity;
+  const cachedAvatar = readCachedAvatarSync();
+  const restore = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const copy = { ...obj };
+    if (
+      copy.profile_image === '__CACHED_AVATAR__' ||
+      (!copy.profile_image && cachedAvatar)
+    ) {
+      copy.profile_image = cachedAvatar;
+    }
+    return copy;
+  };
+  const hydrated = restore(entity);
+  if (hydrated.teacher && typeof hydrated.teacher === 'object') {
+    hydrated.teacher = restore(hydrated.teacher);
+  }
+  if (hydrated.student && typeof hydrated.student === 'object') {
+    hydrated.student = restore(hydrated.student);
+  }
+  return hydrated;
+};
 
 const readCachedUserSync = () => {
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      readRawStorageItem('user') || readRawStorageItem('auth_user');
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return parsed?.user || parsed?.data || parsed;
+    const extracted = parsed?.user || parsed?.data || parsed;
+    return hydrateEntityWithCachedAvatar(extracted);
   } catch {
     return null;
   }
@@ -70,17 +122,42 @@ const readCachedUserSync = () => {
 
 const readCachedTeacherSync = () => {
   try {
-    const raw = localStorage.getItem('teacher');
-    return raw ? JSON.parse(raw) : null;
+    const raw = readRawStorageItem('teacher');
+    if (!raw) return null;
+    return hydrateEntityWithCachedAvatar(JSON.parse(raw));
   } catch {
     return null;
   }
 };
 
+// ✅ លុបរូបភាព Base64 ធំៗចេញពី Object មុនពេលរក្សាទុកចូល localStorage ដើម្បីការពារ QuotaExceededError
+const stripHeavyBase64ForStorage = (obj, depth = 0) => {
+  if (!obj || typeof obj !== 'object' || depth > 4) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => stripHeavyBase64ForStorage(item, depth + 1));
+  }
+  const copy = {};
+  Object.keys(obj).forEach((k) => {
+    const val = obj[k];
+    if (
+      typeof val === 'string' &&
+      val.startsWith('data:') &&
+      val.length > 15000
+    ) {
+      copy[k] = '__CACHED_AVATAR__';
+    } else if (val && typeof val === 'object') {
+      copy[k] = stripHeavyBase64ForStorage(val, depth + 1);
+    } else {
+      copy[k] = val;
+    }
+  });
+  return copy;
+};
+
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+      readRawStorageItem('auth_user') || readRawStorageItem('user');
     let uid = 'default';
     let role = 'admin';
     if (userObjStr) {
@@ -152,7 +229,11 @@ const Navbar = () => {
   const navigate = useNavigate();
 
   const user = useMemo(
-    () => contextUser || readCachedUserSync() || EMPTY_USER_OBJ,
+    () =>
+      contextUser ||
+      readCachedUserSync() ||
+      readCachedTeacherSync() ||
+      EMPTY_USER_OBJ,
     [contextUser]
   );
 
@@ -293,29 +374,65 @@ const Navbar = () => {
     setIsDarkMode((prev) => !prev);
   }, []);
 
+  // ✅ រក្សាទុកទិន្នន័យគណនីដែលបានកែប្រែចូលទាំង sessionStorage និង localStorage ដោយមិនឱ្យពេញ Quota
   const syncUserToStorage = useCallback((updatedUserObj, updatedTeacherObj) => {
     try {
-      const str = JSON.stringify(updatedUserObj);
-      localStorage.setItem('user', str);
-      localStorage.setItem('auth_user', str);
+      const rawAvatar =
+        updatedUserObj?.profile_image ||
+        updatedTeacherObj?.profile_image ||
+        updatedUserObj?.teacher?.profile_image ||
+        updatedUserObj?.student?.profile_image ||
+        null;
 
-      if (updatedTeacherObj) {
-        localStorage.setItem('teacher', JSON.stringify(updatedTeacherObj));
-      } else if (updatedUserObj?.teacher) {
-        localStorage.setItem(
-          'teacher',
-          JSON.stringify(updatedUserObj.teacher)
-        );
+      if (rawAvatar && rawAvatar !== '__CACHED_AVATAR__') {
+        try {
+          sessionStorage.setItem(AUTH_AVATAR_CACHE_KEY, rawAvatar);
+        } catch {}
+        try {
+          localStorage.setItem(AUTH_AVATAR_CACHE_KEY, rawAvatar);
+        } catch {}
       }
+
+      const slimUser = stripHeavyBase64ForStorage(updatedUserObj);
+      const str = JSON.stringify(slimUser);
+
+      try {
+        sessionStorage.setItem('user', str);
+        sessionStorage.setItem('auth_user', str);
+      } catch {}
+      try {
+        localStorage.setItem('user', str);
+        localStorage.setItem('auth_user', str);
+      } catch {}
+
+      const targetTeacher = updatedTeacherObj || updatedUserObj?.teacher;
+      if (targetTeacher) {
+        const slimTeacherStr = JSON.stringify(
+          stripHeavyBase64ForStorage(targetTeacher)
+        );
+        try {
+          sessionStorage.setItem('teacher', slimTeacherStr);
+        } catch {}
+        try {
+          localStorage.setItem('teacher', slimTeacherStr);
+        } catch {}
+      }
+
       if (updatedUserObj?.student) {
-        localStorage.setItem(
-          'student',
-          JSON.stringify(updatedUserObj.student)
+        const slimStudentStr = JSON.stringify(
+          stripHeavyBase64ForStorage(updatedUserObj.student)
         );
+        try {
+          sessionStorage.setItem('student', slimStudentStr);
+        } catch {}
+        try {
+          localStorage.setItem('student', slimStudentStr);
+        } catch {}
       }
+
       window.dispatchEvent(new Event('lms_user_updated'));
     } catch (e) {
-      console.warn('Failed to sync user to localStorage:', e);
+      console.warn('Failed to sync user to storage:', e);
     }
   }, []);
 
@@ -324,15 +441,30 @@ const Navbar = () => {
     setIsProfileModalOpen(false);
     setIsSettingsModalOpen(false);
 
+    try {
+      sessionStorage.removeItem('lms_last_active_role');
+      localStorage.removeItem('lms_last_active_role');
+    } catch {}
+
     if (typeof logout === 'function') {
       logout();
     } else {
       try {
-        localStorage.removeItem('token');
-        localStorage.removeItem('teacher');
-        localStorage.removeItem('student');
-        localStorage.removeItem('user');
-        localStorage.removeItem('auth_user');
+        [
+          'token',
+          'auth_token',
+          'teacher',
+          'student',
+          'user',
+          'auth_user',
+          AUTH_AVATAR_CACHE_KEY,
+          LEGACY_AVATAR_CACHE_KEY,
+        ].forEach((k) => {
+          try {
+            sessionStorage.removeItem(k);
+            localStorage.removeItem(k);
+          } catch {}
+        });
       } catch {}
 
       if (typeof setUser === 'function') {
@@ -349,6 +481,7 @@ const Navbar = () => {
       user?.role?.name ||
       user?.role_name ||
       (typeof user?.role === 'string' ? user.role : '') ||
+      readRawStorageItem('lms_last_active_role') ||
       '',
     [user]
   );
@@ -365,16 +498,19 @@ const Navbar = () => {
     () =>
       (typeof hasRole === 'function' && hasRole('Teacher')) ||
       String(userRoleRaw).toLowerCase().includes('teacher') ||
-      Number(user?.role_id) === 2,
-    [hasRole, userRoleRaw, user?.role_id]
+      Number(user?.role_id) === 2 ||
+      Boolean(teacherData) ||
+      Boolean(user?.is_teacher),
+    [hasRole, userRoleRaw, user?.role_id, user?.is_teacher, teacherData]
   );
 
   const isStudent = useMemo(
     () =>
       (typeof hasRole === 'function' && hasRole('Student')) ||
       String(userRoleRaw).toLowerCase().includes('student') ||
-      Number(user?.role_id) === 3,
-    [hasRole, userRoleRaw, user?.role_id]
+      Number(user?.role_id) === 3 ||
+      Boolean(user?.student),
+    [hasRole, userRoleRaw, user?.role_id, user?.student]
   );
 
   const getRoleName = useCallback(
@@ -382,24 +518,27 @@ const Navbar = () => {
       const r = (roleName || '').toString().toLowerCase();
       const rid = Number(user?.role_id);
       if (language === 'km') {
-        if (r.includes('admin') || rid === 1) return 'អ្នកគ្រប់គ្រង';
-        if (r.includes('teacher') || rid === 2) return 'គ្រូបង្រៀន';
-        if (r.includes('student') || rid === 3) return 'សិស្ស';
+        if (r.includes('admin') || rid === 1 || isAdmin) return 'អ្នកគ្រប់គ្រង';
+        if (r.includes('teacher') || rid === 2 || isTeacher) return 'គ្រូបង្រៀន';
+        if (r.includes('student') || rid === 3 || isStudent) return 'សិស្ស';
         return roleName;
       }
-      if (r.includes('admin') || rid === 1) return 'Administrator';
-      if (r.includes('teacher') || rid === 2) return 'Teacher';
-      if (r.includes('student') || rid === 3) return 'Student';
+      if (r.includes('admin') || rid === 1 || isAdmin) return 'Administrator';
+      if (r.includes('teacher') || rid === 2 || isTeacher) return 'Teacher';
+      if (r.includes('student') || rid === 3 || isStudent) return 'Student';
       return roleName;
     },
-    [language, user?.role_id]
+    [language, user?.role_id, isAdmin, isTeacher, isStudent]
   );
 
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
+  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway, Placeholder '__CACHED_AVATAR__' និង URL ធម្មតា
   const resolveImageUrl = useCallback((rawPath) => {
     if (!rawPath || typeof rawPath !== 'string') return null;
     const trimmed = rawPath.trim();
     if (!trimmed) return null;
+    if (trimmed === '__CACHED_AVATAR__') {
+      return readCachedAvatarSync();
+    }
     if (
       trimmed.startsWith('data:') ||
       trimmed.startsWith('http://') ||
@@ -425,7 +564,8 @@ const Navbar = () => {
       user?.teacher?.profile_image ||
       user?.teacher?.profile_image_url ||
       user?.student?.profile_image ||
-      user?.student?.profile_image_url;
+      user?.student?.profile_image_url ||
+      readCachedAvatarSync();
     return rawImg ? resolveImageUrl(rawImg) : null;
   }, [user, teacherData, instantAvatarPreview, resolveImageUrl]);
 
@@ -434,6 +574,7 @@ const Navbar = () => {
       user?.first_name ||
       teacherData?.first_name ||
       user?.teacher_first_name ||
+      user?.teacher?.first_name ||
       user?.student?.first_name ||
       '',
     [user, teacherData]
@@ -444,16 +585,18 @@ const Navbar = () => {
       user?.last_name ||
       teacherData?.last_name ||
       user?.teacher_last_name ||
+      user?.teacher?.last_name ||
       user?.student?.last_name ||
       '',
     [user, teacherData]
   );
 
   const userInitials = useMemo(() => {
-    const first = (resolvedFirstName || user?.name || '')?.trim()?.[0] || '';
+    const first =
+      (resolvedFirstName || user?.name || userEmail || '')?.trim()?.[0] || '';
     const last = (resolvedLastName || '')?.trim()?.[0] || '';
     return (first + last).toUpperCase() || 'U';
-  }, [resolvedFirstName, resolvedLastName, user?.name]);
+  }, [resolvedFirstName, resolvedLastName, user?.name, userEmail]);
 
   const userDisplayName = useMemo(() => {
     if (resolvedFirstName || resolvedLastName) {
@@ -470,6 +613,7 @@ const Navbar = () => {
       user?.phone ||
       teacherData?.phone ||
       user?.teacher_phone ||
+      user?.teacher?.phone ||
       user?.student?.phone ||
       '',
     [user, teacherData]
@@ -523,7 +667,7 @@ const Navbar = () => {
     [userEmail, checkTelegramLinkStatus, user, setUser, syncUserToStorage]
   );
 
-  // ✅ មុខងារផ្ដាច់គណនី Telegram ចេញពីប្រព័ន្ធ (ដើម្បីឱ្យលេខកូដ ៦ ខ្ទង់ត្រឡប់ទៅផ្ញើចូល Email វិញ)
+  // ✅ មុខងារផ្ដាច់គណនី Telegram ចេញពីប្រព័ន្ធ
   const handleUnlinkTelegram = useCallback(async () => {
     if (!userEmail || isUnlinkingTelegram) return;
     setIsUnlinkingTelegram(true);

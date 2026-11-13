@@ -19,8 +19,106 @@ import {
   SparklesIcon,
 } from '@heroicons/react/24/outline';
 
+const LAST_ACTIVE_ROLE_KEY = 'lms_last_active_role';
+
+const readStorageItemSafe = (key) => {
+  try {
+    const fromSession = sessionStorage.getItem(key);
+    if (fromSession && fromSession !== 'undefined' && fromSession !== 'null') {
+      return fromSession;
+    }
+  } catch {}
+  try {
+    const fromLocal = localStorage.getItem(key);
+    if (fromLocal && fromLocal !== 'undefined' && fromLocal !== 'null') {
+      return fromLocal;
+    }
+  } catch {}
+  return null;
+};
+
+const parseJsonSafe = (raw) => {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+// ✅ ស្រង់យកតួនាទី ('Admin' | 'Teacher' | 'Student') ភ្លាមៗក្នុង 0ms ពីគ្រប់ប្រភពទាំងអស់
+const resolveRoleKeySync = (contextUser, contextTeacher, hasRoleFn) => {
+  if (typeof hasRoleFn === 'function') {
+    if (hasRoleFn('Admin')) return 'Admin';
+    if (hasRoleFn('Teacher')) return 'Teacher';
+    if (hasRoleFn('Student')) return 'Student';
+  }
+
+  const extractRoleFromUserObj = (u) => {
+    if (!u || typeof u !== 'object') return null;
+    const rawRole =
+      typeof u.role === 'string'
+        ? u.role
+        : u.role?.role_name || u.role?.name || u.role_name || '';
+    const norm = String(rawRole).trim().toLowerCase();
+    const rid = Number(u.role_id);
+
+    if (norm.includes('admin') || rid === 1) return 'Admin';
+    if (
+      norm.includes('teacher') ||
+      rid === 2 ||
+      Boolean(u.is_teacher) ||
+      Boolean(u.teacher) ||
+      Boolean(u.teacher_id)
+    ) {
+      return 'Teacher';
+    }
+    if (
+      norm.includes('student') ||
+      rid === 3 ||
+      Boolean(u.student) ||
+      Boolean(u.student_id)
+    ) {
+      return 'Student';
+    }
+    return null;
+  };
+
+  // ១. ឆែកពី Context ផ្ទាល់
+  const fromContext = extractRoleFromUserObj(contextUser);
+  if (fromContext) return fromContext;
+  if (contextTeacher && typeof contextTeacher === 'object') return 'Teacher';
+
+  // ២. ឆែកពី sessionStorage / localStorage ភ្លាមៗក្នុង 0ms (ពេល F5)
+  const hasToken = Boolean(
+    readStorageItemSafe('token') || readStorageItemSafe('auth_token')
+  );
+  if (!hasToken) return null;
+
+  const storedUserRaw =
+    parseJsonSafe(readStorageItemSafe('user')) ||
+    parseJsonSafe(readStorageItemSafe('auth_user'));
+  const storedUser =
+    storedUserRaw?.user || storedUserRaw?.data || storedUserRaw || null;
+  const fromStoredUser = extractRoleFromUserObj(storedUser);
+  if (fromStoredUser) return fromStoredUser;
+
+  const storedTeacher = parseJsonSafe(readStorageItemSafe('teacher'));
+  if (storedTeacher && typeof storedTeacher === 'object') return 'Teacher';
+
+  const storedStudent = parseJsonSafe(readStorageItemSafe('student'));
+  if (storedStudent && typeof storedStudent === 'object') return 'Student';
+
+  const lastRole = readStorageItemSafe(LAST_ACTIVE_ROLE_KEY);
+  if (lastRole === 'Admin' || lastRole === 'Teacher' || lastRole === 'Student') {
+    return lastRole;
+  }
+
+  return null;
+};
+
 const Sidebar = () => {
-  const { hasRole, user } = useAuth();
+  const { hasRole, user, teacher } = useAuth();
   const { t } = useLanguage();
   const location = useLocation();
 
@@ -139,23 +237,23 @@ const Sidebar = () => {
     [t]
   );
 
-  // ✅ ឆែកតួនាទីដោយគាំទ្រទាំង hasRole និងការអានផ្ទាល់ពី user object ជា Fallback
-  const roleKey = useMemo(() => {
-    const matched = Object.keys(NAV_CONFIG).find(
-      (role) => typeof hasRole === 'function' && hasRole(role)
-    );
-    if (matched) return matched;
+  // ✅ កំណត់តួនាទីភ្លាមៗក្នុង 0ms (គាំទ្រទាំង Context និង Storage Fallback)
+  const roleKey = useMemo(
+    () => resolveRoleKeySync(user, teacher, hasRole),
+    [user, teacher, hasRole]
+  );
 
-    const rawRole =
-      typeof user?.role === 'string'
-        ? user.role
-        : user?.role?.role_name || user?.role?.name || '';
-    const norm = rawRole.toString().trim().toLowerCase();
-    if (norm === 'admin' || Number(user?.role_id) === 1) return 'Admin';
-    if (norm === 'teacher' || Number(user?.role_id) === 2) return 'Teacher';
-    if (norm === 'student' || Number(user?.role_id) === 3) return 'Student';
-    return null;
-  }, [NAV_CONFIG, hasRole, user]);
+  // ✅ រក្សាទុកតួនាទីចុងក្រោយដែលសកម្ម (ត្រឹម 10 Bytes) ដើម្បីធានាថាពេល F5 ម៉ឺនុយមិនបាត់ដាច់ខាត
+  useEffect(() => {
+    if (roleKey) {
+      try {
+        sessionStorage.setItem(LAST_ACTIVE_ROLE_KEY, roleKey);
+      } catch {}
+      try {
+        localStorage.setItem(LAST_ACTIVE_ROLE_KEY, roleKey);
+      } catch {}
+    }
+  }, [roleKey]);
 
   const isStudent = roleKey === 'Student';
   const section = roleKey ? NAV_CONFIG[roleKey] : null;
@@ -469,4 +567,4 @@ const Sidebar = () => {
   );
 };
 
-export default Sidebar;
+export default React.memo(Sidebar);

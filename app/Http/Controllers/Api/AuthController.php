@@ -21,7 +21,8 @@ use Illuminate\Validation\ValidationException;
 class AuthController extends Controller
 {
     /**
-     * HELPER METHOD: រៀបចំទម្រង់ទិន្នន័យ User, Teacher និង Student ឱ្យពេញលេញតាំងពីវិនាទីដំបូង
+     * ✅ HELPER METHOD: រៀបចំទម្រង់ទិន្នន័យ User, Teacher និង Student ឱ្យពេញលេញ និងស្រាលបំផុត (Slim Payload)
+     * ជៀសវាងការដាក់រូបភាព Base64 ស្ទួនគ្នា ៣ កន្លែង ដែលធ្វើឱ្យពេញ localStorage (QuotaExceededError) លើ Frontend
      */
     private function buildUserAndTeacherPayload(User $user)
     {
@@ -35,8 +36,12 @@ class AuthController extends Controller
             'phone' => $user->phone,
             'gender' => $user->gender,
             'status' => $user->status,
-            'role_id' => $user->role_id,
-            'role' => $user->role,
+            'role_id' => (int) $user->role_id,
+            'role_name' => $user->role?->role_name ?? 'User',
+            'role' => $user->role ? [
+                'id' => $user->role->id,
+                'role_name' => $user->role->role_name,
+            ] : null,
             'profile_image' => $user->profile_image,
             'telegram_linked' => $this->resolveUserTelegramChatId($user) !== null,
             'created_at' => $user->created_at,
@@ -63,32 +68,57 @@ class AuthController extends Controller
                 ->first();
 
             if ($teacher) {
-                if (empty($teacher->profile_image) && !empty($user->profile_image)) {
-                    $teacher->profile_image = $user->profile_image;
-                } elseif (empty($userData['profile_image']) && !empty($teacher->profile_image)) {
-                    $userData['profile_image'] = $teacher->profile_image;
-                }
+                $resolvedAvatar = $user->profile_image ?: $teacher->profile_image;
+                $userData['profile_image'] = $resolvedAvatar;
+
+                // ✅ បង្កើត Array សម្រាប់ Teacher ដោយមិនដាក់រូបភាព Base64 ស្ទួន (ព្រោះមាននៅលើ $userData['profile_image'] រួចហើយ)
+                $slimTeacher = [
+                    'id' => $teacher->id,
+                    'user_id' => $teacher->user_id,
+                    'role_id' => (int) ($teacher->role_id ?? 2),
+                    'department_id' => $teacher->department_id,
+                    'teacher_code' => $teacher->teacher_code,
+                    'first_name' => $teacher->first_name ?: $user->first_name,
+                    'last_name' => $teacher->last_name ?: $user->last_name,
+                    'gender' => $teacher->gender ?: $user->gender,
+                    'date_of_birth' => $teacher->date_of_birth,
+                    'email' => $teacher->email ?: $user->email,
+                    'phone' => $teacher->phone ?: $user->phone,
+                    'specialization' => $teacher->specialization,
+                    'employment_type' => $teacher->employment_type,
+                    'department' => $teacher->department ? [
+                        'id' => $teacher->department->id,
+                        'department_name' => $teacher->department->department_name,
+                    ] : null,
+                    'role' => $teacher->role ? [
+                        'id' => $teacher->role->id,
+                        'role_name' => $teacher->role->role_name,
+                    ] : ['id' => 2, 'role_name' => 'Teacher'],
+                    'profile_image' => (is_string($resolvedAvatar) && strlen($resolvedAvatar) > 15000)
+                        ? null
+                        : $resolvedAvatar,
+                ];
 
                 $userData['teacher_id'] = $teacher->id;
                 $userData['teacher_code'] = $teacher->teacher_code;
                 $userData['specialization'] = $teacher->specialization;
                 $userData['department_id'] = $teacher->department_id;
                 $userData['department_name'] = $teacher->department?->department_name;
-                $userData['department'] = $teacher->department;
+                $userData['department'] = $slimTeacher['department'];
                 $userData['employment_type'] = $teacher->employment_type;
                 $userData['date_of_birth'] = $teacher->date_of_birth;
-                $userData['teacher_first_name'] = $teacher->first_name;
-                $userData['teacher_last_name'] = $teacher->last_name;
-                $userData['teacher_email'] = $teacher->email;
-                $userData['teacher_phone'] = $teacher->phone;
-                $userData['teacher_gender'] = $teacher->gender;
-                $userData['teacher_role'] = $teacher->role;
-                $userData['teacher'] = $teacher;
+                $userData['teacher_first_name'] = $slimTeacher['first_name'];
+                $userData['teacher_last_name'] = $slimTeacher['last_name'];
+                $userData['teacher_email'] = $slimTeacher['email'];
+                $userData['teacher_phone'] = $slimTeacher['phone'];
+                $userData['teacher_gender'] = $slimTeacher['gender'];
+                $userData['teacher_role'] = $slimTeacher['role'];
+                $userData['teacher'] = $slimTeacher;
                 $userData['is_teacher'] = true;
 
-                $teacherData = $teacher;
+                $teacherData = $slimTeacher;
             } else {
-                $userData['is_teacher'] = false;
+                $userData['is_teacher'] = true;
             }
         } elseif ($isStudentRole) {
             $userData['is_teacher'] = false;
@@ -107,22 +137,48 @@ class AuthController extends Controller
                 ->first();
 
             if ($student) {
-                if (empty($student->profile_image) && !empty($user->profile_image)) {
-                    $student->profile_image = $user->profile_image;
-                } elseif (empty($userData['profile_image']) && !empty($student->profile_image)) {
-                    $userData['profile_image'] = $student->profile_image;
-                }
+                $resolvedAvatar = $user->profile_image ?: $student->profile_image;
+                $userData['profile_image'] = $resolvedAvatar;
+
+                $slimStudent = [
+                    'id' => $student->id,
+                    'user_id' => $student->user_id,
+                    'role_id' => (int) ($student->role_id ?? 3),
+                    'department_id' => $student->department_id,
+                    'student_code' => $student->student_code,
+                    'first_name' => $student->first_name ?: $user->first_name,
+                    'last_name' => $student->last_name ?: $user->last_name,
+                    'gender' => $student->gender ?: $user->gender,
+                    'date_of_birth' => $student->date_of_birth,
+                    'email' => $student->email ?: $user->email,
+                    'phone' => $student->phone ?: $user->phone,
+                    'batch_year' => $student->batch_year,
+                    'degree_level' => $student->degree_level,
+                    'study_shift' => $student->study_shift ?? 'Monday-Friday',
+                    'address' => $student->address,
+                    'department' => $student->department ? [
+                        'id' => $student->department->id,
+                        'department_name' => $student->department->department_name,
+                    ] : null,
+                    'role' => $student->role ? [
+                        'id' => $student->role->id,
+                        'role_name' => $student->role->role_name,
+                    ] : ['id' => 3, 'role_name' => 'Student'],
+                    'profile_image' => (is_string($resolvedAvatar) && strlen($resolvedAvatar) > 15000)
+                        ? null
+                        : $resolvedAvatar,
+                ];
 
                 $userData['student_id'] = $student->id;
                 $userData['student_code'] = $student->student_code;
                 $userData['department_id'] = $student->department_id;
                 $userData['department_name'] = $student->department?->department_name;
-                $userData['department'] = $student->department;
+                $userData['department'] = $slimStudent['department'];
                 $userData['batch_year'] = $student->batch_year;
                 $userData['degree_level'] = $student->degree_level;
                 $userData['study_shift'] = $student->study_shift ?? 'Monday-Friday';
                 $userData['date_of_birth'] = $student->date_of_birth;
-                $userData['student'] = $student;
+                $userData['student'] = $slimStudent;
             }
         } else {
             $userData['is_teacher'] = false;
@@ -165,6 +221,7 @@ class AuthController extends Controller
     {
         $cleanChatId = trim($chatId);
         Cache::forever('lms_user_telegram_chat_id_' . $user->id, $cleanChatId);
+        Cache::forget('lms_auth_user_payload_' . $user->id);
 
         try {
             if (Schema::hasColumn('users', 'telegram_chat_id')) {
@@ -176,7 +233,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: ផ្ដាច់ (លុប) Telegram Chat ID របស់អ្នកប្រើប្រាស់ចេញពីប្រព័ន្ធ (ដើម្បីឱ្យលេខកូដ ៦ ខ្ទង់ត្រឡប់ទៅផ្ញើចូល Email វិញ)
+     * ✅ HELPER METHOD: ផ្ដាច់ (លុប) Telegram Chat ID របស់អ្នកប្រើប្រាស់ចេញពីប្រព័ន្ធ
      */
     private function unlinkUserTelegramChatId(User $user): void
     {
@@ -187,6 +244,7 @@ class AuthController extends Controller
 
         Cache::forget('lms_user_telegram_chat_id_' . $user->id);
         Cache::forget('lms_tg_user_link_token_' . $user->id);
+        Cache::forget('lms_auth_user_payload_' . $user->id);
 
         try {
             if (Schema::hasColumn('users', 'telegram_chat_id')) {
@@ -248,7 +306,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: ផ្ញើលេខកូដ 2FA ឬលេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ (៦ ខ្ទង់) ទៅកាន់ Telegram Bot (ទម្រង់ផ្លូវការ)
+     * ✅ HELPER METHOD: ផ្ញើលេខកូដ 2FA ឬលេខកូដកំណត់ពាក្យសម្ងាត់ឡើងវិញ (៦ ខ្ទង់) ទៅកាន់ Telegram Bot
      */
     private function sendTelegramOtpAlert(User $user, string $otp, Request $request, string $purpose = '2fa'): bool
     {
@@ -306,9 +364,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ដោយរហ័ស៖
-     * - បើភ្ជាប់ Telegram ហើយ -> ផ្ញើទៅ Telegram ភ្លាម (មិនបាច់រង់ចាំ Email នាំឱ្យយឺតពេល Login ទេ)
-     * - បើមិនទាន់ភ្ជាប់ Telegram (ឬបានផ្ដាច់ Telegram ហើយ) -> ទើបផ្ញើទៅកាន់ Email
+     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ដោយរហ័ស
      */
     private function generateAndSendOtp(User $user, Request $request, string $purpose = '2fa'): array
     {
@@ -345,7 +401,7 @@ class AuthController extends Controller
 
         $isTelegramLinked = $this->resolveUserTelegramChatId($user) !== null;
 
-        // ✅ ១. ប្រសិនបើអ្នកប្រើប្រាស់បានភ្ជាប់ Telegram រួចហើយ គឺផ្ញើទៅកាន់ Telegram ភ្លាម (រហ័សបំផុត < 0.5s)
+        // ✅ ១. ប្រសិនបើអ្នកប្រើប្រាស់បានភ្ជាប់ Telegram រួចហើយ គឺផ្ញើទៅកាន់ Telegram ភ្លាម
         if ($isTelegramLinked) {
             $telegramSent = $this->sendTelegramOtpAlert($user, $otp, $request, $purpose);
             if ($telegramSent) {
@@ -364,7 +420,7 @@ class AuthController extends Controller
             }
         }
 
-        // ✅ ២. លុះត្រាតែមិនទាន់ភ្ជាប់ Telegram (ឬបានផ្ដាច់ Telegram ហើយ) ទើបរៀបចំផ្ញើទៅកាន់ Email
+        // ✅ ២. លុះត្រាតែមិនទាន់ភ្ជាប់ Telegram ទើបរៀបចំផ្ញើទៅកាន់ Email
         $badgeTitle = $purpose === 'reset'
             ? '🔐 សំណើកំណត់ពាក្យសម្ងាត់ឡើងវិញ'
             : '🛡️ ការផ្ទៀងផ្ទាត់សុវត្ថិភាពចូលប្រព័ន្ធ (2FA)';
@@ -601,9 +657,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ មុខងារពិនិត្យ, ភ្ជាប់, និងផ្ដាច់គណនី Telegram (គាំទ្រ action = 'unlink')៖
-     * - បើ action === 'unlink' -> ផ្ដាច់ Telegram ចេញពីគណនី ដើម្បីឱ្យលេខកូដ ៦ ខ្ទង់ផ្ញើចូលតែ Email វិញ
-     * - ផ្ញើលេខកូដ ៦ ខ្ទង់ តែនៅពេលគណនីកំពុងស្ថិតក្នុងជំហានរង់ចាំផ្ទៀងផ្ទាត់ OTP (Login / Reset Password) ប៉ុណ្ណោះ!
+     * ✅ មុខងារពិនិត្យ, ភ្ជាប់, និងផ្ដាច់គណនី Telegram (គាំទ្រ action = 'unlink')
      */
     public function checkTelegramLink(Request $request)
     {
@@ -618,7 +672,6 @@ class AuthController extends Controller
             return response()->json(['linked' => false, 'message' => 'រកមិនឃើញគណនីនេះទេ'], 404);
         }
 
-        // ✅ ប្រសិនបើអ្នកប្រើប្រាស់ចុចប៊ូតុង «ផ្ដាច់ Telegram (Unlink)» នៅក្នុង Settings
         if ($request->input('action') === 'unlink') {
             $this->unlinkUserTelegramChatId($user);
 
@@ -638,7 +691,6 @@ class AuthController extends Controller
         $expectedToken = Cache::get('lms_tg_user_link_token_' . $user->id);
         $existingChatId = $this->resolveUserTelegramChatId($user);
 
-        // ✅ បើគណនីបានភ្ជាប់ Telegram រួចហើយ ត្រឡប់លទ្ធផលភ្លាមៗក្នុង 0ms
         if ($existingChatId && !$expectedToken) {
             return response()->json([
                 'linked' => true,
@@ -699,7 +751,6 @@ class AuthController extends Controller
                     }
                     Cache::forget('lms_tg_user_link_token_' . $user->id);
 
-                    // ✅ ពិនិត្យមើលថាតើអ្នកប្រើប្រាស់កំពុងស្ថិតនៅលើផ្ទាំងវាយលេខកូដ ៦ ខ្ទង់ (Login ឬ Reset Password) មែនឬអត់?
                     $pendingResetOtp = Cache::get('lms_pwd_reset_otp_' . $user->id);
                     $pending2faOtp = Cache::get('lms_2fa_otp_' . $user->id);
                     $sentOtpNow = false;
@@ -738,7 +789,6 @@ class AuthController extends Controller
     // ✅ ចុះឈ្មោះគណនី Admin ដំបូង រួចភ្ជាប់ទិន្នន័យ Role ត្រឡប់ទៅឱ្យ Frontend ភ្លាមៗ
     public function register(Request $request)
     {
-        // ការពារមិនឱ្យចុះឈ្មោះ Admin ថ្មីថែមទៀតប្រសិនបើមានគណនី Admin រួចហើយក្នុងប្រព័ន្ធ
         $adminRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%admin%'])->first();
         $adminRoleId = $adminRole?->id ?? 1;
         if (User::where('role_id', $adminRoleId)->exists()) {
@@ -950,6 +1000,7 @@ class AuthController extends Controller
         Cache::forget($cacheKey);
         Cache::forget($attemptKey);
         Cache::forget($otpLockoutKey);
+        Cache::forget('lms_auth_user_payload_' . $user->id);
 
         $shouldLogoutOthers = $request->boolean('logout_other_devices', true);
         if ($shouldLogoutOthers) {
@@ -1193,6 +1244,7 @@ class AuthController extends Controller
         Cache::forget('lms_pwd_reset_attempts_' . $user->id);
         Cache::forget('lms_pwd_reset_lockout_' . $user->id);
         Cache::forget('lms_login_lockout_' . md5(strtolower(trim($user->email)) . '_' . $request->ip()));
+        Cache::forget('lms_auth_user_payload_' . $user->id);
 
         $user->tokens()->delete();
 
@@ -1211,6 +1263,11 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
+        $uid = $request->user()?->id;
+        if ($uid) {
+            Cache::forget('lms_auth_user_payload_' . $uid);
+        }
+
         if ($request->boolean('all_devices')) {
             $request->user()?->tokens()?->delete();
         } else {
@@ -1224,19 +1281,31 @@ class AuthController extends Controller
 
     public function user(Request $request)
     {
-        $user = User::with('role:id,role_name')->find($request->user()?->id);
-
-        if (!$user || $user->status !== 'active') {
-            $request->user()?->tokens()?->delete();
+        $authUser = $request->user();
+        if (!$authUser || $authUser->status !== 'active') {
+            $authUser?->tokens()?->delete();
             return response()->json(['message' => 'គណនីរបស់អ្នកត្រូវបានផ្អាកដំណើរការ!'], 403);
         }
 
-        [$userData, $teacherData] = $this->buildUserAndTeacherPayload($user);
+        // ✅ ប្រើ Short-lived Cache (១៥ វិនាទី) ដើម្បីឱ្យការហៅ /api/user ពេល Refresh ដើរលឿនបំផុតលើ Online
+        $cacheKey = 'lms_auth_user_payload_' . $authUser->id . '_' . ($authUser->updated_at?->timestamp ?? 0);
+        $payload = Cache::remember($cacheKey, 15, function () use ($authUser) {
+            $user = User::with('role:id,role_name')->find($authUser->id);
+            if (!$user) {
+                return null;
+            }
+            [$userData, $teacherData] = $this->buildUserAndTeacherPayload($user);
+            return [
+                'user' => $userData,
+                'teacher' => $teacherData,
+                'student' => $userData['student'] ?? null,
+            ];
+        });
 
-        return response()->json([
-            'user' => $userData,
-            'teacher' => $teacherData,
-            'student' => $userData['student'] ?? null,
-        ]);
+        if (!$payload) {
+            return response()->json(['message' => 'រកមិនឃើញគណនី'], 404);
+        }
+
+        return response()->json($payload);
     }
 }

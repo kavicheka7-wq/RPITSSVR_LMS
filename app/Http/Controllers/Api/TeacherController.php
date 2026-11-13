@@ -31,74 +31,170 @@ use Illuminate\Validation\ValidationException;
 
 class TeacherController extends Controller
 {
+    /**
+     * ✅ HELPER: សម្អាត Cache របស់ផ្ទាំងគ្រូបង្រៀនភ្លាមៗនៅពេលមានការផ្លាស់ប្ដូរទិន្នន័យ
+     */
+    private function clearTeacherDashboardCache(): void
+    {
+        $uid = auth()->id();
+        if ($uid) {
+            Cache::forget("teacher_dashboard_v2_{$uid}");
+        }
+    }
+
     // --- Dashboard ---
     public function dashboard()
     {
-        $teacherIds = $this->getTeacherCourseIds();
+        $userId = auth()->id() ?? 0;
+        $cacheKey = "teacher_dashboard_v2_{$userId}";
 
-        $courses = Course::whereIn('teacher_id', $teacherIds)
-            ->with(['department'])
-            ->withCount(['enrollments as students_count', 'lessons', 'assignments', 'quizzes'])
-            ->get();
+        // ✅ ប្រើ Cache ៦០ វិនាទី សម្រាប់ Teacher Dashboard ដើម្បីឱ្យលឿនដូច Admin Dashboard លើ Online
+        $payload = Cache::remember($cacheKey, 60, function () {
+            $teacherIds = $this->getTeacherCourseIds();
 
-        $courseIds = $courses->pluck('id')->toArray();
+            $courses = Course::whereIn('teacher_id', $teacherIds)
+                ->with(['department:id,department_name,department_code'])
+                ->withCount(['enrollments as students_count', 'lessons', 'assignments', 'quizzes'])
+                ->get();
 
-        $totalStudents = Enrollment::whereIn('course_id', $courseIds)
-            ->where(function ($q) {
-                $q->whereNull('status')
-                  ->orWhere('status', 'active')
-                  ->orWhere('status', '');
+            $courseIds = $courses->pluck('id')->toArray();
+
+            if (empty($courseIds)) {
+                return [
+                    'stats' => [
+                        'total_courses' => 0,
+                        'total_students' => 0,
+                        'total_lessons' => 0,
+                        'total_assignments' => 0,
+                        'total_quizzes' => 0,
+                        'pending_assignments' => 0,
+                        'pending_submissions' => 0,
+                        'present_today' => 0,
+                        'absent_today' => 0,
+                        'avg_attendance_rate' => 100,
+                        'grade_data' => [],
+                    ],
+                    'courses' => [],
+                    'recent_activities' => [],
+                ];
+            }
+
+            $totalStudents = Enrollment::whereIn('course_id', $courseIds)
+                ->where(function ($q) {
+                    $q->whereNull('status')
+                      ->orWhere('status', 'active')
+                      ->orWhere('status', '');
+                })
+                ->distinct('student_id')
+                ->count('student_id');
+
+            $totalLessons = (int) $courses->sum('lessons_count');
+            $totalAssignments = (int) $courses->sum('assignments_count');
+            $totalQuizzes = (int) $courses->sum('quizzes_count');
+
+            $pendingAssignments = AssignmentSubmission::whereHas('assignment', function ($q) use ($courseIds) {
+                $q->whereIn('course_id', $courseIds);
+            })->whereNull('score')->count();
+
+            $todayStr = now()->toDateString();
+
+            // ✅ គណនាវត្តមានថ្ងៃនេះ និងអត្រាវត្តមានសរុបក្នុង Query តែម្ដង
+            $attendanceStats = Attendance::whereIn('course_id', $courseIds)
+                ->selectRaw("
+                    COUNT(*) as total_records,
+                    SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as total_present,
+                    SUM(CASE WHEN LOWER(status) = 'late' THEN 1 ELSE 0 END) as total_late,
+                    SUM(CASE WHEN LOWER(status) = 'permission' THEN 1 ELSE 0 END) as total_permission,
+                    SUM(CASE WHEN DATE(attendance_date) = ? AND LOWER(status) IN ('present', 'late') THEN 1 ELSE 0 END) as present_today,
+                    SUM(CASE WHEN DATE(attendance_date) = ? AND LOWER(status) = 'absent' THEN 1 ELSE 0 END) as absent_today
+                ", [$todayStr, $todayStr])
+                ->first();
+
+            $totalAttRecords = (int) ($attendanceStats->total_records ?? 0);
+            $effectiveAttended = (int) ($attendanceStats->total_present ?? 0)
+                + (int) ($attendanceStats->total_late ?? 0)
+                + ((int) ($attendanceStats->total_permission ?? 0) * 0.5);
+
+            $avgAttendanceRate = $totalAttRecords > 0
+                ? min(100, round(($effectiveAttended / $totalAttRecords) * 100, 1))
+                : 100;
+
+            // ✅ គណនាទិន្នន័យនិទ្ទេសសម្រាប់ក្រាហ្វបង្គោលក្នុង TeacherDashboard.jsx
+            $gradeSummary = Grade::whereIn('course_id', $courseIds)
+                ->selectRaw("
+                    SUM(CASE WHEN final_score >= 50 AND UPPER(TRIM(COALESCE(grade_letter, ''))) != 'F' THEN 1 ELSE 0 END) as passed_count,
+                    SUM(CASE WHEN final_score < 50 OR UPPER(TRIM(COALESCE(grade_letter, ''))) = 'F' THEN 1 ELSE 0 END) as failed_count
+                ")
+                ->first();
+
+            $gradeData = [
+                ['grade' => 'PASSED', 'students' => (int) ($gradeSummary->passed_count ?? 0)],
+                ['grade' => 'FAILED', 'students' => (int) ($gradeSummary->failed_count ?? 0)],
+            ];
+
+            $stats = [
+                'total_courses' => $courses->count(),
+                'total_students' => (int) $totalStudents,
+                'total_lessons' => $totalLessons,
+                'total_assignments' => $totalAssignments,
+                'total_quizzes' => $totalQuizzes,
+                'pending_assignments' => (int) $pendingAssignments,
+                'pending_submissions' => (int) $pendingAssignments,
+                'present_today' => (int) ($attendanceStats->present_today ?? 0),
+                'absent_today' => (int) ($attendanceStats->absent_today ?? 0),
+                'avg_attendance_rate' => $avgAttendanceRate,
+                'grade_data' => $gradeData,
+            ];
+
+            $rawRecent = AssignmentSubmission::whereHas('assignment', function ($q) use ($courseIds) {
+                $q->whereIn('course_id', $courseIds);
             })
-            ->distinct('student_id')
-            ->count('student_id');
+                ->whereNull('score')
+                ->with([
+                    'student:id,first_name,last_name,email,profile_image',
+                    'assignment:id,title,course_id',
+                    'assignment.course:id,course_name',
+                ])
+                ->orderBy('created_at', 'desc')
+                ->take(6)
+                ->get();
 
-        $totalLessons = (int) $courses->sum('lessons_count');
-        $totalAssignments = (int) $courses->sum('assignments_count');
-        $totalQuizzes = (int) $courses->sum('quizzes_count');
+            // ✅ ទាញលេខកូដសិស្សក្នុង Query តែម្ដង (ការពារ N+1)
+            $recentStudentIds = $rawRecent->pluck('student_id')->filter()->unique()->all();
+            $studentProfiles = !empty($recentStudentIds)
+                ? Student::whereIn('user_id', $recentStudentIds)
+                    ->select('id', 'user_id', 'student_code', 'profile_image')
+                    ->get()
+                    ->keyBy('user_id')
+                : collect();
 
-        $pendingAssignments = AssignmentSubmission::whereHas('assignment', function ($q) use ($courseIds) {
-            $q->whereIn('course_id', $courseIds);
-        })->whereNull('score')->count();
+            $recentSubmissions = $rawRecent->map(function ($sub) use ($studentProfiles) {
+                $stuProfile = $studentProfiles->get($sub->student_id);
+                $submittedDate = $sub->submitted_at ?? $sub->created_at;
+                $dateStr = $submittedDate ? substr((string) $submittedDate, 0, 10) : null;
 
-        $presentToday = Attendance::whereIn('course_id', $courseIds)
-            ->whereDate('attendance_date', now()->toDateString())
-            ->whereRaw("LOWER(status) = 'present'")
-            ->count();
-
-        $stats = [
-            'total_courses' => $courses->count(),
-            'total_students' => $totalStudents,
-            'total_lessons' => $totalLessons,
-            'total_assignments' => $totalAssignments,
-            'total_quizzes' => $totalQuizzes,
-            'pending_assignments' => $pendingAssignments,
-            'pending_submissions' => $pendingAssignments,
-            'present_today' => $presentToday,
-        ];
-
-        $recentSubmissions = AssignmentSubmission::whereHas('assignment', function ($q) use ($courseIds) {
-            $q->whereIn('course_id', $courseIds);
-        })
-            ->with(['student:id,first_name,last_name,email,profile_image', 'assignment:id,title,course_id'])
-            ->orderBy('created_at', 'desc')
-            ->take(6)
-            ->get()
-            ->map(function ($sub) {
                 return [
                     'id' => $sub->id,
+                    'student_id' => $sub->student_id,
                     'student_name' => $sub->student
-                        ? trim($sub->student->first_name . ' ' . $sub->student->last_name)
+                        ? trim(($sub->student->first_name ?? '') . ' ' . ($sub->student->last_name ?? ''))
                         : 'សិស្ស',
-                    'assignment_title' => $sub->assignment ? $sub->assignment->title : 'កិច្ចការ',
-                    'submitted_at' => $sub->created_at ? $sub->created_at->diffForHumans() : null,
+                    'student_code' => $stuProfile?->student_code ?? null,
+                    'student_image' => $stuProfile?->profile_image ?? $sub->student?->profile_image ?? null,
+                    'assignment_title' => $sub->assignment?->title ?? 'កិច្ចការ',
+                    'course_name' => $sub->assignment?->course?->course_name ?? null,
+                    'submitted_at' => $dateStr,
                 ];
             });
 
-        return response()->json([
-            'stats' => $stats,
-            'courses' => $courses,
-            'recent_activities' => $recentSubmissions,
-        ]);
+            return [
+                'stats' => $stats,
+                'courses' => $courses,
+                'recent_activities' => $recentSubmissions,
+            ];
+        });
+
+        return response()->json($payload);
     }
 
     // ============================================
@@ -166,6 +262,8 @@ class TeacherController extends Controller
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
+            Cache::forget('lms_auth_user_payload_' . $user->id);
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => 'Profile image updated successfully',
@@ -228,6 +326,8 @@ class TeacherController extends Controller
 
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
+        Cache::forget('lms_auth_user_payload_' . $user->id);
+        $this->clearTeacherDashboardCache();
 
         return response()->json([
             'message' => 'Profile updated successfully',
@@ -323,6 +423,7 @@ class TeacherController extends Controller
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => 'បានបង្កើតមុខវិជ្ជាដោយជោគជ័យ',
@@ -366,6 +467,7 @@ class TeacherController extends Controller
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => 'បានកែប្រែមុខវិជ្ជាដោយជោគជ័យ',
@@ -400,6 +502,7 @@ class TeacherController extends Controller
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => "បានលុបមុខវិជ្ជា '{$courseName}' ដោយជោគជ័យ",
@@ -493,6 +596,7 @@ class TeacherController extends Controller
         );
 
         Cache::forget('admin_overview_report');
+        $this->clearTeacherDashboardCache();
 
         return response()->json([
             'attendance' => $attendance,
@@ -530,6 +634,7 @@ class TeacherController extends Controller
         });
 
         Cache::forget('admin_overview_report');
+        $this->clearTeacherDashboardCache();
 
         return response()->json([
             'message' => 'Attendance marked successfully',
@@ -753,6 +858,9 @@ class TeacherController extends Controller
                 }
             });
 
+            Cache::forget('admin_overview_report');
+            $this->clearTeacherDashboardCache();
+
             return response()->json([
                 'message' => 'បានរក្សាទុកពិន្ទុដោយជោគជ័យ',
             ]);
@@ -799,6 +907,9 @@ class TeacherController extends Controller
                 ],
                 $updatePayload
             );
+
+            Cache::forget('admin_overview_report');
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'grade' => $grade,
@@ -856,6 +967,7 @@ class TeacherController extends Controller
         $lesson = Lesson::create($validated);
 
         Cache::forget('admin_overview_report');
+        $this->clearTeacherDashboardCache();
 
         return response()->json([
             'lesson' => $lesson->load(['course', 'files', 'videos']),
@@ -882,6 +994,7 @@ class TeacherController extends Controller
             $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
             $lesson->update($validated);
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'lesson' => $lesson->load(['course', 'files', 'videos']),
@@ -935,6 +1048,7 @@ class TeacherController extends Controller
             $lesson->delete();
 
             Cache::forget('admin_overview_report');
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => 'បានលុបមេរៀនដោយជោគជ័យ',
@@ -1155,6 +1269,7 @@ class TeacherController extends Controller
         });
 
         Cache::forget('admin_overview_report');
+        $this->clearTeacherDashboardCache();
 
         return response()->json([
             'assignment' => $assignment->load('course'),
@@ -1182,6 +1297,7 @@ class TeacherController extends Controller
             $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
             $assignment->update($validated);
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'assignment' => $assignment->load('course'),
@@ -1218,6 +1334,7 @@ class TeacherController extends Controller
             $assignment->delete();
 
             Cache::forget('admin_overview_report');
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => 'បានលុបកិច្ចការដោយជោគជ័យ',
@@ -1344,6 +1461,8 @@ class TeacherController extends Controller
                 'feedback' => $validated['feedback'] ?? null,
             ]);
 
+            $this->clearTeacherDashboardCache();
+
             return response()->json([
                 'submission' => $submission->fresh(['student:id,first_name,last_name,email,profile_image']),
                 'message' => 'បានកែប្រែពិន្ទុ និងការផ្តល់មតិយោបល់ដោយជោគជ័យ',
@@ -1424,6 +1543,8 @@ class TeacherController extends Controller
             return Quiz::create($validated);
         });
 
+        $this->clearTeacherDashboardCache();
+
         return response()->json([
             'quiz' => $quiz->load('course'),
             'message' => 'Quiz created successfully',
@@ -1499,6 +1620,8 @@ class TeacherController extends Controller
                 }
             });
 
+            $this->clearTeacherDashboardCache();
+
             return response()->json([
                 'quizzes' => $importedQuizzes,
                 'message' => 'បាននាំចូលកម្រងសំណួរដោយជោគជ័យ',
@@ -1536,6 +1659,7 @@ class TeacherController extends Controller
             $this->teacherCourseQuery()->findOrFail($validated['course_id']);
 
             $quiz->update($validated);
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'quiz' => $quiz->load('course'),
@@ -1575,6 +1699,8 @@ class TeacherController extends Controller
                 }
                 $quiz->delete();
             });
+
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => 'បានលុបកម្រងសំណួរដោយជោគជ័យ',
