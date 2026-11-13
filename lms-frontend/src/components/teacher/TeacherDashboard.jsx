@@ -32,10 +32,11 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (0ms Cache & Safe Non-Blocking Prefetcher)
 // ============================================================================
 const LAST_ACTIVE_TEACHER_UID_KEY = 'lms_last_active_teacher_uid';
+const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v1';
 const getStatsCacheKey = (uid) => `cached_teacher_dashboard_stats_v8_${uid}`;
 const getActivitiesCacheKey = (uid) => `cached_teacher_dashboard_activities_v8_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ + រក្សារូបភាពក្នុង RAM
+// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ
 const TEACHER_DASH_MEM_CACHE = {
   uid: null,
   stats: null,
@@ -44,40 +45,108 @@ const TEACHER_DASH_MEM_CACHE = {
   assignmentsList: null,
   lastSyncedAt: 0,
   prefetchedUid: null,
-  avatarMap: {},
 };
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ លុបរូបភាព Base64 ធំៗចេញពីបញ្ជីមុននឹង Save ចូល localStorage ដើម្បីការពារកុំឱ្យពេញទំហំ 5MB (QuotaExceededError) ដែលធ្វើឱ្យលោតអេក្រង់សពេល F5
+// ✅ បង្រួមរូបភាពសិស្សទុកមុនក្នុង cached_teacher_student_avatars_v1 ដើម្បីឱ្យទំព័រ TeacherManageStudents បើកភ្លាមឃើញរូបភាពក្នុង 0ms
+const cacheStudentAvatarsInBackground = (studentsList) => {
+  if (!Array.isArray(studentsList) || studentsList.length === 0) return;
+
+  const avatarMap = readStorageJson(CACHE_KEY_STUDENT_AVATARS, {}) || {};
+  let pendingCount = 0;
+
+  const persistMap = () => {
+    try {
+      const str = JSON.stringify(avatarMap);
+      sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+    } catch {}
+  };
+
+  studentsList.forEach((stu) => {
+    if (!stu || typeof stu !== 'object' || !stu.id) return;
+    const rawImg = stu.profile_image || stu.user?.profile_image || null;
+    if (!rawImg || typeof rawImg !== 'string') return;
+
+    if (!rawImg.startsWith('data:image') || rawImg.length < 12000) {
+      avatarMap[stu.id] = rawImg;
+      return;
+    }
+
+    pendingCount++;
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 80;
+          let w = img.width || maxSize;
+          let h = img.height || maxSize;
+          if (w > h) {
+            if (w > maxSize) {
+              h = Math.round((h * maxSize) / w);
+              w = maxSize;
+            }
+          } else {
+            if (h > maxSize) {
+              w = Math.round((w * maxSize) / h);
+              h = maxSize;
+            }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          const tinyWebp = canvas.toDataURL('image/webp', 0.78);
+          avatarMap[stu.id] =
+            tinyWebp.length < rawImg.length ? tinyWebp : rawImg;
+        } catch {}
+        pendingCount--;
+        if (pendingCount <= 0) persistMap();
+      };
+      img.onerror = () => {
+        pendingCount--;
+        if (pendingCount <= 0) persistMap();
+      };
+      img.src = rawImg;
+    } catch {
+      pendingCount--;
+    }
+  });
+
+  if (pendingCount === 0) {
+    persistMap();
+  } else {
+    setTimeout(persistMap, 350);
+  }
+};
+
+// ✅ លុបរូបភាព Base64 ធំៗចេញពីបញ្ជីមុននឹង Save ចូល localStorage ការពារ QuotaExceededError
 const stripHeavyBase64FromList = (data) => {
   if (!Array.isArray(data)) return data;
   return data.map((item) => {
     if (!item || typeof item !== 'object') return item;
     const copy = { ...item };
 
-    const rawImg =
-      copy.profile_image ||
-      copy.student_image ||
-      copy.user?.profile_image ||
-      copy.student?.profile_image;
-
-    if (copy.id && rawImg) {
-      TEACHER_DASH_MEM_CACHE.avatarMap[copy.id] = rawImg;
-    }
-
-    if (typeof copy.profile_image === 'string' && copy.profile_image.startsWith('data:') && copy.profile_image.length > 15000) {
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 12000
+    ) {
       copy.profile_image = null;
     }
-    if (typeof copy.student_image === 'string' && copy.student_image.startsWith('data:') && copy.student_image.length > 15000) {
-      copy.student_image = null;
+    if (copy.student_image !== undefined) {
+      delete copy.student_image;
     }
     if (copy.user && typeof copy.user === 'object') {
       copy.user = {
@@ -87,14 +156,15 @@ const stripHeavyBase64FromList = (data) => {
       };
     }
     if (copy.student && typeof copy.student === 'object') {
-      copy.student = {
-        ...copy.student,
-        profile_image:
-          typeof copy.student.profile_image === 'string' &&
-          copy.student.profile_image.startsWith('data:')
-            ? null
-            : copy.student.profile_image,
-      };
+      const { profile_image, ...restStudent } = copy.student;
+      copy.student = restStudent;
+    }
+    if (Array.isArray(copy.files)) {
+      copy.files = copy.files.map((f) => {
+        if (!f || typeof f !== 'object') return f;
+        const { file_data, ...restFile } = f;
+        return restFile;
+      });
     }
     return copy;
   });
@@ -105,7 +175,11 @@ const safeWriteTeacherCache = (key, payload) => {
     const slimPayload = Array.isArray(payload)
       ? stripHeavyBase64FromList(payload)
       : payload;
-    localStorage.setItem(key, JSON.stringify(slimPayload));
+    const str = JSON.stringify(slimPayload);
+    try {
+      sessionStorage.setItem(key, str);
+    } catch {}
+    localStorage.setItem(key, str);
   } catch {}
 };
 
@@ -124,7 +198,9 @@ const resolveTeacherUid = (contextUser) => {
       sessionStorage.getItem('user') ||
       sessionStorage.getItem('auth_user') ||
       localStorage.getItem('user') ||
-      localStorage.getItem('auth_user');
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('teacher') ||
+      localStorage.getItem('teacher');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -158,8 +234,14 @@ const ensureCleanTeacherSessionCache = (newUid) => {
         'cached_teacher_quizzes_list',
         'cached_teacher_att_history_map_v6',
         'cached_teacher_exam_scores_map_v1',
+        CACHE_KEY_STUDENT_AVATARS,
       ];
-      sharedLocalKeys.forEach((k) => localStorage.removeItem(k));
+      sharedLocalKeys.forEach((k) => {
+        try {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+        } catch {}
+      });
     }
     localStorage.setItem(LAST_ACTIVE_TEACHER_UID_KEY, String(newUid));
   } catch (e) {}
@@ -196,6 +278,8 @@ const prefetchAllTeacherPagesData = (
           if (typeof onStudentsSynced === 'function') {
             onStudentsSynced(data.length);
           }
+          // ✅ បង្រួមរូបភាពសិស្សទុកមុនក្នុង Avatar Dictionary មុនពេលលុប Base64 ចេញពីបញ្ជីសិស្ស
+          cacheStudentAvatarsInBackground(data);
           safeWriteTeacherCache(`cached_teacher_students_list_v8_${uid}`, data);
           safeWriteTeacherCache('cached_teacher_students_list_v6', data);
         }
@@ -283,7 +367,6 @@ const formatSubmittedDate = (dateStr) => {
 export default function TeacherDashboard() {
   const { t, language } = useLanguage();
   const { user, teacher } = useAuth();
-  const [failedAvatars, setFailedAvatars] = useState({});
 
   const currentTeacherId = useMemo(() => {
     const uid = resolveTeacherUid(user || teacher);
@@ -365,25 +448,6 @@ export default function TeacherDashboard() {
     return user?.name || t('លោកគ្រូ/អ្នកគ្រូ', 'Teacher');
   };
 
-  const getProfileImageUrl = useCallback((imagePath) => {
-    if (!imagePath || typeof imagePath !== 'string') return null;
-    const trimmed = imagePath.trim();
-    if (!trimmed) return null;
-    if (
-      trimmed.startsWith('data:') ||
-      trimmed.startsWith('http://') ||
-      trimmed.startsWith('https://') ||
-      trimmed.startsWith('blob:')
-    ) {
-      return trimmed;
-    }
-    const baseUrl = (
-      import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    ).replace(/\/api\/?$/, '');
-    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
-    return `${baseUrl}/storage/${cleanPath}`;
-  }, []);
-
   // ============================================================================
   // 📌 ផ្នែកទី២៖ ទាញយកទិន្នន័យ Dashboard ល្បឿនលឿន (0ms)
   // ============================================================================
@@ -417,17 +481,6 @@ export default function TeacherDashboard() {
       const newActivities = Array.isArray(resData?.recent_activities)
         ? resData.recent_activities
         : [];
-
-      newActivities.forEach((act) => {
-        const img =
-          act?.student_image ||
-          act?.profile_image ||
-          act?.student?.profile_image ||
-          act?.student?.user?.profile_image;
-        if (act?.id && img) {
-          TEACHER_DASH_MEM_CACHE.avatarMap[act.id] = img;
-        }
-      });
 
       setStats(newStats);
       setRecentActivities(newActivities);
@@ -608,6 +661,18 @@ export default function TeacherDashboard() {
       link: '/quizzes',
     },
   ];
+
+  // ✅ បង្កើតអក្សរកាត់ (Initials) សម្រាប់សិស្សក្នុងតារាង ដោយមិនបាច់ទាញរូបភាព
+  const getStudentInitials = (nameStr) => {
+    const parts = String(nameStr || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+    }
+    return (parts[0]?.[0] || 'S').toUpperCase();
+  };
 
   return (
     <div className="tch-dash-bg max-w-7xl mx-auto space-y-6 md:space-y-8 pb-28 lg:pb-10 animate-fadeIn px-3 sm:px-6 lg:px-8 mt-2 md:mt-0">
@@ -906,7 +971,7 @@ export default function TeacherDashboard() {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 4. RECENT SUBMISSIONS                                           */}
+      {/* 📌 4. RECENT SUBMISSIONS (បង្ហាញតែអក្សរកាត់ មិនទាញរូបភាពឱ្យធ្ងន់)     */}
       {/* ================================================================== */}
       
       {/* 💻 Desktop View: TABLE */}
@@ -969,16 +1034,7 @@ export default function TeacherDashboard() {
                 </tr>
               ) : (
                 recentActivities.map((act, index) => {
-                  const rawAvatar =
-                    TEACHER_DASH_MEM_CACHE.avatarMap[act.id] ||
-                    act.student_image ||
-                    act.profile_image ||
-                    act.student?.profile_image ||
-                    act.student?.user?.profile_image;
-                  const avatarUrl = getProfileImageUrl(rawAvatar);
-                  const avatarKey = `act_${act.id || index}`;
-                  const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
-                  const initial = (act.student_name?.[0] || 'S').toUpperCase();
+                  const initial = getStudentInitials(act.student_name);
                   return (
                     <tr
                       key={`desk-${act.id || index}`}
@@ -986,24 +1042,8 @@ export default function TeacherDashboard() {
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-3.5">
-                          <div className="tch-avatar w-10 h-10 rounded-full bg-indigo-500 text-white flex items-center justify-center font-black shrink-0 overflow-hidden shadow-xs">
-                            {hasAvatar ? (
-                              <img
-                                src={avatarUrl}
-                                alt={act.student_name}
-                                loading="lazy"
-                                decoding="async"
-                                className="h-full w-full object-cover rounded-full"
-                                onError={() =>
-                                  setFailedAvatars((prev) => ({
-                                    ...prev,
-                                    [avatarKey]: true,
-                                  }))
-                                }
-                              />
-                            ) : (
-                              <span>{initial}</span>
-                            )}
+                          <div className="tch-avatar w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-xs">
+                            <span>{initial}</span>
                           </div>
                           <div>
                             <div className="tch-text-primary font-extrabold text-gray-900">
@@ -1076,40 +1116,15 @@ export default function TeacherDashboard() {
             </div>
           ) : (
             recentActivities.map((act, index) => {
-              const rawAvatar =
-                TEACHER_DASH_MEM_CACHE.avatarMap[act.id] ||
-                act.student_image ||
-                act.profile_image ||
-                act.student?.profile_image ||
-                act.student?.user?.profile_image;
-              const avatarUrl = getProfileImageUrl(rawAvatar);
-              const avatarKey = `act_${act.id || index}`;
-              const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
-              const initial = (act.student_name?.[0] || 'S').toUpperCase();
+              const initial = getStudentInitials(act.student_name);
               return (
                 <Link
                   key={`mob-${act.id || index}`}
                   to="/assignments"
                   className="tch-surface-card bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3.5 active:scale-[0.98] transition-transform"
                 >
-                  <div className="w-11 h-11 rounded-full bg-indigo-500 text-white flex items-center justify-center font-black text-base shrink-0 overflow-hidden shadow-xs">
-                    {hasAvatar ? (
-                      <img
-                        src={avatarUrl}
-                        alt={act.student_name}
-                        loading="lazy"
-                        decoding="async"
-                        className="h-full w-full object-cover rounded-full"
-                        onError={() =>
-                          setFailedAvatars((prev) => ({
-                            ...prev,
-                            [avatarKey]: true,
-                          }))
-                        }
-                      />
-                    ) : (
-                      <span>{initial}</span>
-                    )}
+                  <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-white flex items-center justify-center font-black text-sm shrink-0 shadow-xs">
+                    <span>{initial}</span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <h4 className="tch-text-primary font-black text-sm text-gray-900 truncate">
@@ -1138,7 +1153,6 @@ export default function TeacherDashboard() {
       {/* 📌 5. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
       {/* ================================================================== */}
       <style>{`
-        /* Light mode subtle row dividers */
         .tch-table-row + .tch-table-row > td {
           border-top: 1px solid #f1f5f9;
         }
