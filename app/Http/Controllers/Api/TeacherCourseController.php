@@ -15,32 +15,53 @@ use Illuminate\Support\Facades\Log;
 class TeacherCourseController extends Controller
 {
     /**
-     * ទាញយកកំណត់ត្រាគ្រូបង្រៀនពីតារាង teachers ដោយផ្អែកលើ user_id ឬ email
+     * ✅ រក្សាទុកកំណត់ត្រាគ្រូក្នុង Request Memory ដើម្បីកុំឱ្យរត់ Query ស្ទួនៗ
      */
-    private function resolveTeacherRecord($user): ?Teacher
+    private ?Teacher $cachedTeacher = null;
+    private bool $teacherResolved = false;
+
+    /**
+     * ទាញយកកំណត់ត្រាគ្រូបង្រៀនពីតារាង teachers ដោយផ្អែកលើ user_id ឬ email (តែ ១ ដងគត់ក្នុង ១ Request)
+     */
+    private function resolveTeacherRecord($user = null): ?Teacher
     {
+        $user = $user ?: Auth::user();
         if (!$user) {
             return null;
         }
 
+        if ($this->teacherResolved) {
+            return $this->cachedTeacher;
+        }
+
         if ($user->relationLoaded('teacher') && $user->teacher) {
-            return $user->teacher;
+            $this->cachedTeacher = $user->teacher;
+            $this->teacherResolved = true;
+            return $this->cachedTeacher;
         }
 
-        $teacher = Teacher::where('user_id', $user->id)->first();
+        $teacher = Teacher::select('id', 'user_id', 'department_id', 'first_name', 'last_name', 'email')
+            ->where('user_id', $user->id)
+            ->first();
+
         if (!$teacher && !empty($user->email)) {
-            $teacher = Teacher::where('email', $user->email)->first();
+            $teacher = Teacher::select('id', 'user_id', 'department_id', 'first_name', 'last_name', 'email')
+                ->where('email', $user->email)
+                ->first();
         }
 
-        return $teacher;
+        $this->cachedTeacher = $teacher;
+        $this->teacherResolved = true;
+
+        return $this->cachedTeacher;
     }
 
     /**
      * ទាញយកបញ្ជី ID របស់គ្រូបង្រៀន (គាំទ្រទាំង teachers.id និង users.id)
      */
-    private function getTeacherIds(): array
+    private function getTeacherIds($user = null): array
     {
-        $user = Auth::user();
+        $user = $user ?: Auth::user();
         $teacher = $this->resolveTeacherRecord($user);
 
         return array_values(array_unique(array_filter([
@@ -90,7 +111,7 @@ class TeacherCourseController extends Controller
         try {
             $user = Auth::user();
             $teacher = $this->resolveTeacherRecord($user);
-            $teacherIds = $this->getTeacherIds();
+            $teacherIds = $this->getTeacherIds($user);
 
             if (empty($teacherIds)) {
                 return response()->json([
@@ -98,9 +119,15 @@ class TeacherCourseController extends Controller
                 ], 403);
             }
 
-            $query = Course::with(['department'])
+            $query = Course::with(['department:id,department_name,department_code'])
                 ->withCount([
-                    'enrollments as students_count',
+                    'enrollments as students_count' => function ($q) {
+                        $q->where(function ($sub) {
+                            $sub->whereNull('status')
+                                ->orWhere('status', 'active')
+                                ->orWhere('status', '');
+                        });
+                    },
                     'lessons',
                     'assignments',
                     'quizzes',
@@ -167,9 +194,15 @@ class TeacherCourseController extends Controller
                 return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
             }
 
-            $course = Course::with(['department'])
+            $course = Course::with(['department:id,department_name,department_code'])
                 ->withCount([
-                    'enrollments as students_count',
+                    'enrollments as students_count' => function ($q) {
+                        $q->where(function ($sub) {
+                            $sub->whereNull('status')
+                                ->orWhere('status', 'active')
+                                ->orWhere('status', '');
+                        });
+                    },
                     'lessons',
                     'assignments',
                     'quizzes',
@@ -202,7 +235,7 @@ class TeacherCourseController extends Controller
         try {
             $user = Auth::user();
             $teacher = $this->resolveTeacherRecord($user);
-            $teacherIds = $this->getTeacherIds();
+            $teacherIds = $this->getTeacherIds($user);
 
             if (empty($teacherIds)) {
                 return response()->json([
@@ -210,7 +243,9 @@ class TeacherCourseController extends Controller
                 ], 403);
             }
 
-            $courses = Course::whereIn('teacher_id', $teacherIds)->get();
+            $courses = Course::select('id', 'credit', 'department_id', 'teacher_id')
+                ->whereIn('teacher_id', $teacherIds)
+                ->get();
 
             $totalCourses = $courses->count();
             $totalCredits = (int) $courses->sum('credit');
@@ -268,9 +303,15 @@ class TeacherCourseController extends Controller
                 return $this->index($request);
             }
 
-            $courses = Course::with(['department'])
+            $courses = Course::with(['department:id,department_name,department_code'])
                 ->withCount([
-                    'enrollments as students_count',
+                    'enrollments as students_count' => function ($q) {
+                        $q->where(function ($sub) {
+                            $sub->whereNull('status')
+                                ->orWhere('status', 'active')
+                                ->orWhere('status', '');
+                        });
+                    },
                     'lessons',
                     'assignments',
                     'quizzes',

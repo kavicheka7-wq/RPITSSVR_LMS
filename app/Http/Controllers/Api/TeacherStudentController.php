@@ -19,7 +19,13 @@ use Illuminate\Support\Facades\Log;
 class TeacherStudentController extends Controller
 {
     /**
-     * ទាញយកកំណត់ត្រាគ្រូបង្រៀនពីតារាង teachers ដោយផ្អែកលើ user_id ឬ email
+     * ✅ រក្សាទុកកំណត់ត្រាគ្រូក្នុង Request Memory ដើម្បីកុំឱ្យរត់ Query ស្ទួនៗ
+     */
+    private ?Teacher $cachedTeacher = null;
+    private bool $teacherResolved = false;
+
+    /**
+     * ទាញយកកំណត់ត្រាគ្រូបង្រៀនពីតារាង teachers ដោយផ្អែកលើ user_id ឬ email (តែ ១ ដងគត់)
      */
     private function resolveTeacherRecord(): ?Teacher
     {
@@ -28,16 +34,30 @@ class TeacherStudentController extends Controller
             return null;
         }
 
+        if ($this->teacherResolved) {
+            return $this->cachedTeacher;
+        }
+
         if ($user->relationLoaded('teacher') && $user->teacher) {
-            return $user->teacher;
+            $this->cachedTeacher = $user->teacher;
+            $this->teacherResolved = true;
+            return $this->cachedTeacher;
         }
 
-        $teacher = Teacher::where('user_id', $user->id)->first();
+        $teacher = Teacher::select('id', 'user_id', 'department_id', 'first_name', 'last_name', 'email')
+            ->where('user_id', $user->id)
+            ->first();
+
         if (!$teacher && !empty($user->email)) {
-            $teacher = Teacher::where('email', $user->email)->first();
+            $teacher = Teacher::select('id', 'user_id', 'department_id', 'first_name', 'last_name', 'email')
+                ->where('email', $user->email)
+                ->first();
         }
 
-        return $teacher;
+        $this->cachedTeacher = $teacher;
+        $this->teacherResolved = true;
+
+        return $this->cachedTeacher;
     }
 
     /**
@@ -54,29 +74,7 @@ class TeacherStudentController extends Controller
     }
 
     /**
-     * ទាញយកបញ្ជីដេប៉ាតឺម៉ង់របស់គ្រូបង្រៀន និងដេប៉ាតឺម៉ង់នៃមុខវិជ្ជាដែលគ្រូបង្រៀន
-     */
-    private function getTeacherDepartmentIds(): array
-    {
-        $teacher = $this->resolveTeacherRecord();
-        $deptIds = [];
-        if ($teacher && $teacher->department_id) {
-            $deptIds[] = (int) $teacher->department_id;
-        }
-
-        $courseDeptIds = Course::whereIn('teacher_id', $this->getTeacherIds())
-            ->whereNotNull('department_id')
-            ->pluck('department_id')
-            ->map(function ($id) {
-                return (int) $id;
-            })
-            ->toArray();
-
-        return array_values(array_unique(array_merge($deptIds, $courseDeptIds)));
-    }
-
-    /**
-     * បង្កើតតារាងផ្គូផ្គងរវាង course_id និងបញ្ជី students.id ដែលបានចុះឈ្មោះក្នុងមុខវិជ្ជានីមួយៗយ៉ាងត្រឹមត្រូវ ១០០%
+     * បង្កើតតារាងផ្គូផ្គងរវាង course_id និងបញ្ជី students.id ដែលបានចុះឈ្មោះក្នុងមុខវិជ្ជានីមួយៗយ៉ាងលឿនបំផុត
      */
     private function buildCourseToStudentIdsMap(array $courseIds): array
     {
@@ -84,9 +82,10 @@ class TeacherStudentController extends Controller
             return [];
         }
 
-        $allStudents = Student::all(['id', 'user_id', 'department_id']);
-        $studentsById = $allStudents->keyBy('id');
-        $studentsByUserId = $allStudents->whereNotNull('user_id')->keyBy('user_id');
+        $courseMap = [];
+        foreach ($courseIds as $cid) {
+            $courseMap[(int) $cid] = [];
+        }
 
         $enrollments = Enrollment::whereIn('course_id', $courseIds)
             ->where(function ($q) {
@@ -101,7 +100,26 @@ class TeacherStudentController extends Controller
                 ->get(['course_id', 'student_id']);
         }
 
-        // ពិនិត្យមើលថាតើតារាង enrollments រក្សាទុក student_id ជា students.id ដាច់ដោយឡែកឬអត់
+        if ($enrollments->isEmpty()) {
+            return $courseMap;
+        }
+
+        $rawEnrolledIds = $enrollments->pluck('student_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        // ✅ ទាញតែសិស្សណាដែលពាក់ព័ន្ធនឹងការចុះឈ្មោះក្នុងមុខវិជ្ជាទាំងនេះប៉ុណ្ណោះ (មិនប្រើ Student::all() ទាញសិស្សទូទាំងសាលាទេ)
+        $matchedStudents = Student::select('id', 'user_id', 'department_id')
+            ->whereIn('id', $rawEnrolledIds)
+            ->orWhereIn('user_id', $rawEnrolledIds)
+            ->get();
+
+        $studentsById = $matchedStudents->keyBy('id');
+        $studentsByUserId = $matchedStudents->whereNotNull('user_id')->keyBy('user_id');
+
         $onlyMatchesStudentPK = false;
         foreach ($enrollments as $enr) {
             $v = (int) $enr->student_id;
@@ -111,18 +129,12 @@ class TeacherStudentController extends Controller
             }
         }
 
-        $courseMap = [];
-        foreach ($courseIds as $cid) {
-            $courseMap[(int) $cid] = [];
-        }
-
         foreach ($enrollments as $enr) {
             $cid = (int) $enr->course_id;
             $val = (int) $enr->student_id;
 
             $resolvedStudentId = null;
 
-            // ✅ អាទិភាពទី១៖ ផ្គូផ្គងតាម users.id ជាមុន (ព្រោះ Course::students() ភ្ជាប់ជាមួយ users.id)
             if (!$onlyMatchesStudentPK && isset($studentsByUserId[$val])) {
                 $resolvedStudentId = (int) $studentsByUserId[$val]->id;
             } elseif (isset($studentsById[$val])) {
@@ -150,24 +162,32 @@ class TeacherStudentController extends Controller
     public function index(?Request $request = null)
     {
         try {
+            $teacher = $this->resolveTeacherRecord();
             $teacherIds = $this->getTeacherIds();
-            $teacherDeptIds = $this->getTeacherDepartmentIds();
 
+            // ✅ ទាញមុខវិជ្ជារបស់គ្រូតែ ១ ដងគត់ រួចស្រង់យកទាំង courseIds និង departmentIds
             $teacherCourses = Course::whereIn('teacher_id', $teacherIds)
                 ->get(['id', 'course_code', 'course_name', 'department_id']);
 
             $teacherCourseIds = $teacherCourses->pluck('id')
-                ->map(function ($id) {
-                    return (int) $id;
-                })
+                ->map(fn ($id) => (int) $id)
                 ->toArray();
+
+            $deptIds = [];
+            if ($teacher && $teacher->department_id) {
+                $deptIds[] = (int) $teacher->department_id;
+            }
+            $courseDeptIds = $teacherCourses->pluck('department_id')
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->toArray();
+            $teacherDeptIds = array_values(array_unique(array_merge($deptIds, $courseDeptIds)));
 
             $coursesById = $teacherCourses->keyBy('id');
             $courseToStudentIdsMap = $this->buildCourseToStudentIdsMap($teacherCourseIds);
 
             $filterCourseId = $request ? $request->input('course_id') : null;
 
-            // ✅ កំណត់បញ្ជី students.id ដែលត្រូវទាញយក (រួមបញ្ចូលទាំងសិស្សក្នុងដេប៉ាតឺម៉ង់របស់គ្រូទាំងអស់)
             if (!empty($filterCourseId) && $filterCourseId !== 'all') {
                 $targetCid = (int) $filterCourseId;
                 $studentIds = $courseToStudentIdsMap[$targetCid] ?? [];
@@ -181,9 +201,7 @@ class TeacherStudentController extends Controller
                 if (!empty($teacherDeptIds)) {
                     $deptStudentIds = Student::whereIn('department_id', $teacherDeptIds)
                         ->pluck('id')
-                        ->map(function ($id) {
-                            return (int) $id;
-                        })
+                        ->map(fn ($id) => (int) $id)
                         ->toArray();
                 }
 
@@ -240,7 +258,6 @@ class TeacherStudentController extends Controller
                 $total = $students->count();
             }
 
-            // បង្កើតបញ្ជីមុខវិជ្ជារបស់គ្រូដែលសិស្សម្នាក់ៗបានចុះឈ្មោះ
             $studentEnrolledCourses = [];
             foreach ($courseToStudentIdsMap as $cid => $sIds) {
                 foreach ($sIds as $sid) {
@@ -295,11 +312,11 @@ class TeacherStudentController extends Controller
                         'name' => $student->department->department_name,
                         'department_name' => $student->department->department_name,
                     ] : null,
+                    // ✅ មិនដាក់រូបភាព Base64 ស្ទួននៅក្នុង user ម្ដងទៀតទេ (ព្រោះមាននៅលើ profile_image ខាងលើរួចហើយ) កាត់បន្ថយទំហំទិន្នន័យបាន ៥០% ភ្លាមៗ!
                     'user' => $student->user ? [
                         'id' => $student->user->id,
                         'status' => $student->user->status,
                         'email' => $student->user->email,
-                        'profile_image' => $resolvedImage,
                     ] : null,
                     'status' => $student->user ? $student->user->status : 'active',
                 ];
@@ -337,13 +354,20 @@ class TeacherStudentController extends Controller
     public function getCount()
     {
         try {
+            $teacher = $this->resolveTeacherRecord();
             $teacherIds = $this->getTeacherIds();
-            $teacherDeptIds = $this->getTeacherDepartmentIds();
 
-            $courses = Course::whereIn('teacher_id', $teacherIds)->get(['id', 'course_code', 'course_name']);
-            $courseIds = $courses->pluck('id')->map(function ($id) {
-                return (int) $id;
-            })->toArray();
+            $courses = Course::whereIn('teacher_id', $teacherIds)
+                ->get(['id', 'course_code', 'course_name', 'department_id']);
+
+            $courseIds = $courses->pluck('id')->map(fn ($id) => (int) $id)->toArray();
+
+            $deptIds = [];
+            if ($teacher && $teacher->department_id) {
+                $deptIds[] = (int) $teacher->department_id;
+            }
+            $courseDeptIds = $courses->pluck('department_id')->filter()->map(fn ($id) => (int) $id)->toArray();
+            $teacherDeptIds = array_values(array_unique(array_merge($deptIds, $courseDeptIds)));
 
             $courseMap = $this->buildCourseToStudentIdsMap($courseIds);
             $allEnrolled = [];
@@ -389,7 +413,11 @@ class TeacherStudentController extends Controller
     public function show($studentId)
     {
         try {
-            $student = Student::with(['department', 'user', 'role'])
+            $student = Student::with([
+                'department:id,department_name',
+                'user:id,status,email,profile_image',
+                'role:id,role_name',
+            ])
                 ->where(function ($q) use ($studentId) {
                     $q->where('id', $studentId)
                       ->orWhere('user_id', $studentId);

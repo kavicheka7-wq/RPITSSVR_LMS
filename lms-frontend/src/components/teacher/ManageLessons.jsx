@@ -27,7 +27,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីគ្រូម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីគ្រូម្នាក់ៗ (User-Scoped 0ms Slim Cache)
 // ============================================================================
 const CACHE_KEY_SHARED_LESSONS = 'cached_teacher_lessons_list_v6';
 const CACHE_KEY_SHARED_COURSES = 'cached_teacher_courses_list_v6';
@@ -60,19 +60,90 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
-const resolveTeacherUid = (contextUser) => {
-  if (contextUser) {
+// ✅ លុបជួរឈរ file_data (Base64 ធំៗ) ចេញពីមេរៀនមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
+const stripHeavyDataFromLessons = (lessonsList) => {
+  if (!Array.isArray(lessonsList)) return [];
+  return lessonsList.map((lsn) => {
+    if (!lsn || typeof lsn !== 'object') return lsn;
+    const copy = { ...lsn };
+    if (Array.isArray(copy.files)) {
+      copy.files = copy.files.map((f) => {
+        if (!f || typeof f !== 'object') return f;
+        const { file_data, ...restFile } = f;
+        return restFile;
+      });
+    }
+    return copy;
+  });
+};
+
+// ✅ លុបរូបភាព Base64 ធំៗចេញពីបញ្ជីសិស្សមុនពេល Save ចូល localStorage
+const stripHeavyDataFromStudents = (studentsList) => {
+  if (!Array.isArray(studentsList)) return [];
+  return studentsList.map((stu) => {
+    if (!stu || typeof stu !== 'object') return stu;
+    const copy = { ...stu };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 15000
+    ) {
+      copy.profile_image = null;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      copy.user = {
+        id: copy.user.id,
+        status: copy.user.status,
+        email: copy.user.email,
+      };
+    }
+    return copy;
+  });
+};
+
+const safeSaveLessonsCache = (uid, lessonsList) => {
+  const slim = stripHeavyDataFromLessons(lessonsList);
+  try {
+    localStorage.setItem(getLessonsCacheKey(uid), JSON.stringify(slim));
+    localStorage.setItem(CACHE_KEY_SHARED_LESSONS, JSON.stringify(slim));
+  } catch {}
+};
+
+const safeSaveCoursesCache = (uid, coursesList) => {
+  if (!Array.isArray(coursesList)) return;
+  try {
+    localStorage.setItem(getCoursesCacheKey(uid), JSON.stringify(coursesList));
+    localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(coursesList));
+  } catch {}
+};
+
+const safeSaveStudentsCache = (uid, studentsList) => {
+  const slim = stripHeavyDataFromStudents(studentsList);
+  try {
+    localStorage.setItem(getStudentsCacheKey(uid), JSON.stringify(slim));
+    localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, JSON.stringify(slim));
+  } catch {}
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+const resolveTeacherUid = (contextUser, contextTeacher) => {
+  const target = contextUser || contextTeacher;
+  if (target) {
     const id =
-      contextUser.id ||
-      contextUser.user_id ||
-      contextUser.teacher?.id ||
-      contextUser.email;
+      target.id ||
+      target.user_id ||
+      target.teacher?.id ||
+      target.email;
     if (id) return String(id);
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('teacher') ||
+      localStorage.getItem('teacher');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -172,7 +243,10 @@ const isStudentEnrolledInCourse = (student, courseId, courseMap) => {
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+      sessionStorage.getItem('auth_user') ||
+      sessionStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      localStorage.getItem('user');
     let uid = 'default';
     let role = 'teacher';
     if (userObjStr) {
@@ -218,7 +292,7 @@ const pushLocalNotification = (notif) => {
 
 export default function ManageLessons() {
   const { t } = useLanguage();
-  const { user } = useAuth();
+  const { user, teacher } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
 
@@ -226,7 +300,10 @@ export default function ManageLessons() {
     searchParams.get('course_id') || location.state?.courseId || '';
 
   // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
-  const currentTeacherId = useMemo(() => resolveTeacherUid(user), [user]);
+  const currentTeacherId = useMemo(
+    () => resolveTeacherUid(user, teacher),
+    [user, teacher]
+  );
 
   // បើប្ដូរគណនីគ្រូ ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
   if (
@@ -349,6 +426,16 @@ export default function ManageLessons() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [youtubeVideo, setYoutubeVideo] = useState({ title: '', url: '' });
 
+  // ✅ សម្អាតប្រអប់វាយចំណងជើងវីដេអូរាល់ពេលប្ដូរកាតមេរៀនដែលបើក
+  const handleToggleExpandLesson = useCallback((lessonId) => {
+    setExpandedLesson((prev) => {
+      const next = prev === lessonId ? null : lessonId;
+      setVideoTitle('');
+      setVideoUrlInput('');
+      return next;
+    });
+  }, []);
+
   // បើគ្រូចុចចូលតាមផ្លូវកាត់ដែលមាន course_id ឱ្យចាប់យកកាតឆ្នាំសិក្សារបស់មុខវិជ្ជានោះដោយស្វ័យប្រវត្តិ
   useEffect(() => {
     if (initialRouteCourseId && allStudents.length > 0) {
@@ -408,20 +495,13 @@ export default function ManageLessons() {
       .then((lsnRes) => {
         if (!isMounted) return;
         const rawLsn = lsnRes.data?.data || lsnRes.data || [];
-        const validLessons = Array.isArray(rawLsn) ? rawLsn : [];
+        const validLessons = stripHeavyDataFromLessons(
+          Array.isArray(rawLsn) ? rawLsn : []
+        );
         setLessons(validLessons);
         LESSONS_MEM_CACHE.lessons = validLessons;
         LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
-        try {
-          localStorage.setItem(
-            getLessonsCacheKey(currentTeacherId),
-            JSON.stringify(validLessons)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_LESSONS,
-            JSON.stringify(validLessons)
-          );
-        } catch (e) {}
+        safeSaveLessonsCache(currentTeacherId, validLessons);
       })
       .catch((err) => {
         console.error('Error fetching lessons:', err);
@@ -436,16 +516,7 @@ export default function ManageLessons() {
         const validCourses = Array.isArray(rawCrs) ? rawCrs : [];
         setCourses(validCourses);
         LESSONS_MEM_CACHE.courses = validCourses;
-        try {
-          localStorage.setItem(
-            getCoursesCacheKey(currentTeacherId),
-            JSON.stringify(validCourses)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_COURSES,
-            JSON.stringify(validCourses)
-          );
-        } catch (e) {}
+        safeSaveCoursesCache(currentTeacherId, validCourses);
       })
       .catch(() => {});
 
@@ -459,19 +530,12 @@ export default function ManageLessons() {
         .then((stdRes) => {
           if (!isMounted) return;
           const rawStd = stdRes.data?.data || stdRes.data || [];
-          const validStudents = Array.isArray(rawStd) ? rawStd : [];
+          const validStudents = stripHeavyDataFromStudents(
+            Array.isArray(rawStd) ? rawStd : []
+          );
           setAllStudents(validStudents);
           LESSONS_MEM_CACHE.allStudents = validStudents;
-          try {
-            localStorage.setItem(
-              getStudentsCacheKey(currentTeacherId),
-              JSON.stringify(validStudents)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_STUDENTS,
-              JSON.stringify(validStudents)
-            );
-          } catch (e) {}
+          safeSaveStudentsCache(currentTeacherId, validStudents);
 
           if (stdRes.data?.course_students_map) {
             setCourseMap(stdRes.data.course_students_map);
@@ -500,17 +564,13 @@ export default function ManageLessons() {
     try {
       const response = await api.get('/teacher/lessons');
       const lessonsData = response.data?.data || response.data || [];
-      const validLessons = Array.isArray(lessonsData) ? lessonsData : [];
+      const validLessons = stripHeavyDataFromLessons(
+        Array.isArray(lessonsData) ? lessonsData : []
+      );
       setLessons(validLessons);
       LESSONS_MEM_CACHE.lessons = validLessons;
       LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
-      try {
-        localStorage.setItem(
-          getLessonsCacheKey(currentTeacherId),
-          JSON.stringify(validLessons)
-        );
-        localStorage.setItem(CACHE_KEY_SHARED_LESSONS, JSON.stringify(validLessons));
-      } catch (e) {}
+      safeSaveLessonsCache(currentTeacherId, validLessons);
     } catch (error) {
       console.error('Error fetching lessons:', error);
     }
@@ -902,13 +962,7 @@ export default function ManageLessons() {
     setLessons((prev) => {
       const updated = prev.filter((l) => l.id !== deletedId);
       LESSONS_MEM_CACHE.lessons = updated;
-      try {
-        localStorage.setItem(
-          getLessonsCacheKey(currentTeacherId),
-          JSON.stringify(updated)
-        );
-        localStorage.setItem(CACHE_KEY_SHARED_LESSONS, JSON.stringify(updated));
-      } catch (e) {}
+      safeSaveLessonsCache(currentTeacherId, updated);
       return updated;
     });
 
@@ -926,16 +980,7 @@ export default function ManageLessons() {
     } catch (error) {
       setLessons(previousLessons);
       LESSONS_MEM_CACHE.lessons = previousLessons;
-      try {
-        localStorage.setItem(
-          getLessonsCacheKey(currentTeacherId),
-          JSON.stringify(previousLessons)
-        );
-        localStorage.setItem(
-          CACHE_KEY_SHARED_LESSONS,
-          JSON.stringify(previousLessons)
-        );
-      } catch (e) {}
+      safeSaveLessonsCache(currentTeacherId, previousLessons);
       console.error('Cannot delete lesson:', error);
     }
   };
@@ -1083,13 +1128,7 @@ export default function ManageLessons() {
             : [],
         }));
         LESSONS_MEM_CACHE.lessons = updated;
-        try {
-          localStorage.setItem(
-            getLessonsCacheKey(currentTeacherId),
-            JSON.stringify(updated)
-          );
-          localStorage.setItem(CACHE_KEY_SHARED_LESSONS, JSON.stringify(updated));
-        } catch (e) {}
+        safeSaveLessonsCache(currentTeacherId, updated);
         return updated;
       });
 
@@ -1107,12 +1146,7 @@ export default function ManageLessons() {
       } catch (error) {
         setLessons(previousLessons);
         LESSONS_MEM_CACHE.lessons = previousLessons;
-        try {
-          localStorage.setItem(
-            getLessonsCacheKey(currentTeacherId),
-            JSON.stringify(previousLessons)
-          );
-        } catch (e) {}
+        safeSaveLessonsCache(currentTeacherId, previousLessons);
         console.error('Cannot delete file:', error);
       }
     } else if (type === 'video') {
@@ -1124,13 +1158,7 @@ export default function ManageLessons() {
             : [],
         }));
         LESSONS_MEM_CACHE.lessons = updated;
-        try {
-          localStorage.setItem(
-            getLessonsCacheKey(currentTeacherId),
-            JSON.stringify(updated)
-          );
-          localStorage.setItem(CACHE_KEY_SHARED_LESSONS, JSON.stringify(updated));
-        } catch (e) {}
+        safeSaveLessonsCache(currentTeacherId, updated);
         return updated;
       });
 
@@ -1148,12 +1176,7 @@ export default function ManageLessons() {
       } catch (error) {
         setLessons(previousLessons);
         LESSONS_MEM_CACHE.lessons = previousLessons;
-        try {
-          localStorage.setItem(
-            getLessonsCacheKey(currentTeacherId),
-            JSON.stringify(previousLessons)
-          );
-        } catch (e) {}
+        safeSaveLessonsCache(currentTeacherId, previousLessons);
         console.error('Cannot delete video:', error);
       }
     }
@@ -1516,7 +1539,10 @@ export default function ManageLessons() {
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder=""
+              placeholder={t(
+                'ស្វែងរកមេរៀន ឬមុខវិជ្ជា...',
+                'Search lessons or courses...'
+              )}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="lsn-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
@@ -1641,9 +1667,7 @@ export default function ManageLessons() {
                     {/* ផ្ទៃកាតខាងលើ (Main Card Info) */}
                     <div
                       className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-5 cursor-pointer"
-                      onClick={() =>
-                        setExpandedLesson(isExpanded ? null : lesson.id)
-                      }
+                      onClick={() => handleToggleExpandLesson(lesson.id)}
                     >
                       <div className="flex items-start gap-4 flex-1 min-w-0">
                         <div
@@ -1720,9 +1744,7 @@ export default function ManageLessons() {
                           </button>
                           <button
                             type="button"
-                            onClick={() =>
-                              setExpandedLesson(isExpanded ? null : lesson.id)
-                            }
+                            onClick={() => handleToggleExpandLesson(lesson.id)}
                             className={`lsn-expand-btn p-2 rounded-xl transition-all cursor-pointer ${
                               isExpanded
                                 ? 'bg-gray-100 text-gray-800'
@@ -1937,7 +1959,10 @@ export default function ManageLessons() {
                                 <div className="lsn-video-input-box flex gap-2 p-1.5 bg-purple-50/50 border border-purple-100 rounded-2xl focus-within:ring-2 focus-within:ring-purple-300 transition-all">
                                   <input
                                     type="text"
-                                    placeholder=""
+                                    placeholder={t(
+                                      'បញ្ចូលចំណងជើងវីដេអូមុនផ្ទុកឡើង...',
+                                      'Enter video title before uploading...'
+                                    )}
                                     value={videoTitle}
                                     onChange={(e) => setVideoTitle(e.target.value)}
                                     className="lsn-transparent-input flex-1 px-4 py-2.5 text-sm font-semibold border-none bg-transparent focus:outline-none focus:ring-0 text-gray-800 placeholder-gray-400"
@@ -1963,7 +1988,10 @@ export default function ManageLessons() {
                                 <div className="space-y-2">
                                   <input
                                     type="text"
-                                    placeholder=""
+                                    placeholder={t(
+                                      'ចំណងជើងវីដេអូ...',
+                                      'Video title...'
+                                    )}
                                     value={videoTitle}
                                     onChange={(e) => setVideoTitle(e.target.value)}
                                     className="lsn-input w-full px-3.5 py-2 text-xs font-semibold border border-purple-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -1971,7 +1999,7 @@ export default function ManageLessons() {
                                   <div className="flex gap-2">
                                     <input
                                       type="url"
-                                      placeholder=""
+                                      placeholder="https://www.youtube.com/watch?v=..."
                                       value={videoUrlInput}
                                       onChange={(e) =>
                                         setVideoUrlInput(e.target.value)
@@ -2096,7 +2124,10 @@ export default function ManageLessons() {
                     required
                     value={formData.title}
                     onChange={handleInputChange}
-                    placeholder=""
+                    placeholder={t(
+                      'បញ្ចូលចំណងជើងមេរៀន...',
+                      'Enter lesson title...'
+                    )}
                     className="lsn-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                   />
                 </div>
@@ -2169,7 +2200,7 @@ export default function ManageLessons() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <input
                       type="text"
-                      placeholder=""
+                      placeholder={t('ចំណងជើងវីដេអូ...', 'Video title...')}
                       value={youtubeVideo.title}
                       onChange={(e) =>
                         setYoutubeVideo({ ...youtubeVideo, title: e.target.value })
@@ -2182,7 +2213,7 @@ export default function ManageLessons() {
                       </div>
                       <input
                         type="url"
-                        placeholder=""
+                        placeholder="https://www.youtube.com/watch?v=..."
                         value={youtubeVideo.url}
                         onChange={(e) =>
                           setYoutubeVideo({ ...youtubeVideo, url: e.target.value })

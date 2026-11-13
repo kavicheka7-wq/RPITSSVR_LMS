@@ -22,6 +22,37 @@ use Illuminate\Validation\ValidationException;
 class TeacherLessonController extends Controller
 {
     /**
+     * ✅ HELPER: កំណត់ទំនាក់ទំនង (Eager Load Relations) ដោយមិនទាញយកជួរឈរ file_data (Base64 ធំៗ) មកជាមួយដាច់ខាត
+     */
+    private function lessonRelations(): array
+    {
+        return [
+            'course:id,course_code,course_name,department_id,teacher_id,credit',
+            'files' => function ($q) {
+                $cols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
+                if (Schema::hasColumn('lesson_files', 'mime_type')) {
+                    $cols[] = 'mime_type';
+                }
+                $q->select($cols);
+            },
+            'videos:id,lesson_id,title,video_url,duration,created_at,updated_at',
+        ];
+    }
+
+    /**
+     * ✅ HELPER: សម្អាត Cache ស្ថិតិរបស់គ្រូ និង Admin ពេលមានការបន្ថែម/កែ/លុបមេរៀន
+     */
+    private function clearRelatedCaches(): void
+    {
+        $uid = Auth::id();
+        if ($uid) {
+            Cache::forget("teacher_dashboard_v2_{$uid}");
+        }
+        Cache::forget('admin_overview_report');
+        Cache::forget('admin_dashboard_stats');
+    }
+
+    /**
      * ទាញយកបញ្ជី ID ទាំងអស់របស់គ្រូបង្រៀន (ទាំង teachers.id និង users.id)
      */
     private function resolveTeacherIds(): array
@@ -33,10 +64,10 @@ class TeacherLessonController extends Controller
 
         $teacher = ($user->relationLoaded('teacher') && $user->teacher)
             ? $user->teacher
-            : Teacher::where('user_id', $user->id)->first();
+            : Teacher::select('id', 'user_id', 'email')->where('user_id', $user->id)->first();
 
         if (!$teacher && !empty($user->email)) {
-            $teacher = Teacher::where('email', $user->email)->first();
+            $teacher = Teacher::select('id', 'user_id', 'email')->where('email', $user->email)->first();
         }
 
         return array_values(array_unique(array_filter([
@@ -88,7 +119,7 @@ class TeacherLessonController extends Controller
                 ]);
             }
 
-            $query = Lesson::with(['course', 'files', 'videos'])
+            $query = Lesson::with($this->lessonRelations())
                 ->where(function ($q) use ($courseIds) {
                     $q->whereIn('course_id', $courseIds)
                       ->orWhere('created_by', Auth::id());
@@ -149,7 +180,7 @@ class TeacherLessonController extends Controller
         try {
             $course = $this->checkCourseOwnership($courseId);
 
-            $lessons = Lesson::with(['course', 'files', 'videos'])
+            $lessons = Lesson::with($this->lessonRelations())
                 ->where('course_id', $courseId)
                 ->orderBy('lesson_order')
                 ->get();
@@ -197,9 +228,9 @@ class TeacherLessonController extends Controller
             $validated['lesson_order'] = $validated['lesson_order'] ?? 0;
 
             $lesson = Lesson::create($validated);
-            $loadedLesson = $lesson->load(['course', 'files', 'videos']);
+            $loadedLesson = $lesson->load($this->lessonRelations());
 
-            Cache::forget('admin_overview_report');
+            $this->clearRelatedCaches();
 
             return response()->json([
                 'lesson' => $loadedLesson,
@@ -249,7 +280,8 @@ class TeacherLessonController extends Controller
                 'description' => $validated['description'] ?? null,
             ]);
 
-            $freshLesson = $lesson->fresh(['course', 'files', 'videos']);
+            $freshLesson = $lesson->load($this->lessonRelations());
+            $this->clearRelatedCaches();
 
             return response()->json([
                 'message' => 'បានកែប្រែមេរៀនដោយជោគជ័យ',
@@ -280,7 +312,7 @@ class TeacherLessonController extends Controller
     public function destroy($id)
     {
         try {
-            $lesson = Lesson::with(['files', 'videos'])->findOrFail($id);
+            $lesson = Lesson::with($this->lessonRelations())->findOrFail($id);
             $this->ensureLessonAccess($lesson);
 
             foreach ($lesson->files as $file) {
@@ -309,7 +341,7 @@ class TeacherLessonController extends Controller
             $lessonTitle = $lesson->title;
             $lesson->delete();
 
-            Cache::forget('admin_overview_report');
+            $this->clearRelatedCaches();
 
             return response()->json([
                 'message' => "បានលុបមេរៀន '{$lessonTitle}' ដោយជោគជ័យ",
@@ -363,6 +395,11 @@ class TeacherLessonController extends Controller
 
             $lessonFile = LessonFile::create($createData);
 
+            // ✅ លាក់ file_data ពេលបញ្ជូន JSON ត្រឡប់ទៅ Frontend វិញ ដើម្បីឱ្យការ Upload ចប់ភ្លាមៗដោយមិនទាញទិន្នន័យធំមកវិញ
+            $lessonFile->makeHidden(['file_data']);
+
+            $this->clearRelatedCaches();
+
             return response()->json([
                 'message' => 'បានផ្ទុកឡើងឯកសារដោយជោគជ័យ',
                 'file' => $lessonFile,
@@ -392,7 +429,7 @@ class TeacherLessonController extends Controller
     public function deleteFile($fileId)
     {
         try {
-            $file = LessonFile::findOrFail($fileId);
+            $file = LessonFile::select('id', 'lesson_id', 'file_name', 'file_path')->findOrFail($fileId);
             $lesson = Lesson::findOrFail($file->lesson_id);
             $this->ensureLessonAccess($lesson);
 
@@ -404,6 +441,8 @@ class TeacherLessonController extends Controller
                 Storage::disk('public')->delete($file->file_path);
             }
             $file->delete();
+
+            $this->clearRelatedCaches();
 
             return response()->json([
                 'message' => 'បានលុបឯកសារដោយជោគជ័យ',
@@ -457,6 +496,8 @@ class TeacherLessonController extends Controller
                 'duration' => $validated['duration'] ?? null,
             ]);
 
+            $this->clearRelatedCaches();
+
             return response()->json([
                 'message' => 'បានផ្ទុកឡើងវីដេអូដោយជោគជ័យ',
                 'video' => $videoRecord,
@@ -500,6 +541,8 @@ class TeacherLessonController extends Controller
             }
             $video->delete();
 
+            $this->clearRelatedCaches();
+
             return response()->json([
                 'message' => 'បានលុបវីដេអូដោយជោគជ័យ',
             ]);
@@ -522,7 +565,7 @@ class TeacherLessonController extends Controller
     public function show($lessonId)
     {
         try {
-            $lesson = Lesson::with(['course', 'files', 'videos'])
+            $lesson = Lesson::with($this->lessonRelations())
                 ->findOrFail($lessonId);
 
             $this->ensureLessonAccess($lesson);
