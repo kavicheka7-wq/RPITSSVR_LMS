@@ -80,8 +80,7 @@ const Login = () => {
   const [mailSent, setMailSent] = useState(false);
   const [telegramLinked, setTelegramLinked] = useState(false);
   const [telegramSent, setTelegramSent] = useState(false);
-  const [telegramLinkUrl, setTelegramLinkUrl] = useState(null);
-  const [waitingTelegramStart, setWaitingTelegramStart] = useState(false);
+  const [unlinkingTelegram, setUnlinkingTelegram] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendingOtp, setResendingOtp] = useState(false);
 
@@ -97,7 +96,6 @@ const Login = () => {
   const newPasswordInputRef = useRef(null);
   const otpInputRefs = useRef([]);
   const lastSubmittedSignatureRef = useRef('');
-  const isCheckingTelegramRef = useRef(false);
 
   const [canShowRegister, setCanShowRegister] = useState(false);
 
@@ -107,7 +105,6 @@ const Login = () => {
     login,
     verifyTwoFactor,
     resendTwoFactor,
-    checkTelegramLinkStatus,
     setUser,
   } = useAuth();
   const { language, toggleLanguage, t } = useLanguage();
@@ -194,54 +191,6 @@ const Login = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, [resendCooldown]);
-
-  // ✅ ពិនិត្យស្វ័យប្រវត្តិរៀងរាល់ ៣ វិនាទីម្ដង នៅពេលអ្នកប្រើចុចប៊ូតុងភ្ជាប់ Telegram
-  useEffect(() => {
-    if (
-      (step !== 'otp' && step !== 'forgot_otp') ||
-      !waitingTelegramStart ||
-      !email
-    ) {
-      return;
-    }
-
-    let isMounted = true;
-
-    const checkNow = async () => {
-      if (isCheckingTelegramRef.current || !isMounted) return;
-      isCheckingTelegramRef.current = true;
-      try {
-        const status = await checkTelegramLinkStatus(email.trim());
-        if (isMounted && status?.linked) {
-          setTelegramLinked(true);
-          setTelegramSent(true);
-          setWaitingTelegramStart(false);
-          setTelegramLinkUrl(null);
-          setOtpError('');
-          setOtpDigits(['', '', '', '', '', '']);
-          lastSubmittedSignatureRef.current = '';
-          focusFirstOtpInput();
-        }
-      } finally {
-        isCheckingTelegramRef.current = false;
-      }
-    };
-
-    checkNow();
-    const pollInterval = setInterval(checkNow, 3000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(pollInterval);
-      isCheckingTelegramRef.current = false;
-    };
-  }, [
-    step,
-    waitingTelegramStart,
-    email,
-    checkTelegramLinkStatus,
-    focusFirstOtpInput,
-  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -426,8 +375,6 @@ const Login = () => {
           setMailSent(Boolean(result.mail_sent));
           setTelegramLinked(Boolean(result.telegram_linked));
           setTelegramSent(Boolean(result.telegram_sent));
-          setTelegramLinkUrl(result.telegram_link_url || null);
-          setWaitingTelegramStart(false);
           setResendCooldown(60);
           focusFirstOtpInput();
           return;
@@ -450,6 +397,39 @@ const Login = () => {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ==========================================================================
+  // 📌 មុខងារប្ដូរមកទទួលកូដតាមអ៊ីមែលវិញ (ផ្ដាច់ Telegram ចាស់ដែលជាប់ខុសគណនី)
+  // ==========================================================================
+  const handleSwitchToEmailOtp = async () => {
+    if (unlinkingTelegram || loading || step !== 'otp') return;
+    setUnlinkingTelegram(true);
+    setOtpError('');
+    try {
+      const res = await api.post('/check-telegram-link', {
+        email: email.trim(),
+        action: 'unlink',
+      });
+      const data = res.data || {};
+      setTelegramLinked(false);
+      setTelegramSent(false);
+      setMailSent(Boolean(data.mail_sent ?? true));
+      setOtpDigits(['', '', '', '', '', '']);
+      lastSubmittedSignatureRef.current = '';
+      setResendCooldown(60);
+      focusFirstOtpInput();
+    } catch (err) {
+      setOtpError(
+        err?.response?.data?.message ||
+          t(
+            'មិនអាចប្ដូរមកផ្ញើតាមអ៊ីមែលបានទេ សូមព្យាយាមម្ដងទៀត!',
+            'Could not switch to Email OTP. Please try again!'
+          )
+      );
+    } finally {
+      setUnlinkingTelegram(false);
     }
   };
 
@@ -546,8 +526,6 @@ const Login = () => {
       setMailSent(Boolean(data.mail_sent));
       setTelegramLinked(Boolean(data.telegram_linked));
       setTelegramSent(Boolean(data.telegram_sent));
-      setTelegramLinkUrl(data.telegram_link_url || null);
-      setWaitingTelegramStart(false);
       setOtpDigits(['', '', '', '', '', '']);
       lastSubmittedSignatureRef.current = '';
       setResendCooldown(60);
@@ -648,15 +626,23 @@ const Login = () => {
       syncRememberedEmail(cleanEmail, rememberMe);
 
       if (data.token && data.user) {
+        const userStr = JSON.stringify(data.user);
         try {
+          sessionStorage.setItem('token', data.token);
+          sessionStorage.setItem('user', userStr);
+          sessionStorage.setItem('auth_user', userStr);
           localStorage.setItem('token', data.token);
-          localStorage.setItem('user', JSON.stringify(data.user));
-          localStorage.setItem('auth_user', JSON.stringify(data.user));
+          localStorage.setItem('user', userStr);
+          localStorage.setItem('auth_user', userStr);
           if (data.teacher) {
-            localStorage.setItem('teacher', JSON.stringify(data.teacher));
+            const tchStr = JSON.stringify(data.teacher);
+            sessionStorage.setItem('teacher', tchStr);
+            localStorage.setItem('teacher', tchStr);
           }
           if (data.student) {
-            localStorage.setItem('student', JSON.stringify(data.student));
+            const stuStr = JSON.stringify(data.student);
+            sessionStorage.setItem('student', stuStr);
+            localStorage.setItem('student', stuStr);
           }
         } catch {}
 
@@ -712,7 +698,6 @@ const Login = () => {
     triggerAutoVerifyForgotOtp,
   ]);
 
-  // ✅ គាំទ្រទាំងការវាយលេខ ១ ខ្ទង់ និងការបំពេញស្វ័យប្រវត្តិ (AutoFill / Multi-digit input) លើទូរស័ព្ទ
   const handleOtpChange = (index, value) => {
     if (loading) return;
     if (otpError) setOtpError('');
@@ -800,7 +785,6 @@ const Login = () => {
         setMailSent(Boolean(data.mail_sent));
         setTelegramLinked(Boolean(data.telegram_linked));
         setTelegramSent(Boolean(data.telegram_sent));
-        setTelegramLinkUrl(data.telegram_link_url || null);
         setResendCooldown(60);
         focusFirstOtpInput();
       } else {
@@ -811,7 +795,6 @@ const Login = () => {
           setMailSent(Boolean(result.mail_sent));
           setTelegramLinked(Boolean(result.telegram_linked));
           setTelegramSent(Boolean(result.telegram_sent));
-          setTelegramLinkUrl(result.telegram_link_url || null);
           setResendCooldown(60);
           focusFirstOtpInput();
         } else {
@@ -1420,8 +1403,8 @@ const Login = () => {
                     }`}
                   >
                     {t(
-                      'សូមបញ្ចូលអ៊ីមែលគណនីរបស់អ្នក ដើម្បីទទួលលេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់តាម Telegram ឬ Email៖',
-                      'Enter your account email to receive a 6-digit verification code via Telegram or Email:'
+                      'សូមបញ្ចូលអ៊ីមែលគណនីរបស់អ្នក ដើម្បីទទួលលេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់៖',
+                      'Enter your account email to receive a 6-digit verification code:'
                     )}
                   </p>
                 </div>
@@ -1716,7 +1699,7 @@ const Login = () => {
               </div>
             ) : (
               /* ============================================================
-                 ✅ ផ្ទាំងវាយលេខកូដ ៦ ខ្ទង់ (គ្មានបង្ហាញលេខកូដ ៦ ខ្ទង់លើអេក្រង់ឡើយ)
+                 ✅ ផ្ទាំងវាយលេខកូដ ៦ ខ្ទង់ (Zero-Trust Security៖ មិនអនុញ្ញាតឱ្យអ្នកដទៃភ្ជាប់ Telegram ថ្មីលើអេក្រង់ Login ឡើយ)
               ============================================================= */
               <div className="relative z-10 space-y-5">
                 <div className="flex flex-col items-center text-center">
@@ -1868,33 +1851,33 @@ const Login = () => {
                   )}
                 </div>
 
-                {/* ✅ បង្ហាញប៊ូតុងភ្ជាប់ Telegram តែនៅពេលគណនីនោះមិនទាន់បានភ្ជាប់ Telegram ប៉ុណ្ណោះ */}
-                {!telegramLinked && telegramLinkUrl && (
-                  <div className="space-y-2.5">
-                    <a
-                      href={telegramLinkUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={() => setWaitingTelegramStart(true)}
-                      className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-sm transition-colors cursor-pointer"
+                {/* ✅ ប្រសិនបើគណនីនេះជាប់ Telegram ចាស់ខុសម្ចាស់ (ក្នុងជំហាន Login) អនុញ្ញាតឱ្យចុចផ្ដាច់ Telegram ហើយប្ដូរមកទទួលកូដតាម Email ម្ចាស់គណនីផ្ទាល់ */}
+                {step === 'otp' && telegramLinked && (
+                  <div className="pt-0.5 text-center">
+                    <button
+                      type="button"
+                      disabled={unlinkingTelegram || loading}
+                      onClick={handleSwitchToEmailOtp}
+                      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold border transition-all cursor-pointer disabled:opacity-50 ${
+                        isDarkMode
+                          ? 'bg-white/5 hover:bg-white/10 border-white/15 text-blue-200 hover:text-yellow-300'
+                          : 'bg-slate-50 hover:bg-indigo-50 border-slate-200 text-slate-700 hover:text-indigo-700'
+                      }`}
                     >
-                      {waitingTelegramStart ? (
-                        <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0 stroke-[2.2]" />
+                      {unlinkingTelegram ? (
+                        <ArrowPathIcon className="h-3.5 w-3.5 animate-spin shrink-0" />
                       ) : (
-                        <PaperAirplaneIcon className="h-4 w-4 -rotate-45 shrink-0 stroke-[2.2]" />
+                        <EnvelopeIcon className="h-3.5 w-3.5 shrink-0" />
                       )}
                       <span>
-                        {waitingTelegramStart
-                          ? t(
-                              'សូមចុច Start ក្នុង Telegram...',
-                              'Press Start in Telegram...'
-                            )
+                        {unlinkingTelegram
+                          ? t('កំពុងប្ដូរមកអ៊ីមែល...', 'Switching to Email...')
                           : t(
-                              'ទទួលលេខកូដតាម Telegram',
-                              'Get Code via Telegram'
+                              'ប្ដូរមកទទួលលេខកូដតាមអ៊ីមែលវិញ',
+                              'Switch to receive code via Email'
                             )}
                       </span>
-                    </a>
+                    </button>
                   </div>
                 )}
 
@@ -1938,7 +1921,6 @@ const Login = () => {
                       );
                       setOtpDigits(['', '', '', '', '', '']);
                       setOtpError('');
-                      setWaitingTelegramStart(false);
                       lastSubmittedSignatureRef.current = '';
                     }}
                     className={`inline-flex items-center justify-center gap-1.5 font-extrabold transition-colors cursor-pointer mx-auto disabled:opacity-50 ${

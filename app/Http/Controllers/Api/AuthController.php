@@ -22,7 +22,6 @@ class AuthController extends Controller
 {
     /**
      * ✅ HELPER METHOD: រៀបចំទម្រង់ទិន្នន័យ User, Teacher និង Student ឱ្យពេញលេញ និងស្រាលបំផុត (Slim Payload)
-     * ជៀសវាងការដាក់រូបភាព Base64 ស្ទួនគ្នា ៣ កន្លែង ដែលធ្វើឱ្យពេញ localStorage (QuotaExceededError) លើ Frontend
      */
     private function buildUserAndTeacherPayload(User $user)
     {
@@ -71,7 +70,6 @@ class AuthController extends Controller
                 $resolvedAvatar = $user->profile_image ?: $teacher->profile_image;
                 $userData['profile_image'] = $resolvedAvatar;
 
-                // ✅ បង្កើត Array សម្រាប់ Teacher ដោយមិនដាក់រូបភាព Base64 ស្ទួន (ព្រោះមាននៅលើ $userData['profile_image'] រួចហើយ)
                 $slimTeacher = [
                     'id' => $teacher->id,
                     'user_id' => $teacher->user_id,
@@ -199,37 +197,79 @@ class AuthController extends Controller
 
     /**
      * ✅ HELPER METHOD: កំណត់យក Telegram Chat ID ផ្ទាល់ខ្លួនរបស់អ្នកប្រើប្រាស់ម្នាក់ៗ
+     * (ឆែកធានាថា Chat ID នោះមិនមែនជារបស់គណនីផ្សេងដែលជាន់គ្នាឡើយ)
      */
     private function resolveUserTelegramChatId(User $user): ?string
     {
+        $chatId = null;
+
         if (!empty($user->telegram_chat_id)) {
-            return trim((string) $user->telegram_chat_id);
+            $chatId = trim((string) $user->telegram_chat_id);
+        } else {
+            $cachedChatId = Cache::get('lms_user_telegram_chat_id_' . $user->id);
+            if (!empty($cachedChatId)) {
+                $chatId = trim((string) $cachedChatId);
+            }
         }
 
-        $cachedChatId = Cache::get('lms_user_telegram_chat_id_' . $user->id);
-        if (!empty($cachedChatId)) {
-            return trim((string) $cachedChatId);
+        if (!$chatId) {
+            return null;
         }
 
-        return null;
+        // ✅ សុវត្ថិភាពបន្ថែម៖ ប្រសិនបើក្នុង Cache កត់ត្រាថា Chat ID នេះត្រូវបានគ្រប់គ្រងដោយម្ចាស់គណនីផ្សេង ត្រូវបដិសេធមិនយកមកប្រើឡើយ
+        $ownerUserId = Cache::get('lms_tg_chat_owner_' . $chatId);
+        if ($ownerUserId !== null && (int) $ownerUserId !== (int) $user->id) {
+            Cache::forget('lms_user_telegram_chat_id_' . $user->id);
+            return null;
+        }
+
+        return $chatId;
     }
 
     /**
-     * HELPER METHOD: រក្សាទុក Telegram Chat ID របស់អ្នកប្រើប្រាស់ដោយស្វ័យប្រវត្តិ
+     * ✅ HELPER METHOD: រក្សាទុក Telegram Chat ID ដោយអនុវត្តច្បាប់ "Telegram ១ គណនី ១" (One-to-One Binding)
+     * ប្រសិនបើ Chat ID នេះធ្លាប់ជាប់ជាមួយគណនីផ្សេង វានឹងផ្ដាច់ចេញពីគណនីផ្សេងនោះភ្លាមៗ!
      */
     private function saveUserTelegramChatId(User $user, string $chatId): void
     {
         $cleanChatId = trim($chatId);
-        Cache::forever('lms_user_telegram_chat_id_' . $user->id, $cleanChatId);
-        Cache::forget('lms_auth_user_payload_' . $user->id);
+        if ($cleanChatId === '') {
+            return;
+        }
 
+        // ១. ប្រសិនបើ Chat ID នេះធ្លាប់ជាប់ជាមួយ User ផ្សេងពីមុនក្នុង Cache ត្រូវលុបចេញពី User ចាស់នោះភ្លាម
+        $previousOwnerId = Cache::get('lms_tg_chat_owner_' . $cleanChatId);
+        if ($previousOwnerId && (int) $previousOwnerId !== (int) $user->id) {
+            Cache::forget('lms_user_telegram_chat_id_' . $previousOwnerId);
+            Cache::forget('lms_auth_user_payload_' . $previousOwnerId);
+        }
+
+        // ២. ប្រសិនបើក្នុងតារាង users មានគណនីផ្សេងប្រើប្រាស់ telegram_chat_id នេះស្ទួនគ្នា ត្រូវលុបចេញពីគណនីផ្សេងទាំងអស់
         try {
             if (Schema::hasColumn('users', 'telegram_chat_id')) {
+                $duplicateUsers = User::where('telegram_chat_id', $cleanChatId)
+                    ->where('id', '!=', $user->id)
+                    ->pluck('id');
+
+                foreach ($duplicateUsers as $dupId) {
+                    Cache::forget('lms_user_telegram_chat_id_' . $dupId);
+                    Cache::forget('lms_auth_user_payload_' . $dupId);
+                }
+
+                if ($duplicateUsers->isNotEmpty()) {
+                    User::whereIn('id', $duplicateUsers)->update(['telegram_chat_id' => null]);
+                }
+
                 $user->forceFill(['telegram_chat_id' => $cleanChatId])->save();
             }
         } catch (\Exception $e) {
-            Log::warning('Could not save telegram_chat_id to users table: ' . $e->getMessage());
+            Log::warning('Could not save unique telegram_chat_id to users table: ' . $e->getMessage());
         }
+
+        // ៣. កត់ត្រាម្ចាស់កម្មសិទ្ធិពិតប្រាកដនៃ Chat ID នេះ
+        Cache::forever('lms_tg_chat_owner_' . $cleanChatId, (int) $user->id);
+        Cache::forever('lms_user_telegram_chat_id_' . $user->id, $cleanChatId);
+        Cache::forget('lms_auth_user_payload_' . $user->id);
     }
 
     /**
@@ -237,6 +277,14 @@ class AuthController extends Controller
      */
     private function unlinkUserTelegramChatId(User $user): void
     {
+        $existingChatId = $this->resolveUserTelegramChatId($user);
+        if ($existingChatId) {
+            $ownerId = Cache::get('lms_tg_chat_owner_' . $existingChatId);
+            if ((int) $ownerId === (int) $user->id) {
+                Cache::forget('lms_tg_chat_owner_' . $existingChatId);
+            }
+        }
+
         $existingToken = Cache::get('lms_tg_user_link_token_' . $user->id);
         if ($existingToken) {
             Cache::forget('lms_tg_link_token_map_' . $existingToken);
@@ -284,7 +332,8 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: បង្កើតតំណភ្ជាប់ Telegram Deep-Link សម្រាប់ឱ្យអ្នកប្រើចុចភ្ជាប់ Telegram ក្នុង ១ ចុច
+     * ✅ HELPER METHOD: បង្កើតតំណភ្ជាប់ Telegram Deep-Link ដោយប្រើសោសម្ងាត់គ្រីប (Cryptographic Random Token ២៤ តួអក្សរ)
+     * មិនដាក់លេខ ID គណនីឱ្យគេទាយបាន និងមានសុពលភាពតែ ១០ នាទីប៉ុណ្ណោះ!
      */
     private function generateTelegramLinkUrl(User $user, bool $forceNewToken = false): ?string
     {
@@ -297,10 +346,13 @@ class AuthController extends Controller
         $token = $forceNewToken ? null : Cache::get($tokenKey);
 
         if (!$token) {
-            $token = $user->id . '_' . Str::lower(Str::random(10));
-            Cache::put($tokenKey, $token, now()->addMinutes(30));
+            $token = Str::lower(Str::random(24));
+            Cache::put($tokenKey, $token, now()->addMinutes(10));
         }
-        Cache::put('lms_tg_link_token_map_' . $token, $user->id, now()->addMinutes(30));
+        Cache::put('lms_tg_link_token_map_' . $token, [
+            'user_id' => (int) $user->id,
+            'created_at' => now()->timestamp,
+        ], now()->addMinutes(10));
 
         return "https://t.me/{$botUsername}?start=link_{$token}";
     }
@@ -364,7 +416,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ដោយរហ័ស
+     * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ដោយរហ័ស និងមានសុវត្ថិភាពខ្ពស់បំផុត
      */
     private function generateAndSendOtp(User $user, Request $request, string $purpose = '2fa'): array
     {
@@ -401,7 +453,7 @@ class AuthController extends Controller
 
         $isTelegramLinked = $this->resolveUserTelegramChatId($user) !== null;
 
-        // ✅ ១. ប្រសិនបើអ្នកប្រើប្រាស់បានភ្ជាប់ Telegram រួចហើយ គឺផ្ញើទៅកាន់ Telegram ភ្លាម
+        // ✅ ១. ប្រសិនបើម្ចាស់គណនីបានភ្ជាប់ Telegram ផ្ទាល់ខ្លួនរួចហើយ ទើបផ្ញើទៅ Telegram របស់គាត់
         if ($isTelegramLinked) {
             $telegramSent = $this->sendTelegramOtpAlert($user, $otp, $request, $purpose);
             if ($telegramSent) {
@@ -420,7 +472,7 @@ class AuthController extends Controller
             }
         }
 
-        // ✅ ២. លុះត្រាតែមិនទាន់ភ្ជាប់ Telegram ទើបរៀបចំផ្ញើទៅកាន់ Email
+        // ✅ ២. បើមិនទាន់បានភ្ជាប់ Telegram ទេ គឺត្រូវតែផ្ញើទៅកាន់ Email ម្ចាស់គណនីជានិច្ច!
         $badgeTitle = $purpose === 'reset'
             ? '🔐 សំណើកំណត់ពាក្យសម្ងាត់ឡើងវិញ'
             : '🛡️ ការផ្ទៀងផ្ទាត់សុវត្ថិភាពចូលប្រព័ន្ធ (2FA)';
@@ -542,7 +594,6 @@ class AuthController extends Controller
         $googleScriptUrl = trim((string) env('GOOGLE_SCRIPT_MAIL_URL', ''));
         $brevoApiKey = trim((string) env('BREVO_API_KEY', ''));
 
-        // ២.១. ផ្ញើតាមរយៈ Google Apps Script HTTPS (Port 443)
         if (!$mailSent && !empty($googleScriptUrl)) {
             try {
                 $res = Http::timeout(6)
@@ -565,7 +616,6 @@ class AuthController extends Controller
             }
         }
 
-        // ២.២. ឬផ្ញើតាមរយៈ Brevo HTTP API (Port 443)
         if (!$mailSent && !empty($brevoApiKey)) {
             try {
                 $recipientName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: 'User';
@@ -600,7 +650,6 @@ class AuthController extends Controller
             }
         }
 
-        // ២.៣. ប្រសិនបើនៅលើ Localhost ឬ Server ដែលបើក Port 587
         if (!$mailSent && empty($brevoApiKey) && empty($googleScriptUrl)) {
             config([
                 'mail.default' => 'smtp',
@@ -645,19 +694,25 @@ class AuthController extends Controller
 
         Log::info("6-Digit OTP ({$purpose}) for [{$user->email}] ({$rawRole}) via [{$deliveryChannel}]: {$otp}");
 
+        // ✅ សុវត្ថិភាពសំខាន់បំផុត៖
+        // - នៅពេលចុច "ភ្លេចពាក្យសម្ងាត់" ($purpose === 'reset') គឺហាមដាច់ខាតមិនឱ្យបង្កើតតំណភ្ជាប់ Telegram ថ្មីឡើយ!
+        // - អនុញ្ញាតឱ្យភ្ជាប់ Telegram តែនៅពេលដែលអ្នកប្រើបានវាយ Email + Password ត្រឹមត្រូវ ($purpose === '2fa') ប៉ុណ្ណោះ!
+        $allowTelegramLinking = ($purpose === '2fa') && !$isTelegramLinked;
+
         return [
             'otp' => null,
             'mail_sent' => $mailSent,
             'mail_error' => $mailErrorMsg,
             'telegram_sent' => $telegramSent,
             'telegram_linked' => $isTelegramLinked,
-            'telegram_link_url' => $isTelegramLinked ? null : $this->generateTelegramLinkUrl($user, false),
+            'telegram_link_url' => $allowTelegramLinking ? $this->generateTelegramLinkUrl($user, false) : null,
             'delivery_channel' => $deliveryChannel,
         ];
     }
 
     /**
-     * ✅ មុខងារពិនិត្យ, ភ្ជាប់, និងផ្ដាច់គណនី Telegram (គាំទ្រ action = 'unlink')
+     * ✅ មុខងារពិនិត្យ, ភ្ជាប់, និងផ្ដាច់គណនី Telegram ដោយមានការការពារសុវត្ថិភាពខ្ពស់បំផុត
+     * អនុញ្ញាតឱ្យដំណើរការតែចំពោះអ្នកប្រើដែលទើបតែវាយ Email + Password ត្រូវ (មាន Active 2FA Session) ប៉ុណ្ណោះ!
      */
     public function checkTelegramLink(Request $request)
     {
@@ -672,14 +727,33 @@ class AuthController extends Controller
             return response()->json(['linked' => false, 'message' => 'រកមិនឃើញគណនីនេះទេ'], 404);
         }
 
+        // ✅ សុវត្ថិភាពទី ១៖ ត្រួតពិនិត្យថាតើគណនីនេះពិតជាបានឆ្លងកាត់ការវាយ Password ត្រឹមត្រូវក្នុងរយៈពេល ១០ នាទីចុងក្រោយមែនឬអត់
+        // ការពារកុំឱ្យជនខិលខូចដែលដឹងត្រឹម Email ឬចូលតាមផ្ទាំង Forgot Password អាចភ្ជាប់/ផ្ដាច់ Telegram របស់គេបាន!
+        $deviceHash = $this->getDeviceFingerprint($request);
+        $verified2faDevice = Cache::get('lms_2fa_verified_password_device_' . $user->id);
+        $hasActive2faOtp = Cache::has('lms_2fa_otp_' . $user->id);
+
+        if (!$hasActive2faOtp || $verified2faDevice !== $deviceHash) {
+            return response()->json([
+                'linked' => $this->resolveUserTelegramChatId($user) !== null,
+                'telegram_sent' => false,
+                'telegram_link_url' => null,
+                'message' => 'សកម្មភាពនេះតម្រូវឱ្យផ្ទៀងផ្ទាត់ពាក្យសម្ងាត់គណនីជាមុនសិន!',
+            ], 403);
+        }
+
         if ($request->input('action') === 'unlink') {
             $this->unlinkUserTelegramChatId($user);
+
+            // នៅពេលផ្ដាច់ Telegram ចេញ ឱ្យផ្ញើលេខកូដ ៦ ខ្ទង់ថ្មីទៅកាន់ Email របស់ម្ចាស់គណនីភ្លាមៗ
+            $otpResult = $this->generateAndSendOtp($user, $request, '2fa');
 
             return response()->json([
                 'linked' => false,
                 'telegram_sent' => false,
-                'telegram_link_url' => $this->generateTelegramLinkUrl($user, true),
-                'message' => 'បានផ្ដាច់គណនី Telegram ជោគជ័យ! ចាប់ពីពេលនេះទៅ លេខកូដ ៦ ខ្ទង់នឹងត្រូវផ្ញើទៅកាន់ Email របស់អ្នកវិញ។',
+                'mail_sent' => $otpResult['mail_sent'],
+                'telegram_link_url' => $otpResult['telegram_link_url'],
+                'message' => 'បានផ្ដាច់គណនី Telegram ជោគជ័យ! លេខកូដ ៦ ខ្ទង់ថ្មីត្រូវបានផ្ញើទៅកាន់ Email របស់អ្នកវិញហើយ។',
             ]);
         }
 
@@ -714,14 +788,21 @@ class AuthController extends Controller
                     $updateId = $upd['update_id'] ?? null;
                     $text = trim((string) ($upd['message']['text'] ?? ''));
                     $chatId = $upd['message']['chat']['id'] ?? null;
+                    $msgDate = (int) ($upd['message']['date'] ?? 0);
 
                     if (!$chatId || !str_starts_with($text, '/start')) {
                         continue;
                     }
 
+                    // មិនទទួលយកសារ /start ចាស់ៗដែលលើសពី ១០ នាទីមុនឡើយ
+                    if ($msgDate > 0 && (now()->timestamp - $msgDate) > 600) {
+                        continue;
+                    }
+
                     if (preg_match('/^\/start\s+link_([A-Za-z0-9_]+)$/i', $text, $matches)) {
                         $incomingToken = $matches[1];
-                        $mappedUserId = Cache::get('lms_tg_link_token_map_' . $incomingToken);
+                        $tokenMeta = Cache::get('lms_tg_link_token_map_' . $incomingToken);
+                        $mappedUserId = is_array($tokenMeta) ? ($tokenMeta['user_id'] ?? null) : $tokenMeta;
 
                         $alreadyProcessedKey = 'lms_tg_processed_update_' . $updateId;
                         if (Cache::has($alreadyProcessedKey)) {
@@ -729,8 +810,9 @@ class AuthController extends Controller
                         }
 
                         if (
-                            ($expectedToken && $incomingToken === $expectedToken) ||
-                            ($mappedUserId && (int) $mappedUserId === (int) $user->id)
+                            $expectedToken &&
+                            hash_equals((string) $expectedToken, (string) $incomingToken) &&
+                            (int) $mappedUserId === (int) $user->id
                         ) {
                             $matchedChatId = (string) $chatId;
                             $matchedUpdateId = $updateId;
@@ -744,6 +826,7 @@ class AuthController extends Controller
                         Cache::forever('lms_tg_processed_update_' . $matchedUpdateId, true);
                     }
 
+                    // ✅ រក្សាទុក Chat ID ថ្មី និងលុប Chat ID នេះចេញពីគណនីផ្សេងទៀតដែលធ្លាប់ប្រើជាន់គ្នា
                     $this->saveUserTelegramChatId($user, $matchedChatId);
 
                     if ($expectedToken) {
@@ -751,15 +834,11 @@ class AuthController extends Controller
                     }
                     Cache::forget('lms_tg_user_link_token_' . $user->id);
 
-                    $pendingResetOtp = Cache::get('lms_pwd_reset_otp_' . $user->id);
+                    // ✅ អនុញ្ញាតឱ្យបាញ់កូដចូល Telegram តែសម្រាប់ការ Login (2FA) ប៉ុណ្ណោះ (ហាមដាច់ខាតសម្រាប់ការប្ដូរពាក្យសម្ងាត់ Reset)
                     $pending2faOtp = Cache::get('lms_2fa_otp_' . $user->id);
                     $sentOtpNow = false;
 
-                    if ($pendingResetOtp) {
-                        $newOtp = (string) random_int(100000, 999999);
-                        Cache::put('lms_pwd_reset_otp_' . $user->id, $newOtp, now()->addMinutes(5));
-                        $sentOtpNow = $this->sendTelegramOtpAlert($user->fresh('role'), $newOtp, $request, 'reset');
-                    } elseif ($pending2faOtp) {
+                    if ($pending2faOtp) {
                         $newOtp = (string) random_int(100000, 999999);
                         Cache::put('lms_2fa_otp_' . $user->id, $newOtp, now()->addMinutes(5));
                         $sentOtpNow = $this->sendTelegramOtpAlert($user->fresh('role'), $newOtp, $request, '2fa');
@@ -786,7 +865,7 @@ class AuthController extends Controller
         ]);
     }
 
-    // ✅ ចុះឈ្មោះគណនី Admin ដំបូង រួចភ្ជាប់ទិន្នន័យ Role ត្រឡប់ទៅឱ្យ Frontend ភ្លាមៗ
+    // ✅ ចុះឈ្មោះគណនី Admin ដំបូង
     public function register(Request $request)
     {
         $adminRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%admin%'])->first();
@@ -882,6 +961,9 @@ class AuthController extends Controller
         Cache::forget($lockoutKey);
 
         $deviceHash = $this->getDeviceFingerprint($request);
+        // ✅ កត់ត្រាថាឧបករណ៍នេះពិតជាបានវាយ Password របស់គណនីនេះត្រឹមត្រូវ (មានសុពលភាព ១០ នាទីសម្រាប់ភ្ជាប់ Telegram)
+        Cache::put('lms_2fa_verified_password_device_' . $user->id, $deviceHash, now()->addMinutes(10));
+
         $trustedDevices = Cache::get('lms_trusted_devices_' . $user->id, []);
         $isKnownDevice = in_array($deviceHash, is_array($trustedDevices) ? $trustedDevices : []);
 
@@ -1000,6 +1082,7 @@ class AuthController extends Controller
         Cache::forget($cacheKey);
         Cache::forget($attemptKey);
         Cache::forget($otpLockoutKey);
+        Cache::forget('lms_2fa_verified_password_device_' . $user->id);
         Cache::forget('lms_auth_user_payload_' . $user->id);
 
         $shouldLogoutOthers = $request->boolean('logout_other_devices', true);
@@ -1137,7 +1220,8 @@ class AuthController extends Controller
             'mail_error' => $otpResult['mail_error'] ?? null,
             'telegram_sent' => $otpResult['telegram_sent'],
             'telegram_linked' => $otpResult['telegram_linked'],
-            'telegram_link_url' => $otpResult['telegram_link_url'],
+            // ✅ សុវត្ថិភាព៖ មិនបញ្ជូន telegram_link_url នៅក្នុង Forgot Password ដាច់ខាត!
+            'telegram_link_url' => null,
             'dev_otp' => null,
             'message' => $msg,
         ]);
@@ -1287,7 +1371,6 @@ class AuthController extends Controller
             return response()->json(['message' => 'គណនីរបស់អ្នកត្រូវបានផ្អាកដំណើរការ!'], 403);
         }
 
-        // ✅ ប្រើ Short-lived Cache (១៥ វិនាទី) ដើម្បីឱ្យការហៅ /api/user ពេល Refresh ដើរលឿនបំផុតលើ Online
         $cacheKey = 'lms_auth_user_payload_' . $authUser->id . '_' . ($authUser->updated_at?->timestamp ?? 0);
         $payload = Cache::remember($cacheKey, 15, function () use ($authUser) {
             $user = User::with('role:id,role_name')->find($authUser->id);
