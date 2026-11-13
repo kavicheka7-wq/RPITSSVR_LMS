@@ -1,6 +1,5 @@
 // src/components/student/StudentCourses.jsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Link } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -9,16 +8,12 @@ import {
   ExclamationCircleIcon,
   MagnifyingGlassIcon,
   XMarkIcon,
-  PlayCircleIcon,
-  ArrowRightIcon,
   BuildingLibraryIcon,
   FolderIcon,
   ClipboardDocumentListIcon,
   AcademicCapIcon,
   CalendarDaysIcon,
   SparklesIcon,
-  Squares2X2Icon,
-  ListBulletIcon,
   CheckBadgeIcon,
   UserIcon,
   ChevronLeftIcon,
@@ -26,14 +21,13 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Instant Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 
 const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
 const CACHE_KEY_SHARED_COURSES_META = 'cached_student_courses_meta_v3';
 const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
-const CACHE_KEY_STD_VIEW_MODE = 'student_courses_view_mode';
 const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
 
 const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
@@ -43,7 +37,7 @@ const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v10_${u
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 const getAttendanceCacheKey = (uid) => `cached_student_attendance_list_v10_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ + រក្សារូបភាពគ្រូក្នុង RAM (0ms)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
 const STUDENT_COURSES_MEM_CACHE = {
   uid: null,
   courses: null,
@@ -55,14 +49,14 @@ const STUDENT_COURSES_MEM_CACHE = {
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
-      sessionStorage.getItem(key) || localStorage.getItem(key);
+      localStorage.getItem(key) || sessionStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អានតារាងរូបថតគ្រូបង្រៀន (Teacher Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
+// ✅ អានតារាងរូបថតគ្រូបង្រៀនពី RAM ភ្លាមៗក្នុង 0ms
 const getTeacherAvatarMapSync = () => {
   if (
     STUDENT_COURSES_MEM_CACHE.teacherAvatarMap &&
@@ -76,88 +70,53 @@ const getTeacherAvatarMapSync = () => {
   return STUDENT_COURSES_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ បង្រួមរូបថតគ្រូបង្រៀនមកត្រឹម 80x80px (~2KB) ទុកក្នុង Dictionary ដើម្បីបង្ហាញភ្លាមៗក្នុង 0ms
-const compressTeacherAvatarAsync = (keyId, rawDataUrl, onDone) => {
-  if (!keyId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
-  const map = getTeacherAvatarMapSync();
-
-  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
-    map[keyId] = rawDataUrl;
-    if (typeof onDone === 'function') onDone(keyId, rawDataUrl);
-    return;
-  }
-
-  if (!map[keyId]) {
-    map[keyId] = rawDataUrl;
-  }
-
-  try {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 80;
-        let w = img.width || maxSize;
-        let h = img.height || maxSize;
-        if (w > h) {
-          if (w > maxSize) {
-            h = Math.round((h * maxSize) / w);
-            w = maxSize;
-          }
-        } else {
-          if (h > maxSize) {
-            w = Math.round((w * maxSize) / h);
-            h = maxSize;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        const tinyWebp = canvas.toDataURL('image/webp', 0.8);
-        const bestImg =
-          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
-        map[keyId] = bestImg;
-        if (typeof onDone === 'function') onDone(keyId, bestImg);
-      } catch {}
-    };
-    img.src = rawDataUrl;
-  } catch {}
-};
-
-// ✅ លុប Base64 ធំៗចេញពីបញ្ជីមុខវិជ្ជា តែរក្សាទុករូបថតគ្រូជា Thumbnail (~2KB) ក្នុង CACHE_KEY_TEACHER_AVATARS
-const persistStudentCoursesSafely = (uid, coursesList, metaObj) => {
+// ✅ រក្សាទុកបញ្ជីមុខវិជ្ជា និងរូបថតគ្រូដោយលឿនបំផុត (0ms Synchronous Slim Save គ្មាន Canvas)
+const persistStudentCoursesFast = (uid, coursesList, metaObj) => {
   if (!Array.isArray(coursesList)) return;
   const avatarMap = getTeacherAvatarMapSync();
-  let pendingCount = 0;
+  let avatarMapUpdated = false;
 
-  const saveAvatarMap = () => {
-    try {
-      const str = JSON.stringify(avatarMap);
-      sessionStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-    } catch {}
-  };
-
-  const stripPersonAvatar = (person) => {
+  const extractAndSlimTeacher = (person, courseIdFallback = '') => {
     if (!person || typeof person !== 'object') return person;
+    const rawImg =
+      person.profile_image_url ||
+      person.profile_image ||
+      person.user?.profile_image_url ||
+      person.user?.profile_image ||
+      null;
+
+    const tchId = String(person.id || person.user_id || '');
+    const cid = String(courseIdFallback || '');
+
+    if (rawImg && typeof rawImg === 'string') {
+      if (cid && avatarMap[`crs_${cid}`] !== rawImg) {
+        avatarMap[`crs_${cid}`] = rawImg;
+        avatarMapUpdated = true;
+      }
+      if (tchId && avatarMap[`tch_${tchId}`] !== rawImg) {
+        avatarMap[`tch_${tchId}`] = rawImg;
+        avatarMapUpdated = true;
+      }
+    }
+
+    const isHeavyBase64 =
+      typeof rawImg === 'string' &&
+      rawImg.startsWith('data:') &&
+      rawImg.length > 2000;
+
     const copy = { ...person };
-    if (
-      typeof copy.profile_image === 'string' &&
-      copy.profile_image.startsWith('data:') &&
-      copy.profile_image.length > 12000
-    ) {
-      copy.profile_image = null;
+    if (isHeavyBase64) {
+      delete copy.profile_image;
+      delete copy.profile_image_url;
     }
     if (copy.user && typeof copy.user === 'object') {
       const uCopy = { ...copy.user };
       if (
         typeof uCopy.profile_image === 'string' &&
-        uCopy.profile_image.startsWith('data:') &&
-        uCopy.profile_image.length > 12000
+        uCopy.profile_image.startsWith('data:')
       ) {
-        uCopy.profile_image = null;
+        delete uCopy.profile_image;
+        delete uCopy.profile_image_url;
       }
       copy.user = uCopy;
     }
@@ -168,77 +127,47 @@ const persistStudentCoursesSafely = (uid, coursesList, metaObj) => {
     if (!item || typeof item !== 'object') return item;
     const courseInfo = item.course || item;
     const cid = String(item.course_id || courseInfo.id || item.id || '');
-    const tchId = String(
-      courseInfo.teacher?.id ||
-        courseInfo.teacher_id ||
-        item.teacher?.id ||
-        item.teacher_id ||
-        ''
-    );
-
-    const rawImg =
-      courseInfo.teacher?.profile_image_url ||
-      courseInfo.teacher?.profile_image ||
-      courseInfo.teacher?.user?.profile_image ||
-      courseInfo.teacher_profile?.profile_image ||
-      item.teacher?.profile_image ||
-      null;
-
-    if (rawImg) {
-      if (cid) {
-        pendingCount++;
-        compressTeacherAvatarAsync(`crs_${cid}`, rawImg, (_, best) => {
-          if (tchId) avatarMap[`tch_${tchId}`] = best;
-          pendingCount--;
-          if (pendingCount <= 0) saveAvatarMap();
-        });
-      } else if (tchId) {
-        pendingCount++;
-        compressTeacherAvatarAsync(`tch_${tchId}`, rawImg, () => {
-          pendingCount--;
-          if (pendingCount <= 0) saveAvatarMap();
-        });
-      }
-    }
 
     const copy = { ...item };
-    if (copy.teacher) copy.teacher = stripPersonAvatar(copy.teacher);
+    if (copy.teacher) {
+      copy.teacher = extractAndSlimTeacher(copy.teacher, cid);
+    }
     if (copy.teacher_profile) {
-      copy.teacher_profile = stripPersonAvatar(copy.teacher_profile);
+      copy.teacher_profile = extractAndSlimTeacher(copy.teacher_profile, cid);
     }
     if (copy.course && typeof copy.course === 'object') {
       const cCopy = { ...copy.course };
-      if (cCopy.teacher) cCopy.teacher = stripPersonAvatar(cCopy.teacher);
+      if (cCopy.teacher) {
+        cCopy.teacher = extractAndSlimTeacher(cCopy.teacher, cid);
+      }
       if (cCopy.teacher_profile) {
-        cCopy.teacher_profile = stripPersonAvatar(cCopy.teacher_profile);
+        cCopy.teacher_profile = extractAndSlimTeacher(cCopy.teacher_profile, cid);
       }
       copy.course = cCopy;
     }
     return copy;
   });
 
-  if (pendingCount === 0) {
-    saveAvatarMap();
-  } else {
-    setTimeout(saveAvatarMap, 300);
+  if (avatarMapUpdated) {
+    try {
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(avatarMap));
+    } catch {}
   }
 
   try {
     const crsStr = JSON.stringify(slimCourses);
-    sessionStorage.setItem(getCoursesCacheKey(uid), crsStr);
     localStorage.setItem(getCoursesCacheKey(uid), crsStr);
     localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
 
     if (metaObj) {
       const metaStr = JSON.stringify(metaObj);
-      sessionStorage.setItem(getCoursesMetaCacheKey(uid), metaStr);
       localStorage.setItem(getCoursesMetaCacheKey(uid), metaStr);
       localStorage.setItem(CACHE_KEY_SHARED_COURSES_META, metaStr);
     }
   } catch {}
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -328,32 +257,24 @@ const COURSE_COVER_THEMES = [
     coverBg: 'from-blue-600 via-indigo-600 to-violet-700',
     floatingIconBg: 'from-blue-500 to-indigo-600 text-white shadow-blue-500/30',
     avatarBg: 'from-blue-500 to-indigo-600 text-white',
-    btnGradient:
-      'from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 shadow-indigo-500/20',
     glow: 'hover:shadow-[0_14px_30px_-12px_rgba(79,70,229,0.28)]',
   },
   {
     coverBg: 'from-emerald-600 via-teal-600 to-cyan-700',
     floatingIconBg: 'from-emerald-500 to-teal-600 text-white shadow-emerald-500/30',
     avatarBg: 'from-emerald-500 to-teal-600 text-white',
-    btnGradient:
-      'from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 shadow-emerald-500/20',
     glow: 'hover:shadow-[0_14px_30px_-12px_rgba(16,185,129,0.28)]',
   },
   {
     coverBg: 'from-violet-600 via-purple-600 to-fuchsia-700',
     floatingIconBg: 'from-purple-500 to-fuchsia-600 text-white shadow-purple-500/30',
     avatarBg: 'from-purple-500 to-fuchsia-600 text-white',
-    btnGradient:
-      'from-violet-600 via-purple-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 shadow-purple-500/20',
     glow: 'hover:shadow-[0_14px_30px_-12px_rgba(147,51,234,0.28)]',
   },
   {
     coverBg: 'from-amber-500 via-orange-500 to-rose-600',
     floatingIconBg: 'from-amber-500 to-orange-600 text-white shadow-amber-500/30',
     avatarBg: 'from-amber-500 to-orange-600 text-white',
-    btnGradient:
-      'from-amber-500 via-orange-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 shadow-orange-500/20',
     glow: 'hover:shadow-[0_14px_30px_-12px_rgba(245,158,11,0.28)]',
   },
 ];
@@ -363,14 +284,12 @@ const StudentCourses = () => {
   const { user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
 
-  // ✅ កំណត់អត្តសញ្ញាណសិស្សបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
     ensureCleanStudentSessionCache(uid);
     return uid;
   }, [user]);
 
-  // បើប្ដូរគណនីសិស្ស ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
   if (
     STUDENT_COURSES_MEM_CACHE.uid &&
     STUDENT_COURSES_MEM_CACHE.uid !== currentStudentId
@@ -381,7 +300,7 @@ const StudentCourses = () => {
   }
   STUDENT_COURSES_MEM_CACHE.uid = currentStudentId;
 
-  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី (គ្មាន Loading វិលៗ ឬ Skeleton ឡើយ)
+  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី
   const [courses, setCourses] = useState(() => {
     if (Array.isArray(STUDENT_COURSES_MEM_CACHE.courses)) {
       return STUDENT_COURSES_MEM_CACHE.courses;
@@ -426,29 +345,11 @@ const StudentCourses = () => {
   });
 
   const [searchTerm, setSearchTerm] = useState('');
-
-  // State សម្រាប់ប្រអប់រំកិលបង្ហាញគ្រូបង្រៀនដោយស្វ័យប្រវត្តិ
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [isCarouselPaused, setIsCarouselPaused] = useState(false);
 
-  // State សម្រាប់ប្តូរទម្រង់បង្ហាញ (grid = កាត, list = តារាង)
-  const [viewMode, setViewMode] = useState(() => {
-    try {
-      return localStorage.getItem(CACHE_KEY_STD_VIEW_MODE) || 'grid';
-    } catch {
-      return 'grid';
-    }
-  });
-
-  const handleViewModeChange = (mode) => {
-    setViewMode(mode);
-    try {
-      localStorage.setItem(CACHE_KEY_STD_VIEW_MODE, mode);
-    } catch {}
-  };
-
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី Backend API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
+  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី Backend API ដោយមិនរាំងស្ទះ UI (0ms Sync)
   // ============================================================================
   const fetchCourses = useCallback(
     async (forceRefresh = false) => {
@@ -501,16 +402,18 @@ const StudentCourses = () => {
           per_page: perPage,
         };
 
-        setCourses(coursesData);
-        setMeta(resolvedMeta);
-
         if (page === 1) {
           STUDENT_COURSES_MEM_CACHE.uid = currentStudentId;
           STUDENT_COURSES_MEM_CACHE.courses = coursesData;
           STUDENT_COURSES_MEM_CACHE.meta = resolvedMeta;
           STUDENT_COURSES_MEM_CACHE.lastSyncedAt = Date.now();
+        }
 
-          persistStudentCoursesSafely(
+        setCourses(coursesData);
+        setMeta(resolvedMeta);
+
+        if (page === 1) {
+          persistStudentCoursesFast(
             currentStudentId,
             coursesData,
             resolvedMeta
@@ -528,9 +431,8 @@ const StudentCourses = () => {
   }, [fetchCourses]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់រូបភាព ឈ្មោះគ្រូ ព័ត៌មានសិស្ស និងការច្រោះស្វែងរក
+  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់រូបភាព ឈ្មោះគ្រូ និងការស្វែងរកក្នុង 0ms (O(1) Lookup)
   // ============================================================================
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getImageUrl = useCallback((path) => {
     if (!path || typeof path !== 'string') return null;
     const trimmed = path.trim();
@@ -592,19 +494,29 @@ const StudentCourses = () => {
     return (parts[0]?.[0] || 'T').toUpperCase();
   };
 
-  // ✅ អនុគមន៍ស្វែងរករូបថតគ្រូបង្រៀនពីគ្រប់ទម្រង់ Object, ពី Teacher Avatar Dictionary (0ms) និងពី Cache ពិន្ទុ/វត្តមាន
+  const fallbackScoresAndAttAvatars = useMemo(() => {
+    const map = {};
+    const cachedScores =
+      readStorageJson(getScoresCacheKey(currentStudentId), null) ||
+      readStorageJson('cached_student_scores_list_v5', []);
+    if (Array.isArray(cachedScores)) {
+      cachedScores.forEach((s) => {
+        const cid = String(s?.course_id || s?.course?.id || '');
+        const img =
+          s?.course?.teacher_profile?.profile_image_url ||
+          s?.course?.teacher_profile?.profile_image ||
+          s?.course?.teacher?.profile_image_url ||
+          s?.course?.teacher?.profile_image ||
+          s?.course?.teacher?.user?.profile_image;
+        if (cid && img && !map[cid]) map[cid] = img;
+      });
+    }
+    return map;
+  }, [currentStudentId]);
+
   const resolveTeacherImagePath = useCallback(
     (courseObj) => {
       if (!courseObj) return null;
-      const cid = String(courseObj.id || courseObj.course_id || '');
-      const tchId = String(
-        courseObj.teacher?.id || courseObj.teacher_id || ''
-      );
-      const avatarMap = getTeacherAvatarMapSync();
-
-      if (cid && avatarMap[`crs_${cid}`]) return avatarMap[`crs_${cid}`];
-      if (tchId && avatarMap[`tch_${tchId}`]) return avatarMap[`tch_${tchId}`];
-
       const direct =
         courseObj.teacher?.profile_image_url ||
         courseObj.teacher?.profile_image ||
@@ -621,38 +533,24 @@ const StudentCourses = () => {
 
       if (direct) return direct;
 
-      const cachedScores =
-        readStorageJson(getScoresCacheKey(currentStudentId), null) ||
-        readStorageJson('cached_student_scores_list_v5', []);
-      if (Array.isArray(cachedScores)) {
-        const matchScore = cachedScores.find(
-          (s) => String(s?.course_id || s?.course?.id) === cid
-        );
-        const fromScore =
-          matchScore?.course?.teacher?.profile_image_url ||
-          matchScore?.course?.teacher?.profile_image ||
-          matchScore?.course?.teacher?.user?.profile_image ||
-          matchScore?.course?.teacher_profile?.profile_image_url ||
-          matchScore?.course?.teacher_profile?.profile_image;
-        if (fromScore) return fromScore;
-      }
+      const cid = String(courseObj.id || courseObj.course_id || '');
+      const tchId = String(
+        courseObj.teacher?.id ||
+          courseObj.teacher_profile?.id ||
+          courseObj.teacher_id ||
+          ''
+      );
+      const avatarMap = getTeacherAvatarMapSync();
 
-      const cachedAtt =
-        readStorageJson(getAttendanceCacheKey(currentStudentId), null) ||
-        readStorageJson('cached_student_attendance_list_v3', []);
-      if (Array.isArray(cachedAtt)) {
-        const matchAtt = cachedAtt.find(
-          (a) => String(a?.course_id || a?.course?.id) === cid
-        );
-        const fromAtt =
-          matchAtt?.course?.teacher?.profile_image ||
-          matchAtt?.course?.teacher?.user?.profile_image;
-        if (fromAtt) return fromAtt;
+      if (cid && avatarMap[`crs_${cid}`]) return avatarMap[`crs_${cid}`];
+      if (tchId && avatarMap[`tch_${tchId}`]) return avatarMap[`tch_${tchId}`];
+      if (cid && fallbackScoresAndAttAvatars[cid]) {
+        return fallbackScoresAndAttAvatars[cid];
       }
 
       return null;
     },
-    [currentStudentId]
+    [fallbackScoresAndAttAvatars]
   );
 
   const studentDeptName = useMemo(() => {
@@ -691,7 +589,6 @@ const StudentCourses = () => {
     );
   };
 
-  // ✅ រៀបចំបញ្ជីមុខវិជ្ជា (ដកឆមាសចេញទាំងស្រុង)
   const enrichedCourses = useMemo(() => {
     if (!Array.isArray(courses)) return [];
     return courses.map((item, idx) => {
@@ -763,7 +660,7 @@ const StudentCourses = () => {
   }, [enrichedCourses, currentStudentId]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ បង្កើតបញ្ជីគ្រូបង្រៀនសម្រាប់ប្រអប់រំកិលស្វ័យប្រវត្តិ (បង្ហាញតែរូបថត និងឈ្មោះគ្រូ)
+  // 📌 ផ្នែកទី៤៖ បង្កើតបញ្ជីគ្រូបង្រៀនសម្រាប់ប្រអប់រំកិលស្វ័យប្រវត្តិ
   // ============================================================================
   const courseInstructors = useMemo(() => {
     const map = new Map();
@@ -827,7 +724,6 @@ const StudentCourses = () => {
     getImageUrl,
   ]);
 
-  // Auto-rotate បង្វិលគ្រូបង្រៀនដោយស្វ័យប្រវត្តិរហូត រៀងរាល់ ៤ វិនាទីម្ដង
   useEffect(() => {
     if (courseInstructors.length <= 1 || isCarouselPaused) return;
     const timer = setInterval(() => {
@@ -887,7 +783,6 @@ const StudentCourses = () => {
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
           <div className="relative z-10 space-y-3.5">
-            {/* ផ្លាកខាងលើទាំង ២ (ដេប៉ាតឺម៉ង់ • វេនសិក្សា) */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
@@ -910,7 +805,6 @@ const StudentCourses = () => {
               </span>
             </div>
 
-            {/* ចំណងជើងធំ៖ បង្ហាញឆ្នាំសិក្សា */}
             <div className="space-y-2 pt-1">
               <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
                 <span>{t('មុខវិជ្ជាសិក្សា,', 'My Courses,')}</span>
@@ -929,7 +823,6 @@ const StudentCourses = () => {
             </div>
           </div>
 
-          {/* ប្រអប់រំកិលប្តូរគ្រូបង្រៀនដោយស្វ័យប្រវត្តិ (បង្ហាញតែរូបថតមូល និងឈ្មោះគ្រូប៉ុណ្ណោះ) */}
           <div
             className="relative z-10 mt-6 pt-5 border-t border-white/15"
             onMouseEnter={() => setIsCarouselPaused(true)}
@@ -957,7 +850,6 @@ const StudentCourses = () => {
                     key={`${currentInstructor.key}-${activeSlideIndex}`}
                     className="std-carousel-slide flex items-center justify-between gap-4"
                   >
-                    {/* ខាងឆ្វេង៖ រូបថតមូលរបស់គ្រូ និងឈ្មោះគ្រូ */}
                     <div className="flex items-center gap-3.5 min-w-0 flex-1">
                       <div
                         className={`h-12 w-12 rounded-full bg-gradient-to-br ${currentInstructor.avatarBg} flex items-center justify-center font-black text-sm text-white shrink-0 overflow-hidden relative ring-2 ring-white/30 shadow-md transition-transform duration-300`}
@@ -987,7 +879,6 @@ const StudentCourses = () => {
                       </h3>
                     </div>
 
-                    {/* ខាងស្ដាំ៖ ផ្លាក «គ្រូបង្រៀន» */}
                     <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/35 text-xs font-extrabold text-cyan-200 shadow-2xs shrink-0">
                       <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
                       <span>{t('គ្រូបង្រៀន', 'Instructor')}</span>
@@ -995,7 +886,6 @@ const StudentCourses = () => {
                   </div>
                 </div>
 
-                {/* ជួរខាងក្រោមប្រអប់៖ Dots Indicator ខាងឆ្វេង និងលេខរៀង 1 / N + ប៊ូតុងព្រួញខាងស្ដាំ */}
                 {courseInstructors.length > 1 && (
                   <div className="flex items-center justify-between px-1 pt-0.5">
                     <div className="flex items-center gap-1.5">
@@ -1042,7 +932,7 @@ const StudentCourses = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns - ដាក់ប្រអប់ «មុខវិជ្ជាសិក្សាសកម្ម» និង «ចំនួនក្រេឌីតសរុប» ធំទូលាយស្អាត) */}
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
         <div className="lg:col-span-4 stdc-surface-card bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -1065,7 +955,6 @@ const StudentCourses = () => {
             </div>
 
             <div className="space-y-3 pt-1">
-              {/* កាតទី១៖ មុខវិជ្ជាសិក្សាសកម្ម */}
               <div className="stdc-subbox p-4 rounded-2xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/70 via-teal-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3 transition-all">
                 <div className="flex items-center gap-3.5 min-w-0">
                   <div className="h-12 w-12 rounded-2xl bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-300 border border-emerald-300/50 dark:border-emerald-500/30 flex items-center justify-center shrink-0 shadow-2xs">
@@ -1086,7 +975,6 @@ const StudentCourses = () => {
                 </span>
               </div>
 
-              {/* កាតទី២៖ ចំនួនក្រេឌីតសរុប */}
               <div className="stdc-subbox p-4 rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50/70 via-orange-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3 transition-all">
                 <div className="flex items-center gap-3.5 min-w-0">
                   <div className="h-12 w-12 rounded-2xl bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-300/50 dark:border-amber-500/30 flex items-center justify-center shrink-0 shadow-2xs">
@@ -1126,7 +1014,7 @@ const StudentCourses = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. SEARCH BAR & VIEW MODE SWITCHER (កាត / តារាង)                */}
+      {/* 📌 2. SEARCH BAR (ដកប៊ូតុងប្ដូរទម្រង់តារាងចេញទាំងស្រុង)                */}
       {/* ================================================================== */}
       <div className="stdc-surface-card bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-4 items-center justify-between">
         <div className="relative w-full sm:max-w-md flex-1">
@@ -1152,7 +1040,7 @@ const StudentCourses = () => {
           )}
         </div>
 
-        <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-3">
+        <div className="flex items-center justify-end w-full sm:w-auto gap-3">
           <span className="stdc-text-secondary text-xs font-bold text-gray-500">
             {t('បង្ហាញ៖', 'Showing:')}{' '}
             <strong className="text-indigo-600 dark:text-indigo-400">
@@ -1160,38 +1048,11 @@ const StudentCourses = () => {
             </strong>{' '}
             {t('មុខវិជ្ជា', 'Courses')}
           </span>
-
-          <div className="stdc-view-switcher inline-flex items-center p-1 bg-gray-100 rounded-xl border border-gray-200">
-            <button
-              type="button"
-              onClick={() => handleViewModeChange('grid')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
-                viewMode === 'grid'
-                  ? 'stdc-view-active bg-white text-indigo-600 shadow-xs'
-                  : 'stdc-view-inactive text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              <Squares2X2Icon className="h-4 w-4" />
-              <span>{t('កាត', 'Cards')}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleViewModeChange('list')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
-                viewMode === 'list'
-                  ? 'stdc-view-active bg-white text-indigo-600 shadow-xs'
-                  : 'stdc-view-inactive text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              <ListBulletIcon className="h-4 w-4" />
-              <span>{t('តារាង', 'Table')}</span>
-            </button>
-          </div>
         </div>
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. MAIN COURSES CONTENT (គ្មាន Loading វិលៗ ឬ Skeleton ឡើយ)      */}
+      {/* 📌 3. MAIN COURSES CARDS (Static Display - មិនបាច់ឱ្យចុចទេ)          */}
       {/* ================================================================== */}
       <div className="w-full">
         {filteredCourses.length === 0 ? (
@@ -1216,10 +1077,7 @@ const StudentCourses = () => {
               </p>
             </div>
           </div>
-        ) : viewMode === 'grid' ? (
-          /* ==============================================================
-             OPTION A: COMPACT STUDIO COURSE CARDS (តូចល្មមស្អាត ដាក់បានច្រើនមុខវិជ្ជា)
-          =============================================================== */
+        ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch">
             {filteredCourses.map((course, idx) => {
               const teacherName = getTeacherDisplayName(course);
@@ -1242,16 +1100,15 @@ const StudentCourses = () => {
               return (
                 <div
                   key={course.id}
-                  className={`stdc-course-card group relative bg-white rounded-2xl border border-gray-200/80 hover:border-indigo-400 shadow-xs ${theme.glow} transition-all duration-300 hover:-translate-y-1 overflow-hidden flex flex-col justify-between h-full`}
+                  className={`stdc-course-card group relative bg-white rounded-2xl border border-gray-200/80 shadow-xs ${theme.glow} transition-all duration-300 overflow-hidden flex flex-col justify-between h-full select-none`}
                 >
                   <div>
-                    {/* ១. គម្របខាងលើនៃកាតមុខវិជ្ជា (បង្ហាញតែកូដមុខវិជ្ជា និងក្រេឌីត គ្មានឆមាស) */}
-                    <Link
-                      to={`/lessons?course_id=${course.id}`}
-                      className={`relative h-20 bg-gradient-to-r ${theme.coverBg} p-3 flex flex-col justify-between text-white overflow-hidden block`}
+                    {/* ១. គម្របខាងលើនៃកាតមុខវិជ្ជា (Static div មិនអាចចុចបានទេ) */}
+                    <div
+                      className={`relative h-20 bg-gradient-to-r ${theme.coverBg} p-3 flex flex-col justify-between text-white overflow-hidden`}
                     >
                       <div className="stdc-hero-grid absolute inset-0 opacity-20 pointer-events-none"></div>
-                      <BookOpenIcon className="absolute right-2 -bottom-3 h-16 w-16 text-white/[0.12] -rotate-12 group-hover:scale-110 transition-transform duration-500 pointer-events-none" />
+                      <BookOpenIcon className="absolute right-2 -bottom-3 h-16 w-16 text-white/[0.12] -rotate-12 pointer-events-none" />
 
                       <div className="relative z-10 flex items-center justify-between gap-1.5">
                         <span className="px-2 py-0.5 rounded-lg bg-slate-950/35 backdrop-blur-md border border-white/20 text-[10px] font-black tracking-wider uppercase">
@@ -1269,13 +1126,13 @@ const StudentCourses = () => {
                           {t('កំពុងបើកបង្រៀន', 'Active')}
                         </span>
                       </div>
-                    </Link>
+                    </div>
 
-                    {/* ២. តួកាតខាងក្រោម ភ្ជាប់ជាមួយ Floating Icon តូចល្មម */}
+                    {/* ២. តួកាតខាងក្រោម (Static Display មិនអាចចុចបានទេ) */}
                     <div className="px-4 pb-3 pt-0 relative">
                       <div className="flex items-end justify-between gap-2 -mt-5 mb-2.5 relative z-20">
                         <div
-                          className={`h-10 w-10 rounded-xl bg-gradient-to-br ${theme.floatingIconBg} border-[3px] border-white dark:border-slate-800 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-300 shrink-0`}
+                          className={`h-10 w-10 rounded-xl bg-gradient-to-br ${theme.floatingIconBg} border-[3px] border-white dark:border-slate-800 flex items-center justify-center shadow-sm shrink-0`}
                         >
                           <BookOpenIcon className="h-4 w-4 stroke-[2.2]" />
                         </div>
@@ -1286,11 +1143,8 @@ const StudentCourses = () => {
                         </span>
                       </div>
 
-                      <Link
-                        to={`/lessons?course_id=${course.id}`}
-                        className="block space-y-1"
-                      >
-                        <h3 className="stdc-text-primary text-sm sm:text-base font-black text-gray-900 group-hover:text-indigo-500 transition-colors line-clamp-1">
+                      <div className="space-y-1">
+                        <h3 className="stdc-text-primary text-sm sm:text-base font-black text-gray-900 line-clamp-1">
                           {course.course_name}
                         </h3>
                         <p className="stdc-text-secondary text-[11px] text-gray-500 line-clamp-1 leading-relaxed font-medium">
@@ -1300,26 +1154,18 @@ const StudentCourses = () => {
                               'Access lessons, videos, and exercises.'
                             )}
                         </p>
-                      </Link>
+                      </div>
 
-                      {/* ប៊ូតុងផ្លូវកាត់រហ័ស៖ មេរៀន • កិច្ចការ • កម្រងសំណួរ */}
+                      {/* ផ្លាកបង្ហាញចំនួន៖ មេរៀន • កិច្ចការ • កម្រងសំណួរ (Static span មិនអាចចុចបានទេ) */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-gray-100 dark:border-slate-700/70">
-                        <Link
-                          to={`/lessons?course_id=${course.id}`}
-                          state={{ courseId: course.id }}
-                          className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50/80 hover:bg-blue-600 text-blue-700 hover:text-white border border-blue-100 transition-colors"
-                        >
+                        <span className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50/80 text-blue-700 border border-blue-100">
                           <FolderIcon className="h-3 w-3" />
                           <span>
                             {t('មេរៀន', 'Lessons')}
                             {course.lessons_count > 0 ? ` (${course.lessons_count})` : ''}
                           </span>
-                        </Link>
-                        <Link
-                          to={`/assignments?course_id=${course.id}`}
-                          state={{ courseId: course.id }}
-                          className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50/80 hover:bg-purple-600 text-purple-700 hover:text-white border border-purple-100 transition-colors"
-                        >
+                        </span>
+                        <span className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50/80 text-purple-700 border border-purple-100">
                           <ClipboardDocumentListIcon className="h-3 w-3" />
                           <span>
                             {t('កិច្ចការ', 'Homework')}
@@ -1327,25 +1173,21 @@ const StudentCourses = () => {
                               ? ` (${course.assignments_count})`
                               : ''}
                           </span>
-                        </Link>
-                        <Link
-                          to={`/quizzes?course_id=${course.id}`}
-                          state={{ courseId: course.id }}
-                          className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50/80 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-100 transition-colors"
-                        >
+                        </span>
+                        <span className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50/80 text-emerald-700 border border-emerald-100">
                           <AcademicCapIcon className="h-3 w-3" />
                           <span>
                             {t('កម្រងសំណួរ', 'Quizzes')}
                             {course.quizzes_count > 0 ? ` (${course.quizzes_count})` : ''}
                           </span>
-                        </Link>
+                        </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* ៣. ផ្នែកខាងក្រោមកាត៖ រូបថតមូល/ឈ្មោះគ្រូបង្រៀន និងប៊ូតុងចូលរៀន */}
+                  {/* ៣. ផ្នែកខាងក្រោមកាត៖ បង្ហាញតែរូបថតមូល និងឈ្មោះគ្រូបង្រៀន (ដកប៊ូតុងចូលរៀនចេញ) */}
                   <div className="stdc-card-footer px-4 py-2.5 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <div
                         className={`h-8 w-8 rounded-full bg-gradient-to-br ${theme.avatarBg} flex items-center justify-center font-black text-[10px] shrink-0 overflow-hidden relative shadow-2xs`}
                       >
@@ -1382,153 +1224,14 @@ const StudentCourses = () => {
                       </div>
                     </div>
 
-                    <Link
-                      to={`/lessons?course_id=${course.id}`}
-                      state={{ courseId: course.id }}
-                      className={`inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r ${theme.btnGradient} text-white font-extrabold text-[11px] shadow-2xs transition-all duration-300 shrink-0`}
-                    >
-                      <PlayCircleIcon className="h-3.5 w-3.5 stroke-[2.2]" />
-                      <span>{t('ចូលរៀន', 'Study')}</span>
-                      <ArrowRightIcon className="h-3 w-3 stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
-                    </Link>
+                    <span className="stdc-code-pill inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-extrabold bg-white text-indigo-600 border border-gray-200/80 shrink-0">
+                      <CheckBadgeIcon className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>{t('បានចុះឈ្មោះ', 'Enrolled')}</span>
+                    </span>
                   </div>
                 </div>
               );
             })}
-          </div>
-        ) : (
-          /* ==============================================================
-             OPTION B: CLEAN TABLE VIEW (ដកឆមាសចេញ)
-          =============================================================== */
-          <div className="stdc-surface-card bg-white rounded-[1.5rem] border border-gray-200 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse">
-                <thead className="stdc-table-head bg-gray-50 border-b border-gray-100">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider w-14">
-                      {t('ល.រ', 'No')}
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                      {t('មុខវិជ្ជា', 'Course')}
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                      {t('កូដមុខវិជ្ជា', 'Course Code')}
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                      {t('គ្រូបង្រៀន', 'Instructor')}
-                    </th>
-                    <th className="px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                      {t('ក្រេឌីត', 'Credits')}
-                    </th>
-                    <th className="px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                      {t('សកម្មភាព', 'Actions')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="stdc-table-body bg-white">
-                  {filteredCourses.map((course, idx) => {
-                    const teacherName = getTeacherDisplayName(course);
-                    const teacherInitials = getTeacherInitials(teacherName);
-                    const rawImagePath = resolveTeacherImagePath(course);
-                    const imageUrl = getImageUrl(rawImagePath);
-                    const avatarKey = `tbl_tch_${course.id}`;
-                    const hasTeacherAvatar = Boolean(
-                      imageUrl && !failedAvatars[avatarKey]
-                    );
-                    const theme =
-                      COURSE_COVER_THEMES[
-                        course.themeIndex % COURSE_COVER_THEMES.length
-                      ];
-
-                    return (
-                      <tr
-                        key={course.id}
-                        className="stdc-table-row hover:bg-blue-50/30 transition-colors"
-                      >
-                        <td className="stdc-text-secondary px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-400">
-                          {idx + 1}
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3.5">
-                            <div
-                              className={`h-10 w-10 rounded-xl bg-gradient-to-br ${theme.floatingIconBg} flex items-center justify-center shrink-0 shadow-2xs`}
-                            >
-                              <BookOpenIcon className="h-5 w-5" />
-                            </div>
-                            <div>
-                              <div className="stdc-text-primary text-sm font-extrabold text-gray-900">
-                                {course.course_name}
-                              </div>
-                              <div className="stdc-text-secondary text-xs text-gray-500 line-clamp-1 max-w-md mt-0.5">
-                                {course.description ||
-                                  t('គ្មានការពិពណ៌នា', 'No description')}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="stdc-code-pill text-xs font-extrabold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700 border border-gray-200 uppercase">
-                            {course.course_code || 'COURSE'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2.5">
-                            <div
-                              className={`h-8 w-8 rounded-full bg-gradient-to-br ${theme.avatarBg} flex items-center justify-center font-black text-[10px] shrink-0 overflow-hidden shadow-2xs`}
-                            >
-                              {hasTeacherAvatar ? (
-                                <img
-                                  src={imageUrl}
-                                  alt={teacherName}
-                                  loading={idx < 10 ? 'eager' : 'lazy'}
-                                  decoding="async"
-                                  className="h-full w-full object-cover rounded-full"
-                                  onError={() =>
-                                    setFailedAvatars((prev) => ({
-                                      ...prev,
-                                      [avatarKey]: true,
-                                    }))
-                                  }
-                                />
-                              ) : (
-                                <span>{teacherInitials}</span>
-                              )}
-                            </div>
-                            <span className="stdc-text-primary text-sm font-bold text-gray-800">
-                              {teacherName}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <span className="inline-flex items-center px-3 py-1 rounded-lg text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30">
-                            {course.credit || 3} {t('ក្រេឌីត', 'Cr')}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <Link
-                              to={`/assignments?course_id=${course.id}`}
-                              state={{ courseId: course.id }}
-                              className="stdc-code-pill px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 hover:bg-indigo-50 text-xs font-extrabold text-gray-700 transition-all"
-                            >
-                              {t('កិច្ចការ', 'Homework')}
-                            </Link>
-                            <Link
-                              to={`/lessons?course_id=${course.id}`}
-                              state={{ courseId: course.id }}
-                              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r ${theme.btnGradient} text-white text-xs font-extrabold shadow-2xs transition-all`}
-                            >
-                              <PlayCircleIcon className="h-4 w-4" />
-                              <span>{t('ចូលរៀន', 'Study')}</span>
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
           </div>
         )}
 
@@ -1611,10 +1314,6 @@ const StudentCourses = () => {
           animation: carouselSlideFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
 
-        .stdc-table-row + .stdc-table-row > td {
-          border-top: 1px solid #f1f5f9;
-        }
-
         html.dark .stdc-page-bg {
           background-color: transparent !important;
         }
@@ -1623,9 +1322,6 @@ const StudentCourses = () => {
           background-color: #1e293b !important;
           border-color: #334155 !important;
         }
-        html.dark .stdc-course-card:hover {
-          border-color: #6366f1 !important;
-        }
         html.dark .stdc-subbox {
           background: #0f172a !important;
           border-color: #334155 !important;
@@ -1633,20 +1329,9 @@ const StudentCourses = () => {
         html.dark .stdc-divider {
           border-color: #334155 !important;
         }
-        html.dark .stdc-card-footer,
-        html.dark .stdc-view-switcher {
+        html.dark .stdc-card-footer {
           background-color: #0f172a !important;
           border-color: #334155 !important;
-        }
-        html.dark .stdc-view-active {
-          background-color: #4f46e5 !important;
-          color: #ffffff !important;
-        }
-        html.dark .stdc-view-inactive {
-          color: #94a3b8 !important;
-        }
-        html.dark .stdc-view-inactive:hover {
-          color: #f8fafc !important;
         }
         html.dark .stdc-input {
           background-color: #0f172a !important;
@@ -1663,27 +1348,10 @@ const StudentCourses = () => {
           border-color: #334155 !important;
           color: #cbd5e1 !important;
         }
-        html.dark .stdc-resource-tag:hover,
         html.dark .stdc-page-btn:hover:not(:disabled) {
           background-color: #4f46e5 !important;
           border-color: #6366f1 !important;
           color: #ffffff !important;
-        }
-        html.dark .stdc-table-head {
-          background-color: #0f172a !important;
-          border-color: rgba(51, 65, 85, 0.7) !important;
-        }
-        html.dark .stdc-table-head th {
-          color: #94a3b8 !important;
-        }
-        html.dark .stdc-table-body {
-          background-color: #1e293b !important;
-        }
-        html.dark .stdc-table-row + .stdc-table-row > td {
-          border-top: 1px solid rgba(51, 65, 85, 0.55) !important;
-        }
-        html.dark .stdc-table-row:hover {
-          background-color: rgba(59, 130, 246, 0.08) !important;
         }
         html.dark .stdc-text-primary {
           color: #f8fafc !important;

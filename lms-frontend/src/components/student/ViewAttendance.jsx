@@ -23,7 +23,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Instant Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
@@ -46,7 +46,7 @@ const DEFAULT_META = {
   per_page: 20,
 };
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ + រក្សារូបថតគ្រូក្នុង RAM (0ms)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
 const STUDENT_ATT_MEM_CACHE = {
   uid: null,
   attendance: null,
@@ -59,14 +59,14 @@ const STUDENT_ATT_MEM_CACHE = {
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
-      sessionStorage.getItem(key) || localStorage.getItem(key);
+      localStorage.getItem(key) || sessionStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អានតារាងរូបថតគ្រូបង្រៀន (Teacher Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
+// ✅ អានតារាងរូបថតគ្រូបង្រៀនពី RAM ភ្លាមៗក្នុង 0ms (គ្មានការប្រើ Canvas ឱ្យទាក់អេក្រង់ឡើយ)
 const getTeacherAvatarMapSync = () => {
   if (
     STUDENT_ATT_MEM_CACHE.teacherAvatarMap &&
@@ -80,88 +80,53 @@ const getTeacherAvatarMapSync = () => {
   return STUDENT_ATT_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ បង្រួមរូបថតគ្រូបង្រៀនមកត្រឹម 80x80px (~2KB) ទុកក្នុង Dictionary សម្រាប់បង្ហាញក្នុង 0ms
-const compressTeacherAvatarAsync = (keyId, rawDataUrl, onDone) => {
-  if (!keyId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
-  const map = getTeacherAvatarMapSync();
-
-  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
-    map[keyId] = rawDataUrl;
-    if (typeof onDone === 'function') onDone(keyId, rawDataUrl);
-    return;
-  }
-
-  if (!map[keyId]) {
-    map[keyId] = rawDataUrl;
-  }
-
-  try {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 80;
-        let w = img.width || maxSize;
-        let h = img.height || maxSize;
-        if (w > h) {
-          if (w > maxSize) {
-            h = Math.round((h * maxSize) / w);
-            w = maxSize;
-          }
-        } else {
-          if (h > maxSize) {
-            w = Math.round((w * maxSize) / h);
-            h = maxSize;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        const tinyWebp = canvas.toDataURL('image/webp', 0.8);
-        const bestImg =
-          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
-        map[keyId] = bestImg;
-        if (typeof onDone === 'function') onDone(keyId, bestImg);
-      } catch {}
-    };
-    img.src = rawDataUrl;
-  } catch {}
-};
-
-// ✅ លុបរូបភាព Base64 ធំៗចេញពីបញ្ជីវត្តមានមុនពេល Save ចូល localStorage តែរក្សាទុករូបថតគ្រូក្នុង Avatar Dictionary
-const persistStudentAttendanceSafely = (uid, attList, summaryObj, metaObj) => {
+// ✅ រក្សាទុកបញ្ជីវត្តមាន និងរូបថតគ្រូដោយលឿនបំផុត (0ms Synchronous Slim Save គ្មាន Canvas)
+const persistStudentAttendanceFast = (uid, attList, summaryObj, metaObj) => {
   if (!Array.isArray(attList)) return;
   const avatarMap = getTeacherAvatarMapSync();
-  let pendingCount = 0;
+  let avatarMapUpdated = false;
 
-  const saveAvatarMap = () => {
-    try {
-      const str = JSON.stringify(avatarMap);
-      sessionStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-    } catch {}
-  };
-
-  const stripPersonAvatar = (person) => {
+  const extractAndSlimTeacher = (person, courseIdFallback = '') => {
     if (!person || typeof person !== 'object') return person;
+    const rawImg =
+      person.profile_image_url ||
+      person.profile_image ||
+      person.user?.profile_image_url ||
+      person.user?.profile_image ||
+      null;
+
+    const tchId = String(person.id || person.user_id || '');
+    const cid = String(courseIdFallback || '');
+
+    if (rawImg && typeof rawImg === 'string') {
+      if (cid && avatarMap[`crs_${cid}`] !== rawImg) {
+        avatarMap[`crs_${cid}`] = rawImg;
+        avatarMapUpdated = true;
+      }
+      if (tchId && avatarMap[`tch_${tchId}`] !== rawImg) {
+        avatarMap[`tch_${tchId}`] = rawImg;
+        avatarMapUpdated = true;
+      }
+    }
+
+    const isHeavyBase64 =
+      typeof rawImg === 'string' &&
+      rawImg.startsWith('data:') &&
+      rawImg.length > 2000;
+
     const copy = { ...person };
-    if (
-      typeof copy.profile_image === 'string' &&
-      copy.profile_image.startsWith('data:') &&
-      copy.profile_image.length > 12000
-    ) {
-      copy.profile_image = null;
+    if (isHeavyBase64) {
+      delete copy.profile_image;
+      delete copy.profile_image_url;
     }
     if (copy.user && typeof copy.user === 'object') {
       const uCopy = { ...copy.user };
       if (
         typeof uCopy.profile_image === 'string' &&
-        uCopy.profile_image.startsWith('data:') &&
-        uCopy.profile_image.length > 12000
+        uCopy.profile_image.startsWith('data:')
       ) {
-        uCopy.profile_image = null;
+        delete uCopy.profile_image;
+        delete uCopy.profile_image_url;
       }
       copy.user = uCopy;
     }
@@ -172,71 +137,49 @@ const persistStudentAttendanceSafely = (uid, attList, summaryObj, metaObj) => {
     if (!rec || typeof rec !== 'object') return rec;
     const course = rec.course || {};
     const cid = String(course.id || rec.course_id || '');
-    const tchId = String(
-      course.teacher?.id ||
-        course.teacher_id ||
-        course.teacher_profile?.id ||
-        ''
-    );
-
-    const rawImg =
-      course.teacher_profile?.profile_image_url ||
-      course.teacher_profile?.profile_image ||
-      course.teacher?.profile_image_url ||
-      course.teacher?.profile_image ||
-      course.teacher?.user?.profile_image ||
-      course.teacher_image ||
-      null;
-
-    if (rawImg && cid) {
-      pendingCount++;
-      compressTeacherAvatarAsync(`crs_${cid}`, rawImg, (_, best) => {
-        if (tchId) avatarMap[`tch_${tchId}`] = best;
-        pendingCount--;
-        if (pendingCount <= 0) saveAvatarMap();
-      });
-    }
 
     const copy = { ...rec };
     if (copy.student && typeof copy.student === 'object') {
-      copy.student = stripPersonAvatar(copy.student);
+      const sCopy = { ...copy.student };
+      if (
+        typeof sCopy.profile_image === 'string' &&
+        sCopy.profile_image.startsWith('data:')
+      ) {
+        delete sCopy.profile_image;
+      }
+      copy.student = sCopy;
     }
     if (copy.course && typeof copy.course === 'object') {
       const cCopy = { ...copy.course };
-      if (cCopy.teacher) cCopy.teacher = stripPersonAvatar(cCopy.teacher);
+      if (cCopy.teacher) {
+        cCopy.teacher = extractAndSlimTeacher(cCopy.teacher, cid);
+      }
       if (cCopy.teacher_profile) {
-        cCopy.teacher_profile = stripPersonAvatar(cCopy.teacher_profile);
+        cCopy.teacher_profile = extractAndSlimTeacher(cCopy.teacher_profile, cid);
       }
       copy.course = cCopy;
     }
     return copy;
   });
 
-  if (pendingCount === 0) {
-    saveAvatarMap();
-  } else {
-    setTimeout(saveAvatarMap, 300);
+  if (avatarMapUpdated) {
+    try {
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(avatarMap));
+    } catch {}
   }
 
   try {
-    const listStr = JSON.stringify(slimList);
-    sessionStorage.setItem(getAttListCacheKey(uid), listStr);
-    localStorage.setItem(getAttListCacheKey(uid), listStr);
-
+    localStorage.setItem(getAttListCacheKey(uid), JSON.stringify(slimList));
     if (summaryObj) {
-      const sumStr = JSON.stringify(summaryObj);
-      sessionStorage.setItem(getAttSummaryCacheKey(uid), sumStr);
-      localStorage.setItem(getAttSummaryCacheKey(uid), sumStr);
+      localStorage.setItem(getAttSummaryCacheKey(uid), JSON.stringify(summaryObj));
     }
     if (metaObj) {
-      const metaStr = JSON.stringify(metaObj);
-      sessionStorage.setItem(getAttMetaCacheKey(uid), metaStr);
-      localStorage.setItem(getAttMetaCacheKey(uid), metaStr);
+      localStorage.setItem(getAttMetaCacheKey(uid), JSON.stringify(metaObj));
     }
   } catch {}
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -313,14 +256,12 @@ const ViewAttendance = () => {
   const abortControllerRef = useRef(null);
   const [failedAvatars, setFailedAvatars] = useState({});
 
-  // ✅ កំណត់អត្តសញ្ញាណសិស្សបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
     ensureCleanStudentSessionCache(uid);
     return uid;
   }, [user]);
 
-  // បើប្ដូរគណនីសិស្ស ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗក្នុង 0ms
   if (
     STUDENT_ATT_MEM_CACHE.uid &&
     STUDENT_ATT_MEM_CACHE.uid !== currentStudentId
@@ -332,7 +273,7 @@ const ViewAttendance = () => {
   }
   STUDENT_ATT_MEM_CACHE.uid = currentStudentId;
 
-  // ✅ ១. អានពី Cache តាមគណនីសិស្សម្នាក់ៗភ្លាមៗក្នុង 0 វិនាទី (គ្មាន Skeleton Loading)
+  // ✅ ១. អានពី Cache តាមគណនីសិស្សម្នាក់ៗភ្លាមៗក្នុង 0 វិនាទី
   const [attendance, setAttendance] = useState(() => {
     if (Array.isArray(STUDENT_ATT_MEM_CACHE.attendance)) {
       return STUDENT_ATT_MEM_CACHE.attendance;
@@ -368,13 +309,12 @@ const ViewAttendance = () => {
     return cached;
   });
 
-  // Filters State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'Present' | 'Absent' | 'Permission' | 'Late'
+  const [statusFilter, setStatusFilter] = useState('all');
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យនៅផ្ទៃខាងក្រោយដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
+  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យនៅផ្ទៃខាងក្រោយដោយមិនរាំងស្ទះ UI (0ms Sync)
   // ============================================================================
   useEffect(() => {
     let isMounted = true;
@@ -469,12 +409,6 @@ const ViewAttendance = () => {
         };
 
         if (page === 1) {
-          persistStudentAttendanceSafely(
-            currentStudentId,
-            validList,
-            newSummary,
-            newMeta
-          );
           STUDENT_ATT_MEM_CACHE.uid = currentStudentId;
           STUDENT_ATT_MEM_CACHE.attendance = validList;
           STUDENT_ATT_MEM_CACHE.summary = newSummary;
@@ -485,6 +419,15 @@ const ViewAttendance = () => {
         setAttendance(validList);
         setSummary(newSummary);
         setMeta(newMeta);
+
+        if (page === 1) {
+          persistStudentAttendanceFast(
+            currentStudentId,
+            validList,
+            newSummary,
+            newMeta
+          );
+        }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
           return;
@@ -536,7 +479,6 @@ const ViewAttendance = () => {
     return isWeekendShift ? 'Shift: Sat-Sun' : 'Shift: Mon-Fri';
   }, [isWeekendShift, language]);
 
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getProfileImageUrl = useCallback((imagePath) => {
     if (!imagePath || typeof imagePath !== 'string') return null;
     const trimmed = imagePath.trim();
@@ -556,7 +498,7 @@ const ViewAttendance = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ ទាញយកឈ្មោះ និងរូបថតគ្រូបង្រៀនឱ្យត្រឹមត្រូវ ១០០% (គាំទ្រទាំង Avatar Dictionary 0ms, teacher_profile និង teacher)
+  // ✅ ទាញយកឈ្មោះ និងរូបថតគ្រូបង្រៀនពី RAM Dictionary ក្នុងល្បឿន 0ms
   const resolveRecordTeacherInfo = useCallback(
     (record) => {
       const course = record?.course || {};
@@ -606,8 +548,6 @@ const ViewAttendance = () => {
 
       const avatarMap = getTeacherAvatarMapSync();
       const rawImage =
-        (cid && avatarMap[`crs_${cid}`]) ||
-        (tchId && avatarMap[`tch_${tchId}`]) ||
         tchProfile?.profile_image_url ||
         tchProfile?.profile_image ||
         tchProfile?.user?.profile_image ||
@@ -615,7 +555,9 @@ const ViewAttendance = () => {
         tch?.profile_image ||
         tch?.user?.profile_image_url ||
         tch?.user?.profile_image ||
-        course?.teacher_image;
+        course?.teacher_image ||
+        (cid && avatarMap[`crs_${cid}`]) ||
+        (tchId && avatarMap[`tch_${tchId}`]);
 
       return {
         name: fullName,
@@ -682,7 +624,6 @@ const ViewAttendance = () => {
     [language]
   );
 
-  // ✅ បង្ហាញម៉ោងតែនៅពេលសិស្សមានស្ថានភាពជា «មកយឺត» (Late) ប៉ុណ្ណោះ (ក្រៅពីហ្នឹងត្រឡប់ null ដើម្បីបង្ហាញតែថ្ងៃខែឆ្នាំ)
   const resolveRecordTime = useCallback(
     (record) => {
       if (!record || record.status !== 'Late' || !record.late_time) {
@@ -857,7 +798,6 @@ const ViewAttendance = () => {
     }
   };
 
-  // ទិន្នន័យប្រអប់ស្ថានភាពទាំង ៤ នៅក្នុងកាតខាងស្ដាំ
   const statusSelectorItems = [
     {
       id: 'Present',
@@ -918,7 +858,6 @@ const ViewAttendance = () => {
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
           <div className="relative z-10 space-y-3.5">
-            {/* ផ្លាកខាងលើ (ដេប៉ាតឺម៉ង់ • វេនសិក្សា) */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
@@ -941,7 +880,6 @@ const ViewAttendance = () => {
               </span>
             </div>
 
-            {/* ចំណងជើងធំ និងអត្ថបទពិពណ៌នា */}
             <div className="space-y-2 pt-1">
               <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
                 <span>{t('របាយការណ៍វត្តមាន,', 'Attendance,')}</span>
@@ -960,7 +898,6 @@ const ViewAttendance = () => {
             </div>
           </div>
 
-          {/* ប្រអប់តូចៗទាំង ២ នៅជួរខាងក្រោម (កំណត់ត្រាសរុប & អត្រាវត្តមាន) */}
           <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-6 pt-5 border-t border-white/15">
             <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-blue-500/25 border border-blue-300/30 flex items-center justify-center text-cyan-300 shrink-0">
@@ -992,7 +929,7 @@ const ViewAttendance = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns - សង្ខេបវត្តមានតាមស្ថានភាពទាំង ៤) */}
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
         <div className="lg:col-span-4 std-att-surface bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -1149,7 +1086,7 @@ const ViewAttendance = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 3. DETAILED ATTENDANCE TABLE (គ្មាន Skeleton Loading)               */}
+      {/* 3. DETAILED ATTENDANCE TABLE                                       */}
       {/* ================================================================== */}
       <div className="std-att-surface bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
         <div className="std-att-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
@@ -1315,7 +1252,6 @@ const ViewAttendance = () => {
                             <span className="std-att-text-primary text-xs sm:text-sm text-gray-900 font-extrabold">
                               {formatAttendanceDate(record.attendance_date)}
                             </span>
-                            {/* ✅ បង្ហាញម៉ោងតែនៅពេលសិស្សមកយឺត (timeString មានតម្លៃ) ប៉ុណ្ណោះ */}
                             {timeString && (
                               <span className="text-[11px] font-bold flex items-center gap-1 mt-0.5 text-amber-600 dark:text-amber-400">
                                 <ClockIcon className="w-3.5 h-3.5" />
@@ -1402,7 +1338,6 @@ const ViewAttendance = () => {
           background-size: 20px 20px;
         }
 
-        /* Light mode subtle row dividers */
         .std-att-row + .std-att-row > td {
           border-top: 1px solid #f1f5f9;
         }

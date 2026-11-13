@@ -21,7 +21,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Instant Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
@@ -30,7 +30,7 @@ const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v5';
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ + រក្សារូបថតគ្រូក្នុង RAM (0ms)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
 const STUDENT_SCORES_MEM_CACHE = {
   uid: null,
   grades: null,
@@ -41,14 +41,14 @@ const STUDENT_SCORES_MEM_CACHE = {
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
-      sessionStorage.getItem(key) || localStorage.getItem(key);
+      localStorage.getItem(key) || sessionStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អានតារាងរូបថតគ្រូបង្រៀន (Teacher Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
+// ✅ អានតារាងរូបថតគ្រូបង្រៀនពី RAM ភ្លាមៗក្នុង 0ms (គ្មានការប្រើ Canvas ឱ្យទាក់អេក្រង់ឡើយ)
 const getTeacherAvatarMapSync = () => {
   if (
     STUDENT_SCORES_MEM_CACHE.teacherAvatarMap &&
@@ -62,88 +62,53 @@ const getTeacherAvatarMapSync = () => {
   return STUDENT_SCORES_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ បង្រួមរូបថតគ្រូបង្រៀនមកត្រឹម 80x80px (~2KB) ទុកក្នុង Dictionary សម្រាប់បង្ហាញក្នុង 0ms
-const compressTeacherAvatarAsync = (keyId, rawDataUrl, onDone) => {
-  if (!keyId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
-  const map = getTeacherAvatarMapSync();
-
-  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
-    map[keyId] = rawDataUrl;
-    if (typeof onDone === 'function') onDone(keyId, rawDataUrl);
-    return;
-  }
-
-  if (!map[keyId]) {
-    map[keyId] = rawDataUrl;
-  }
-
-  try {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 80;
-        let w = img.width || maxSize;
-        let h = img.height || maxSize;
-        if (w > h) {
-          if (w > maxSize) {
-            h = Math.round((h * maxSize) / w);
-            w = maxSize;
-          }
-        } else {
-          if (h > maxSize) {
-            w = Math.round((w * maxSize) / h);
-            h = maxSize;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        const tinyWebp = canvas.toDataURL('image/webp', 0.8);
-        const bestImg =
-          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
-        map[keyId] = bestImg;
-        if (typeof onDone === 'function') onDone(keyId, bestImg);
-      } catch {}
-    };
-    img.src = rawDataUrl;
-  } catch {}
-};
-
-// ✅ លុបរូបភាព Base64 ធំៗចេញពីបញ្ជីពិន្ទុមុនពេល Save ចូល localStorage តែរក្សាទុករូបថតគ្រូក្នុង Avatar Dictionary
-const persistStudentScoresSafely = (uid, scoresList) => {
+// ✅ រក្សាទុកបញ្ជីពិន្ទុ និងរូបថតគ្រូដោយលឿនបំផុត (0ms Synchronous Slim Save គ្មាន Canvas)
+const persistStudentScoresFast = (uid, scoresList) => {
   if (!Array.isArray(scoresList)) return;
   const avatarMap = getTeacherAvatarMapSync();
-  let pendingCount = 0;
+  let avatarMapUpdated = false;
 
-  const saveAvatarMap = () => {
-    try {
-      const str = JSON.stringify(avatarMap);
-      sessionStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-    } catch {}
-  };
-
-  const stripPersonAvatar = (person) => {
+  const extractAndSlimTeacher = (person, courseIdFallback = '') => {
     if (!person || typeof person !== 'object') return person;
+    const rawImg =
+      person.profile_image_url ||
+      person.profile_image ||
+      person.user?.profile_image_url ||
+      person.user?.profile_image ||
+      null;
+
+    const tchId = String(person.id || person.user_id || '');
+    const cid = String(courseIdFallback || '');
+
+    if (rawImg && typeof rawImg === 'string') {
+      if (cid && avatarMap[`crs_${cid}`] !== rawImg) {
+        avatarMap[`crs_${cid}`] = rawImg;
+        avatarMapUpdated = true;
+      }
+      if (tchId && avatarMap[`tch_${tchId}`] !== rawImg) {
+        avatarMap[`tch_${tchId}`] = rawImg;
+        avatarMapUpdated = true;
+      }
+    }
+
+    const isHeavyBase64 =
+      typeof rawImg === 'string' &&
+      rawImg.startsWith('data:') &&
+      rawImg.length > 2000;
+
     const copy = { ...person };
-    if (
-      typeof copy.profile_image === 'string' &&
-      copy.profile_image.startsWith('data:') &&
-      copy.profile_image.length > 12000
-    ) {
-      copy.profile_image = null;
+    if (isHeavyBase64) {
+      delete copy.profile_image;
+      delete copy.profile_image_url;
     }
     if (copy.user && typeof copy.user === 'object') {
       const uCopy = { ...copy.user };
       if (
         typeof uCopy.profile_image === 'string' &&
-        uCopy.profile_image.startsWith('data:') &&
-        uCopy.profile_image.length > 12000
+        uCopy.profile_image.startsWith('data:')
       ) {
-        uCopy.profile_image = null;
+        delete uCopy.profile_image;
+        delete uCopy.profile_image_url;
       }
       copy.user = uCopy;
     }
@@ -154,70 +119,41 @@ const persistStudentScoresSafely = (uid, scoresList) => {
     if (!row || typeof row !== 'object') return row;
     const course = row.course || {};
     const cid = String(row.course_id || course.id || row.id || '');
-    const tchId = String(
-      course.teacher?.id ||
-        course.teacher_id ||
-        course.teacher_profile?.id ||
-        row.teacher?.id ||
-        ''
-    );
-
-    const rawImg =
-      course.teacher_profile?.profile_image_url ||
-      course.teacher_profile?.profile_image ||
-      course.teacher?.profile_image_url ||
-      course.teacher?.profile_image ||
-      course.teacher?.user?.profile_image ||
-      row.teacher?.profile_image ||
-      course.teacher_image ||
-      row.teacher_image ||
-      null;
-
-    if (rawImg && cid) {
-      pendingCount++;
-      compressTeacherAvatarAsync(`crs_${cid}`, rawImg, (_, best) => {
-        if (tchId) avatarMap[`tch_${tchId}`] = best;
-        pendingCount--;
-        if (pendingCount <= 0) saveAvatarMap();
-      });
-    }
 
     const copy = { ...row };
-    if (copy.student && typeof copy.student === 'object') {
-      copy.student = stripPersonAvatar(copy.student);
+    if (copy.teacher) {
+      copy.teacher = extractAndSlimTeacher(copy.teacher, cid);
     }
-    if (copy.teacher && typeof copy.teacher === 'object') {
-      copy.teacher = stripPersonAvatar(copy.teacher);
-    }
-    if (copy.teacher_profile && typeof copy.teacher_profile === 'object') {
-      copy.teacher_profile = stripPersonAvatar(copy.teacher_profile);
+    if (copy.teacher_profile) {
+      copy.teacher_profile = extractAndSlimTeacher(copy.teacher_profile, cid);
     }
     if (copy.course && typeof copy.course === 'object') {
       const cCopy = { ...copy.course };
-      if (cCopy.teacher) cCopy.teacher = stripPersonAvatar(cCopy.teacher);
+      if (cCopy.teacher) {
+        cCopy.teacher = extractAndSlimTeacher(cCopy.teacher, cid);
+      }
       if (cCopy.teacher_profile) {
-        cCopy.teacher_profile = stripPersonAvatar(cCopy.teacher_profile);
+        cCopy.teacher_profile = extractAndSlimTeacher(cCopy.teacher_profile, cid);
       }
       copy.course = cCopy;
     }
     return copy;
   });
 
-  if (pendingCount === 0) {
-    saveAvatarMap();
-  } else {
-    setTimeout(saveAvatarMap, 300);
+  if (avatarMapUpdated) {
+    try {
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(avatarMap));
+    } catch {}
   }
 
   try {
     const listStr = JSON.stringify(slimList);
-    sessionStorage.setItem(getScoresCacheKey(uid), listStr);
     localStorage.setItem(getScoresCacheKey(uid), listStr);
     localStorage.setItem(CACHE_KEY_SHARED_SCORES, listStr);
   } catch {}
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -287,7 +223,6 @@ const normalizeShiftKey = (shiftVal) => {
   return 'Monday-Friday';
 };
 
-// ✅ អនុគមន៍ស្រង់យកបញ្ជីពិន្ទុពី API Response គ្រប់ទម្រង់ទាំងអស់យ៉ាងត្រឹមត្រូវ
 const extractValidScoresArray = (resData) => {
   if (!resData) return [];
   if (Array.isArray(resData)) return resData;
@@ -300,7 +235,6 @@ const extractValidScoresArray = (resData) => {
   return [];
 };
 
-// ✅ អនុគមន៍កាត់ .00 ចេញពីពិន្ទុ
 const formatCleanNumber = (val) => {
   if (val === null || val === undefined || val === '') return null;
   const num = Number(val);
@@ -308,7 +242,6 @@ const formatCleanNumber = (val) => {
   return Math.round(num * 100) / 100;
 };
 
-// ✅ អនុគមន៍បម្លែងពិន្ទុលើមាត្រដ្ឋាន 100 (0-100) មកជាពិន្ទុពិតប្រាកដតាមភាគរយនៃផ្នែកនីមួយៗ (20, 20, 25, 35)
 const toWeightedComponentPoints = (rawPercentageScore, maxWeightPoints) => {
   if (rawPercentageScore === null || rawPercentageScore === undefined || rawPercentageScore === '') {
     return null;
@@ -327,7 +260,6 @@ const enrichGradeRow = (row, idx) => {
   const courseId =
     row?.course_id || courseObj?.id || scoreObj?.course_id || row?.id || idx + 1;
 
-  // ១. ពិន្ទុឆៅលើមាត្រដ្ឋាន 100 (0 - 100) ពី Backend
   const assignRaw100 = formatCleanNumber(
     row?.assignment_score ??
       scoreObj?.assignment_score ??
@@ -387,7 +319,6 @@ const enrichGradeRow = (row, idx) => {
     }
   }
 
-  // ✅ ២. បម្លែងពិន្ទុនីមួយៗមកជាពិន្ទុពិតប្រាកដតាមក្បាលតារាង (កិច្ចការ 20, សំណួរខ្លី 20, ពាក់កណ្តាលឆមាស 25, ប្រឡងបញ្ចប់ 35)
   const assignPts20 = toWeightedComponentPoints(assignRaw100, 20);
   const quizPts20 = toWeightedComponentPoints(quizRaw100, 20);
   const midtermPts25 = toWeightedComponentPoints(midtermRaw100, 25);
@@ -481,14 +412,12 @@ const ViewScores = () => {
   const abortControllerRef = useRef(null);
   const [failedAvatars, setFailedAvatars] = useState({});
 
-  // ✅ កំណត់អត្តសញ្ញាណសិស្សបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
     ensureCleanStudentSessionCache(uid);
     return uid;
   }, [user]);
 
-  // បើប្ដូរគណនីសិស្ស ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗក្នុង 0ms
   if (
     STUDENT_SCORES_MEM_CACHE.uid &&
     STUDENT_SCORES_MEM_CACHE.uid !== currentStudentId
@@ -498,7 +427,7 @@ const ViewScores = () => {
   }
   STUDENT_SCORES_MEM_CACHE.uid = currentStudentId;
 
-  // ✅ ១. អានពី Cache តាមគណនីសិស្សម្នាក់ៗភ្លាមៗក្នុង 0 វិនាទី (គ្មាន Skeleton Loading)
+  // ✅ ១. អានពី Cache តាមគណនីសិស្សម្នាក់ៗភ្លាមៗក្នុង 0 វិនាទី
   const [grades, setGrades] = useState(() => {
     if (Array.isArray(STUDENT_SCORES_MEM_CACHE.grades)) {
       return STUDENT_SCORES_MEM_CACHE.grades;
@@ -511,12 +440,11 @@ const ViewScores = () => {
     return cached;
   });
 
-  // Filters State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('all');
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី `/student/scores` ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
+  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី `/student/scores` ដោយមិនរាំងស្ទះ UI (0ms Sync)
   // ============================================================================
   useEffect(() => {
     let isMounted = true;
@@ -554,7 +482,6 @@ const ViewScores = () => {
 
         let validList = extractValidScoresArray(response.data);
 
-        // បើសិស្សមានមុខវិជ្ជាដែលបានចុះឈ្មោះក្នុង Dashboard តែមិនទាន់មានកំណត់ត្រាក្នុងតារាង scores ឱ្យបញ្ចូលមកជាមួយដើម្បីបង្ហាញជា «រង់ចាំពិន្ទុ»
         const cachedEnrollments =
           readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
           readStorageJson('cached_student_dashboard_enrollments_v8', []);
@@ -585,13 +512,13 @@ const ViewScores = () => {
           });
         }
 
-        // ✅ សម្អាត Base64 ធំៗចេញពីបញ្ជីពិន្ទុ តែរក្សាទុករូបថតគ្រូជា Thumbnail (~2KB) ក្នុង CACHE_KEY_TEACHER_AVATARS
-        persistStudentScoresSafely(currentStudentId, validList);
-
-        setGrades(validList);
+        // ✅ រក្សាទុកក្នុង RAM មុនគេដើម្បីបង្ហាញលើអេក្រង់ក្នុង 0ms រួចទើប Save Slim JSON ចូល localStorage
         STUDENT_SCORES_MEM_CACHE.uid = currentStudentId;
         STUDENT_SCORES_MEM_CACHE.grades = validList;
         STUDENT_SCORES_MEM_CACHE.lastSyncedAt = Date.now();
+        setGrades(validList);
+
+        persistStudentScoresFast(currentStudentId, validList);
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
           return;
@@ -647,7 +574,6 @@ const ViewScores = () => {
     return isWeekendShift ? 'Shift: Sat-Sun' : 'Shift: Mon-Fri';
   }, [isWeekendShift, language]);
 
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getProfileImageUrl = useCallback((imagePath) => {
     if (!imagePath || typeof imagePath !== 'string') return null;
     const trimmed = imagePath.trim();
@@ -667,7 +593,7 @@ const ViewScores = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ ទាញយកឈ្មោះ រូបថត (ពី Avatar Dictionary 0ms) និងជំនាញរបស់គ្រូបង្រៀនឱ្យត្រឹមត្រូវ ១០០%
+  // ✅ ទាញយកឈ្មោះ និងរូបថតគ្រូបង្រៀនពី RAM Dictionary ក្នុងល្បឿន 0ms
   const resolveGradeTeacherMeta = useCallback(
     (gradeRow) => {
       const course = gradeRow?.course || {};
@@ -722,8 +648,6 @@ const ViewScores = () => {
 
       const avatarMap = getTeacherAvatarMapSync();
       const rawImg =
-        (cid && avatarMap[`crs_${cid}`]) ||
-        (tchId && avatarMap[`tch_${tchId}`]) ||
         tchProfile?.profile_image_url ||
         tchProfile?.profile_image ||
         tchProfile?.user?.profile_image ||
@@ -732,7 +656,9 @@ const ViewScores = () => {
         tch?.user?.profile_image_url ||
         tch?.user?.profile_image ||
         course?.teacher_image ||
-        gradeRow?.teacher_image;
+        gradeRow?.teacher_image ||
+        (cid && avatarMap[`crs_${cid}`]) ||
+        (tchId && avatarMap[`tch_${tchId}`]);
 
       return {
         name: fullName,
@@ -788,7 +714,6 @@ const ViewScores = () => {
     });
   }, [enrichedGrades, selectedCourse, searchTerm, resolveGradeTeacherMeta]);
 
-  // គណនាពិន្ទុមធ្យមតាមផ្នែកទាំង ៤ ដែលគ្រូបានដាក់ឱ្យ (កិច្ចការ 20, សំណួរខ្លី 20, ពាក់កណ្ដាលឆមាស 25, ប្រឡងបញ្ចប់ 35)
   const componentAverages = useMemo(() => {
     const targetList =
       selectedCourse !== 'all' ? filteredGrades : enrichedGrades;
@@ -842,7 +767,6 @@ const ViewScores = () => {
     );
   }, [selectedCourse, availableCourses]);
 
-  // ផ្លាកបង្ហាញលទ្ធផល «ប្រឡងជាប់ / ប្រឡងធ្លាក់ / រង់ចាំពិន្ទុ»
   const getResultBadge = (row) => {
     if (row.resultStatus === 'passed') {
       return (
@@ -868,7 +792,6 @@ const ViewScores = () => {
     );
   };
 
-  // ✅ ទិន្នន័យប្រអប់ពិន្ទុតាមផ្នែកទាំង ៤ ដែលគ្រូបានកែ
   const scoreComponentCards = [
     {
       id: 'assign',
@@ -945,7 +868,6 @@ const ViewScores = () => {
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
           <div className="relative z-10 space-y-3.5">
-            {/* ផ្លាកខាងលើ (ដេប៉ាតឺម៉ង់ • វេនសិក្សា) */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
@@ -968,7 +890,6 @@ const ViewScores = () => {
               </span>
             </div>
 
-            {/* ចំណងជើងធំ និងអត្ថបទពិពណ៌នា */}
             <div className="space-y-2 pt-1">
               <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
                 <span>{t('លទ្ធផលពិន្ទុសិក្សា,', 'My Scores,')}</span>
@@ -989,7 +910,6 @@ const ViewScores = () => {
             </div>
           </div>
 
-          {/* ប្រអប់តូចៗទាំង ២ នៅជួរខាងក្រោម (ពិន្ទុមធ្យមភាគរួម & មុខវិជ្ជាប្រឡងជាប់) */}
           <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-6 pt-5 border-t border-white/15">
             <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
@@ -1021,7 +941,7 @@ const ViewScores = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns - បង្ហាញពិន្ទុតាមផ្នែកទាំង ៤ ដែលគ្រូបានកែ) */}
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
         <div className="lg:col-span-4 std-scr-surface bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -1380,7 +1300,7 @@ const ViewScores = () => {
                         )}
                       </td>
 
-                      {/* ✅ ពិន្ទុសរុប (បង្ហាញជាពិន្ទុ មិនដាក់ %) */}
+                      {/* ✅ ពិន្ទុសរុប */}
                       <td className="px-5 py-4 whitespace-nowrap text-center align-middle">
                         {grade.cleanFinal !== null ? (
                           <span className="std-scr-badge-indigo inline-block px-3 py-1.5 rounded-xl text-sm font-black text-indigo-700 bg-indigo-50 border border-indigo-200/80">
@@ -1414,7 +1334,6 @@ const ViewScores = () => {
           background-size: 20px 20px;
         }
 
-        /* Light mode subtle row dividers */
         .std-scr-row + .std-scr-row > td {
           border-top: 1px solid #f1f5f9;
         }

@@ -23,7 +23,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (0ms Cache & Safe Non-Blocking Prefetcher)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (0ms Cache & Instant Background Prefetcher)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 
@@ -33,6 +33,9 @@ const CACHE_KEY_SHARED_ASSIGNMENTS = 'cached_student_assignments_list_v5';
 const CACHE_KEY_SHARED_QUIZZES = 'cached_student_quizzes_list_v5';
 const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v5';
 const CACHE_KEY_SHARED_ATTENDANCE = 'cached_student_attendance_list_v3';
+const CACHE_KEY_SHARED_LESSONS = 'cached_student_dept_lessons_v12';
+const CACHE_KEY_SHARED_DEPT_COURSES = 'cached_student_dept_courses_all_years_v12';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
 
 const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
@@ -41,6 +44,9 @@ const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v10_${u
 const getQuizzesCacheKey = (uid) => `cached_student_quizzes_list_v8_${uid}`;
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 const getAttendanceCacheKey = (uid) => `cached_student_attendance_list_v8_${uid}`;
+const getLessonsCacheKey = (uid) => `cached_student_dept_lessons_v12_${uid}`;
+const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v12_${uid}`;
+const getStudentYearCacheKey = (uid) => `cached_student_current_year_v12_${uid}`;
 
 // ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ
 const STUDENT_DASH_MEM_CACHE = {
@@ -56,51 +62,78 @@ const STUDENT_DASH_MEM_CACHE = {
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
-      sessionStorage.getItem(key) || localStorage.getItem(key);
+      localStorage.getItem(key) || sessionStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ លុបជួរឈរ file_data និងរូបភាព Base64 ធំៗចេញពីទិន្នន័យមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
-const stripHeavyStudentDataDeep = (obj, depth = 0) => {
-  if (!obj || typeof obj !== 'object' || depth > 5) return obj;
-  if (Array.isArray(obj)) {
-    return obj.map((item) => stripHeavyStudentDataDeep(item, depth + 1));
+// ✅ ញែករូបថតគ្រូទុកក្នុង CACHE_KEY_TEACHER_AVATARS រួមតែមួយ ហើយរក្សាទុកបញ្ជីមុខវិជ្ជា/មេរៀនយ៉ាងស្រាលបំផុត (គ្មាន Canvas)
+const saveCoursesAndAvatarsFast = (coursesArr) => {
+  if (!Array.isArray(coursesArr)) return [];
+  const avatarMap = readStorageJson(CACHE_KEY_TEACHER_AVATARS, {});
+  let mapUpdated = false;
+
+  const slimList = coursesArr.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const courseObj = item.course || item;
+    const cid = String(item.course_id || courseObj.id || item.id || '');
+    const tch = courseObj.teacher_profile || courseObj.teacher || item.teacher_profile || item.teacher;
+    const tchId = String(tch?.id || tch?.user_id || courseObj.teacher_id || '');
+    const rawImg =
+      tch?.profile_image_url ||
+      tch?.profile_image ||
+      tch?.user?.profile_image ||
+      null;
+
+    if (rawImg && typeof rawImg === 'string') {
+      if (cid && avatarMap[`crs_${cid}`] !== rawImg) {
+        avatarMap[`crs_${cid}`] = rawImg;
+        mapUpdated = true;
+      }
+      if (tchId && avatarMap[`tch_${tchId}`] !== rawImg) {
+        avatarMap[`tch_${tchId}`] = rawImg;
+        mapUpdated = true;
+      }
+    }
+
+    const isHeavy =
+      typeof rawImg === 'string' &&
+      rawImg.startsWith('data:') &&
+      rawImg.length > 2000;
+
+    if (!isHeavy) return item;
+
+    const cleanPerson = (p) => {
+      if (!p || typeof p !== 'object') return p;
+      const c = { ...p };
+      delete c.profile_image;
+      delete c.profile_image_url;
+      return c;
+    };
+
+    const copy = { ...item };
+    if (copy.teacher) copy.teacher = cleanPerson(copy.teacher);
+    if (copy.teacher_profile) copy.teacher_profile = cleanPerson(copy.teacher_profile);
+    if (copy.course && typeof copy.course === 'object') {
+      const cCopy = { ...copy.course };
+      if (cCopy.teacher) cCopy.teacher = cleanPerson(cCopy.teacher);
+      if (cCopy.teacher_profile) cCopy.teacher_profile = cleanPerson(cCopy.teacher_profile);
+      copy.course = cCopy;
+    }
+    return copy;
+  });
+
+  if (mapUpdated) {
+    try {
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(avatarMap));
+    } catch {}
   }
 
-  const cleaned = {};
-  Object.keys(obj).forEach((k) => {
-    if (k === 'file_data') return;
-    const val = obj[k];
-    if (
-      typeof val === 'string' &&
-      val.startsWith('data:') &&
-      val.length > 15000
-    ) {
-      cleaned[k] = null;
-    } else if (val && typeof val === 'object') {
-      cleaned[k] = stripHeavyStudentDataDeep(val, depth + 1);
-    } else {
-      cleaned[k] = val;
-    }
-  });
-  return cleaned;
+  return slimList;
 };
 
-const safeWriteStudentCache = (key, payload) => {
-  try {
-    const slim = stripHeavyStudentDataDeep(payload);
-    const str = JSON.stringify(slim);
-    try {
-      sessionStorage.setItem(key, str);
-    } catch {}
-    localStorage.setItem(key, str);
-  } catch {}
-};
-
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -128,7 +161,6 @@ const resolveStudentUid = (contextUser) => {
   return 'default_student';
 };
 
-// ✅ អនុគមន៍សម្អាត Cache ចាស់របស់សិស្សមុន នៅពេលមានសិស្សថ្មី Login ចូលលើ Browser តែមួយ
 const ensureCleanStudentSessionCache = (newUid) => {
   if (!newUid || newUid === 'default_student') return;
   try {
@@ -144,6 +176,9 @@ const ensureCleanStudentSessionCache = (newUid) => {
         'cached_student_quizzes_list_v5',
         'cached_student_scores_list_v5',
         'cached_student_attendance_list_v3',
+        CACHE_KEY_SHARED_LESSONS,
+        CACHE_KEY_SHARED_DEPT_COURSES,
+        CACHE_KEY_TEACHER_AVATARS,
       ];
       sharedLocalKeys.forEach((k) => {
         try {
@@ -169,7 +204,7 @@ const extractArrayFromRes = (resData) => {
   return [];
 };
 
-// ✅ អនុគមន៍ទាញទិន្នន័យគ្រប់ទំព័ររបស់សិស្សទុកមុននៅផ្ទៃខាងក្រោយ (ពន្យារពេលបន្តិចដើម្បីទុកឱ្យ Dashboard បង្ហាញលឿន 0ms មុនគេ)
+// ✅ ទាញទិន្នន័យគ្រប់ទំព័រទាំងអស់របស់សិស្សទុកមុនភ្លាមៗ (រួមទាំង មេរៀន /student/lessons ដើម្បីចុចភ្លាមចេញភ្លាមក្នុង 0ms)
 const prefetchAllStudentPagesData = (
   uid,
   onAssignmentsSynced,
@@ -180,62 +215,114 @@ const prefetchAllStudentPagesData = (
   if (STUDENT_DASH_MEM_CACHE.prefetchedUid === uid) return;
   STUDENT_DASH_MEM_CACHE.prefetchedUid = uid;
 
+  // ១. ទាញបញ្ជីកិច្ចការសិស្សភ្លាមៗ
+  api
+    .get('/student/assignments', { params: { per_page: 20 } })
+    .then((res) => {
+      const data = extractArrayFromRes(res.data);
+      STUDENT_DASH_MEM_CACHE.assignments = data;
+      if (typeof onAssignmentsSynced === 'function') {
+        onAssignmentsSynced(data);
+      }
+      try {
+        localStorage.setItem(getAssignmentsCacheKey(uid), JSON.stringify(data));
+        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, JSON.stringify(data));
+      } catch {}
+    })
+    .catch(() => {});
+
+  // ២. ទាញបញ្ជីកម្រងសំណួរប្រឡងភ្លាមៗ
+  api
+    .get('/student/quizzes', { params: { per_page: 20 } })
+    .then((res) => {
+      const data = extractArrayFromRes(res.data);
+      STUDENT_DASH_MEM_CACHE.quizzes = data;
+      if (typeof onQuizzesSynced === 'function') {
+        onQuizzesSynced(data);
+      }
+      try {
+        localStorage.setItem(getQuizzesCacheKey(uid), JSON.stringify(data));
+        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, JSON.stringify(data));
+      } catch {}
+    })
+    .catch(() => {});
+
+  // ៣. ទាញបញ្ជីមុខវិជ្ជា និងមេរៀនទុកមុនសម្រាប់ទំព័រ StudentCourses និង StudentLessons (0ms)
   setTimeout(() => {
-    // ១. ទាញបញ្ជីកិច្ចការសិស្សដោយឯករាជ្យ
-    api
-      .get('/student/assignments', { params: { per_page: 20 } })
-      .then((res) => {
-        const data = extractArrayFromRes(res.data);
-        const slimData = stripHeavyStudentDataDeep(data);
-        STUDENT_DASH_MEM_CACHE.assignments = slimData;
-        if (typeof onAssignmentsSynced === 'function') {
-          onAssignmentsSynced(slimData);
-        }
-        safeWriteStudentCache(getAssignmentsCacheKey(uid), slimData);
-        safeWriteStudentCache(CACHE_KEY_SHARED_ASSIGNMENTS, slimData);
-      })
-      .catch(() => {});
-
-    // ២. ទាញបញ្ជីកម្រងសំណួរប្រឡងដោយឯករាជ្យ
-    api
-      .get('/student/quizzes', { params: { per_page: 20 } })
-      .then((res) => {
-        const data = extractArrayFromRes(res.data);
-        const slimData = stripHeavyStudentDataDeep(data);
-        STUDENT_DASH_MEM_CACHE.quizzes = slimData;
-        if (typeof onQuizzesSynced === 'function') {
-          onQuizzesSynced(slimData);
-        }
-        safeWriteStudentCache(getQuizzesCacheKey(uid), slimData);
-        safeWriteStudentCache(CACHE_KEY_SHARED_QUIZZES, slimData);
-      })
-      .catch(() => {});
-
-    // ៣. ទាញបញ្ជីមុខវិជ្ជាទុកមុនសម្រាប់ទំព័រ StudentCourses និង StudentAssignments
     api
       .get('/student/courses', { params: { per_page: 12 } })
       .then((res) => {
         const data = extractArrayFromRes(res.data);
         if (Array.isArray(data) && data.length > 0) {
-          const slimData = stripHeavyStudentDataDeep(data);
           if (typeof onCoursesSynced === 'function') {
-            onCoursesSynced(slimData);
+            onCoursesSynced(data);
           }
-          safeWriteStudentCache(getCoursesCacheKey(uid), slimData);
-          safeWriteStudentCache(CACHE_KEY_SHARED_COURSES, slimData);
+          const slim = saveCoursesAndAvatarsFast(data);
+          try {
+            localStorage.setItem(getCoursesCacheKey(uid), JSON.stringify(slim));
+            localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(slim));
+          } catch {}
         }
       })
       .catch(() => {});
-  }, 800);
 
-  // ៤. ទាញពិន្ទុ និងវត្តមានទុកមុននៅផ្ទៃខាងក្រោយដោយស្ងាត់ៗ
-  setTimeout(() => {
+    api
+      .get('/student/lessons')
+      .then((res) => {
+        const lessonsData = Array.isArray(res.data?.data)
+          ? res.data.data
+          : Array.isArray(res.data)
+          ? res.data
+          : [];
+        const deptCoursesData = Array.isArray(res.data?.department_courses)
+          ? res.data.department_courses
+          : [];
+
+        if (deptCoursesData.length > 0) {
+          const slimDept = saveCoursesAndAvatarsFast(deptCoursesData);
+          try {
+            localStorage.setItem(
+              getDeptCoursesCacheKey(uid),
+              JSON.stringify(slimDept)
+            );
+            localStorage.setItem(
+              CACHE_KEY_SHARED_DEPT_COURSES,
+              JSON.stringify(slimDept)
+            );
+          } catch {}
+        }
+        if (lessonsData.length > 0) {
+          try {
+            localStorage.setItem(
+              getLessonsCacheKey(uid),
+              JSON.stringify(lessonsData)
+            );
+            localStorage.setItem(
+              CACHE_KEY_SHARED_LESSONS,
+              JSON.stringify(lessonsData)
+            );
+          } catch {}
+        }
+        if (res.data?.student_current_year) {
+          try {
+            localStorage.setItem(
+              getStudentYearCacheKey(uid),
+              String(res.data.student_current_year)
+            );
+          } catch {}
+        }
+      })
+      .catch(() => {});
+
     api
       .get('/student/scores')
       .then((res) => {
         const data = extractArrayFromRes(res.data);
-        safeWriteStudentCache(getScoresCacheKey(uid), data);
-        safeWriteStudentCache(CACHE_KEY_SHARED_SCORES, data);
+        const slim = saveCoursesAndAvatarsFast(data);
+        try {
+          localStorage.setItem(getScoresCacheKey(uid), JSON.stringify(slim));
+          localStorage.setItem(CACHE_KEY_SHARED_SCORES, JSON.stringify(slim));
+        } catch {}
       })
       .catch(() => {});
 
@@ -243,11 +330,17 @@ const prefetchAllStudentPagesData = (
       .get('/student/attendance', { params: { per_page: 20 } })
       .then((res) => {
         const data = extractArrayFromRes(res.data);
-        safeWriteStudentCache(getAttendanceCacheKey(uid), data);
-        safeWriteStudentCache(CACHE_KEY_SHARED_ATTENDANCE, data);
+        const slim = saveCoursesAndAvatarsFast(data);
+        try {
+          localStorage.setItem(getAttendanceCacheKey(uid), JSON.stringify(slim));
+          localStorage.setItem(
+            CACHE_KEY_SHARED_ATTENDANCE,
+            JSON.stringify(slim)
+          );
+        } catch {}
       })
       .catch(() => {});
-  }, 1800);
+  }, 150);
 };
 
 const normalizeShiftKey = (shiftVal) => {
@@ -265,7 +358,6 @@ const normalizeShiftKey = (shiftVal) => {
   return 'Monday-Friday';
 };
 
-// ពណ៌សម្រាប់ប្រអប់ Spotlight Carousel លើ Hero Banner
 const COURSE_COVER_THEMES = [
   { iconGradient: 'from-amber-400 to-orange-500 text-slate-950' },
   { iconGradient: 'from-emerald-400 to-teal-500 text-slate-950' },
@@ -273,7 +365,6 @@ const COURSE_COVER_THEMES = [
   { iconGradient: 'from-sky-400 to-blue-500 text-white' },
 ];
 
-// អនុគមន៍កាត់ .00 ចេញពីពិន្ទុ (ឧ. 20.00 -> 20)
 const formatCleanScore = (val, fallback = 0) => {
   if (val === null || val === undefined || val === '') return fallback;
   const num = Number(val);
@@ -329,14 +420,12 @@ const StudentDashboard = () => {
   const { t, language } = useLanguage();
   const { getFullName, user } = useAuth();
 
-  // ✅ កំណត់អត្តសញ្ញាណសិស្សបច្ចុប្បន្ន និងសម្អាត Cache ចាស់បើមានការប្ដូរគណនី
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
     ensureCleanStudentSessionCache(uid);
     return uid;
   }, [user]);
 
-  // បើប្ដូរគណនីសិស្ស ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
   if (
     STUDENT_DASH_MEM_CACHE.uid &&
     STUDENT_DASH_MEM_CACHE.uid !== currentStudentId
@@ -350,7 +439,6 @@ const StudentDashboard = () => {
   }
   STUDENT_DASH_MEM_CACHE.uid = currentStudentId;
 
-  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី (គ្មាន Loading វិលៗ ឬ Skeleton ឡើយ)
   const [stats, setStats] = useState(() => {
     if (STUDENT_DASH_MEM_CACHE.stats) return STUDENT_DASH_MEM_CACHE.stats;
     const cached = readStorageJson(getStatsCacheKey(currentStudentId), null);
@@ -404,9 +492,6 @@ const StudentDashboard = () => {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [isCarouselPaused, setIsCarouselPaused] = useState(false);
 
-  // ============================================================================
-  // 📌 ផ្នែកទី២៖ អនុគមន៍ជំនួយសម្រាប់រៀបចំទិន្នន័យសិស្ស
-  // ============================================================================
   const getGreeting = () => {
     const hr = new Date().getHours();
     if (hr < 12) return t('អរុណសួស្តី', 'Good Morning');
@@ -492,7 +577,6 @@ const StudentDashboard = () => {
     [t]
   );
 
-  // បម្លែងកាលបរិច្ឆេទជាភាសាខ្មែរសុទ្ធ (ឧ. 31 តុលា 2026)
   const formatSafeDate = useCallback(
     (dateVal) => {
       if (!dateVal) return '—';
@@ -534,7 +618,6 @@ const StudentDashboard = () => {
     return Math.min(100, Math.max(0, Math.round(raw)));
   }, [stats]);
 
-  // ✅ គិតលើលទ្ធផល ប្រឡងជាប់ / ប្រឡងធ្លាក់ / រង់ចាំពិន្ទុ (មិនគិតនិទ្ទេស A-F ទេ)
   const masteryInfo = useMemo(() => {
     if (averageScoreNum >= 50) {
       return {
@@ -580,9 +663,6 @@ const StudentDashboard = () => {
     }));
   }, [enrollments]);
 
-  // ============================================================================
-  // 📌 ផ្នែកទី៣៖ រៀបចំបញ្ជី «កិច្ចការសិក្សា» និង «កម្រងសំណួរ» ដែលគ្រូបានដាក់ឱ្យ
-  // ============================================================================
   const teacherAssignedHomework = useMemo(() => {
     if (!Array.isArray(assignments)) return [];
     const now = new Date();
@@ -653,9 +733,6 @@ const StudentDashboard = () => {
     [teacherAssignedQuizzes]
   );
 
-  // ============================================================================
-  // 📌 ផ្នែកទី៤៖ បង្កើតបញ្ជីផ្ទាំងព័ត៌មានសម្រាប់លោតប្តូរដោយស្វ័យប្រវត្តិ (Auto-Rotating Slides)
-  // ============================================================================
   const spotlightSlides = useMemo(() => {
     const slides = [];
 
@@ -771,6 +848,20 @@ const StudentDashboard = () => {
   // 📌 ផ្នែកទី៥៖ ទាញយកទិន្នន័យដោយឯករាជ្យមិនរង់ចាំគ្នា (Non-Blocking 0ms Sync + Prefetch)
   // ============================================================================
   const fetchDashboardData = useCallback(async () => {
+    // ១. ចាប់ផ្ដើមទាញទិន្នន័យទំព័រផ្សេងៗរបស់សិស្សទុកមុនភ្លាមៗក្នុង 0ms
+    prefetchAllStudentPagesData(
+      currentStudentId,
+      (asgData) => {
+        setAssignments(asgData);
+      },
+      (qzData) => {
+        setQuizzes(qzData);
+      },
+      (crsData) => {
+        setEnrollments((prev) => (prev.length === 0 ? crsData : prev));
+      }
+    );
+
     const now = Date.now();
     const cachedSt =
       STUDENT_DASH_MEM_CACHE.stats ||
@@ -804,16 +895,9 @@ const StudentDashboard = () => {
       Object.keys(cachedSt).length > 0 &&
       now - STUDENT_DASH_MEM_CACHE.lastSyncedAt < 25000
     ) {
-      prefetchAllStudentPagesData(
-        currentStudentId,
-        (asgData) => setAssignments(asgData),
-        (qzData) => setQuizzes(qzData),
-        (crsData) => setEnrollments((prev) => (prev.length === 0 ? crsData : prev))
-      );
       return;
     }
 
-    // ✅ ១. ទាញទិន្នន័យ Dashboard ផ្ទាល់មុនគេបង្អស់ ដើម្បីឱ្យលឿនបំផុតលើ Online
     try {
       const dashRes = await api.get('/student/dashboard');
       const resData = dashRes?.data?.data || dashRes?.data || {};
@@ -831,9 +915,7 @@ const StudentDashboard = () => {
         resData?.courses ||
         resData?.recent_courses ||
         [];
-      const validEnrollments = stripHeavyStudentDataDeep(
-        Array.isArray(rawCourses) ? rawCourses : []
-      );
+      const validEnrollments = Array.isArray(rawCourses) ? rawCourses : [];
 
       setStats(newStats);
       setEnrollments(validEnrollments);
@@ -849,15 +931,13 @@ const StudentDashboard = () => {
         Array.isArray(resData?.recent_activity?.submissions) &&
         resData.recent_activity.submissions.length > 0
       ) {
-        const fallbackAsg = stripHeavyStudentDataDeep(
-          resData.recent_activity.submissions.map((sub) => ({
-            ...(sub.assignment || {}),
-            id: sub.assignment_id || sub.assignment?.id || sub.id,
-            title: sub.assignment?.title || 'កិច្ចការសិស្ស',
-            due_date: sub.assignment?.due_date || sub.submitted_at,
-            submission: sub,
-          }))
-        );
+        const fallbackAsg = resData.recent_activity.submissions.map((sub) => ({
+          ...(sub.assignment || {}),
+          id: sub.assignment_id || sub.assignment?.id || sub.id,
+          title: sub.assignment?.title || 'កិច្ចការសិស្ស',
+          due_date: sub.assignment?.due_date || sub.submitted_at,
+          submission: sub,
+        }));
         setAssignments((prev) => (prev.length === 0 ? fallbackAsg : prev));
       }
 
@@ -867,40 +947,33 @@ const StudentDashboard = () => {
         Array.isArray(resData?.recent_activity?.quiz_attempts) &&
         resData.recent_activity.quiz_attempts.length > 0
       ) {
-        const fallbackQz = stripHeavyStudentDataDeep(
-          resData.recent_activity.quiz_attempts.map((att) => ({
-            ...(att.quiz || {}),
-            id: att.quiz_id || att.quiz?.id || att.id,
-            title: att.quiz?.title || 'កម្រងសំណួរប្រឡង',
-            end_date: att.quiz?.end_date || att.submitted_at,
-            attempt: att,
-          }))
-        );
+        const fallbackQz = resData.recent_activity.quiz_attempts.map((att) => ({
+          ...(att.quiz || {}),
+          id: att.quiz_id || att.quiz?.id || att.id,
+          title: att.quiz?.title || 'កម្រងសំណួរប្រឡង',
+          end_date: att.quiz?.end_date || att.submitted_at,
+          attempt: att,
+        }));
         setQuizzes((prev) => (prev.length === 0 ? fallbackQz : prev));
       }
 
-      safeWriteStudentCache(getStatsCacheKey(currentStudentId), newStats);
-      safeWriteStudentCache(
-        getEnrollmentsCacheKey(currentStudentId),
-        validEnrollments
-      );
-      safeWriteStudentCache(CACHE_KEY_SHARED_ENROLLMENTS, validEnrollments);
+      const slimEnrollments = saveCoursesAndAvatarsFast(validEnrollments);
+      try {
+        localStorage.setItem(
+          getStatsCacheKey(currentStudentId),
+          JSON.stringify(newStats)
+        );
+        localStorage.setItem(
+          getEnrollmentsCacheKey(currentStudentId),
+          JSON.stringify(slimEnrollments)
+        );
+        localStorage.setItem(
+          CACHE_KEY_SHARED_ENROLLMENTS,
+          JSON.stringify(slimEnrollments)
+        );
+      } catch (e) {}
     } catch (error) {
       console.error('Error fetching student dashboard data:', error);
-    } finally {
-      // ✅ ២. ទាញទិន្នន័យទំព័រផ្សេងៗតាមក្រោយដោយស្ងាត់ៗ មិនរំខានការបើកទំព័រដំបូង
-      prefetchAllStudentPagesData(
-        currentStudentId,
-        (asgData) => {
-          setAssignments(asgData);
-        },
-        (qzData) => {
-          setQuizzes(qzData);
-        },
-        (crsData) => {
-          setEnrollments((prev) => (prev.length === 0 ? crsData : prev));
-        }
-      );
     }
   }, [currentStudentId]);
 
@@ -988,7 +1061,6 @@ const StudentDashboard = () => {
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
           <div className="relative z-10 space-y-3.5">
-            {/* ផ្លាកខាងលើ (ដេប៉ាតឺម៉ង់ • វេនសិក្សា • កាលបរិច្ឆេទ) */}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
@@ -1038,7 +1110,6 @@ const StudentDashboard = () => {
             </div>
           </div>
 
-          {/* ប្រអប់រំកិលប្តូរព័ត៌មានដោយស្វ័យប្រវត្តិ (Auto-Rotating Spotlight Carousel) */}
           <div
             className="relative z-10 mt-6 pt-5 border-t border-white/15"
             onMouseEnter={() => setIsCarouselPaused(true)}
@@ -1224,7 +1295,7 @@ const StudentDashboard = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. VIBRANT FLOATING METRIC TILES (គ្មាន Skeleton លោតភ្លឹបភ្លែត) */}
+      {/* 📌 2. VIBRANT FLOATING METRIC TILES                                */}
       {/* ================================================================== */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
         {statCards.map((stat, index) => {
@@ -1268,7 +1339,6 @@ const StudentDashboard = () => {
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 items-stretch">
         
-        {/* ✅ កាតទី ១ (ខាងឆ្វេង)៖ កិច្ចការសិក្សាដែលគ្រូបានដាក់ឱ្យ */}
         <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
           <div className="space-y-5">
             <div className="flex items-center justify-between gap-3 pb-4 border-b border-gray-100 std-card-divider">
@@ -1414,7 +1484,6 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* ✅ កាតទី ២ (ខាងស្ដាំ)៖ កម្រងសំណួរប្រឡងដែលគ្រូបានដាក់ឱ្យ */}
         <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
           <div className="space-y-5">
             <div className="flex items-center justify-between gap-3 pb-4 border-b border-gray-100 std-card-divider">
