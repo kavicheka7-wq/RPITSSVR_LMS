@@ -711,8 +711,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ មុខងារពិនិត្យ, ភ្ជាប់, និងផ្ដាច់គណនី Telegram ដោយមានការការពារសុវត្ថិភាពខ្ពស់បំផុត
-     * អនុញ្ញាតឱ្យដំណើរការតែចំពោះអ្នកប្រើដែលទើបតែវាយ Email + Password ត្រូវ (មាន Active 2FA Session) ប៉ុណ្ណោះ!
+     * ✅ មុខងារពិនិត្យ, ភ្ជាប់, និងផ្ដាច់គណនី Telegram (គាំទ្រទាំងក្នុង Navbar Settings និងលើអេក្រង់ Login 2FA)
      */
     public function checkTelegramLink(Request $request)
     {
@@ -727,13 +726,18 @@ class AuthController extends Controller
             return response()->json(['linked' => false, 'message' => 'រកមិនឃើញគណនីនេះទេ'], 404);
         }
 
-        // ✅ សុវត្ថិភាពទី ១៖ ត្រួតពិនិត្យថាតើគណនីនេះពិតជាបានឆ្លងកាត់ការវាយ Password ត្រឹមត្រូវក្នុងរយៈពេល ១០ នាទីចុងក្រោយមែនឬអត់
-        // ការពារកុំឱ្យជនខិលខូចដែលដឹងត្រឹម Email ឬចូលតាមផ្ទាំង Forgot Password អាចភ្ជាប់/ផ្ដាច់ Telegram របស់គេបាន!
+        // ✅ អនុញ្ញាតឱ្យភ្ជាប់/ផ្ដាច់ Telegram បានក្នុង ២ ករណីសុវត្ថិភាព៖
+        // ករណីទី ១៖ ម្ចាស់គណនីបាន Login ចូលក្នុងប្រព័ន្ធរួចហើយ និងកំពុងចុចពីក្នុង Navbar Settings (មាន Sanctum Bearer Token ត្រឹមត្រូវ)
+        // ករណីទី ២៖ ម្ចាស់គណនីទើបតែវាយ Email + Password ត្រឹមត្រូវនៅលើឧបករណ៍នេះ (Active 2FA Session)
+        $loggedInUser = auth('sanctum')->user();
+        $isAuthenticatedOwner = $loggedInUser && (int) $loggedInUser->id === (int) $user->id;
+
         $deviceHash = $this->getDeviceFingerprint($request);
         $verified2faDevice = Cache::get('lms_2fa_verified_password_device_' . $user->id);
         $hasActive2faOtp = Cache::has('lms_2fa_otp_' . $user->id);
+        $isVerified2faSession = $hasActive2faOtp && $verified2faDevice === $deviceHash;
 
-        if (!$hasActive2faOtp || $verified2faDevice !== $deviceHash) {
+        if (!$isAuthenticatedOwner && !$isVerified2faSession) {
             return response()->json([
                 'linked' => $this->resolveUserTelegramChatId($user) !== null,
                 'telegram_sent' => false,
@@ -745,15 +749,24 @@ class AuthController extends Controller
         if ($request->input('action') === 'unlink') {
             $this->unlinkUserTelegramChatId($user);
 
-            // នៅពេលផ្ដាច់ Telegram ចេញ ឱ្យផ្ញើលេខកូដ ៦ ខ្ទង់ថ្មីទៅកាន់ Email របស់ម្ចាស់គណនីភ្លាមៗ
-            $otpResult = $this->generateAndSendOtp($user, $request, '2fa');
+            // បើចុចផ្ដាច់ពីលើអេក្រង់ Login (កំពុងរង់ចាំវាយកូដ 2FA) ឱ្យផ្ញើកូដ ៦ ខ្ទង់ថ្មីទៅកាន់ Email ភ្លាមៗ
+            if ($isVerified2faSession && !$isAuthenticatedOwner) {
+                $otpResult = $this->generateAndSendOtp($user, $request, '2fa');
+                return response()->json([
+                    'linked' => false,
+                    'telegram_sent' => false,
+                    'mail_sent' => $otpResult['mail_sent'],
+                    'telegram_link_url' => $otpResult['telegram_link_url'],
+                    'message' => 'បានផ្ដាច់គណនី Telegram ជោគជ័យ! លេខកូដ ៦ ខ្ទង់ថ្មីត្រូវបានផ្ញើទៅកាន់ Email របស់អ្នកវិញហើយ។',
+                ]);
+            }
 
+            // បើចុចផ្ដាច់ចេញពីក្នុង Navbar (Settings Modal) គ្រាន់តែផ្ដាច់ធម្មតា និងបង្កើត Link ថ្មីទុកឱ្យភ្ជាប់ម្ដងទៀត
             return response()->json([
                 'linked' => false,
                 'telegram_sent' => false,
-                'mail_sent' => $otpResult['mail_sent'],
-                'telegram_link_url' => $otpResult['telegram_link_url'],
-                'message' => 'បានផ្ដាច់គណនី Telegram ជោគជ័យ! លេខកូដ ៦ ខ្ទង់ថ្មីត្រូវបានផ្ញើទៅកាន់ Email របស់អ្នកវិញហើយ។',
+                'telegram_link_url' => $this->generateTelegramLinkUrl($user, true),
+                'message' => 'បានផ្ដាច់គណនី Telegram ជោគជ័យ! ចាប់ពីពេលនេះទៅ លេខកូដ ៦ ខ្ទង់នឹងត្រូវផ្ញើទៅកាន់ Email របស់អ្នកវិញ។',
             ]);
         }
 
@@ -834,11 +847,11 @@ class AuthController extends Controller
                     }
                     Cache::forget('lms_tg_user_link_token_' . $user->id);
 
-                    // ✅ អនុញ្ញាតឱ្យបាញ់កូដចូល Telegram តែសម្រាប់ការ Login (2FA) ប៉ុណ្ណោះ (ហាមដាច់ខាតសម្រាប់ការប្ដូរពាក្យសម្ងាត់ Reset)
+                    // ✅ អនុញ្ញាតឱ្យបាញ់កូដចូល Telegram តែសម្រាប់ការ Login (2FA) ប៉ុណ្ណោះ
                     $pending2faOtp = Cache::get('lms_2fa_otp_' . $user->id);
                     $sentOtpNow = false;
 
-                    if ($pending2faOtp) {
+                    if ($pending2faOtp && !$isAuthenticatedOwner) {
                         $newOtp = (string) random_int(100000, 999999);
                         Cache::put('lms_2fa_otp_' . $user->id, $newOtp, now()->addMinutes(5));
                         $sentOtpNow = $this->sendTelegramOtpAlert($user->fresh('role'), $newOtp, $request, '2fa');
