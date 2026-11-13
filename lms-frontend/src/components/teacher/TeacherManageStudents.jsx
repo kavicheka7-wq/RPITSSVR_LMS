@@ -19,11 +19,12 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីគ្រូម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យ និងរូបភាពសិស្សល្បឿនលឿន 0ms (Instant Avatar Cache)
 // ============================================================================
 const CACHE_KEY_SHARED_STUDENTS = 'cached_teacher_students_list_v6';
 const CACHE_KEY_SHARED_COURSES = 'cached_teacher_courses_list_v6';
 const CACHE_KEY_SHARED_MAP = 'cached_teacher_course_map_v6';
+const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v1';
 
 const getStudentsCacheKey = (uid) => `cached_teacher_students_list_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_teacher_courses_list_v8_${uid}`;
@@ -32,37 +33,185 @@ const getSelectedYearKey = (uid) => `cached_teacher_selected_year_${uid}`;
 const getSelectedCourseKey = (uid) => `cached_teacher_selected_course_${uid}`;
 const getSelectedShiftKey = (uid) => `cached_teacher_selected_shift_${uid}`;
 
-// ✅ Global In-Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ
+// ✅ Global In-Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ + រក្សារូបភាពសិស្សក្នុង RAM (0ms)
 const MEMORY_CACHE = {
   uid: null,
   students: null,
   courses: null,
   courseMap: null,
+  avatarMap: null,
   lastFetchedAt: 0,
 };
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
-const resolveTeacherUid = (contextUser) => {
-  if (contextUser) {
+// ✅ អានតារាងរូបភាពសិស្ស (Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
+const getAvatarMapSync = () => {
+  if (MEMORY_CACHE.avatarMap && typeof MEMORY_CACHE.avatarMap === 'object') {
+    return MEMORY_CACHE.avatarMap;
+  }
+  const stored = readStorageJson(CACHE_KEY_STUDENT_AVATARS, {});
+  MEMORY_CACHE.avatarMap = stored && typeof stored === 'object' ? stored : {};
+  return MEMORY_CACHE.avatarMap;
+};
+
+// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 80x80px (~2KB) ដើម្បី Save ចូល localStorage បាន 100% និងបង្ហាញលឿន 0ms
+const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
+  if (!studentId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
+
+  const map = getAvatarMapSync();
+  // បើជារូបភាព URL ធម្មតា ឬរូបភាពតូចស្រាប់ (< 12KB) រក្សាទុកភ្លាមៗ
+  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
+    map[studentId] = rawDataUrl;
+    if (typeof onCompressed === 'function') onCompressed(studentId, rawDataUrl);
+    return;
+  }
+
+  // រក្សាទុករូបដើមក្នុង RAM ភ្លាមៗសិន ដើម្បីឱ្យបង្ហាញលើអេក្រង់ភ្លាម 0ms
+  if (!map[studentId]) {
+    map[studentId] = rawDataUrl;
+  }
+
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 80;
+        let w = img.width || maxSize;
+        let h = img.height || maxSize;
+        if (w > h) {
+          if (w > maxSize) {
+            h = Math.round((h * maxSize) / w);
+            w = maxSize;
+          }
+        } else {
+          if (h > maxSize) {
+            w = Math.round((w * maxSize) / h);
+            h = maxSize;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const tinyWebp = canvas.toDataURL('image/webp', 0.78);
+        const bestImg = tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
+        map[studentId] = bestImg;
+        if (typeof onCompressed === 'function') onCompressed(studentId, bestImg);
+      } catch {}
+    };
+    img.src = rawDataUrl;
+  } catch {}
+};
+
+// ✅ ភ្ជាប់រូបភាពពី Avatar Dictionary មកដាក់ក្នុងបញ្ជីសិស្សវិញភ្លាមៗក្នុង 0ms
+const hydrateStudentsWithAvatars = (list) => {
+  if (!Array.isArray(list)) return [];
+  const avatarMap = getAvatarMapSync();
+  return list.map((stu) => {
+    if (!stu || typeof stu !== 'object') return stu;
+    const rawImg =
+      stu.profile_image ||
+      stu.user?.profile_image ||
+      avatarMap[stu.id] ||
+      avatarMap[stu.user_id] ||
+      null;
+    if (rawImg && stu.profile_image !== rawImg) {
+      return { ...stu, profile_image: rawImg };
+    }
+    return stu;
+  });
+};
+
+// ✅ រក្សាទុកបញ្ជីសិស្ស (Slim JSON) និងរូបភាព Thumbnail ដាច់ដោយឡែកពីគ្នា ធានាមិនពេញ localStorage 100%
+const persistStudentsAndAvatarsSafely = (uid, studentsList) => {
+  if (!Array.isArray(studentsList)) return;
+  const avatarMap = getAvatarMapSync();
+  let pendingCompressCount = 0;
+
+  const saveAvatarMapToStorage = () => {
+    try {
+      const str = JSON.stringify(avatarMap);
+      sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+    } catch {}
+  };
+
+  const slimStudents = studentsList.map((stu) => {
+    if (!stu || typeof stu !== 'object') return stu;
+    const rawImg = stu.profile_image || stu.user?.profile_image || null;
+
+    if (stu.id && rawImg) {
+      pendingCompressCount++;
+      compressStudentAvatarAsync(stu.id, rawImg, () => {
+        pendingCompressCount--;
+        if (pendingCompressCount <= 0) {
+          saveAvatarMapToStorage();
+        }
+      });
+    }
+
+    const copy = { ...stu };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 12000
+    ) {
+      copy.profile_image = null;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      copy.user = {
+        id: copy.user.id,
+        status: copy.user.status,
+        email: copy.user.email,
+      };
+    }
+    return copy;
+  });
+
+  if (pendingCompressCount === 0) {
+    saveAvatarMapToStorage();
+  } else {
+    setTimeout(saveAvatarMapToStorage, 300);
+  }
+
+  try {
+    const serialized = JSON.stringify(slimStudents);
+    sessionStorage.setItem(getStudentsCacheKey(uid), serialized);
+    localStorage.setItem(getStudentsCacheKey(uid), serialized);
+    localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, serialized);
+  } catch {}
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+const resolveTeacherUid = (contextUser, contextTeacher) => {
+  const target = contextUser || contextTeacher;
+  if (target) {
     const id =
-      contextUser.id ||
-      contextUser.user_id ||
-      contextUser.teacher?.id ||
-      contextUser.email;
+      target.id ||
+      target.user_id ||
+      target.teacher?.id ||
+      target.email;
     if (id) return String(id);
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('teacher') ||
+      localStorage.getItem('teacher');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -239,7 +388,10 @@ const hasStudentEnrolledAnyTeacherCourse = (student, courses, courseMap) => {
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+      sessionStorage.getItem('auth_user') ||
+      sessionStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      localStorage.getItem('user');
     let uid = 'default';
     let role = 'teacher';
     if (userObjStr) {
@@ -281,7 +433,7 @@ const pushLocalNotification = (notif) => {
 
 const TeacherManageStudents = () => {
   const { t, language } = useLanguage();
-  const { user } = useAuth();
+  const { user, teacher } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [failedAvatars, setFailedAvatars] = useState({});
@@ -290,7 +442,10 @@ const TeacherManageStudents = () => {
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || '';
 
-  const currentTeacherId = useMemo(() => resolveTeacherUid(user), [user]);
+  const currentTeacherId = useMemo(
+    () => resolveTeacherUid(user, teacher),
+    [user, teacher]
+  );
 
   if (MEMORY_CACHE.uid && MEMORY_CACHE.uid !== currentTeacherId) {
     MEMORY_CACHE.students = null;
@@ -300,20 +455,22 @@ const TeacherManageStudents = () => {
   }
   MEMORY_CACHE.uid = currentTeacherId;
 
+  // ✅ ១. អានបញ្ជីសិស្ស និងភ្ជាប់រូបភាពពី Cache ភ្លាមៗក្នុង 0 វិនាទី
   const [students, setStudents] = useState(() => {
     if (Array.isArray(MEMORY_CACHE.students)) {
-      return MEMORY_CACHE.students;
+      return hydrateStudentsWithAvatars(MEMORY_CACHE.students);
     }
     const fromUserKey = readStorageJson(
       getStudentsCacheKey(currentTeacherId),
       null
     );
     if (Array.isArray(fromUserKey)) {
-      MEMORY_CACHE.students = fromUserKey;
-      return fromUserKey;
+      const hydrated = hydrateStudentsWithAvatars(fromUserKey);
+      MEMORY_CACHE.students = hydrated;
+      return hydrated;
     }
     const fallback = readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
-    return Array.isArray(fallback) ? fallback : [];
+    return Array.isArray(fallback) ? hydrateStudentsWithAvatars(fallback) : [];
   });
 
   const [courses, setCourses] = useState(() => {
@@ -410,8 +567,9 @@ const TeacherManageStudents = () => {
     );
 
     if (Array.isArray(cachedStd)) {
-      setStudents(cachedStd);
-      MEMORY_CACHE.students = cachedStd;
+      const hydrated = hydrateStudentsWithAvatars(cachedStd);
+      setStudents(hydrated);
+      MEMORY_CACHE.students = hydrated;
     }
     if (Array.isArray(cachedCrs)) {
       setCourses(cachedCrs);
@@ -450,32 +608,29 @@ const TeacherManageStudents = () => {
           : Array.isArray(rawStd?.data)
           ? rawStd.data
           : [];
-        setStudents(latestStudents);
-        MEMORY_CACHE.students = latestStudents;
+
+        // ✅ រក្សាទុកបញ្ជីសិស្ស និងបង្រួមរូបភាពសិស្សជា Thumbnail (~2KB) សម្រាប់បើកលឿន 0ms លើកក្រោយ
+        persistStudentsAndAvatarsSafely(currentTeacherId, latestStudents);
+
+        const hydrated = hydrateStudentsWithAvatars(latestStudents);
+        setStudents(hydrated);
+        MEMORY_CACHE.students = hydrated;
         MEMORY_CACHE.lastFetchedAt = Date.now();
-        try {
-          localStorage.setItem(
-            getStudentsCacheKey(currentTeacherId),
-            JSON.stringify(latestStudents)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_STUDENTS,
-            JSON.stringify(latestStudents)
-          );
-        } catch (e) {}
 
         if (stdRes.data?.course_students_map) {
           setCourseMap(stdRes.data.course_students_map);
           MEMORY_CACHE.courseMap = stdRes.data.course_students_map;
           try {
+            const mapStr = JSON.stringify(stdRes.data.course_students_map);
+            sessionStorage.setItem(
+              getCourseMapCacheKey(currentTeacherId),
+              mapStr
+            );
             localStorage.setItem(
               getCourseMapCacheKey(currentTeacherId),
-              JSON.stringify(stdRes.data.course_students_map)
+              mapStr
             );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_MAP,
-              JSON.stringify(stdRes.data.course_students_map)
-            );
+            localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
           } catch (e) {}
         }
       })
@@ -499,14 +654,10 @@ const TeacherManageStudents = () => {
         setCourses(latestCourses);
         MEMORY_CACHE.courses = latestCourses;
         try {
-          localStorage.setItem(
-            getCoursesCacheKey(currentTeacherId),
-            JSON.stringify(latestCourses)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_COURSES,
-            JSON.stringify(latestCourses)
-          );
+          const crsStr = JSON.stringify(latestCourses);
+          sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+          localStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+          localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
         } catch (e) {}
       })
       .catch(() => {});
@@ -1431,8 +1582,12 @@ const TeacherManageStudents = () => {
                         courseMap
                       );
 
+                    const avatarMap = getAvatarMapSync();
                     const rawAvatar =
-                      student.profile_image || student.user?.profile_image;
+                      avatarMap[student.id] ||
+                      student.profile_image ||
+                      student.user?.profile_image ||
+                      avatarMap[student.user_id];
                     const avatarUrl = getProfileImageUrl(rawAvatar);
                     const avatarKey = `tstd_${student.id}`;
                     const hasAvatar = Boolean(
@@ -1454,6 +1609,8 @@ const TeacherManageStudents = () => {
                                 <img
                                   src={avatarUrl}
                                   alt={`${student.first_name || ''} ${student.last_name || ''}`}
+                                  loading={idx < 15 ? 'eager' : 'lazy'}
+                                  decoding="async"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
                                     setFailedAvatars((prev) => ({
