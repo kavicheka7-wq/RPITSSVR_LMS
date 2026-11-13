@@ -1008,9 +1008,7 @@ const StudentDashboard = () => {
       ? Math.round((totalCompletedActivities / totalActivitiesCount) * 100)
       : 0;
 
-  // ✅ កម្ពស់ទឹកក្នុងកងមូល (Liquid Level):
-  // - បើសិស្សមានពិន្ទុមធ្យមភាគ (> 0) ទឹកនឹងឡើងតាមភាគរយពិន្ទុ (បើបាន 100 ពិន្ទុ ទឹកពេញ 100%)
-  // - បើមិនទាន់មានពិន្ទុ (0%) តែសិស្សបានធ្វើកិច្ចការ/សំណួរខ្លះហើយ ទឹកនឹងឡើងតាមភាគរយការងារដែលធ្វើរួច ឬដាក់កម្ពស់រលកអប្បបរមា 14% ដើម្បីឱ្យឃើញទឹករលកស្អាត!
+  // ✅ កម្ពស់ទឹកក្នុងកងមូល (Liquid Level)
   const liquidLevelPercent = useMemo(() => {
     if (averageScoreNum > 0) return Math.min(100, Math.max(12, averageScoreNum));
     if (activityCompletionPercent > 0) {
@@ -1021,61 +1019,53 @@ const StudentDashboard = () => {
 
   const isLiquidDarkText = liquidLevelPercent < 58;
 
-  // ✅ កាតស្ថិតិទាំង ៤ (រក្សាទុកទម្រង់រូបទី ២ ឱ្យនៅដដែល ១០០%)
+  // ✅ កាតស្ថិតិទាំង ៤ (លុបជួរអក្សរពណ៌ខាងក្រោមចេញ ឱ្យមើលទៅស្រឡះស្អាត)
   const statCards = [
     {
       title: t('មុខវិជ្ជាកំពុងរៀន', 'Enrolled Courses'),
       value: stats?.total_courses ?? enrollments.length ?? 0,
-      subtitle: t('មុខវិជ្ជាបានចុះឈ្មោះ', 'Active courses'),
       badge: t('សកម្ម', 'Active'),
       icon: BookOpenIcon,
       cardStyle:
         'from-blue-500/10 via-indigo-500/5 to-transparent border-blue-200/70',
       iconBox:
         'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-blue-500/25',
-      textAccent: 'text-blue-600 dark:text-blue-400',
       badgeClass:
         'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30',
     },
     {
       title: t('ពិន្ទុមធ្យមភាគ', 'Average Score'),
       value: `${averageScoreNum}%`,
-      subtitle: t('លទ្ធផលសិក្សាសរុប', 'Overall academic score'),
       badge: masteryInfo.statusText,
       icon: ChartBarIcon,
       cardStyle:
         'from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-200/70',
       iconBox:
         'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-emerald-500/25',
-      textAccent: 'text-emerald-600 dark:text-emerald-400',
       badgeClass:
         'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
     },
     {
       title: t('កិច្ចការសិស្ស', 'Assignments'),
       value: totalHomeworkCount,
-      subtitle: `${doneHomeworkCount} / ${totalHomeworkCount} ${t('ធ្វើរួចហើយ', 'Completed')}`,
       badge: `${doneHomeworkCount}/${totalHomeworkCount}`,
       icon: ClipboardDocumentListIcon,
       cardStyle:
         'from-purple-500/10 via-fuchsia-500/5 to-transparent border-purple-200/70',
       iconBox:
         'bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-purple-500/25',
-      textAccent: 'text-purple-600 dark:text-purple-400',
       badgeClass:
         'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-500/30',
     },
     {
       title: t('កម្រងសំណួរប្រឡង', 'Quizzes'),
       value: totalQuizzesCount,
-      subtitle: `${doneQuizzesCount} / ${totalQuizzesCount} ${t('ធ្វើរួចហើយ', 'Completed')}`,
       badge: `${doneQuizzesCount}/${totalQuizzesCount}`,
       icon: AcademicCapIcon,
       cardStyle:
         'from-amber-500/10 via-orange-500/5 to-transparent border-amber-200/70',
       iconBox:
         'bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-amber-500/25',
-      textAccent: 'text-amber-600 dark:text-amber-400',
       badgeClass:
         'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30',
     },
@@ -1247,9 +1237,6 @@ const StudentDashboard = () => {
         <div className="lg:col-span-4 std-surface-card bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                {t('សន្ទស្សន៍ការសិក្សា', 'Performance Index')}
-              </span>
               <h2 className="std-text-primary text-lg font-extrabold text-gray-900 mt-0.5">
                 {t('លទ្ធផលការសិក្សារួម', 'Academic Standing')}
               </h2>
@@ -1392,7 +1379,7 @@ const StudentDashboard = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. STATIC METRIC TILES (រូបទី ២ រក្សាទុកដដែល ១០០%)               */}
+      {/* 📌 2. STATIC METRIC TILES (លុបជួរអក្សរពណ៌ខាងក្រោមចេញរួចរាល់)          */}
       {/* ================================================================== */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
         {statCards.map((stat, index) => {
@@ -1420,11 +1407,8 @@ const StudentDashboard = () => {
                 <p className="std-text-primary text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
                   {stat.value}
                 </p>
-                <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-800 mt-0.5 truncate">
+                <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-800 mt-1 truncate">
                   {stat.title}
-                </p>
-                <p className={`text-[11px] font-bold mt-0.5 truncate ${stat.textAccent}`}>
-                  {stat.subtitle}
                 </p>
               </div>
             </div>
