@@ -1,5 +1,5 @@
 // src/components/common/Sidebar.jsx
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -125,7 +125,11 @@ const Sidebar = () => {
   // State និង Ref សម្រាប់គ្រប់គ្រងផ្ទាំងម៉ឺនុយរង (Dropdown / Popover)
   const [openPopover, setOpenPopover] = useState(() => {
     const isDesktop = typeof window !== 'undefined' ? window.innerWidth >= 1024 : true;
-    return isDesktop && location.pathname.startsWith('/students') ? '/students' : null;
+    return isDesktop &&
+      (location.pathname.startsWith('/students') ||
+        location.pathname.startsWith('/admin/students'))
+      ? '/students'
+      : null;
   });
   const popoverRef = useRef(null);
   const spacerRef = useRef(null);
@@ -175,7 +179,10 @@ const Sidebar = () => {
       setOpenPopover(null);
       return;
     }
-    if (location.pathname.startsWith('/students')) {
+    if (
+      location.pathname.startsWith('/students') ||
+      location.pathname.startsWith('/admin/students')
+    ) {
       setOpenPopover('/students');
     } else {
       setOpenPopover(null);
@@ -183,54 +190,175 @@ const Sidebar = () => {
   }, [location.pathname, location.search]);
 
   // ==========================================
-  // NAVIGATION CONFIGURATION (CLEAN URLS)
+  // NAVIGATION CONFIGURATION (CLEAN URLS + ALT PATHS)
   // ==========================================
   const NAV_CONFIG = useMemo(
     () => ({
       Admin: {
         label: t('អ្នកគ្រប់គ្រង', 'Administrator'),
         items: [
-          { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
-          { name: t('ដេប៉ាតឺម៉ង់', 'Departments'), icon: BuildingLibraryIcon, path: '/departments' },
-          { name: t('គ្រូបង្រៀន', 'Teachers'), icon: AcademicCapIcon, path: '/teachers' },
-          { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
+          {
+            name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
+            icon: HomeIcon,
+            path: '/dashboard',
+            altPaths: ['/', '/admin', '/admin/dashboard'],
+          },
+          {
+            name: t('ដេប៉ាតឺម៉ង់', 'Departments'),
+            icon: BuildingLibraryIcon,
+            path: '/departments',
+            altPaths: ['/admin/departments'],
+          },
+          {
+            name: t('គ្រូបង្រៀន', 'Teachers'),
+            icon: AcademicCapIcon,
+            path: '/teachers',
+            altPaths: ['/admin/teachers'],
+          },
+          {
+            name: t('មុខវិជ្ជា', 'Courses'),
+            icon: BookOpenIcon,
+            path: '/courses',
+            altPaths: ['/admin/courses'],
+          },
           {
             name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
             icon: UserGroupIcon,
             path: '/students',
+            altPaths: ['/admin/students'],
             children: [
-              { name: t('ឆ្នាំទី១', 'Year 1'), path: '/students/year-1', year: 'Year 1' },
-              { name: t('ឆ្នាំទី២', 'Year 2'), path: '/students/year-2', year: 'Year 2' },
-              { name: t('ឆ្នាំទី៣', 'Year 3'), path: '/students/year-3', year: 'Year 3' },
-              { name: t('ឆ្នាំទី៤', 'Year 4'), path: '/students/year-4', year: 'Year 4' },
+              {
+                name: t('ឆ្នាំទី១', 'Year 1'),
+                path: '/students/year-1',
+                altPath: '/admin/students/year-1',
+                year: 'Year 1',
+              },
+              {
+                name: t('ឆ្នាំទី២', 'Year 2'),
+                path: '/students/year-2',
+                altPath: '/admin/students/year-2',
+                year: 'Year 2',
+              },
+              {
+                name: t('ឆ្នាំទី៣', 'Year 3'),
+                path: '/students/year-3',
+                altPath: '/admin/students/year-3',
+                year: 'Year 3',
+              },
+              {
+                name: t('ឆ្នាំទី៤', 'Year 4'),
+                path: '/students/year-4',
+                altPath: '/admin/students/year-4',
+                year: 'Year 4',
+              },
             ],
           },
-          { name: t('របាយការណ៍', 'Reports'), icon: ChartBarIcon, path: '/reports' },
+          {
+            name: t('របាយការណ៍', 'Reports'),
+            icon: ChartBarIcon,
+            path: '/reports',
+            altPaths: ['/admin/reports'],
+          },
         ],
       },
       Teacher: {
         label: t('គ្រូបង្រៀន', 'Teacher'),
         items: [
-          { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
-          { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
-          { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
-          { name: t('សិស្ស', 'Students'), icon: UsersIcon, path: '/students' },
-          { name: t('វត្តមានសិស្ស', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
-          { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
-          { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
-          { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
+          {
+            name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
+            icon: HomeIcon,
+            path: '/dashboard',
+            altPaths: ['/', '/teacher', '/teacher/dashboard'],
+          },
+          {
+            name: t('មុខវិជ្ជា', 'Courses'),
+            icon: BookOpenIcon,
+            path: '/courses',
+            altPaths: ['/teacher/courses'],
+          },
+          {
+            name: t('មេរៀន', 'Lessons'),
+            icon: FolderIcon,
+            path: '/lessons',
+            altPaths: ['/teacher/lessons'],
+          },
+          {
+            name: t('សិស្ស', 'Students'),
+            icon: UsersIcon,
+            path: '/students',
+            altPaths: ['/teacher/students'],
+          },
+          {
+            name: t('វត្តមានសិស្ស', 'Attendance'),
+            icon: ClipboardDocumentListIcon,
+            path: '/attendance',
+            altPaths: ['/teacher/attendance'],
+          },
+          {
+            name: t('ពិន្ទុ', 'Grades'),
+            icon: ChartBarIcon,
+            path: '/grades',
+            altPaths: ['/scores', '/teacher/grades', '/teacher/scores'],
+          },
+          {
+            name: t('កិច្ចការ', 'Assignments'),
+            icon: DocumentArrowUpIcon,
+            path: '/assignments',
+            altPaths: ['/teacher/assignments'],
+          },
+          {
+            name: t('កម្រងសំណួរ', 'Quizzes'),
+            icon: PencilSquareIcon,
+            path: '/quizzes',
+            altPaths: ['/teacher/quizzes'],
+          },
         ],
       },
       Student: {
         label: t('សិស្ស', 'Student'),
         items: [
-          { name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'), icon: HomeIcon, path: '/dashboard' },
-          { name: t('មុខវិជ្ជា', 'Courses'), icon: BookOpenIcon, path: '/courses' },
-          { name: t('មេរៀន', 'Lessons'), icon: FolderIcon, path: '/lessons' },
-          { name: t('វត្តមាន', 'Attendance'), icon: ClipboardDocumentListIcon, path: '/attendance' },
-          { name: t('ពិន្ទុ', 'Grades'), icon: ChartBarIcon, path: '/grades' },
-          { name: t('កិច្ចការ', 'Assignments'), icon: DocumentArrowUpIcon, path: '/assignments' },
-          { name: t('កម្រងសំណួរ', 'Quizzes'), icon: PencilSquareIcon, path: '/quizzes' },
+          {
+            name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
+            icon: HomeIcon,
+            path: '/dashboard',
+            altPaths: ['/', '/student', '/student/dashboard'],
+          },
+          {
+            name: t('មុខវិជ្ជា', 'Courses'),
+            icon: BookOpenIcon,
+            path: '/courses',
+            altPaths: ['/student/courses'],
+          },
+          {
+            name: t('មេរៀន', 'Lessons'),
+            icon: FolderIcon,
+            path: '/lessons',
+            altPaths: ['/student/lessons'],
+          },
+          {
+            name: t('វត្តមាន', 'Attendance'),
+            icon: ClipboardDocumentListIcon,
+            path: '/attendance',
+            altPaths: ['/student/attendance'],
+          },
+          {
+            name: t('ពិន្ទុ', 'Grades'),
+            icon: ChartBarIcon,
+            path: '/grades',
+            altPaths: ['/scores', '/student/grades', '/student/scores'],
+          },
+          {
+            name: t('កិច្ចការ', 'Assignments'),
+            icon: DocumentArrowUpIcon,
+            path: '/assignments',
+            altPaths: ['/student/assignments'],
+          },
+          {
+            name: t('កម្រងសំណួរ', 'Quizzes'),
+            icon: PencilSquareIcon,
+            path: '/quizzes',
+            altPaths: ['/student/quizzes'],
+          },
         ],
       },
     }),
@@ -271,6 +399,33 @@ const Sidebar = () => {
 
   const currentYearParam = new URLSearchParams(location.search).get('year') || 'all';
 
+  // ✅ អនុគមន៍ឆែកមើលថាតើម៉ឺនុយនីមួយៗកំពុង Active ឬអត់ (គាំទ្រទាំងពេលវាយ Domain ចូលដំបូង '/' ឬ '/dashboard' ឬ '/student/dashboard')
+  const checkIsNavItemActive = useCallback(
+    (item) => {
+      const routerPath = (location.pathname || '/').replace(/\/+$/, '') || '/';
+      const browserPath =
+        typeof window !== 'undefined'
+          ? (window.location.pathname || '/').replace(/\/+$/, '') || '/'
+          : routerPath;
+
+      const pathsToCheck = [item.path, ...(item.altPaths || [])];
+
+      return pathsToCheck.some((target) => {
+        const cleanTarget = (target || '/').replace(/\/+$/, '') || '/';
+        if (cleanTarget === '/') {
+          return routerPath === '/' || browserPath === '/';
+        }
+        return (
+          routerPath === cleanTarget ||
+          routerPath.startsWith(`${cleanTarget}/`) ||
+          browserPath === cleanTarget ||
+          browserPath.startsWith(`${cleanTarget}/`)
+        );
+      });
+    },
+    [location.pathname]
+  );
+
   return (
     <>
       {/* ✅ Spacer Div សម្រាប់ទប់ទទឹងជួរឈរខាងឆ្វេងឱ្យនៅដដែល */}
@@ -280,7 +435,7 @@ const Sidebar = () => {
         aria-hidden="true"
       />
 
-      {/* ✅ Modern V18 Floating Sidebar (md:overflow-visible ដើម្បីកុំឱ្យដាច់ Popover និង Tooltip លើ Tablet) */}
+      {/* ✅ Modern V18 Floating Sidebar */}
       <aside
         style={{
           top: `${topOffset}px`,
@@ -292,7 +447,7 @@ const Sidebar = () => {
             : 'bg-gradient-to-b from-slate-950 via-blue-950 to-indigo-950 border border-blue-800/45'
         }`}
       >
-        {/* ផ្ទៃក្រឡាអុចៗស្រាលៗ និងពន្លឺ Glow បែបទំនើប (ដាក់ក្នុងប្រអប់ overflow-hidden ដាច់ដោយឡែក) */}
+        {/* ផ្ទៃក្រឡាអុចៗស្រាលៗ និងពន្លឺ Glow បែបទំនើប */}
         <div className="absolute inset-0 rounded-[1.75rem] overflow-hidden pointer-events-none">
           <div className="std-sidebar-grid-pattern absolute inset-0 opacity-15" />
           <div className="absolute -top-24 -right-24 w-52 h-52 bg-blue-500/20 rounded-full blur-3xl" />
@@ -327,7 +482,6 @@ const Sidebar = () => {
               </div>
             </div>
 
-            {/* ✅ ដក «ម៉ឺនុយគោល» ចេញ ហើយយកផ្លាកតួនាទី (ឧ. ✨ សិស្ស) មកដាក់ជំនួសនៅខាងឆ្វេង */}
             {section && (
               <div className="mt-4 mb-0.5 hidden lg:flex items-center justify-start border-t border-white/10 pt-3.5">
                 <span
@@ -351,7 +505,7 @@ const Sidebar = () => {
             {uniqueNavItems.map((item) => {
               // ១. ប៊ូតុងមានម៉ឺនុយរង (គ្រប់គ្រងសិស្ស សម្រាប់ Admin)
               if (item.children) {
-                const isParentActive = location.pathname.startsWith(item.path);
+                const isParentActive = checkIsNavItemActive(item);
                 const isPopoverOpen = openPopover === item.path;
 
                 return (
@@ -420,7 +574,9 @@ const Sidebar = () => {
                           {item.children.map((sub) => {
                             const isSubActive =
                               location.pathname === sub.path ||
-                              (location.pathname === '/students' &&
+                              location.pathname === sub.altPath ||
+                              ((location.pathname === '/students' ||
+                                location.pathname === '/admin/students') &&
                                 currentYearParam === sub.year);
 
                             return (
@@ -450,56 +606,62 @@ const Sidebar = () => {
                 );
               }
 
-              // ២. ម៉ឺនុយធម្មតា (សម្រាប់ Admin, Teacher, Student)
+              // ✅ ២. ម៉ឺនុយធម្មតា (សម្រាប់ Admin, Teacher, Student) ឆែកទាំង isActive របស់ NavLink និង checkIsNavItemActive
+              const isCustomActive = checkIsNavItemActive(item);
+
               return (
                 <NavLink
                   key={`${item.path}-${item.name}`}
                   to={item.path}
-                  className={({ isActive }) =>
-                    `group relative flex items-center justify-center lg:justify-start gap-3 p-2 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 ${
-                      isActive
+                  className={({ isActive }) => {
+                    const activeState = isActive || isCustomActive;
+                    return `group relative flex items-center justify-center lg:justify-start gap-3 p-2 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 ${
+                      activeState
                         ? 'bg-gradient-to-r from-white/15 to-white/[0.06] backdrop-blur-md text-white font-extrabold border-white/20 shadow-lg'
                         : 'border-transparent text-blue-100/80 font-semibold hover:bg-white/[0.07] hover:text-white lg:hover:translate-x-1'
-                    }`
-                  }
+                    }`;
+                  }}
                 >
-                  {({ isActive }) => (
-                    <>
-                      {/* របារពន្លឺតូចនៅគែមឆ្វេងពេល Active */}
-                      {isActive && (
-                        <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
-                      )}
+                  {({ isActive }) => {
+                    const activeState = isActive || isCustomActive;
+                    return (
+                      <>
+                        {/* របារពន្លឺតូចនៅគែមឆ្វេងពេល Active */}
+                        {activeState && (
+                          <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
+                        )}
 
-                      {/* ប្រអប់រូបតំណាងបែប V18 Glass Box */}
-                      <div
-                        className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200 ${
-                          isActive
-                            ? 'bg-gradient-to-br from-amber-400/25 to-yellow-500/15 border border-yellow-400/40 text-yellow-300 shadow-xs scale-105'
-                            : 'bg-white/[0.05] border border-white/[0.06] text-blue-200/85 group-hover:bg-white/10 group-hover:text-white group-hover:scale-105'
-                        }`}
-                      >
-                        <item.icon
-                          className={`h-[19px] w-[19px] transition-all duration-200 ${
-                            isActive ? 'stroke-[2.2]' : 'stroke-[1.9]'
+                        {/* ប្រអប់រូបតំណាងបែប V18 Glass Box */}
+                        <div
+                          className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200 ${
+                            activeState
+                              ? 'bg-gradient-to-br from-amber-400/25 to-yellow-500/15 border border-yellow-400/40 text-yellow-300 shadow-xs scale-105'
+                              : 'bg-white/[0.05] border border-white/[0.06] text-blue-200/85 group-hover:bg-white/10 group-hover:text-white group-hover:scale-105'
                           }`}
-                          aria-hidden="true"
-                        />
-                      </div>
+                        >
+                          <item.icon
+                            className={`h-[19px] w-[19px] transition-all duration-200 ${
+                              activeState ? 'stroke-[2.2]' : 'stroke-[1.9]'
+                            }`}
+                            aria-hidden="true"
+                          />
+                        </div>
 
-                      <span className="truncate hidden lg:inline leading-relaxed">
-                        {item.name}
-                      </span>
+                        <span className="truncate hidden lg:inline leading-relaxed">
+                          {item.name}
+                        </span>
 
-                      {isActive && (
-                        <span className="hidden lg:block ml-auto mr-1 h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.9)] shrink-0" />
-                      )}
+                        {activeState && (
+                          <span className="hidden lg:block ml-auto mr-1 h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.9)] shrink-0" />
+                        )}
 
-                      {/* Tablet Hover Tooltip */}
-                      <span className="hidden md:group-hover:block lg:group-hover:hidden absolute left-full ml-4 px-3.5 py-2 bg-slate-900/95 backdrop-blur-md text-white text-[13px] font-bold rounded-xl shadow-xl border border-white/15 whitespace-nowrap z-50 pointer-events-none">
-                        {item.name}
-                      </span>
-                    </>
-                  )}
+                        {/* Tablet Hover Tooltip */}
+                        <span className="hidden md:group-hover:block lg:group-hover:hidden absolute left-full ml-4 px-3.5 py-2 bg-slate-900/95 backdrop-blur-md text-white text-[13px] font-bold rounded-xl shadow-xl border border-white/15 whitespace-nowrap z-50 pointer-events-none">
+                          {item.name}
+                        </span>
+                      </>
+                    );
+                  }}
                 </NavLink>
               );
             })}

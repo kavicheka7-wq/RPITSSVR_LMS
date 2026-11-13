@@ -1,6 +1,5 @@
 // src/components/student/StudentDashboard.jsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Link } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -9,7 +8,6 @@ import {
   AcademicCapIcon,
   ChartBarIcon,
   ClipboardDocumentListIcon,
-  ArrowRightIcon,
   CalendarDaysIcon,
   ClockIcon,
   CheckCircleIcon,
@@ -20,6 +18,7 @@ import {
   PencilSquareIcon,
   ExclamationCircleIcon,
   BuildingLibraryIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -204,7 +203,7 @@ const extractArrayFromRes = (resData) => {
   return [];
 };
 
-// ✅ ទាញទិន្នន័យគ្រប់ទំព័រទាំងអស់របស់សិស្សទុកមុនភ្លាមៗ (រួមទាំង មេរៀន /student/lessons ដើម្បីចុចភ្លាមចេញភ្លាមក្នុង 0ms)
+// ✅ ទាញទិន្នន័យគ្រប់ទំព័រទាំងអស់របស់សិស្សទុកមុនភ្លាមៗ (រួមទាំង មេរៀន /student/lessons ដើម្បីចុចលើ Sidebar ភ្លាមចេញភ្លាមក្នុង 0ms)
 const prefetchAllStudentPagesData = (
   uid,
   onAssignmentsSynced,
@@ -728,11 +727,22 @@ const StudentDashboard = () => {
     [teacherAssignedHomework]
   );
 
+  const pendingHomeworkCount = useMemo(
+    () => Math.max(0, teacherAssignedHomework.length - doneHomeworkCount),
+    [teacherAssignedHomework.length, doneHomeworkCount]
+  );
+
   const doneQuizzesCount = useMemo(
     () => teacherAssignedQuizzes.filter((q) => q.isDone).length,
     [teacherAssignedQuizzes]
   );
 
+  const pendingQuizzesCount = useMemo(
+    () => Math.max(0, teacherAssignedQuizzes.length - doneQuizzesCount),
+    [teacherAssignedQuizzes.length, doneQuizzesCount]
+  );
+
+  // ✅ ប្រអប់រំកិលបង្ហាញព័ត៌មានសង្ខេប (Static Spotlight Slides - មិនបាច់ឱ្យចុចទេ)
   const spotlightSlides = useMemo(() => {
     const slides = [];
 
@@ -745,12 +755,11 @@ const StudentDashboard = () => {
 
         slides.push({
           id: `course-${courseId || idx}`,
-          badge: `${t('បន្តមេរៀន', 'Continue')} • ${credit} ${t('ក្រេឌីត', 'Cr')}`,
+          badge: `${t('មុខវិជ្ជាសិក្សា', 'Course')} • ${credit} ${t('ក្រេឌីត', 'Cr')}`,
           badgeStyle: 'bg-yellow-400/20 text-yellow-300 border-yellow-300/30',
           meta: `${courseInfo.course_code || 'COURSE'} • ${getTeacherDisplayName(courseInfo)}`,
           title: courseInfo.course_name || t('មុខវិជ្ជាសិក្សា', 'Course'),
-          buttonText: t('ចូលរៀនឥឡូវនេះ', 'Resume Class'),
-          link: `/lessons?course_id=${courseId}`,
+          statusPill: t('កំពុងសិក្សា', 'Enrolled'),
           icon: PlayCircleIcon,
           iconBoxStyle: theme.iconGradient,
         });
@@ -767,8 +776,7 @@ const StudentDashboard = () => {
         'ពិនិត្យមើល និងប្រគល់កិច្ចការសិស្សឱ្យទាន់ពេលវេលា',
         'Check & submit your course assignments on time'
       ),
-      buttonText: t('មើលកិច្ចការ', 'View Tasks'),
-      link: '/assignments',
+      statusPill: `${doneHomeworkCount}/${totalAsg} ${t('ធ្វើរួច', 'Done')}`,
       icon: ClipboardDocumentListIcon,
       iconBoxStyle: 'from-purple-400 to-indigo-500 text-white',
     });
@@ -783,8 +791,7 @@ const StudentDashboard = () => {
         'ធ្វើតេស្តសាកល្បងចំណេះដឹង ដើម្បីពង្រឹងសមត្ថភាពសិក្សា',
         'Take practice quizzes to test your knowledge'
       ),
-      buttonText: t('ចូលធ្វើតេស្ត', 'Take Quiz'),
-      link: '/quizzes',
+      statusPill: `${doneQuizzesCount}/${totalQz} ${t('ធ្វើរួច', 'Done')}`,
       icon: AcademicCapIcon,
       iconBoxStyle: 'from-emerald-400 to-teal-500 text-slate-950',
     });
@@ -798,8 +805,7 @@ const StudentDashboard = () => {
         '«TVET ជំនាញពិត ជីវិតប្រសើរ! រៀនឱ្យចប់ ឱ្យចេះ ឱ្យមានការងារ»',
         '“TVET Real Skills, Better Life! Study to Finish, to Know, to Get a Job”'
       ),
-      buttonText: t('មើលតារាងពិន្ទុ', 'View Grades'),
-      link: '/grades',
+      statusPill: `${averageScoreNum}%`,
       icon: ChartBarIcon,
       iconBoxStyle: 'from-cyan-400 to-blue-500 text-slate-950',
     });
@@ -848,7 +854,6 @@ const StudentDashboard = () => {
   // 📌 ផ្នែកទី៥៖ ទាញយកទិន្នន័យដោយឯករាជ្យមិនរង់ចាំគ្នា (Non-Blocking 0ms Sync + Prefetch)
   // ============================================================================
   const fetchDashboardData = useCallback(async () => {
-    // ១. ចាប់ផ្ដើមទាញទិន្នន័យទំព័រផ្សេងៗរបស់សិស្សទុកមុនភ្លាមៗក្នុង 0ms
     prefetchAllStudentPagesData(
       currentStudentId,
       (asgData) => {
@@ -991,61 +996,70 @@ const StudentDashboard = () => {
   const totalQuizzesCount =
     teacherAssignedQuizzes.length || stats?.total_quizzes || 0;
 
+  // ✅ កាតស្ថិតិទាំង ៤ (Static Metric Tiles - មិនបាច់ឱ្យចុចទេ)
   const statCards = [
     {
       title: t('មុខវិជ្ជាកំពុងរៀន', 'Enrolled Courses'),
       value: stats?.total_courses ?? enrollments.length ?? 0,
       subtitle: t('មុខវិជ្ជាបានចុះឈ្មោះ', 'Active courses'),
+      badge: t('សកម្ម', 'Active'),
       icon: BookOpenIcon,
       cardStyle:
-        'from-blue-500/10 via-indigo-500/5 to-transparent border-blue-200/70 hover:border-blue-400',
+        'from-blue-500/10 via-indigo-500/5 to-transparent border-blue-200/70',
       iconBox:
         'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-blue-500/25',
       textAccent: 'text-blue-600 dark:text-blue-400',
-      link: '/courses',
+      badgeClass:
+        'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30',
     },
     {
       title: t('ពិន្ទុមធ្យមភាគ', 'Average Score'),
       value: `${averageScoreNum}%`,
       subtitle: t('លទ្ធផលសិក្សាសរុប', 'Overall academic score'),
+      badge: masteryInfo.statusText,
       icon: ChartBarIcon,
       cardStyle:
-        'from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-200/70 hover:border-emerald-400',
+        'from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-200/70',
       iconBox:
         'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-emerald-500/25',
       textAccent: 'text-emerald-600 dark:text-emerald-400',
-      link: '/grades',
+      badgeClass:
+        'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
     },
     {
       title: t('កិច្ចការសិស្ស', 'Assignments'),
       value: totalHomeworkCount,
       subtitle: `${doneHomeworkCount} / ${totalHomeworkCount} ${t('ធ្វើរួចហើយ', 'Completed')}`,
+      badge: `${doneHomeworkCount}/${totalHomeworkCount}`,
       icon: ClipboardDocumentListIcon,
       cardStyle:
-        'from-purple-500/10 via-fuchsia-500/5 to-transparent border-purple-200/70 hover:border-purple-400',
+        'from-purple-500/10 via-fuchsia-500/5 to-transparent border-purple-200/70',
       iconBox:
         'bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-purple-500/25',
       textAccent: 'text-purple-600 dark:text-purple-400',
-      link: '/assignments',
+      badgeClass:
+        'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-500/30',
     },
     {
       title: t('កម្រងសំណួរប្រឡង', 'Quizzes'),
       value: totalQuizzesCount,
       subtitle: `${doneQuizzesCount} / ${totalQuizzesCount} ${t('ធ្វើរួចហើយ', 'Completed')}`,
+      badge: `${doneQuizzesCount}/${totalQuizzesCount}`,
       icon: AcademicCapIcon,
       cardStyle:
-        'from-amber-500/10 via-orange-500/5 to-transparent border-amber-200/70 hover:border-amber-400',
+        'from-amber-500/10 via-orange-500/5 to-transparent border-amber-200/70',
       iconBox:
         'bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-amber-500/25',
       textAccent: 'text-amber-600 dark:text-amber-400',
-      link: '/quizzes',
+      badgeClass:
+        'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30',
     },
   ];
 
   const SlideIcon = currentSlide?.icon || PlayCircleIcon;
 
   return (
-    <div className="std-bento-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
+    <div className="std-bento-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn select-none">
       
       {/* ================================================================== */}
       {/* 📌 1. MODERN BENTO HERO SECTION                                    */}
@@ -1117,14 +1131,14 @@ const StudentDashboard = () => {
           >
             {currentSlide && (
               <div className="space-y-2.5">
-                <div className="relative overflow-hidden bg-white/10 hover:bg-white/[0.14] backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 transition-all duration-300">
+                <div className="relative overflow-hidden bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 transition-all duration-300">
                   <div
                     key={currentSlide.id}
                     className="std-carousel-slide flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                   >
                     <div className="flex items-center gap-3.5 min-w-0 flex-1">
                       <div
-                        className={`h-11 w-11 sm:h-12 sm:w-12 rounded-xl bg-gradient-to-br ${currentSlide.iconBoxStyle} flex items-center justify-center shrink-0 shadow-md transition-transform duration-300`}
+                        className={`h-11 w-11 sm:h-12 sm:w-12 rounded-xl bg-gradient-to-br ${currentSlide.iconBoxStyle} flex items-center justify-center shrink-0 shadow-md`}
                       >
                         <SlideIcon className="h-6 w-6 sm:h-7 sm:w-7 stroke-[2]" />
                       </div>
@@ -1146,14 +1160,12 @@ const StudentDashboard = () => {
                       </div>
                     </div>
 
+                    {/* ✅ ផ្លាកបង្ហាញស្ថានភាពធម្មតា (Static Status Pill - មិនអាចចុចបានទេ) */}
                     <div className="flex items-center gap-2 shrink-0">
-                      <Link
-                        to={currentSlide.link}
-                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900/90 hover:bg-white text-white hover:text-blue-950 border border-white/15 font-extrabold text-xs sm:text-sm shadow-md transition-all duration-200 cursor-pointer"
-                      >
-                        <span>{currentSlide.buttonText}</span>
-                        <ArrowRightIcon className="h-4 w-4 stroke-[2.5]" />
-                      </Link>
+                      <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900/75 text-cyan-200 border border-white/15 font-extrabold text-xs shadow-sm">
+                        <SparklesIcon className="h-4 w-4 text-yellow-300 shrink-0" />
+                        <span>{currentSlide.statusPill}</span>
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1204,7 +1216,7 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* ១.២. កាតសមត្ថភាពសិក្សា និងលទ្ធផលរួម (4 Columns) */}
+        {/* ១.២. កាតសមត្ថភាពសិក្សា និងលទ្ធផលរួម (4 Columns - Static Display) */}
         <div className="lg:col-span-4 std-surface-card bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -1275,6 +1287,7 @@ const StudentDashboard = () => {
             </div>
           </div>
 
+          {/* ✅ របារសង្ខេបខាងក្រោម (Static Text មិនអាចចុចបានទេ) */}
           <div className="std-card-divider pt-4 border-t border-gray-100 flex items-center justify-between text-xs">
             <span className="std-text-secondary font-bold text-gray-500">
               {t('មុខវិជ្ជាកំពុងសិក្សា៖', 'Enrolled Courses:')}{' '}
@@ -1282,39 +1295,37 @@ const StudentDashboard = () => {
                 {stats?.total_courses ?? enrollments.length ?? 0}
               </strong>
             </span>
-            <Link
-              to="/grades"
-              className="font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
-            >
-              <span>{t('មើលតារាងពិន្ទុលម្អិត', 'View Full Grades')}</span>
-              <ChevronRightIcon className="h-3.5 w-3.5 stroke-[2.5]" />
-            </Link>
+            <span className="font-extrabold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+              <CheckBadgeIcon className="h-4 w-4 text-emerald-500 shrink-0" />
+              <span>{getStudentBatchYear()}</span>
+            </span>
           </div>
         </div>
 
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. VIBRANT FLOATING METRIC TILES                                */}
+      {/* 📌 2. STATIC METRIC TILES (មិនបាច់ឱ្យចុចទេ)                          */}
       {/* ================================================================== */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
         {statCards.map((stat, index) => {
           const Icon = stat.icon;
           return (
-            <Link
+            <div
               key={index}
-              to={stat.link}
-              className={`std-metric-tile group relative overflow-hidden rounded-2xl sm:rounded-3xl bg-white bg-gradient-to-br ${stat.cardStyle} p-4 sm:p-5 border shadow-2xs hover:shadow-xl transition-all duration-300 hover:-translate-y-1 flex flex-col justify-between`}
+              className={`std-metric-tile relative overflow-hidden rounded-2xl sm:rounded-3xl bg-white bg-gradient-to-br ${stat.cardStyle} p-4 sm:p-5 border shadow-2xs flex flex-col justify-between`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div
-                  className={`h-11 w-11 sm:h-12 sm:w-12 rounded-2xl ${stat.iconBox} flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300 shrink-0`}
+                  className={`h-11 w-11 sm:h-12 sm:w-12 rounded-2xl ${stat.iconBox} flex items-center justify-center shadow-lg shrink-0`}
                 >
                   <Icon className="h-5 w-5 sm:h-6 sm:w-6 stroke-[2.2]" />
                 </div>
 
-                <span className="std-arrow-circle h-8 w-8 rounded-full bg-gray-50 border border-gray-200/70 flex items-center justify-center text-gray-400 group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 transition-all">
-                  <ChevronRightIcon className="h-4 w-4 stroke-[2.5]" />
+                <span
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold border ${stat.badgeClass}`}
+                >
+                  {stat.badge}
                 </span>
               </div>
 
@@ -1329,16 +1340,17 @@ const StudentDashboard = () => {
                   {stat.subtitle}
                 </p>
               </div>
-            </Link>
+            </div>
           );
         })}
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. ២ កាតទន្ទឹមគ្នា៖ កិច្ចការសិក្សា និង កម្រងសំណួរដែលគ្រូបានដាក់ឱ្យ     */}
+      {/* 📌 3. ២ កាតទន្ទឹមគ្នា៖ កិច្ចការសិក្សា និង កម្រងសំណួរ (Static Display)    */}
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 items-stretch">
         
+        {/* ៣.១. កាតកិច្ចការថ្មីៗ */}
         <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
           <div className="space-y-5">
             <div className="flex items-center justify-between gap-3 pb-4 border-b border-gray-100 std-card-divider">
@@ -1391,16 +1403,13 @@ const StudentDashboard = () => {
                     t('មុខវិជ្ជាសិក្សា', 'Course');
 
                   return (
-                    <Link
+                    <div
                       key={assign.id || idx}
-                      to={`/assignments?course_id=${
-                        assign.course?.id || assign.course_id || 'all'
-                      }`}
-                      className="std-activity-item flex items-center justify-between gap-3.5 p-3.5 sm:p-4 rounded-2xl border border-gray-100 bg-gray-50/60 hover:bg-indigo-50/40 hover:border-indigo-300 transition-all group"
+                      className="std-activity-item flex items-center justify-between gap-3.5 p-3.5 sm:p-4 rounded-2xl border border-gray-100 bg-gray-50/60 transition-all"
                     >
                       <div className="flex items-center gap-3.5 min-w-0 flex-1">
                         <div
-                          className={`h-11 w-11 rounded-xl border flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform ${
+                          className={`h-11 w-11 rounded-xl border flex items-center justify-center shrink-0 ${
                             assign.isDone
                               ? 'bg-emerald-50 text-emerald-600 border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
                               : assign.isOverdue
@@ -1418,7 +1427,7 @@ const StudentDashboard = () => {
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-900 truncate group-hover:text-indigo-600 transition-colors">
+                          <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-900 truncate">
                             {assign.title}
                           </p>
                           <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] font-semibold">
@@ -1466,24 +1475,35 @@ const StudentDashboard = () => {
                           </span>
                         )}
                       </div>
-                    </Link>
+                    </div>
                   );
                 })
               )}
             </div>
           </div>
 
-          <div className="std-card-divider pt-4 mt-5 border-t border-gray-100">
-            <Link
-              to="/assignments"
-              className="std-view-all-activity-btn group w-full py-3 px-4 rounded-xl bg-indigo-50/80 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200/80 hover:border-indigo-600 text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 transition-all duration-200 shadow-2xs hover:shadow-md cursor-pointer"
-            >
-              <span>{t('មើលកិច្ចការសិស្សទាំងអស់', 'View All Assignments')}</span>
-              <ArrowRightIcon className="h-4 w-4 stroke-[2.5] group-hover:translate-x-1 transition-transform" />
-            </Link>
+          {/* ✅ របារសង្ខេបខាងក្រោមកាតកិច្ចការ (Static Summary Footer) */}
+          <div className="std-card-divider pt-4 mt-5 border-t border-gray-100 flex items-center justify-between text-xs">
+            <span className="std-text-secondary font-bold text-gray-500">
+              {t('កិច្ចការសរុប៖', 'Total Tasks:')}{' '}
+              <strong className="std-text-primary text-gray-800">
+                {teacherAssignedHomework.length}
+              </strong>{' '}
+              • {t('នៅសល់៖', 'Pending:')}{' '}
+              <strong className="text-amber-600 dark:text-amber-400">
+                {pendingHomeworkCount}
+              </strong>
+            </span>
+            <span className="font-extrabold text-purple-600 dark:text-purple-400 flex items-center gap-1">
+              <CheckCircleIcon className="h-4 w-4 text-emerald-500 shrink-0" />
+              <span>
+                {doneHomeworkCount} {t('ប្រគល់រួច', 'Submitted')}
+              </span>
+            </span>
           </div>
         </div>
 
+        {/* ៣.២. កាតកម្រងសំណួរថ្មីៗ */}
         <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
           <div className="space-y-5">
             <div className="flex items-center justify-between gap-3 pb-4 border-b border-gray-100 std-card-divider">
@@ -1536,16 +1556,13 @@ const StudentDashboard = () => {
                     t('មុខវិជ្ជាសិក្សា', 'Course');
 
                   return (
-                    <Link
+                    <div
                       key={quiz.id || idx}
-                      to={`/quizzes?course_id=${
-                        quiz.course?.id || quiz.course_id || 'all'
-                      }`}
-                      className="std-activity-item flex items-center justify-between gap-3.5 p-3.5 sm:p-4 rounded-2xl border border-gray-100 bg-gray-50/60 hover:bg-indigo-50/40 hover:border-indigo-300 transition-all group"
+                      className="std-activity-item flex items-center justify-between gap-3.5 p-3.5 sm:p-4 rounded-2xl border border-gray-100 bg-gray-50/60 transition-all"
                     >
                       <div className="flex items-center gap-3.5 min-w-0 flex-1">
                         <div
-                          className={`h-11 w-11 rounded-xl border flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform ${
+                          className={`h-11 w-11 rounded-xl border flex items-center justify-center shrink-0 ${
                             quiz.isDone
                               ? 'bg-emerald-50 text-emerald-600 border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
                               : quiz.isExpired
@@ -1561,7 +1578,7 @@ const StudentDashboard = () => {
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-900 truncate group-hover:text-indigo-600 transition-colors">
+                          <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-900 truncate">
                             {quiz.title}
                           </p>
                           <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] font-semibold">
@@ -1605,21 +1622,31 @@ const StudentDashboard = () => {
                           </span>
                         )}
                       </div>
-                    </Link>
+                    </div>
                   );
                 })
               )}
             </div>
           </div>
 
-          <div className="std-card-divider pt-4 mt-5 border-t border-gray-100">
-            <Link
-              to="/quizzes"
-              className="std-view-all-activity-btn group w-full py-3 px-4 rounded-xl bg-indigo-50/80 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200/80 hover:border-indigo-600 text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 transition-all duration-200 shadow-2xs hover:shadow-md cursor-pointer"
-            >
-              <span>{t('មើលកម្រងសំណួរប្រឡងទាំងអស់', 'View All Quizzes')}</span>
-              <ArrowRightIcon className="h-4 w-4 stroke-[2.5] group-hover:translate-x-1 transition-transform" />
-            </Link>
+          {/* ✅ របារសង្ខេបខាងក្រោមកាតកម្រងសំណួរ (Static Summary Footer) */}
+          <div className="std-card-divider pt-4 mt-5 border-t border-gray-100 flex items-center justify-between text-xs">
+            <span className="std-text-secondary font-bold text-gray-500">
+              {t('កម្រងសំណួរសរុប៖', 'Total Quizzes:')}{' '}
+              <strong className="std-text-primary text-gray-800">
+                {teacherAssignedQuizzes.length}
+              </strong>{' '}
+              • {t('នៅសល់៖', 'Pending:')}{' '}
+              <strong className="text-amber-600 dark:text-amber-400">
+                {pendingQuizzesCount}
+              </strong>
+            </span>
+            <span className="font-extrabold text-amber-600 dark:text-amber-400 flex items-center gap-1">
+              <CheckCircleIcon className="h-4 w-4 text-emerald-500 shrink-0" />
+              <span>
+                {doneQuizzesCount} {t('ប្រឡងរួច', 'Completed')}
+              </span>
+            </span>
           </div>
         </div>
 
@@ -1653,39 +1680,11 @@ const StudentDashboard = () => {
           background-color: #1e293b !important;
           border-color: #334155 !important;
         }
-        html.dark .std-metric-tile:hover {
-          border-color: #6366f1 !important;
-        }
         html.dark .std-subbox,
         html.dark .std-activity-item,
         html.dark .std-empty-box {
           background-color: #0f172a !important;
           border-color: #334155 !important;
-        }
-        html.dark .std-activity-item:hover {
-          border-color: #6366f1 !important;
-          background-color: rgba(30, 41, 59, 0.9) !important;
-        }
-        html.dark .std-view-all-activity-btn {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-          color: #cbd5e1 !important;
-        }
-        html.dark .std-view-all-activity-btn:hover {
-          background-color: #4f46e5 !important;
-          border-color: #6366f1 !important;
-          color: #ffffff !important;
-          box-shadow: 0 8px 20px -4px rgba(79, 70, 229, 0.45) !important;
-        }
-        html.dark .std-arrow-circle {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-          color: #94a3b8 !important;
-        }
-        html.dark .group:hover .std-arrow-circle {
-          background-color: #4f46e5 !important;
-          border-color: #4f46e5 !important;
-          color: #ffffff !important;
         }
         html.dark .std-ring-track {
           stroke: #0f172a !important;
