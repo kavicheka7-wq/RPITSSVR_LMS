@@ -1014,7 +1014,7 @@ const StudentCourses = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. SEARCH BAR (ដកប៊ូតុងប្ដូរទម្រង់តារាងចេញទាំងស្រុង)                */}
+      {/* 📌 2. SEARCH BAR                                                   */}
       {/* ================================================================== */}
       <div className="stdc-surface-card bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-4 items-center justify-between">
         <div className="relative w-full sm:max-w-md flex-1">
@@ -1128,17 +1128,17 @@ const StudentCourses = () => {
                       </div>
                     </div>
 
-                    {/* ២. តួកាតខាងក្រោម (Static Display មិនអាចចុចបានទេ) */}
-                    <div className="px-4 pb-3 pt-0 relative">
-                      <div className="flex items-end justify-between gap-2 -mt-5 mb-2.5 relative z-20">
+                    {/* ✅ ២. តួកាតខាងក្រោម (កែសម្រួលផ្លាកឈ្មោះដេប៉ាតឺម៉ង់ឱ្យធ្លាក់ចុះមកក្រោមមានគម្លាតស្អាត មិនឆ្មៀតជាប់គម្របលើ) */}
+                    <div className="px-4 pb-3 pt-2.5 relative">
+                      <div className="flex items-center justify-between gap-2 mb-3 relative z-20">
                         <div
-                          className={`h-10 w-10 rounded-xl bg-gradient-to-br ${theme.floatingIconBg} border-[3px] border-white dark:border-slate-800 flex items-center justify-center shadow-sm shrink-0`}
+                          className={`-mt-7 h-10 w-10 rounded-xl bg-gradient-to-br ${theme.floatingIconBg} border-[3px] border-white dark:border-slate-800 flex items-center justify-center shadow-sm shrink-0`}
                         >
                           <BookOpenIcon className="h-4 w-4 stroke-[2.2]" />
                         </div>
 
-                        <span className="stdc-code-pill inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-600 border border-gray-200/80 truncate max-w-[145px]">
-                          <BuildingLibraryIcon className="h-3 w-3 text-indigo-500 shrink-0" />
+                        <span className="stdc-code-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold bg-gray-100/90 text-gray-700 border border-gray-200/80 truncate max-w-[155px] shadow-2xs">
+                          <BuildingLibraryIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
                           <span className="truncate">{deptName}</span>
                         </span>
                       </div>
@@ -1185,7 +1185,7 @@ const StudentCourses = () => {
                     </div>
                   </div>
 
-                  {/* ៣. ផ្នែកខាងក្រោមកាត៖ បង្ហាញតែរូបថតមូល និងឈ្មោះគ្រូបង្រៀន (ដកប៊ូតុងចូលរៀនចេញ) */}
+                  {/* ៣. ផ្នែកខាងក្រោមកាត៖ បង្ហាញរូបថតមូល និងឈ្មោះគ្រូបង្រៀន */}
                   <div className="stdc-card-footer px-4 py-2.5 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div
