@@ -2124,10 +2124,7 @@ export default function ManageLessons() {
                     required
                     value={formData.title}
                     onChange={handleInputChange}
-                    placeholder={t(
-                      'បញ្ចូលចំណងជើងមេរៀន...',
-                      'Enter lesson title...'
-                    )}
+                    placeholder=""
                     className="lsn-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                   />
                 </div>
