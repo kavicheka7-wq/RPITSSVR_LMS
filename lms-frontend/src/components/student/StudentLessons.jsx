@@ -31,7 +31,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Cache v12)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Instant Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 
@@ -48,7 +48,7 @@ const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 const getStudentYearCacheKey = (uid) => `cached_student_current_year_v12_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ + រក្សារូបថតគ្រូក្នុង RAM (0ms)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
 const STUDENT_LESSONS_MEM_CACHE = {
   uid: null,
   lessons: null,
@@ -62,14 +62,14 @@ const STUDENT_LESSONS_MEM_CACHE = {
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
-      sessionStorage.getItem(key) || localStorage.getItem(key);
+      localStorage.getItem(key) || sessionStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អានតារាងរូបថតគ្រូបង្រៀន (Teacher Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
+// ✅ អានតារាងរូបថតគ្រូបង្រៀនពី RAM ភ្លាមៗក្នុង 0ms (គ្មានការប្រើ Canvas ឱ្យទាក់អេក្រង់ឡើយ)
 const getTeacherAvatarMapSync = () => {
   if (
     STUDENT_LESSONS_MEM_CACHE.teacherAvatarMap &&
@@ -83,87 +83,52 @@ const getTeacherAvatarMapSync = () => {
   return STUDENT_LESSONS_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ បង្រួមរូបថតគ្រូបង្រៀនមកត្រឹម 80x80px (~2KB) ទុកក្នុង Dictionary សម្រាប់បង្ហាញក្នុង 0ms
-const compressTeacherAvatarAsync = (keyId, rawDataUrl, onDone) => {
-  if (!keyId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
-  const map = getTeacherAvatarMapSync();
-
-  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
-    map[keyId] = rawDataUrl;
-    if (typeof onDone === 'function') onDone(keyId, rawDataUrl);
-    return;
-  }
-
-  if (!map[keyId]) {
-    map[keyId] = rawDataUrl;
-  }
-
-  try {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 80;
-        let w = img.width || maxSize;
-        let h = img.height || maxSize;
-        if (w > h) {
-          if (w > maxSize) {
-            h = Math.round((h * maxSize) / w);
-            w = maxSize;
-          }
-        } else {
-          if (h > maxSize) {
-            w = Math.round((w * maxSize) / h);
-            h = maxSize;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        const tinyWebp = canvas.toDataURL('image/webp', 0.8);
-        const bestImg =
-          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
-        map[keyId] = bestImg;
-        if (typeof onDone === 'function') onDone(keyId, bestImg);
-      } catch {}
-    };
-    img.src = rawDataUrl;
-  } catch {}
-};
-
-// ✅ សម្អាតជួរឈរ file_data (Base64 ឯកសារមេរៀនធំៗ) និងរូបភាពធំៗមុនពេល Save ចូល localStorage ការពារ QuotaExceededError 100%
-const persistStudentLessonsSafely = (uid, lessonsList, deptCoursesList) => {
+// ✅ រក្សាទុកមេរៀន និងមុខវិជ្ជាដោយលឿនបំផុត (0ms Synchronous Slim Save) ដោយគ្មានការបង្រួម Canvas
+const persistStudentLessonsFast = (uid, lessonsList, deptCoursesList) => {
   const avatarMap = getTeacherAvatarMapSync();
-  let pendingCount = 0;
+  let avatarMapUpdated = false;
 
-  const saveAvatarMap = () => {
-    try {
-      const str = JSON.stringify(avatarMap);
-      sessionStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-    } catch {}
-  };
-
-  const stripPersonAvatar = (person) => {
+  const extractAndSlimTeacher = (person, courseIdFallback = '') => {
     if (!person || typeof person !== 'object') return person;
+    const rawImg =
+      person.profile_image_url ||
+      person.profile_image ||
+      person.user?.profile_image_url ||
+      person.user?.profile_image ||
+      null;
+
+    const tchId = String(person.id || person.user_id || '');
+    const cid = String(courseIdFallback || '');
+
+    if (rawImg && typeof rawImg === 'string') {
+      if (cid && avatarMap[`crs_${cid}`] !== rawImg) {
+        avatarMap[`crs_${cid}`] = rawImg;
+        avatarMapUpdated = true;
+      }
+      if (tchId && avatarMap[`tch_${tchId}`] !== rawImg) {
+        avatarMap[`tch_${tchId}`] = rawImg;
+        avatarMapUpdated = true;
+      }
+    }
+
+    const isHeavyBase64 =
+      typeof rawImg === 'string' &&
+      rawImg.startsWith('data:') &&
+      rawImg.length > 2000;
+
     const copy = { ...person };
-    if (
-      typeof copy.profile_image === 'string' &&
-      copy.profile_image.startsWith('data:') &&
-      copy.profile_image.length > 12000
-    ) {
-      copy.profile_image = null;
+    if (isHeavyBase64) {
+      delete copy.profile_image;
+      delete copy.profile_image_url;
     }
     if (copy.user && typeof copy.user === 'object') {
       const uCopy = { ...copy.user };
       if (
         typeof uCopy.profile_image === 'string' &&
-        uCopy.profile_image.startsWith('data:') &&
-        uCopy.profile_image.length > 12000
+        uCopy.profile_image.startsWith('data:')
       ) {
-        uCopy.profile_image = null;
+        delete uCopy.profile_image;
+        delete uCopy.profile_image_url;
       }
       copy.user = uCopy;
     }
@@ -173,27 +138,12 @@ const persistStudentLessonsSafely = (uid, lessonsList, deptCoursesList) => {
   const slimCourseObj = (crs) => {
     if (!crs || typeof crs !== 'object') return crs;
     const cid = String(crs.id || crs.course_id || '');
-    const tchId = String(crs.teacher?.id || crs.teacher_id || '');
-    const rawImg =
-      crs.teacher?.profile_image_url ||
-      crs.teacher?.profile_image ||
-      crs.teacher?.user?.profile_image ||
-      crs.teacher_profile?.profile_image ||
-      null;
-
-    if (rawImg && cid) {
-      pendingCount++;
-      compressTeacherAvatarAsync(`crs_${cid}`, rawImg, (_, best) => {
-        if (tchId) avatarMap[`tch_${tchId}`] = best;
-        pendingCount--;
-        if (pendingCount <= 0) saveAvatarMap();
-      });
-    }
-
     const copy = { ...crs };
-    if (copy.teacher) copy.teacher = stripPersonAvatar(copy.teacher);
+    if (copy.teacher) {
+      copy.teacher = extractAndSlimTeacher(copy.teacher, cid);
+    }
     if (copy.teacher_profile) {
-      copy.teacher_profile = stripPersonAvatar(copy.teacher_profile);
+      copy.teacher_profile = extractAndSlimTeacher(copy.teacher_profile, cid);
     }
     return copy;
   };
@@ -201,19 +151,19 @@ const persistStudentLessonsSafely = (uid, lessonsList, deptCoursesList) => {
   if (Array.isArray(deptCoursesList) && deptCoursesList.length > 0) {
     const slimDept = deptCoursesList.map(slimCourseObj);
     try {
-      const deptStr = JSON.stringify(slimDept);
-      sessionStorage.setItem(getDeptCoursesCacheKey(uid), deptStr);
-      localStorage.setItem(getDeptCoursesCacheKey(uid), deptStr);
-      localStorage.setItem(CACHE_KEY_SHARED_DEPT_COURSES, deptStr);
+      localStorage.setItem(getDeptCoursesCacheKey(uid), JSON.stringify(slimDept));
     } catch {}
   }
 
   if (Array.isArray(lessonsList)) {
     const slimLessons = lessonsList.map((lsn) => {
       if (!lsn || typeof lsn !== 'object') return lsn;
+      const cid = String(lsn.course?.id || lsn.course_id || '');
       const copy = { ...lsn };
       if (copy.course) copy.course = slimCourseObj(copy.course);
-      if (copy.teacher) copy.teacher = stripPersonAvatar(copy.teacher);
+      if (copy.teacher) {
+        copy.teacher = extractAndSlimTeacher(copy.teacher, cid);
+      }
       if (Array.isArray(copy.files)) {
         copy.files = copy.files.map((f) => {
           if (!f || typeof f !== 'object') return f;
@@ -225,21 +175,18 @@ const persistStudentLessonsSafely = (uid, lessonsList, deptCoursesList) => {
     });
 
     try {
-      const lsnStr = JSON.stringify(slimLessons);
-      sessionStorage.setItem(getLessonsCacheKey(uid), lsnStr);
-      localStorage.setItem(getLessonsCacheKey(uid), lsnStr);
-      localStorage.setItem(CACHE_KEY_SHARED_LESSONS, lsnStr);
+      localStorage.setItem(getLessonsCacheKey(uid), JSON.stringify(slimLessons));
     } catch {}
   }
 
-  if (pendingCount === 0) {
-    saveAvatarMap();
-  } else {
-    setTimeout(saveAvatarMap, 300);
+  if (avatarMapUpdated) {
+    try {
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(avatarMap));
+    } catch {}
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -617,8 +564,8 @@ const StudentLessons = () => {
     }
     try {
       return (
-        sessionStorage.getItem(getStudentYearCacheKey(currentStudentId)) ||
         localStorage.getItem(getStudentYearCacheKey(currentStudentId)) ||
+        sessionStorage.getItem(getStudentYearCacheKey(currentStudentId)) ||
         null
       );
     } catch {
@@ -759,7 +706,7 @@ const StudentLessons = () => {
   }, [searchQuery]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ទាញឈ្មោះ និងរូបថតគ្រូបង្រៀនប្រចាំមុខវិជ្ជានីមួយៗ
+  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ទាញឈ្មោះ និងរូបថតគ្រូបង្រៀនប្រចាំមុខវិជ្ជានីមួយៗ (O(1) Lookup)
   // ============================================================================
   const getViewUrl = useCallback((path) => {
     if (!path || typeof path !== 'string') return '#';
@@ -805,6 +752,18 @@ const StudentLessons = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
+  // ✅ បង្កើត Map នៃមុខវិជ្ជាក្នុង RAM ជាមុន ដើម្បីកុំឱ្យរត់ .find() ឬ JSON.parse() នៅក្នុង Loop
+  const deptCoursesById = useMemo(() => {
+    const map = new Map();
+    if (Array.isArray(deptCourses)) {
+      deptCourses.forEach((c) => {
+        const cid = c?.id || c?.course_id;
+        if (cid) map.set(String(cid), c);
+      });
+    }
+    return map;
+  }, [deptCourses]);
+
   const resolveCourseTeacherMeta = useCallback(
     (courseObj, fallbackCourseId = '') => {
       const cid = String(
@@ -814,9 +773,7 @@ const StudentLessons = () => {
       let tchProfile = courseObj?.teacher_profile || courseObj?.teacherProfile;
 
       if (cid) {
-        const fromDeptCourses = (deptCourses || []).find(
-          (item) => String(item?.id || item?.course_id) === cid
-        );
+        const fromDeptCourses = deptCoursesById.get(cid);
         if (fromDeptCourses) {
           if (!tch || !tch.name || tch.name === 'គ្រូបង្រៀន') {
             tch = fromDeptCourses.teacher || tch;
@@ -830,24 +787,6 @@ const StudentLessons = () => {
               fromDeptCourses.teacher_profile ||
               fromDeptCourses.teacherProfile ||
               tchProfile;
-          }
-        }
-      }
-
-      if (!tch && !tchProfile && cid) {
-        const cachedCourses =
-          readStorageJson(getCoursesCacheKey(currentStudentId), null) ||
-          readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
-          readStorageJson(CACHE_KEY_SHARED_COURSES, []);
-        if (Array.isArray(cachedCourses)) {
-          const matchedCrs = cachedCourses.find(
-            (item) =>
-              String(item?.course_id || item?.course?.id || item?.id) === cid
-          );
-          const cInfo = matchedCrs?.course || matchedCrs;
-          if (cInfo) {
-            tch = cInfo.teacher;
-            tchProfile = cInfo.teacher_profile || cInfo.teacherProfile;
           }
         }
       }
@@ -888,9 +827,7 @@ const StudentLessons = () => {
         courseObj?.teacher_id || tch?.id || tchProfile?.id || ''
       );
 
-      let rawImg =
-        (cid && avatarMap[`crs_${cid}`]) ||
-        (tchId && avatarMap[`tch_${tchId}`]) ||
+      const rawImg =
         tchProfile?.profile_image_url ||
         tchProfile?.profile_image ||
         tchProfile?.user?.profile_image ||
@@ -899,25 +836,9 @@ const StudentLessons = () => {
         tch?.user?.profile_image_url ||
         tch?.user?.profile_image ||
         courseObj?.teacher_image ||
+        (cid && avatarMap[`crs_${cid}`]) ||
+        (tchId && avatarMap[`tch_${tchId}`]) ||
         null;
-
-      if (!rawImg && cid) {
-        const cachedScores =
-          readStorageJson(getScoresCacheKey(currentStudentId), null) ||
-          readStorageJson('cached_student_scores_list_v5', []);
-        if (Array.isArray(cachedScores)) {
-          const matchScore = cachedScores.find(
-            (s) => String(s?.course_id || s?.course?.id) === cid
-          );
-          rawImg =
-            matchScore?.course?.teacher?.profile_image_url ||
-            matchScore?.course?.teacher?.profile_image ||
-            matchScore?.course?.teacher?.user?.profile_image ||
-            matchScore?.course?.teacher_profile?.profile_image_url ||
-            matchScore?.course?.teacher_profile?.profile_image ||
-            null;
-        }
-      }
 
       const rawKey =
         tchProfile?.teacher_key ||
@@ -940,11 +861,11 @@ const StudentLessons = () => {
           tchProfile?.specialization || tch?.specialization || null,
       };
     },
-    [currentStudentId, deptCourses, getImageUrl, t]
+    [deptCoursesById, getImageUrl, t]
   );
 
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សាពី Backend ដោយមិនរាំងស្ទះ UI
+  // 📌 ផ្នែកទី៤៖ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សាពី Backend ដោយមិនរាំងស្ទះ UI (0ms Sync)
   // ============================================================================
   const fetchLessons = useCallback(
     async (forceRefresh = false) => {
@@ -989,16 +910,11 @@ const StudentLessons = () => {
           if (Array.isArray(response.data?.department_courses)) {
             validDeptCourses = response.data.department_courses;
           }
-          // ✅ ចាប់យកឆ្នាំសិក្សាបច្ចុប្បន្នរបស់សិស្សពី StudentController
           if (response.data?.student_current_year) {
             const sy = String(response.data.student_current_year);
             setApiStudentYear(sy);
             STUDENT_LESSONS_MEM_CACHE.studentYear = sy;
             try {
-              sessionStorage.setItem(
-                getStudentYearCacheKey(currentStudentId),
-                sy
-              );
               localStorage.setItem(
                 getStudentYearCacheKey(currentStudentId),
                 sy
@@ -1067,22 +983,21 @@ const StudentLessons = () => {
           validLessons = nestedLessons.flat();
         }
 
-        // ✅ សម្អាតជួរឈរ file_data (Base64) និងរក្សាទុករូបថតគ្រូក្នុង Avatar Dictionary មុនពេល Save ចូល Storage
-        persistStudentLessonsSafely(
+        // ✅ រក្សាទុកក្នុង RAM មុនគេដើម្បីបង្ហាញលើអេក្រង់ក្នុង 0ms រួចទើប Save Slim JSON ចូល localStorage
+        STUDENT_LESSONS_MEM_CACHE.uid = currentStudentId;
+        STUDENT_LESSONS_MEM_CACHE.lessons = validLessons;
+        STUDENT_LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
+        if (validDeptCourses.length > 0) {
+          STUDENT_LESSONS_MEM_CACHE.deptCourses = validDeptCourses;
+          setDeptCourses(validDeptCourses);
+        }
+        setLessons(validLessons);
+
+        persistStudentLessonsFast(
           currentStudentId,
           validLessons,
           validDeptCourses
         );
-
-        setLessons(validLessons);
-        STUDENT_LESSONS_MEM_CACHE.uid = currentStudentId;
-        STUDENT_LESSONS_MEM_CACHE.lessons = validLessons;
-        STUDENT_LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
-
-        if (validDeptCourses.length > 0) {
-          setDeptCourses(validDeptCourses);
-          STUDENT_LESSONS_MEM_CACHE.deptCourses = validDeptCourses;
-        }
       } catch (error) {
         console.error('Error fetching lessons:', error);
       }
@@ -1187,17 +1102,6 @@ const StudentLessons = () => {
   // ============================================================================
   // 📌 ផ្នែកទី៦៖ គណនាទិន្នន័យមេរៀន និងតម្រៀបឆ្នាំបច្ចុប្បន្ននៅខាងលើគេជានិច្ច
   // ============================================================================
-  const deptCoursesById = useMemo(() => {
-    const map = new Map();
-    if (Array.isArray(deptCourses)) {
-      deptCourses.forEach((c) => {
-        const cid = c?.id || c?.course_id;
-        if (cid) map.set(String(cid), c);
-      });
-    }
-    return map;
-  }, [deptCourses]);
-
   const enrichedLessons = useMemo(() => {
     if (!Array.isArray(lessons)) return [];
     return lessons.map((l) => {
@@ -1463,7 +1367,6 @@ const StudentLessons = () => {
   }, [allCourseFolders, selectedYear, selectedTeacherKey, doesItemMatchYear]);
 
   // ✅ រៀបចំបណ្ដុំមុខវិជ្ជាតាមឆ្នាំសិក្សា៖
-  // ដាក់ «មុខវិជ្ជាឆ្នាំដែលសិស្សកំពុងរៀនបច្ចុប្បន្ន» នៅខាងលើគេជានិច្ច ហើយមុខវិជ្ជាឆ្នាំមុនៗ (សម្រាប់រំលឹកមេរៀន) ធ្លាក់មកខាងក្រោមតាមលំដាប់!
   const prioritizedYearSections = useMemo(() => {
     const curY = Number(studentCurrentYear) || 1;
 
@@ -1884,11 +1787,9 @@ const StudentLessons = () => {
 
       {/* ================================================================== */}
       {/* 📌 2. UNIFIED SINGLE-ROW TOOLBAR                                   */}
-      {/* (លាក់ប៊ូតុង ឯកសារ/វីដេអូ សិន ➔ បង្ហាញតែពេលសិស្សចុចចូលមុខវិជ្ជាណាមួយ) */}
       {/* ================================================================== */}
       <div className="std-lsn-surface bg-white rounded-3xl border border-gray-200/80 shadow-xs px-4 py-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         
-        {/* ✅ បង្ហាញប៊ូតុង «ឯកសារមេរៀន / វីដេអូបង្រៀន» តែពេលចុចចូលមុខវិជ្ជាណាមួយប៉ុណ្ណោះ */}
         {isShowingCourseFilesView && (
           <div className="std-lsn-subbox inline-flex bg-gray-100 p-1 rounded-full border border-gray-200/70 shrink-0 w-full sm:w-auto justify-center animate-fadeIn">
             <button
@@ -1937,7 +1838,6 @@ const StudentLessons = () => {
           </div>
         )}
 
-        {/* ជួរឈ្មោះគ្រូបង្រៀន អាចអូសរមូរឆ្វេង-ស្ដាំបានយ៉ាងស្អាត */}
         {availableTeachersForYear.length > 0 && (
           <div
             className={`flex items-center gap-2 min-w-0 flex-1 ${
@@ -2017,7 +1917,6 @@ const StudentLessons = () => {
           </div>
         )}
 
-        {/* ប្រអប់ស្វែងរក (Expandable Search Bar) */}
         <div className="flex items-center justify-end shrink-0 ml-auto">
           <div
             ref={searchRef}
@@ -2073,9 +1972,6 @@ const StudentLessons = () => {
       {/* 📌 3. MAIN CONTENT AREA (តម្រៀបឆ្នាំបច្ចុប្បន្ននៅលើ + ឆ្នាំចាស់នៅក្រោម) */}
       {/* ================================================================== */}
       {!isShowingCourseFilesView ? (
-        /* ------------------------------------------------------------------
-           🌟 ជំហានទី ១៖ បង្ហាញកាតមុខវិជ្ជាតាមផ្នែកឆ្នាំសិក្សា
-        ------------------------------------------------------------------- */
         <div className="space-y-8 animate-fadeIn">
           {prioritizedYearSections.length === 0 ? (
             <div className="std-lsn-surface bg-white rounded-3xl border border-gray-200/80 p-14 text-center space-y-3 shadow-2xs">
@@ -2246,9 +2142,6 @@ const StudentLessons = () => {
           )}
         </div>
       ) : (
-        /* ------------------------------------------------------------------
-           🌟 ជំហានទី ២៖ បង្ហាញឯកសារ និងវីដេអូនៃមុខវិជ្ជាដែលបានចុចជ្រើសរើស
-        ------------------------------------------------------------------- */
         <div className="space-y-5 animate-fadeIn">
           
           <div className="flex flex-wrap items-center justify-between gap-4 px-1 pt-1">
@@ -2307,9 +2200,6 @@ const StudentLessons = () => {
             )}
           </div>
 
-          {/* -------------------------------------------------------------- */}
-          {/* ✅ បញ្ជីឯកសារមេរៀន (ទំហំ និងទម្រង់ប៉ុនគ្នាជាមួយកាតវីដេអូ ១០០%)    */}
-          {/* -------------------------------------------------------------- */}
           {activeTab === 'documents' && (
             <div>
               {activeDocsList.length === 0 ? (
@@ -2348,7 +2238,6 @@ const StudentLessons = () => {
                         className="std-lsn-card bg-white p-4 rounded-2xl border border-slate-200/80 hover:border-indigo-400 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between group overflow-hidden"
                       >
                         <div>
-                          {/* ✅ ផ្ទាំងប្រអប់ខាងលើ aspect-video ប៉ុនគ្នាជាមួយកាតវីដេអូ */}
                           <div
                             onClick={() =>
                               !isDownloading &&
@@ -2424,9 +2313,6 @@ const StudentLessons = () => {
             </div>
           )}
 
-          {/* -------------------------------------------------------------- */}
-          {/* បញ្ជីវីដេអូបង្រៀន                                                */}
-          {/* -------------------------------------------------------------- */}
           {activeTab === 'videos' && (
             <div>
               {activeVidsList.length === 0 ? (
