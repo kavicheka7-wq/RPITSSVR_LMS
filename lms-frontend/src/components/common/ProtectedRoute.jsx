@@ -3,25 +3,44 @@ import React, { useMemo } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
-// ✅ អានព័ត៌មាន User និង Token ពី LocalStorage ភ្លាមៗក្នុង 0ms ដើម្បីកុំឱ្យរាំងស្ទះទំព័រពេល Refresh
+// ✅ អានព័ត៌មាន User/Teacher និង Token ពីទាំង sessionStorage និង localStorage ភ្លាមៗក្នុង 0ms
 const readCachedUserSync = () => {
   try {
     const token =
-      localStorage.getItem('token') || localStorage.getItem('auth_token');
+      sessionStorage.getItem('token') ||
+      localStorage.getItem('token') ||
+      localStorage.getItem('auth_token');
     if (!token) return null;
 
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed?.user || parsed?.data || parsed;
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed?.user || parsed?.data || parsed;
+    }
+
+    const rawTeacher =
+      sessionStorage.getItem('teacher') || localStorage.getItem('teacher');
+    if (rawTeacher) {
+      const parsedTeacher = JSON.parse(rawTeacher);
+      return {
+        ...parsedTeacher,
+        role_id: parsedTeacher.role_id || 2,
+        role: 'Teacher',
+        teacher: parsedTeacher,
+      };
+    }
+    return null;
   } catch {
     return null;
   }
 };
 
-// ✅ ស្រង់យកតួនាទីគោល ('admin' | 'teacher' | 'student') ឱ្យត្រឹមត្រូវគ្រប់ទម្រង់ API និង role_id (ទាំងលេខ និងអក្សរ)
-const normalizeRoleKey = (userObj, hasRoleFn) => {
+// ✅ ស្រង់យកតួនាទីគោល ('admin' | 'teacher' | 'student') ឱ្យត្រឹមត្រូវគ្រប់ទម្រង់ API
+const normalizeRoleKey = (userObj, teacherObj, hasRoleFn) => {
   if (userObj) {
     const rawRole =
       userObj?.role?.role_name ||
@@ -33,10 +52,25 @@ const normalizeRoleKey = (userObj, hasRoleFn) => {
     const roleIdNum = Number(userObj?.role_id);
 
     if (r.includes('admin') || roleIdNum === 1) return 'admin';
-    if (r.includes('teacher') || roleIdNum === 2) return 'teacher';
-    if (r.includes('student') || roleIdNum === 3) return 'student';
+    if (
+      r.includes('teacher') ||
+      roleIdNum === 2 ||
+      Boolean(teacherObj) ||
+      Boolean(userObj?.teacher)
+    ) {
+      return 'teacher';
+    }
+    if (
+      r.includes('student') ||
+      roleIdNum === 3 ||
+      Boolean(userObj?.student)
+    ) {
+      return 'student';
+    }
     if (r) return r;
   }
+
+  if (teacherObj) return 'teacher';
 
   if (typeof hasRoleFn === 'function') {
     if (hasRoleFn('Admin')) return 'admin';
@@ -48,19 +82,27 @@ const normalizeRoleKey = (userObj, hasRoleFn) => {
 };
 
 const ProtectedRoute = ({ allowedRoles, children }) => {
-  const { user: contextUser, isAuthenticated, loading, hasRole } = useAuth();
+  const {
+    user: contextUser,
+    teacher: contextTeacher,
+    isAuthenticated,
+    loading,
+    hasRole,
+  } = useAuth();
   const location = useLocation();
 
-  // ✅ ប្រើប្រាស់ User ពី Context ឬអានផ្ទាល់ពី LocalStorage ភ្លាមៗក្នុង 0 វិនាទី (មិនបាច់លោត Loading Spinner)
+  // ✅ ប្រើប្រាស់ User ពី Context ឬអានផ្ទាល់ពី Storage ភ្លាមៗក្នុង 0 វិនាទី
   const effectiveUser = useMemo(
-    () => contextUser || readCachedUserSync(),
-    [contextUser, isAuthenticated, location.pathname]
+    () => contextUser || readCachedUserSync() || contextTeacher,
+    [contextUser, contextTeacher, isAuthenticated, location.pathname]
   );
 
   const hasValidToken = useMemo(() => {
     try {
       return Boolean(
-        localStorage.getItem('token') || localStorage.getItem('auth_token')
+        sessionStorage.getItem('token') ||
+          localStorage.getItem('token') ||
+          localStorage.getItem('auth_token')
       );
     } catch {
       return false;
@@ -78,7 +120,6 @@ const ProtectedRoute = ({ allowedRoles, children }) => {
           effectiveUser.email))
   );
 
-  // បើកំពុងផ្ទុក ហើយមិនទាន់មានទិន្នន័យក្នុងម៉ាស៊ីនសោះ ទើបរង់ចាំបន្តិចដោយមិនលោតផ្ទាំងវិលរំខានភ្នែក
   if (loading && !hasValidSession) {
     return null;
   }
@@ -87,7 +128,7 @@ const ProtectedRoute = ({ allowedRoles, children }) => {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  const userRoleKey = normalizeRoleKey(effectiveUser, hasRole);
+  const userRoleKey = normalizeRoleKey(effectiveUser, contextTeacher, hasRole);
 
   if (Array.isArray(allowedRoles) && allowedRoles.length > 0) {
     const isAllowed = allowedRoles.some((allowed) => {
@@ -99,7 +140,6 @@ const ProtectedRoute = ({ allowedRoles, children }) => {
     });
 
     if (!isAllowed) {
-      // ✅ បញ្ជូនទៅកាន់ '/dashboard' រួមតែមួយគត់ (Clean URL) ប្រសិនបើមានតួនាទីត្រឹមត្រូវ និងមិនទាន់ស្ថិតនៅលើ '/dashboard'
       if (
         userRoleKey === 'admin' ||
         userRoleKey === 'teacher' ||

@@ -29,13 +29,13 @@ import {
 } from 'recharts';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (0ms Cache & Background Prefetcher)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (0ms Cache & Safe Non-Blocking Prefetcher)
 // ============================================================================
 const LAST_ACTIVE_TEACHER_UID_KEY = 'lms_last_active_teacher_uid';
 const getStatsCacheKey = (uid) => `cached_teacher_dashboard_stats_v8_${uid}`;
 const getActivitiesCacheKey = (uid) => `cached_teacher_dashboard_activities_v8_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ
+// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ + រក្សារូបភាពក្នុង RAM
 const TEACHER_DASH_MEM_CACHE = {
   uid: null,
   stats: null,
@@ -44,6 +44,7 @@ const TEACHER_DASH_MEM_CACHE = {
   assignmentsList: null,
   lastSyncedAt: 0,
   prefetchedUid: null,
+  avatarMap: {},
 };
 
 const readStorageJson = (key, fallback) => {
@@ -55,7 +56,60 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (ការពារកុំឱ្យប្ដូរ uid ២ ដងពេល Login)
+// ✅ លុបរូបភាព Base64 ធំៗចេញពីបញ្ជីមុននឹង Save ចូល localStorage ដើម្បីការពារកុំឱ្យពេញទំហំ 5MB (QuotaExceededError) ដែលធ្វើឱ្យលោតអេក្រង់សពេល F5
+const stripHeavyBase64FromList = (data) => {
+  if (!Array.isArray(data)) return data;
+  return data.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const copy = { ...item };
+
+    const rawImg =
+      copy.profile_image ||
+      copy.student_image ||
+      copy.user?.profile_image ||
+      copy.student?.profile_image;
+
+    if (copy.id && rawImg) {
+      TEACHER_DASH_MEM_CACHE.avatarMap[copy.id] = rawImg;
+    }
+
+    if (typeof copy.profile_image === 'string' && copy.profile_image.startsWith('data:') && copy.profile_image.length > 15000) {
+      copy.profile_image = null;
+    }
+    if (typeof copy.student_image === 'string' && copy.student_image.startsWith('data:') && copy.student_image.length > 15000) {
+      copy.student_image = null;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      copy.user = {
+        id: copy.user.id,
+        status: copy.user.status,
+        email: copy.user.email,
+      };
+    }
+    if (copy.student && typeof copy.student === 'object') {
+      copy.student = {
+        ...copy.student,
+        profile_image:
+          typeof copy.student.profile_image === 'string' &&
+          copy.student.profile_image.startsWith('data:')
+            ? null
+            : copy.student.profile_image,
+      };
+    }
+    return copy;
+  });
+};
+
+const safeWriteTeacherCache = (key, payload) => {
+  try {
+    const slimPayload = Array.isArray(payload)
+      ? stripHeavyBase64FromList(payload)
+      : payload;
+    localStorage.setItem(key, JSON.stringify(slimPayload));
+  } catch {}
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
 const resolveTeacherUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -67,7 +121,10 @@ const resolveTeacherUid = (contextUser) => {
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -108,7 +165,7 @@ const ensureCleanTeacherSessionCache = (newUid) => {
   } catch (e) {}
 };
 
-// ✅ អនុគមន៍ទាញទិន្នន័យគ្រប់ទំព័រទុកមុននៅផ្ទៃខាងក្រោយ (Background Prefetch _v8_) ពេលគ្រូចូលដល់ Dashboard
+// ✅ អនុគមន៍ទាញទិន្នន័យទំព័រផ្សេងៗនៅផ្ទៃខាងក្រោយ ដោយពន្យារពេល ១.២ វិនាទី ដើម្បីទុកឱ្យ Dashboard បង្ហាញលឿន 0ms មុនគេ
 const prefetchAllTeacherPagesData = (
   uid,
   onStudentsSynced,
@@ -118,105 +175,67 @@ const prefetchAllTeacherPagesData = (
   if (TEACHER_DASH_MEM_CACHE.prefetchedUid === uid) return;
   TEACHER_DASH_MEM_CACHE.prefetchedUid = uid;
 
-  // ១. ទាញមុខវិជ្ជា និងសិស្សទុកមុនភ្លាមៗដោយស្ងាត់ៗ
-  api
-    .get('/teacher/courses')
-    .then((res) => {
-      const data = res.data?.data || res.data || [];
-      if (Array.isArray(data)) {
-        try {
-          localStorage.setItem(
-            `cached_teacher_courses_list_v8_${uid}`,
-            JSON.stringify(data)
-          );
-          localStorage.setItem(
-            'cached_teacher_courses_list_v6',
-            JSON.stringify(data)
-          );
-          localStorage.setItem(
-            'cached_teacher_courses_list',
-            JSON.stringify(data)
-          );
-        } catch {}
-      }
-    })
-    .catch(() => {});
-
-  api
-    .get('/teacher/students')
-    .then((res) => {
-      const data = res.data?.data || res.data || [];
-      if (Array.isArray(data)) {
-        TEACHER_DASH_MEM_CACHE.deptStudentCount = data.length;
-        if (typeof onStudentsSynced === 'function') {
-          onStudentsSynced(data.length);
+  setTimeout(() => {
+    api
+      .get('/teacher/courses')
+      .then((res) => {
+        const data = res.data?.data || res.data || [];
+        if (Array.isArray(data)) {
+          safeWriteTeacherCache(`cached_teacher_courses_list_v8_${uid}`, data);
+          safeWriteTeacherCache('cached_teacher_courses_list_v6', data);
         }
-        try {
-          localStorage.setItem(
-            `cached_teacher_students_list_v8_${uid}`,
-            JSON.stringify(data)
-          );
-          localStorage.setItem(
-            'cached_teacher_students_list_v6',
-            JSON.stringify(data)
-          );
-        } catch {}
-      }
-      if (res.data?.course_students_map) {
-        try {
-          localStorage.setItem(
+      })
+      .catch(() => {});
+
+    api
+      .get('/teacher/students')
+      .then((res) => {
+        const data = res.data?.data || res.data || [];
+        if (Array.isArray(data)) {
+          TEACHER_DASH_MEM_CACHE.deptStudentCount = data.length;
+          if (typeof onStudentsSynced === 'function') {
+            onStudentsSynced(data.length);
+          }
+          safeWriteTeacherCache(`cached_teacher_students_list_v8_${uid}`, data);
+          safeWriteTeacherCache('cached_teacher_students_list_v6', data);
+        }
+        if (res.data?.course_students_map) {
+          safeWriteTeacherCache(
             `cached_teacher_course_map_v8_${uid}`,
-            JSON.stringify(res.data.course_students_map)
+            res.data.course_students_map
           );
-          localStorage.setItem(
+          safeWriteTeacherCache(
             'cached_teacher_course_map_v6',
-            JSON.stringify(res.data.course_students_map)
+            res.data.course_students_map
           );
-        } catch {}
-      }
-    })
-    .catch(() => {});
-
-  api
-    .get('/teacher/assignments')
-    .then((res) => {
-      const data = res.data?.data || res.data || [];
-      if (Array.isArray(data)) {
-        TEACHER_DASH_MEM_CACHE.assignmentsList = data;
-        if (typeof onAssignmentsSynced === 'function') {
-          onAssignmentsSynced(data);
         }
-        try {
-          localStorage.setItem(
-            `cached_teacher_assignments_list_v8_${uid}`,
-            JSON.stringify(data)
-          );
-          localStorage.setItem(
-            'cached_teacher_assignments_list_v6',
-            JSON.stringify(data)
-          );
-        } catch {}
-      }
-    })
-    .catch(() => {});
+      })
+      .catch(() => {});
 
-  // ២. ទាញមេរៀន និងកម្រងសំណួរទុកមុននៅផ្ទៃខាងក្រោយ
+    api
+      .get('/teacher/assignments')
+      .then((res) => {
+        const data = res.data?.data || res.data || [];
+        if (Array.isArray(data)) {
+          TEACHER_DASH_MEM_CACHE.assignmentsList = data;
+          if (typeof onAssignmentsSynced === 'function') {
+            onAssignmentsSynced(data);
+          }
+          safeWriteTeacherCache(`cached_teacher_assignments_list_v8_${uid}`, data);
+          safeWriteTeacherCache('cached_teacher_assignments_list_v6', data);
+        }
+      })
+      .catch(() => {});
+  }, 1200);
+
   setTimeout(() => {
     api
       .get('/teacher/lessons')
       .then((res) => {
         const data = res.data?.data || res.data || [];
         if (Array.isArray(data)) {
-          try {
-            localStorage.setItem(
-              `cached_teacher_lessons_list_v8_${uid}`,
-              JSON.stringify(data)
-            );
-            localStorage.setItem(
-              'cached_teacher_lessons_list_v6',
-              JSON.stringify(data)
-            );
-          } catch {}
+          safeWriteTeacherCache(`cached_teacher_lessons_list_v8_${uid}`, data);
+          safeWriteTeacherCache('cached_teacher_lessons_list_v6', data);
         }
       })
       .catch(() => {});
@@ -226,23 +245,15 @@ const prefetchAllTeacherPagesData = (
       .then((res) => {
         const data = res.data?.data || res.data || [];
         if (Array.isArray(data)) {
-          try {
-            localStorage.setItem(
-              `cached_teacher_quizzes_list_v8_${uid}`,
-              JSON.stringify(data)
-            );
-            localStorage.setItem(
-              'cached_teacher_quizzes_list_v6',
-              JSON.stringify(data)
-            );
-          } catch {}
+          safeWriteTeacherCache(`cached_teacher_quizzes_list_v8_${uid}`, data);
+          safeWriteTeacherCache('cached_teacher_quizzes_list_v6', data);
         }
       })
       .catch(() => {});
-  }, 250);
+  }, 2400);
 };
 
-// ✅ អនុគមន៍ស្រង់យកថ្ងៃខែពិតប្រាកដ (ការពារកុំឱ្យលោតខុសថ្ងៃម៉ោងដោយសារ UTC)
+// ✅ អនុគមន៍ស្រង់យកថ្ងៃខែពិតប្រាកដ
 const formatSubmittedDate = (dateStr) => {
   if (!dateStr) return '—';
   const str = String(dateStr).trim();
@@ -271,15 +282,14 @@ const formatSubmittedDate = (dateStr) => {
 
 export default function TeacherDashboard() {
   const { t, language } = useLanguage();
-  const { user } = useAuth();
+  const { user, teacher } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
 
-  // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentTeacherId = useMemo(() => {
-    const uid = resolveTeacherUid(user);
+    const uid = resolveTeacherUid(user || teacher);
     ensureCleanTeacherSessionCache(uid);
     return uid;
-  }, [user]);
+  }, [user, teacher]);
 
   if (
     TEACHER_DASH_MEM_CACHE.uid &&
@@ -342,7 +352,6 @@ export default function TeacherDashboard() {
     return cached || [];
   });
 
-  // ✅ ទាញយកឈ្មោះពេញដើមរបស់គ្រូបង្រៀនពី Database
   const getTeacherDisplayName = () => {
     if (user?.first_name || user?.last_name) {
       return `${user.first_name || ''} ${user.last_name || ''}`.trim();
@@ -350,10 +359,12 @@ export default function TeacherDashboard() {
     if (user?.teacher?.first_name || user?.teacher?.last_name) {
       return `${user.teacher.first_name || ''} ${user.teacher.last_name || ''}`.trim();
     }
+    if (teacher?.first_name || teacher?.last_name) {
+      return `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim();
+    }
     return user?.name || t('លោកគ្រូ/អ្នកគ្រូ', 'Teacher');
   };
 
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getProfileImageUrl = useCallback((imagePath) => {
     if (!imagePath || typeof imagePath !== 'string') return null;
     const trimmed = imagePath.trim();
@@ -374,20 +385,9 @@ export default function TeacherDashboard() {
   }, []);
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ទាញយកទិន្នន័យ Dashboard ល្បឿនលឿន (0ms) + Prefetch ទំព័រផ្សេងៗទុកមុន
+  // 📌 ផ្នែកទី២៖ ទាញយកទិន្នន័យ Dashboard ល្បឿនលឿន (0ms)
   // ============================================================================
   const fetchDashboardData = useCallback(async () => {
-    // ចាប់ផ្ដើមទាញទិន្នន័យទំព័រផ្សេងៗទុកមុននៅផ្ទៃខាងក្រោយភ្លាមៗ
-    prefetchAllTeacherPagesData(
-      currentTeacherId,
-      (count) => {
-        setDeptStudentCount(count);
-      },
-      (asgData) => {
-        setAssignmentsList(asgData);
-      }
-    );
-
     const now = Date.now();
     const cachedStatsForUser =
       TEACHER_DASH_MEM_CACHE.stats ||
@@ -400,7 +400,12 @@ export default function TeacherDashboard() {
       setStats(cachedStatsForUser);
       setRecentActivities(cachedActsForUser);
 
-      if (now - TEACHER_DASH_MEM_CACHE.lastSyncedAt < 20000) {
+      if (now - TEACHER_DASH_MEM_CACHE.lastSyncedAt < 25000) {
+        prefetchAllTeacherPagesData(
+          currentTeacherId,
+          (count) => setDeptStudentCount(count),
+          (asgData) => setAssignmentsList(asgData)
+        );
         return;
       }
     }
@@ -413,6 +418,17 @@ export default function TeacherDashboard() {
         ? resData.recent_activities
         : [];
 
+      newActivities.forEach((act) => {
+        const img =
+          act?.student_image ||
+          act?.profile_image ||
+          act?.student?.profile_image ||
+          act?.student?.user?.profile_image;
+        if (act?.id && img) {
+          TEACHER_DASH_MEM_CACHE.avatarMap[act.id] = img;
+        }
+      });
+
       setStats(newStats);
       setRecentActivities(newActivities);
 
@@ -421,26 +437,19 @@ export default function TeacherDashboard() {
       TEACHER_DASH_MEM_CACHE.activities = newActivities;
       TEACHER_DASH_MEM_CACHE.lastSyncedAt = Date.now();
 
-      try {
-        localStorage.setItem(
-          getStatsCacheKey(currentTeacherId),
-          JSON.stringify(newStats)
-        );
-        localStorage.setItem(
-          getActivitiesCacheKey(currentTeacherId),
-          JSON.stringify(newActivities)
-        );
-        localStorage.setItem(
-          'cached_teacher_dashboard_stats',
-          JSON.stringify(newStats)
-        );
-        localStorage.setItem(
-          'cached_teacher_dashboard_activities',
-          JSON.stringify(newActivities)
-        );
-      } catch (e) {}
+      safeWriteTeacherCache(getStatsCacheKey(currentTeacherId), newStats);
+      safeWriteTeacherCache(getActivitiesCacheKey(currentTeacherId), newActivities);
+      safeWriteTeacherCache('cached_teacher_dashboard_stats', newStats);
+      safeWriteTeacherCache('cached_teacher_dashboard_activities', newActivities);
     } catch (err) {
       console.error('Error fetching teacher dashboard data:', err);
+    } finally {
+      // ✅ ទាញទិន្នន័យទំព័រផ្សេងៗតាមក្រោយ ដោយមិនរំខានល្បឿនបើកទំព័រដំបូង
+      prefetchAllTeacherPagesData(
+        currentTeacherId,
+        (count) => setDeptStudentCount(count),
+        (asgData) => setAssignmentsList(asgData)
+      );
     }
   }, [currentTeacherId]);
 
@@ -449,7 +458,7 @@ export default function TeacherDashboard() {
   }, [fetchDashboardData]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ គណនាទិន្នន័យក្រាហ្វបង្គោល (ស្ថិតិប្រគល់កិច្ចការ និងស្ថិតិលទ្ធផល ជាប់/ធ្លាក់)
+  // 📌 ផ្នែកទី៣៖ គណនាទិន្នន័យក្រាហ្វបង្គោល
   // ============================================================================
   const resolvedTotalStudents = useMemo(() => {
     if (typeof deptStudentCount === 'number' && deptStudentCount > 0) {
@@ -458,7 +467,6 @@ export default function TeacherDashboard() {
     return stats?.total_students ?? 0;
   }, [deptStudentCount, stats]);
 
-  // ✅ ១. គណនាទិន្នន័យបង្គោលក្រាហ្វ «ស្ថិតិប្រគល់កិច្ចការ» (ដាក់ពិន្ទុរួច / រង់ចាំដាក់ពិន្ទុ / មិនទាន់ប្រគល់) ឱ្យដូចគ្នានឹងក្រាហ្វខាងស្ដាំ
   const submissionSummaryChartData = useMemo(() => {
     const chartMonths = Array.isArray(stats?.chart_data) ? stats.chart_data : [];
     const totalFromChart = chartMonths.reduce(
@@ -513,7 +521,6 @@ export default function TeacherDashboard() {
     ];
   }, [stats, assignmentsList, recentActivities, resolvedTotalStudents, t]);
 
-  // ✅ ២. គណនាទិន្នន័យបង្គោលក្រាហ្វ «ស្ថិតិលទ្ធផលសិក្សាសិស្ស» (ប្រឡងជាប់ ≥50% / ប្រឡងធ្លាក់ <50% / រង់ចាំពិន្ទុ)
   const passFailChartData = useMemo(() => {
     const rawGrades = Array.isArray(stats?.grade_data) ? stats.grade_data : [];
     let passedCount = 0;
@@ -737,11 +744,10 @@ export default function TeacherDashboard() {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. CHARTS SECTION (បង្គោលក្រាហ្វទាំង ២ ដូចគ្នាបេះបិទ)              */}
+      {/* 📌 3. CHARTS SECTION                                               */}
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 md:gap-8">
         
-        {/* ✅ ៣.១. ស្ថិតិប្រគល់កិច្ចការ (បង្គោលក្រាហ្វ៖ ដាក់ពិន្ទុរួច / រង់ចាំដាក់ពិន្ទុ / មិនទាន់ប្រគល់) */}
         <div className="tch-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] border border-gray-100 shadow-sm p-4 sm:p-7 flex flex-col">
           <div className="tch-card-divider flex items-center justify-between border-b border-gray-100 pb-3.5 mb-4">
             <div>
@@ -820,7 +826,6 @@ export default function TeacherDashboard() {
           </div>
         </div>
 
-        {/* ✅ ៣.២. ស្ថិតិលទ្ធផលសិក្សាសិស្ស (បង្គោលក្រាហ្វ៖ ប្រឡងជាប់ / ប្រឡងធ្លាក់ / រង់ចាំពិន្ទុ) */}
         <div className="tch-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] border border-gray-100 shadow-sm p-4 sm:p-7 flex flex-col">
           <div className="tch-card-divider flex items-center justify-between border-b border-gray-100 pb-3.5 mb-4">
             <div>
@@ -965,6 +970,7 @@ export default function TeacherDashboard() {
               ) : (
                 recentActivities.map((act, index) => {
                   const rawAvatar =
+                    TEACHER_DASH_MEM_CACHE.avatarMap[act.id] ||
                     act.student_image ||
                     act.profile_image ||
                     act.student?.profile_image ||
@@ -985,6 +991,8 @@ export default function TeacherDashboard() {
                               <img
                                 src={avatarUrl}
                                 alt={act.student_name}
+                                loading="lazy"
+                                decoding="async"
                                 className="h-full w-full object-cover rounded-full"
                                 onError={() =>
                                   setFailedAvatars((prev) => ({
@@ -1069,6 +1077,7 @@ export default function TeacherDashboard() {
           ) : (
             recentActivities.map((act, index) => {
               const rawAvatar =
+                TEACHER_DASH_MEM_CACHE.avatarMap[act.id] ||
                 act.student_image ||
                 act.profile_image ||
                 act.student?.profile_image ||
@@ -1088,6 +1097,8 @@ export default function TeacherDashboard() {
                       <img
                         src={avatarUrl}
                         alt={act.student_name}
+                        loading="lazy"
+                        decoding="async"
                         className="h-full w-full object-cover rounded-full"
                         onError={() =>
                           setFailedAvatars((prev) => ({

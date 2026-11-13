@@ -5,7 +5,6 @@ import {
   Routes,
   Route,
   Navigate,
-  useNavigate,
   useLocation,
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -47,23 +46,20 @@ import StudentLessons from './components/student/StudentLessons';
 import StudentAssignments from './components/student/StudentAssignments';
 import StudentQuizzes from './components/student/StudentQuizzes';
 
-// ✅ HELPER COMPONENT: អនុញ្ញាតឱ្យ Browser ចាប់យកឈ្មោះ Domain សុទ្ធ (/) ពេលវាយលើ Address Bar សិន ហើយពេលចុច Enter ចូលដល់ផ្ទាំង Dashboard ទើបលោតពាក្យ /dashboard មកតាមក្រោយ
+// ✅ HELPER COMPONENT: ប្ដូរ URL ទៅជា /dashboard ភ្លាមៗដោយមិនធ្វើឱ្យ React Re-render ទំព័រសាជាថ្មី
 const RootDashboardEntry = ({ children }) => {
-  const navigate = useNavigate();
-
   useEffect(() => {
-    const timer = setTimeout(() => {
-      navigate('/dashboard', { replace: true });
-    }, 150);
-    return () => clearTimeout(timer);
-  }, [navigate]);
+    if (window.location.pathname === '/') {
+      window.history.replaceState(null, '', '/dashboard');
+    }
+  }, []);
 
   return children;
 };
 
 // Main App Content with routing
 const AppContent = () => {
-  const { user, loading, hasRole } = useAuth();
+  const { user, teacher, loading, hasRole } = useAuth();
   const location = useLocation();
   const mainScrollRef = useRef(null);
 
@@ -103,11 +99,7 @@ const AppContent = () => {
     };
   }, []);
 
-  if (loading && !user) {
-    return null;
-  }
-
-  // ✅ កំណត់សិទ្ធិតួនាទីរបស់អ្នកប្រើប្រាស់ (Role Resolver - គាំទ្រទាំងលេខ និងអក្សរ)
+  // ✅ កំណត់សិទ្ធិតួនាទីរបស់អ្នកប្រើប្រាស់ឱ្យស្គាល់ទាំង Admin, Teacher និង Student ភ្លាមៗក្នុង 0ms
   const getUserRole = () => {
     const rawRole =
       user?.role?.role_name ||
@@ -119,8 +111,21 @@ const AppContent = () => {
     const roleIdNum = Number(user?.role_id);
 
     if (r.includes('admin') || roleIdNum === 1) return 'admin';
-    if (r.includes('teacher') || roleIdNum === 2) return 'teacher';
-    if (r.includes('student') || roleIdNum === 3) return 'student';
+    if (
+      r.includes('teacher') ||
+      roleIdNum === 2 ||
+      Boolean(teacher) ||
+      Boolean(user?.teacher)
+    ) {
+      return 'teacher';
+    }
+    if (
+      r.includes('student') ||
+      roleIdNum === 3 ||
+      Boolean(user?.student)
+    ) {
+      return 'student';
+    }
 
     if (typeof hasRole === 'function') {
       if (hasRole('Admin')) return 'admin';
@@ -131,10 +136,11 @@ const AppContent = () => {
   };
 
   const role = getUserRole();
+  const effectiveUser = user || teacher;
 
   // ✅ ប្រើប្រាស់ផ្លូវរួមស្អាតតែមួយ '/dashboard' សម្រាប់គ្រប់តួនាទីទាំងអស់
   const getDashboardPath = () => {
-    if (!user) return '/';
+    if (!effectiveUser) return '/';
     return '/dashboard';
   };
 
@@ -144,8 +150,23 @@ const AppContent = () => {
     return <StudentDashboard />;
   };
 
+  // បើកំពុងផ្ទៀងផ្ទាត់លើកដំបូងបំផុត (មិនទាន់មាន Cache សោះ) បង្ហាញស៊ុម Navbar និង Sidebar ភ្លាមៗ ជៀសវាងអេក្រង់ស/ខ្មៅ
+  if (loading && !effectiveUser) {
+    return (
+      <div className="flex flex-col h-screen w-full overflow-hidden bg-gray-50 dark:bg-slate-950">
+        <div className="w-full shrink-0 z-40">
+          <Navbar />
+        </div>
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-20 md:pb-6 min-w-0" />
+        </div>
+      </div>
+    );
+  }
+
   // If user is not logged in, show auth pages without layout on clean root '/'
-  if (!user) {
+  if (!effectiveUser) {
     return (
       <Routes>
         <Route path="/" element={<Login />} />
@@ -173,7 +194,7 @@ const AppContent = () => {
           className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-20 md:pb-6 min-w-0"
         >
           <Routes>
-            {/* ✅ ពេលវាយ Domain ចុច Enter ចូលដល់ផ្ទាំង Dashboard ទើបលោតពាក្យ /dashboard មក */}
+            {/* ✅ ពេលវាយ Domain ចុច Enter ចូលដល់ផ្ទាំង Dashboard ភ្លាមៗ */}
             <Route
               path="/"
               element={
