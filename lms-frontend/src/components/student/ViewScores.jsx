@@ -1033,10 +1033,7 @@ const ViewScores = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder={t(
-                'ស្វែងរកមុខវិជ្ជា កូដ ឬឈ្មោះគ្រូបង្រៀន...',
-                'Search course, code, or instructor...'
-              )}
+              placeholder=""
               className="std-scr-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
             />
             {searchTerm && (

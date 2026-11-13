@@ -1933,7 +1933,7 @@ const StudentLessons = () => {
                 setTimeout(() => searchInputRef.current?.focus(), 80);
               }}
               className="text-gray-500 hover:text-indigo-600 transition-colors shrink-0 outline-none flex items-center justify-center cursor-pointer"
-              title={t('ស្វែងរកមេរៀន ឬឈ្មោះគ្រូ', 'Search')}
+              
             >
               <MagnifyingGlassIcon className="h-4 w-4 stroke-[2.5]" />
             </button>

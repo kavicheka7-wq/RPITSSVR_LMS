@@ -1044,10 +1044,7 @@ const ViewAttendance = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder={t(
-                'ស្វែងរកមុខវិជ្ជា ឈ្មោះគ្រូ ឬថ្ងៃខែ...',
-                'Search course, teacher, or date...'
-              )}
+              placeholder=""
               className="std-att-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
             />
             {searchTerm && (
