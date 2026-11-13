@@ -62,26 +62,78 @@ const QUIZZES_MEM_CACHE = {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
-const resolveTeacherUid = (contextUser) => {
-  if (contextUser) {
+// ✅ លុបទិន្នន័យធ្ងន់ៗចេញពីបញ្ជីសិស្សមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
+const stripHeavyStudentsForCache = (list) => {
+  if (!Array.isArray(list)) return [];
+  return list.map((stu) => {
+    if (!stu || typeof stu !== 'object') return stu;
+    const copy = { ...stu };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 12000
+    ) {
+      copy.profile_image = null;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      copy.user = {
+        id: copy.user.id,
+        status: copy.user.status,
+        email: copy.user.email,
+      };
+    }
+    return copy;
+  });
+};
+
+// ✅ លុប Base64 ធំៗចេញពីបញ្ជីលទ្ធផលប្រឡងសិស្ស (Quiz Attempts) មុនពេល Save ចូល localStorage
+const stripHeavyQuizAttemptsForCache = (attemptsList) => {
+  if (!Array.isArray(attemptsList)) return [];
+  return attemptsList.map((att) => {
+    if (!att || typeof att !== 'object') return att;
+    const copy = { ...att };
+    if (copy.student && typeof copy.student === 'object') {
+      const stuCopy = { ...copy.student };
+      if (
+        typeof stuCopy.profile_image === 'string' &&
+        stuCopy.profile_image.startsWith('data:') &&
+        stuCopy.profile_image.length > 12000
+      ) {
+        stuCopy.profile_image = null;
+      }
+      copy.student = stuCopy;
+    }
+    return copy;
+  });
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+const resolveTeacherUid = (contextUser, contextTeacher) => {
+  const target = contextUser || contextTeacher;
+  if (target) {
     const id =
-      contextUser.id ||
-      contextUser.user_id ||
-      contextUser.teacher?.id ||
-      contextUser.email;
+      target.id ||
+      target.user_id ||
+      target.teacher?.id ||
+      target.email;
     if (id) return String(id);
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('teacher') ||
+      localStorage.getItem('teacher');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -287,7 +339,10 @@ const toQuizWeighted20Score = (rawScore, quizTotalMark) => {
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+      sessionStorage.getItem('auth_user') ||
+      sessionStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      localStorage.getItem('user');
     let uid = 'default';
     let role = 'teacher';
     if (userObjStr) {
@@ -333,7 +388,7 @@ const pushLocalNotification = (notif) => {
 
 export default function TeacherManageQuizzes() {
   const { t, language } = useLanguage();
-  const { user } = useAuth();
+  const { user, teacher } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [failedAvatars, setFailedAvatars] = useState({});
@@ -342,7 +397,10 @@ export default function TeacherManageQuizzes() {
     searchParams.get('course_id') || location.state?.courseId || '';
 
   // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
-  const currentTeacherId = useMemo(() => resolveTeacherUid(user), [user]);
+  const currentTeacherId = useMemo(
+    () => resolveTeacherUid(user, teacher),
+    [user, teacher]
+  );
 
   // បើប្ដូរគណនីគ្រូ ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
   if (
@@ -495,6 +553,21 @@ export default function TeacherManageQuizzes() {
   ]);
   const [tfCorrect, setTfCorrect] = useState('true'); // 'true' or 'false'
 
+  const handleToggleExpandQuiz = useCallback((quizId) => {
+    setExpandedQuiz((prev) => {
+      const next = prev === quizId ? null : quizId;
+      setQuestionText('');
+      setQuestionMark(2);
+      setMcqOptions([
+        { option_text: '', is_correct: false },
+        { option_text: '', is_correct: false },
+        { option_text: '', is_correct: false },
+        { option_text: '', is_correct: false },
+      ]);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (initialRouteCourseId && allStudents.length > 0) {
       const cid = String(initialRouteCourseId);
@@ -594,14 +667,10 @@ export default function TeacherManageQuizzes() {
         QUIZZES_MEM_CACHE.quizzes = validQuizzes;
         QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
         try {
-          localStorage.setItem(
-            getQuizzesCacheKey(currentTeacherId),
-            JSON.stringify(validQuizzes)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_QUIZZES,
-            JSON.stringify(validQuizzes)
-          );
+          const str = JSON.stringify(validQuizzes);
+          sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+          localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+          localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
         } catch (e) {}
       })
       .catch((error) => {
@@ -618,19 +687,15 @@ export default function TeacherManageQuizzes() {
         setCourses(validCourses);
         QUIZZES_MEM_CACHE.courses = validCourses;
         try {
-          localStorage.setItem(
-            getCoursesCacheKey(currentTeacherId),
-            JSON.stringify(validCourses)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_COURSES,
-            JSON.stringify(validCourses)
-          );
+          const str = JSON.stringify(validCourses);
+          sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+          localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+          localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
         } catch (e) {}
       })
       .catch(() => {});
 
-    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ
+    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ (សម្អាតទិន្នន័យធ្ងន់មុនពេល Save ចូល localStorage)
     if (
       !Array.isArray(QUIZZES_MEM_CACHE.allStudents) ||
       QUIZZES_MEM_CACHE.allStudents.length === 0
@@ -644,28 +709,34 @@ export default function TeacherManageQuizzes() {
           setAllStudents(validStudents);
           QUIZZES_MEM_CACHE.allStudents = validStudents;
           try {
+            const slimStr = JSON.stringify(
+              stripHeavyStudentsForCache(validStudents)
+            );
+            sessionStorage.setItem(
+              getStudentsCacheKey(currentTeacherId),
+              slimStr
+            );
             localStorage.setItem(
               getStudentsCacheKey(currentTeacherId),
-              JSON.stringify(validStudents)
+              slimStr
             );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_STUDENTS,
-              JSON.stringify(validStudents)
-            );
+            localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
           } catch (e) {}
 
           if (stdRes.data?.course_students_map) {
             setCourseMap(stdRes.data.course_students_map);
             QUIZZES_MEM_CACHE.courseMap = stdRes.data.course_students_map;
             try {
+              const mapStr = JSON.stringify(stdRes.data.course_students_map);
+              sessionStorage.setItem(
+                getCourseMapCacheKey(currentTeacherId),
+                mapStr
+              );
               localStorage.setItem(
                 getCourseMapCacheKey(currentTeacherId),
-                JSON.stringify(stdRes.data.course_students_map)
+                mapStr
               );
-              localStorage.setItem(
-                CACHE_KEY_SHARED_MAP,
-                JSON.stringify(stdRes.data.course_students_map)
-              );
+              localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
             } catch (e) {}
           }
         })
@@ -686,14 +757,10 @@ export default function TeacherManageQuizzes() {
       QUIZZES_MEM_CACHE.quizzes = validQuizzes;
       QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
       try {
-        localStorage.setItem(
-          getQuizzesCacheKey(currentTeacherId),
-          JSON.stringify(validQuizzes)
-        );
-        localStorage.setItem(
-          CACHE_KEY_SHARED_QUIZZES,
-          JSON.stringify(validQuizzes)
-        );
+        const str = JSON.stringify(validQuizzes);
+        sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
       } catch (e) {}
     } catch (error) {
       console.error('Error fetching quizzes:', error);
@@ -1250,14 +1317,10 @@ export default function TeacherManageQuizzes() {
           );
           QUIZZES_MEM_CACHE.quizzes = updated;
           try {
-            localStorage.setItem(
-              getQuizzesCacheKey(currentTeacherId),
-              JSON.stringify(updated)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_QUIZZES,
-              JSON.stringify(updated)
-            );
+            const str = JSON.stringify(updated);
+            sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+            localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+            localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
           } catch (e) {}
           return updated;
         });
@@ -1289,14 +1352,10 @@ export default function TeacherManageQuizzes() {
           const updated = [createdQuiz, ...prev];
           QUIZZES_MEM_CACHE.quizzes = updated;
           try {
-            localStorage.setItem(
-              getQuizzesCacheKey(currentTeacherId),
-              JSON.stringify(updated)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_QUIZZES,
-              JSON.stringify(updated)
-            );
+            const str = JSON.stringify(updated);
+            sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+            localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+            localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
           } catch (e) {}
           return updated;
         });
@@ -1338,11 +1397,10 @@ export default function TeacherManageQuizzes() {
       const updated = prev.filter((q) => q.id !== deletedId);
       QUIZZES_MEM_CACHE.quizzes = updated;
       try {
-        localStorage.setItem(
-          getQuizzesCacheKey(currentTeacherId),
-          JSON.stringify(updated)
-        );
-        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, JSON.stringify(updated));
+        const str = JSON.stringify(updated);
+        sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
       } catch (e) {}
       return updated;
     });
@@ -1363,14 +1421,10 @@ export default function TeacherManageQuizzes() {
       setQuizzes(previousQuizzes);
       QUIZZES_MEM_CACHE.quizzes = previousQuizzes;
       try {
-        localStorage.setItem(
-          getQuizzesCacheKey(currentTeacherId),
-          JSON.stringify(previousQuizzes)
-        );
-        localStorage.setItem(
-          CACHE_KEY_SHARED_QUIZZES,
-          JSON.stringify(previousQuizzes)
-        );
+        const str = JSON.stringify(previousQuizzes);
+        sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
       } catch (e) {}
     }
   };
@@ -1434,11 +1488,10 @@ export default function TeacherManageQuizzes() {
       });
       QUIZZES_MEM_CACHE.quizzes = updated;
       try {
-        localStorage.setItem(
-          getQuizzesCacheKey(currentTeacherId),
-          JSON.stringify(updated)
-        );
-        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, JSON.stringify(updated));
+        const str = JSON.stringify(updated);
+        sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
       } catch (e) {}
       return updated;
     });
@@ -1469,14 +1522,10 @@ export default function TeacherManageQuizzes() {
           });
           QUIZZES_MEM_CACHE.quizzes = updated;
           try {
-            localStorage.setItem(
-              getQuizzesCacheKey(currentTeacherId),
-              JSON.stringify(updated)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_QUIZZES,
-              JSON.stringify(updated)
-            );
+            const str = JSON.stringify(updated);
+            sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+            localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+            localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
           } catch (e) {}
           return updated;
         });
@@ -1523,11 +1572,10 @@ export default function TeacherManageQuizzes() {
       });
       QUIZZES_MEM_CACHE.quizzes = updated;
       try {
-        localStorage.setItem(
-          getQuizzesCacheKey(currentTeacherId),
-          JSON.stringify(updated)
-        );
-        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, JSON.stringify(updated));
+        const str = JSON.stringify(updated);
+        sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
       } catch (e) {}
       return updated;
     });
@@ -1548,14 +1596,10 @@ export default function TeacherManageQuizzes() {
       setQuizzes(previousQuizzes);
       QUIZZES_MEM_CACHE.quizzes = previousQuizzes;
       try {
-        localStorage.setItem(
-          getQuizzesCacheKey(currentTeacherId),
-          JSON.stringify(previousQuizzes)
-        );
-        localStorage.setItem(
-          CACHE_KEY_SHARED_QUIZZES,
-          JSON.stringify(previousQuizzes)
-        );
+        const str = JSON.stringify(previousQuizzes);
+        sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
       } catch (e) {}
     }
   };
@@ -1704,9 +1748,13 @@ export default function TeacherManageQuizzes() {
       setSubmissions(memRes);
     } else {
       try {
-        const cached = localStorage.getItem(
-          getQuizResultsCacheKey(currentTeacherId, quiz.id)
-        );
+        const cached =
+          sessionStorage.getItem(
+            getQuizResultsCacheKey(currentTeacherId, quiz.id)
+          ) ||
+          localStorage.getItem(
+            getQuizResultsCacheKey(currentTeacherId, quiz.id)
+          );
         if (cached) {
           const parsed = JSON.parse(cached);
           setSubmissions(parsed);
@@ -1727,10 +1775,18 @@ export default function TeacherManageQuizzes() {
       setSubmissions(validAttempts);
       QUIZZES_MEM_CACHE.resultsByQuiz[quiz.id] = validAttempts;
 
+      // ✅ សម្អាតទិន្នន័យរូបភាពធំៗមុនពេល Save ចូល Storage ការពារពេញ localStorage
       try {
+        const slimAttemptsStr = JSON.stringify(
+          stripHeavyQuizAttemptsForCache(validAttempts)
+        );
+        sessionStorage.setItem(
+          getQuizResultsCacheKey(currentTeacherId, quiz.id),
+          slimAttemptsStr
+        );
         localStorage.setItem(
           getQuizResultsCacheKey(currentTeacherId, quiz.id),
-          JSON.stringify(validAttempts)
+          slimAttemptsStr
         );
       } catch (e) {}
     } catch (error) {
@@ -2205,7 +2261,10 @@ export default function TeacherManageQuizzes() {
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder=""
+              placeholder={t(
+                'ស្វែងរកកម្រងសំណួរ ឬមុខវិជ្ជា...',
+                'Search quizzes or courses...'
+              )}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="quz-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
@@ -2447,9 +2506,7 @@ export default function TeacherManageQuizzes() {
                     <React.Fragment key={quiz.id}>
                       <tr
                         className="quz-table-row hover:bg-blue-50/30 transition-colors cursor-pointer"
-                        onClick={() =>
-                          setExpandedQuiz(isExpanded ? null : quiz.id)
-                        }
+                        onClick={() => handleToggleExpandQuiz(quiz.id)}
                       >
                         <td className="quz-text-secondary px-4 py-4 whitespace-nowrap text-center text-sm font-bold text-gray-500">
                           {index + 1}
@@ -2555,9 +2612,7 @@ export default function TeacherManageQuizzes() {
                             </button>
                             <button
                               type="button"
-                              onClick={() =>
-                                setExpandedQuiz(isExpanded ? null : quiz.id)
-                              }
+                              onClick={() => handleToggleExpandQuiz(quiz.id)}
                               className="quz-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
                               title={
                                 isExpanded
@@ -3018,7 +3073,10 @@ export default function TeacherManageQuizzes() {
                     required
                     value={formData.title}
                     onChange={handleInputChange}
-                    placeholder=""
+                    placeholder={t(
+                      'បញ្ចូលចំណងជើងកម្រងសំណួរ...',
+                      'Enter quiz title...'
+                    )}
                     className="quz-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                   />
                 </div>

@@ -27,11 +27,12 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីគ្រូម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យ និងរូបភាពសិស្សតាមគណនីគ្រូម្នាក់ៗ (0ms Cache)
 // ============================================================================
 const CACHE_KEY_SHARED_COURSES = 'cached_teacher_courses_list_v6';
 const CACHE_KEY_SHARED_STUDENTS = 'cached_teacher_students_list_v6';
 const CACHE_KEY_SHARED_MAP = 'cached_teacher_course_map_v6';
+const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v1';
 
 const getCoursesCacheKey = (uid) => `cached_teacher_courses_list_v8_${uid}`;
 const getStudentsCacheKey = (uid) => `cached_teacher_students_list_v8_${uid}`;
@@ -41,12 +42,13 @@ const getSelectedYearKey = (uid) => `cached_teacher_attendance_selected_year_${u
 const getSelectedCourseKey = (uid) => `cached_teacher_attendance_selected_course_${uid}`;
 const getSelectedShiftKey = (uid) => `cached_teacher_attendance_selected_shift_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ (ប្ដូរគណនីភ្លាម ប្ដូរទិន្នន័យភ្លាមក្នុង 0 វិនាទី)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ + រក្សារូបភាពសិស្សក្នុង RAM (0ms)
 const ATTENDANCE_MEM_CACHE = {
   uid: null,
   courses: null,
   allStudents: null,
   courseMap: null,
+  avatarMap: null,
   historyByCourse: {},
   lastSyncedStudentsAt: 0,
   lastSyncedHistoryAt: {},
@@ -54,26 +56,189 @@ const ATTENDANCE_MEM_CACHE = {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
-const resolveTeacherUid = (contextUser) => {
-  if (contextUser) {
+// ✅ អានតារាងរូបភាពសិស្ស (Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
+const getAvatarMapSync = () => {
+  if (
+    ATTENDANCE_MEM_CACHE.avatarMap &&
+    typeof ATTENDANCE_MEM_CACHE.avatarMap === 'object'
+  ) {
+    return ATTENDANCE_MEM_CACHE.avatarMap;
+  }
+  const stored = readStorageJson(CACHE_KEY_STUDENT_AVATARS, {});
+  ATTENDANCE_MEM_CACHE.avatarMap =
+    stored && typeof stored === 'object' ? stored : {};
+  return ATTENDANCE_MEM_CACHE.avatarMap;
+};
+
+// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 80x80px (~2KB) សម្រាប់បង្ហាញក្នុង 0ms
+const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
+  if (!studentId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
+
+  const map = getAvatarMapSync();
+  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
+    map[studentId] = rawDataUrl;
+    if (typeof onCompressed === 'function') onCompressed(studentId, rawDataUrl);
+    return;
+  }
+
+  if (!map[studentId]) {
+    map[studentId] = rawDataUrl;
+  }
+
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 80;
+        let w = img.width || maxSize;
+        let h = img.height || maxSize;
+        if (w > h) {
+          if (w > maxSize) {
+            h = Math.round((h * maxSize) / w);
+            w = maxSize;
+          }
+        } else {
+          if (h > maxSize) {
+            w = Math.round((w * maxSize) / h);
+            h = maxSize;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const tinyWebp = canvas.toDataURL('image/webp', 0.78);
+        const bestImg =
+          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
+        map[studentId] = bestImg;
+        if (typeof onCompressed === 'function') onCompressed(studentId, bestImg);
+      } catch {}
+    };
+    img.src = rawDataUrl;
+  } catch {}
+};
+
+// ✅ ភ្ជាប់រូបភាពពី Avatar Dictionary មកដាក់ក្នុងបញ្ជីសិស្សវិញភ្លាមៗក្នុង 0ms
+const hydrateStudentsWithAvatars = (list) => {
+  if (!Array.isArray(list)) return [];
+  const avatarMap = getAvatarMapSync();
+  return list.map((stu) => {
+    if (!stu || typeof stu !== 'object') return stu;
+    const rawImg =
+      stu.profile_image ||
+      stu.user?.profile_image ||
+      avatarMap[stu.id] ||
+      avatarMap[stu.user_id] ||
+      null;
+    if (rawImg && stu.profile_image !== rawImg) {
+      return { ...stu, profile_image: rawImg };
+    }
+    return stu;
+  });
+};
+
+// ✅ រក្សាទុកបញ្ជីសិស្ស (Slim JSON) និងរូបភាព Thumbnail ដាច់ដោយឡែក ការពារពេញ localStorage 100%
+const persistStudentsAndAvatarsSafely = (uid, studentsList) => {
+  if (!Array.isArray(studentsList)) return;
+  const avatarMap = getAvatarMapSync();
+  let pendingCompressCount = 0;
+
+  const saveAvatarMapToStorage = () => {
+    try {
+      const str = JSON.stringify(avatarMap);
+      sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+    } catch {}
+  };
+
+  const slimStudents = studentsList.map((stu) => {
+    if (!stu || typeof stu !== 'object') return stu;
+    const rawImg = stu.profile_image || stu.user?.profile_image || null;
+
+    if (stu.id && rawImg) {
+      pendingCompressCount++;
+      compressStudentAvatarAsync(stu.id, rawImg, () => {
+        pendingCompressCount--;
+        if (pendingCompressCount <= 0) {
+          saveAvatarMapToStorage();
+        }
+      });
+    }
+
+    const copy = { ...stu };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 12000
+    ) {
+      copy.profile_image = null;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      copy.user = {
+        id: copy.user.id,
+        status: copy.user.status,
+        email: copy.user.email,
+      };
+    }
+    return copy;
+  });
+
+  if (pendingCompressCount === 0) {
+    saveAvatarMapToStorage();
+  } else {
+    setTimeout(saveAvatarMapToStorage, 300);
+  }
+
+  try {
+    const serialized = JSON.stringify(slimStudents);
+    sessionStorage.setItem(getStudentsCacheKey(uid), serialized);
+    localStorage.setItem(getStudentsCacheKey(uid), serialized);
+    localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, serialized);
+  } catch {}
+};
+
+// ✅ បង្រួមកំណត់ត្រាប្រវត្តិវត្តមាន (លុប nested student object ធ្ងន់ៗចេញ) មុនពេល Save ចូល localStorage
+const slimAttendanceRecords = (records) => {
+  if (!Array.isArray(records)) return [];
+  return records.map((rec) => ({
+    id: rec.id,
+    course_id: rec.course_id,
+    student_id: rec.student_id,
+    attendance_date: rec.attendance_date,
+    status: rec.status,
+    late_time: rec.late_time || null,
+  }));
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+const resolveTeacherUid = (contextUser, contextTeacher) => {
+  const target = contextUser || contextTeacher;
+  if (target) {
     const id =
-      contextUser.id ||
-      contextUser.user_id ||
-      contextUser.teacher?.id ||
-      contextUser.email;
+      target.id ||
+      target.user_id ||
+      target.teacher?.id ||
+      target.email;
     if (id) return String(id);
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('teacher') ||
+      localStorage.getItem('teacher');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -233,7 +398,10 @@ const isStudentEnrolledInAnyTeacherCourse = (student, courseMap) => {
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+      sessionStorage.getItem('auth_user') ||
+      sessionStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      localStorage.getItem('user');
     let uid = 'default';
     let role = 'teacher';
     if (userObjStr) {
@@ -312,6 +480,8 @@ const buildCourseStudentListSync = (
     (rec) => (rec.attendance_date || '').toString().slice(0, 10) === targetDate
   );
 
+  const avatarMap = getAvatarMapSync();
+
   return sortStudentsOldestFirst(targetStudents).map((student) => {
     const targetUserId = student.user_id || student.user?.id || student.id;
     const matched = recordsForDate.find(
@@ -320,8 +490,16 @@ const buildCourseStudentListSync = (
         String(rec.student_id) === String(student.id)
     );
 
+    const resolvedAvatar =
+      avatarMap[student.id] ||
+      student.profile_image ||
+      student.user?.profile_image ||
+      avatarMap[student.user_id] ||
+      null;
+
     return {
       ...student,
+      profile_image: resolvedAvatar,
       is_enrolled_with_teacher: isStudentEnrolledInAnyTeacherCourse(
         student,
         courseMap
@@ -334,7 +512,7 @@ const buildCourseStudentListSync = (
 
 const ManageAttendance = () => {
   const { t, language } = useLanguage();
-  const { user } = useAuth();
+  const { user, teacher } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const courseSelectRef = useRef(null);
@@ -344,7 +522,10 @@ const ManageAttendance = () => {
     searchParams.get('course_id') || location.state?.courseId || '';
 
   // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
-  const currentTeacherId = useMemo(() => resolveTeacherUid(user), [user]);
+  const currentTeacherId = useMemo(
+    () => resolveTeacherUid(user, teacher),
+    [user, teacher]
+  );
 
   // បើប្ដូរគណនីគ្រូ ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
   if (ATTENDANCE_MEM_CACHE.uid && ATTENDANCE_MEM_CACHE.uid !== currentTeacherId) {
@@ -359,17 +540,19 @@ const ManageAttendance = () => {
 
   const [allStudents, setAllStudents] = useState(() => {
     if (Array.isArray(ATTENDANCE_MEM_CACHE.allStudents)) {
-      return ATTENDANCE_MEM_CACHE.allStudents;
+      return hydrateStudentsWithAvatars(ATTENDANCE_MEM_CACHE.allStudents);
     }
     const fromUserKey = readStorageJson(
       getStudentsCacheKey(currentTeacherId),
       null
     );
     if (Array.isArray(fromUserKey)) {
-      ATTENDANCE_MEM_CACHE.allStudents = fromUserKey;
-      return fromUserKey;
+      const hydrated = hydrateStudentsWithAvatars(fromUserKey);
+      ATTENDANCE_MEM_CACHE.allStudents = hydrated;
+      return hydrated;
     }
-    return readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
+    const fallback = readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
+    return Array.isArray(fallback) ? hydrateStudentsWithAvatars(fallback) : [];
   });
 
   const [courses, setCourses] = useState(() => {
@@ -655,8 +838,9 @@ const ManageAttendance = () => {
     );
 
     if (Array.isArray(cachedStd)) {
-      setAllStudents(cachedStd);
-      ATTENDANCE_MEM_CACHE.allStudents = cachedStd;
+      const hydrated = hydrateStudentsWithAvatars(cachedStd);
+      setAllStudents(hydrated);
+      ATTENDANCE_MEM_CACHE.allStudents = hydrated;
     }
     if (Array.isArray(cachedCrs)) {
       setCourses(cachedCrs);
@@ -675,45 +859,42 @@ const ManageAttendance = () => {
     if (
       ATTENDANCE_MEM_CACHE.uid === currentTeacherId &&
       Array.isArray(ATTENDANCE_MEM_CACHE.allStudents) &&
+      ATTENDANCE_MEM_CACHE.allStudents.length > 0 &&
       Array.isArray(ATTENDANCE_MEM_CACHE.courses) &&
       now - ATTENDANCE_MEM_CACHE.lastSyncedStudentsAt < 30000
     ) {
       return;
     }
 
-    // ១. ទាញបញ្ជីសិស្សមុនគេ
+    // ១. ទាញបញ្ជីសិស្សមុនគេ និងបង្រួមរូបភាពសិស្សទុកក្នុង Avatar Dictionary
     api
       .get('/teacher/students')
       .then((stdRes) => {
         if (!isMounted) return;
         const latestStudents = getArrayData(stdRes.data);
-        setAllStudents(latestStudents);
-        ATTENDANCE_MEM_CACHE.allStudents = latestStudents;
+
+        persistStudentsAndAvatarsSafely(currentTeacherId, latestStudents);
+
+        const hydrated = hydrateStudentsWithAvatars(latestStudents);
+        setAllStudents(hydrated);
+        ATTENDANCE_MEM_CACHE.allStudents = hydrated;
         ATTENDANCE_MEM_CACHE.lastSyncedStudentsAt = Date.now();
-        try {
-          localStorage.setItem(
-            getStudentsCacheKey(currentTeacherId),
-            JSON.stringify(latestStudents)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_STUDENTS,
-            JSON.stringify(latestStudents)
-          );
-        } catch {}
 
         if (stdRes.data?.course_students_map) {
           const latestMap = stdRes.data.course_students_map;
           setCourseMap(latestMap);
           ATTENDANCE_MEM_CACHE.courseMap = latestMap;
           try {
+            const mapStr = JSON.stringify(latestMap);
+            sessionStorage.setItem(
+              getCourseMapCacheKey(currentTeacherId),
+              mapStr
+            );
             localStorage.setItem(
               getCourseMapCacheKey(currentTeacherId),
-              JSON.stringify(latestMap)
+              mapStr
             );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_MAP,
-              JSON.stringify(latestMap)
-            );
+            localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
           } catch {}
         }
       })
@@ -728,14 +909,10 @@ const ManageAttendance = () => {
         setCourses(latestCourses);
         ATTENDANCE_MEM_CACHE.courses = latestCourses;
         try {
-          localStorage.setItem(
-            getCoursesCacheKey(currentTeacherId),
-            JSON.stringify(latestCourses)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_COURSES,
-            JSON.stringify(latestCourses)
-          );
+          const crsStr = JSON.stringify(latestCourses);
+          sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+          localStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+          localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
         } catch {}
       })
       .catch(() => {});
@@ -784,12 +961,13 @@ const ManageAttendance = () => {
       .get(`/teacher/attendance/${cid}`)
       .then((res) => {
         if (!isMounted) return;
-        const records = getArrayData(res.data);
-        ATTENDANCE_MEM_CACHE.historyByCourse[cid] = records;
+        const rawRecords = getArrayData(res.data);
+        const slimRecords = slimAttendanceRecords(rawRecords);
+        ATTENDANCE_MEM_CACHE.historyByCourse[cid] = slimRecords;
         ATTENDANCE_MEM_CACHE.lastSyncedHistoryAt[cid] = Date.now();
 
         setHistoryByCourse((prev) => {
-          const next = { ...prev, [cid]: records };
+          const next = { ...prev, [cid]: slimRecords };
           try {
             localStorage.setItem(
               getAttHistoryMapKey(currentTeacherId),
@@ -1421,7 +1599,10 @@ const ManageAttendance = () => {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder=""
+                placeholder={t(
+                  'ស្វែងរកឈ្មោះសិស្ស ឬអត្តលេខ...',
+                  'Search student name or code...'
+                )}
                 className="att-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
               />
               {searchTerm && (
@@ -1715,8 +1896,12 @@ const ManageAttendance = () => {
                     const isEnrolledWithTeacher =
                       isStudentEnrolledInAnyTeacherCourse(student, courseMap);
 
+                    const avatarMap = getAvatarMapSync();
                     const rawAvatar =
-                      student.profile_image || student.user?.profile_image;
+                      avatarMap[student.id] ||
+                      student.profile_image ||
+                      student.user?.profile_image ||
+                      avatarMap[student.user_id];
                     const avatarUrl = getProfileImageUrl(rawAvatar);
                     const avatarKey = `att_std_${student.id}`;
                     const hasAvatar = Boolean(
@@ -1743,6 +1928,8 @@ const ManageAttendance = () => {
                                 <img
                                   src={avatarUrl}
                                   alt={studentName}
+                                  loading={idx < 15 ? 'eager' : 'lazy'}
+                                  decoding="async"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
                                     setFailedAvatars((prev) => ({
@@ -1923,7 +2110,7 @@ const ManageAttendance = () => {
 
         {/* 📱 ទម្រង់ទី ២៖ សម្រាប់ទូរស័ព្ទដៃ (Card View - Hidden on Desktop) */}
         <div className="grid lg:hidden grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
-          {filteredStudents.map((student) => {
+          {filteredStudents.map((student, idx) => {
             const studentName =
               `${student.first_name || ''} ${student.last_name || ''}`.trim() ||
               student.name ||
@@ -1947,8 +2134,12 @@ const ManageAttendance = () => {
               courseMap
             );
 
+            const avatarMap = getAvatarMapSync();
             const rawAvatar =
-              student.profile_image || student.user?.profile_image;
+              avatarMap[student.id] ||
+              student.profile_image ||
+              student.user?.profile_image ||
+              avatarMap[student.user_id];
             const avatarUrl = getProfileImageUrl(rawAvatar);
             const avatarKey = `att_std_${student.id}`;
             const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
@@ -1984,6 +2175,8 @@ const ManageAttendance = () => {
                       <img
                         src={avatarUrl}
                         alt={studentName}
+                        loading={idx < 10 ? 'eager' : 'lazy'}
+                        decoding="async"
                         className="h-full w-full object-cover rounded-2xl"
                         onError={() =>
                           setFailedAvatars((prev) => ({

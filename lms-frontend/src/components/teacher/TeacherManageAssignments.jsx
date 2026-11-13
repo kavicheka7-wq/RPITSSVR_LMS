@@ -60,26 +60,92 @@ const ASSIGNMENTS_MEM_CACHE = {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
-const resolveTeacherUid = (contextUser) => {
-  if (contextUser) {
+// ✅ លុបទិន្នន័យធ្ងន់ៗចេញពីបញ្ជីសិស្សមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
+const stripHeavyStudentsForCache = (list) => {
+  if (!Array.isArray(list)) return [];
+  return list.map((stu) => {
+    if (!stu || typeof stu !== 'object') return stu;
+    const copy = { ...stu };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 12000
+    ) {
+      copy.profile_image = null;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      copy.user = {
+        id: copy.user.id,
+        status: copy.user.status,
+        email: copy.user.email,
+      };
+    }
+    return copy;
+  });
+};
+
+// ✅ លុប file_data និង Base64 ធំៗចេញពីបញ្ជីការដាក់កិច្ចការ (Submissions) មុនពេល Save ចូល localStorage
+const stripHeavySubmissionsForCache = (subsList) => {
+  if (!Array.isArray(subsList)) return [];
+  return subsList.map((sub) => {
+    if (!sub || typeof sub !== 'object') return sub;
+    const { file_data, ...copy } = sub;
+    if (
+      typeof copy.file_path === 'string' &&
+      copy.file_path.startsWith('data:') &&
+      copy.file_path.length > 15000
+    ) {
+      copy.file_path = null;
+    }
+    if (
+      typeof copy.file_url === 'string' &&
+      copy.file_url.startsWith('data:') &&
+      copy.file_url.length > 15000
+    ) {
+      copy.file_url = null;
+    }
+    if (copy.student && typeof copy.student === 'object') {
+      const stuCopy = { ...copy.student };
+      if (
+        typeof stuCopy.profile_image === 'string' &&
+        stuCopy.profile_image.startsWith('data:') &&
+        stuCopy.profile_image.length > 12000
+      ) {
+        stuCopy.profile_image = null;
+      }
+      copy.student = stuCopy;
+    }
+    return copy;
+  });
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+const resolveTeacherUid = (contextUser, contextTeacher) => {
+  const target = contextUser || contextTeacher;
+  if (target) {
     const id =
-      contextUser.id ||
-      contextUser.user_id ||
-      contextUser.teacher?.id ||
-      contextUser.email;
+      target.id ||
+      target.user_id ||
+      target.teacher?.id ||
+      target.email;
     if (id) return String(id);
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('teacher') ||
+      localStorage.getItem('teacher');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -275,7 +341,10 @@ const isStudentEnrolledInCourse = (student, courseId, courseMap) => {
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+      sessionStorage.getItem('auth_user') ||
+      sessionStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      localStorage.getItem('user');
     let uid = 'default';
     let role = 'teacher';
     if (userObjStr) {
@@ -321,7 +390,7 @@ const pushLocalNotification = (notif) => {
 
 export default function TeacherManageAssignments() {
   const { t, language } = useLanguage();
-  const { user } = useAuth();
+  const { user, teacher } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [failedAvatars, setFailedAvatars] = useState({});
@@ -330,7 +399,10 @@ export default function TeacherManageAssignments() {
     searchParams.get('course_id') || location.state?.courseId || '';
 
   // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
-  const currentTeacherId = useMemo(() => resolveTeacherUid(user), [user]);
+  const currentTeacherId = useMemo(
+    () => resolveTeacherUid(user, teacher),
+    [user, teacher]
+  );
 
   // បើប្ដូរគណនីគ្រូ ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
   if (
@@ -560,14 +632,10 @@ export default function TeacherManageAssignments() {
         ASSIGNMENTS_MEM_CACHE.assignments = validAssignments;
         ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
         try {
-          localStorage.setItem(
-            getAssignmentsCacheKey(currentTeacherId),
-            JSON.stringify(validAssignments)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_ASSIGNMENTS,
-            JSON.stringify(validAssignments)
-          );
+          const str = JSON.stringify(validAssignments);
+          sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+          localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+          localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
         } catch (e) {}
       })
       .catch((error) => {
@@ -584,19 +652,15 @@ export default function TeacherManageAssignments() {
         setCourses(validCourses);
         ASSIGNMENTS_MEM_CACHE.courses = validCourses;
         try {
-          localStorage.setItem(
-            getCoursesCacheKey(currentTeacherId),
-            JSON.stringify(validCourses)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_COURSES,
-            JSON.stringify(validCourses)
-          );
+          const str = JSON.stringify(validCourses);
+          sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+          localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+          localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
         } catch (e) {}
       })
       .catch(() => {});
 
-    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ
+    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ (សម្អាតទិន្នន័យធ្ងន់មុនពេល Save ចូល localStorage)
     if (
       !Array.isArray(ASSIGNMENTS_MEM_CACHE.allStudents) ||
       ASSIGNMENTS_MEM_CACHE.allStudents.length === 0
@@ -610,28 +674,34 @@ export default function TeacherManageAssignments() {
           setAllStudents(validStudents);
           ASSIGNMENTS_MEM_CACHE.allStudents = validStudents;
           try {
+            const slimStr = JSON.stringify(
+              stripHeavyStudentsForCache(validStudents)
+            );
+            sessionStorage.setItem(
+              getStudentsCacheKey(currentTeacherId),
+              slimStr
+            );
             localStorage.setItem(
               getStudentsCacheKey(currentTeacherId),
-              JSON.stringify(validStudents)
+              slimStr
             );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_STUDENTS,
-              JSON.stringify(validStudents)
-            );
+            localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
           } catch (e) {}
 
           if (stdRes.data?.course_students_map) {
             setCourseMap(stdRes.data.course_students_map);
             ASSIGNMENTS_MEM_CACHE.courseMap = stdRes.data.course_students_map;
             try {
+              const mapStr = JSON.stringify(stdRes.data.course_students_map);
+              sessionStorage.setItem(
+                getCourseMapCacheKey(currentTeacherId),
+                mapStr
+              );
               localStorage.setItem(
                 getCourseMapCacheKey(currentTeacherId),
-                JSON.stringify(stdRes.data.course_students_map)
+                mapStr
               );
-              localStorage.setItem(
-                CACHE_KEY_SHARED_MAP,
-                JSON.stringify(stdRes.data.course_students_map)
-              );
+              localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
             } catch (e) {}
           }
         })
@@ -654,14 +724,10 @@ export default function TeacherManageAssignments() {
       ASSIGNMENTS_MEM_CACHE.assignments = validAssignments;
       ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
       try {
-        localStorage.setItem(
-          getAssignmentsCacheKey(currentTeacherId),
-          JSON.stringify(validAssignments)
-        );
-        localStorage.setItem(
-          CACHE_KEY_SHARED_ASSIGNMENTS,
-          JSON.stringify(validAssignments)
-        );
+        const str = JSON.stringify(validAssignments);
+        sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+        localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
       } catch (e) {}
     } catch (error) {
       console.error('Error fetching assignments:', error);
@@ -1124,14 +1190,10 @@ export default function TeacherManageAssignments() {
           );
           ASSIGNMENTS_MEM_CACHE.assignments = updated;
           try {
-            localStorage.setItem(
-              getAssignmentsCacheKey(currentTeacherId),
-              JSON.stringify(updated)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_ASSIGNMENTS,
-              JSON.stringify(updated)
-            );
+            const str = JSON.stringify(updated);
+            sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+            localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+            localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
           } catch (e) {}
           return updated;
         });
@@ -1160,14 +1222,10 @@ export default function TeacherManageAssignments() {
           const updated = [createdAsg, ...prev];
           ASSIGNMENTS_MEM_CACHE.assignments = updated;
           try {
-            localStorage.setItem(
-              getAssignmentsCacheKey(currentTeacherId),
-              JSON.stringify(updated)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_ASSIGNMENTS,
-              JSON.stringify(updated)
-            );
+            const str = JSON.stringify(updated);
+            sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+            localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+            localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
           } catch (e) {}
           return updated;
         });
@@ -1209,14 +1267,10 @@ export default function TeacherManageAssignments() {
       const updated = prev.filter((a) => a.id !== deletedId);
       ASSIGNMENTS_MEM_CACHE.assignments = updated;
       try {
-        localStorage.setItem(
-          getAssignmentsCacheKey(currentTeacherId),
-          JSON.stringify(updated)
-        );
-        localStorage.setItem(
-          CACHE_KEY_SHARED_ASSIGNMENTS,
-          JSON.stringify(updated)
-        );
+        const str = JSON.stringify(updated);
+        sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+        localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
       } catch (e) {}
       return updated;
     });
@@ -1237,14 +1291,10 @@ export default function TeacherManageAssignments() {
       setAssignments(previousAssignments);
       ASSIGNMENTS_MEM_CACHE.assignments = previousAssignments;
       try {
-        localStorage.setItem(
-          getAssignmentsCacheKey(currentTeacherId),
-          JSON.stringify(previousAssignments)
-        );
-        localStorage.setItem(
-          CACHE_KEY_SHARED_ASSIGNMENTS,
-          JSON.stringify(previousAssignments)
-        );
+        const str = JSON.stringify(previousAssignments);
+        sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+        localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
       } catch (e) {}
     }
   };
@@ -1275,9 +1325,13 @@ export default function TeacherManageAssignments() {
       initGradingState(memSubs);
     } else {
       try {
-        const cachedSubs = localStorage.getItem(
-          getSubmissionsCacheKey(currentTeacherId, assignment.id)
-        );
+        const cachedSubs =
+          sessionStorage.getItem(
+            getSubmissionsCacheKey(currentTeacherId, assignment.id)
+          ) ||
+          localStorage.getItem(
+            getSubmissionsCacheKey(currentTeacherId, assignment.id)
+          );
         if (cachedSubs) {
           const parsed = JSON.parse(cachedSubs);
           setSubmissions(parsed);
@@ -1301,10 +1355,18 @@ export default function TeacherManageAssignments() {
       initGradingState(validSubs);
       ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[assignment.id] = validSubs;
 
+      // ✅ សម្អាតទិន្នន័យធ្ងន់ៗមុនពេលរក្សាទុកចូល Storage ការពារពេញ localStorage
       try {
+        const slimSubsStr = JSON.stringify(
+          stripHeavySubmissionsForCache(validSubs)
+        );
+        sessionStorage.setItem(
+          getSubmissionsCacheKey(currentTeacherId, assignment.id),
+          slimSubsStr
+        );
         localStorage.setItem(
           getSubmissionsCacheKey(currentTeacherId, assignment.id),
-          JSON.stringify(validSubs)
+          slimSubsStr
         );
       } catch (e) {}
     } catch (error) {
@@ -1372,18 +1434,29 @@ export default function TeacherManageAssignments() {
           ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[viewingAssignment.id] =
             updatedSubs;
           try {
+            const slimSubsStr = JSON.stringify(
+              stripHeavySubmissionsForCache(updatedSubs)
+            );
+            sessionStorage.setItem(
+              getSubmissionsCacheKey(currentTeacherId, viewingAssignment.id),
+              slimSubsStr
+            );
             localStorage.setItem(
               getSubmissionsCacheKey(currentTeacherId, viewingAssignment.id),
-              JSON.stringify(updatedSubs)
+              slimSubsStr
             );
-            // សម្អាត Cache ពិន្ទុរួមនៃមុខវិជ្ជានេះ ដើម្បីឱ្យទំព័រ TeacherManageGrades ចាប់យកពិន្ទុកិច្ចការថ្មីភ្លាមៗ
+            // សម្អាត Cache ពិន្ទុរួមនៃមុខវិជ្ជានេះទាំងក្នុង sessionStorage និង localStorage ដើម្បីឱ្យទំព័រ TeacherManageGrades ចាប់យកពិន្ទុកិច្ចការថ្មីភ្លាមៗ
             if (viewingAssignment.course_id) {
-              localStorage.removeItem(
-                `cached_teacher_course_scores_v8_${currentTeacherId}_${viewingAssignment.course_id}`
-              );
-              localStorage.removeItem(
-                `cached_teacher_course_scores_v9_${currentTeacherId}_${viewingAssignment.course_id}`
-              );
+              const scoreKeysToClear = [
+                `cached_teacher_course_scores_v8_${currentTeacherId}_${viewingAssignment.course_id}`,
+                `cached_teacher_course_scores_v9_${currentTeacherId}_${viewingAssignment.course_id}`,
+              ];
+              scoreKeysToClear.forEach((k) => {
+                try {
+                  sessionStorage.removeItem(k);
+                  localStorage.removeItem(k);
+                } catch {}
+              });
             }
           } catch (e) {}
         }
@@ -1931,7 +2004,10 @@ export default function TeacherManageAssignments() {
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder=""
+              placeholder={t(
+                'ស្វែងរកកិច្ចការ ឬមុខវិជ្ជា...',
+                'Search assignments or courses...'
+              )}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="asg-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
@@ -2774,7 +2850,10 @@ export default function TeacherManageAssignments() {
                     required
                     value={formData.title}
                     onChange={handleInputChange}
-                    placeholder=""
+                    placeholder={t(
+                      'បញ្ចូលចំណងជើងកិច្ចការ...',
+                      'Enter assignment title...'
+                    )}
                     className="asg-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                   />
                 </div>

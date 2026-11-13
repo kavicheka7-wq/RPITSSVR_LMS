@@ -23,11 +23,12 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីគ្រូម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យ និងរូបភាពសិស្សតាមគណនីគ្រូម្នាក់ៗ (0ms Cache)
 // ============================================================================
 const CACHE_KEY_SHARED_COURSES = 'cached_teacher_courses_list_v6';
 const CACHE_KEY_SHARED_STUDENTS = 'cached_teacher_students_list_v6';
 const CACHE_KEY_SHARED_MAP = 'cached_teacher_course_map_v6';
+const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v1';
 
 const getCoursesCacheKey = (uid) => `cached_teacher_courses_list_v8_${uid}`;
 const getStudentsCacheKey = (uid) => `cached_teacher_students_list_v8_${uid}`;
@@ -39,12 +40,13 @@ const getSelectedShiftKey = (uid) => `cached_teacher_grades_selected_shift_${uid
 const getCourseScoresCacheKey = (uid, courseId) =>
   `cached_teacher_course_scores_v9_${uid}_${courseId}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ (គាំទ្រទាំងពេលមានសិស្ស និងពេល 0 នាក់)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ + រក្សារូបភាពសិស្សក្នុង RAM (0ms)
 const GRADES_MEM_CACHE = {
   uid: null,
   courses: null,
   allStudents: null,
   courseMap: null,
+  avatarMap: null,
   examScoresMap: null,
   scoresByCourse: {},
   lastSyncedMasterAt: 0,
@@ -53,26 +55,223 @@ const GRADES_MEM_CACHE = {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
-const resolveTeacherUid = (contextUser) => {
-  if (contextUser) {
+// ✅ អានតារាងរូបភាពសិស្ស (Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
+const getAvatarMapSync = () => {
+  if (
+    GRADES_MEM_CACHE.avatarMap &&
+    typeof GRADES_MEM_CACHE.avatarMap === 'object'
+  ) {
+    return GRADES_MEM_CACHE.avatarMap;
+  }
+  const stored = readStorageJson(CACHE_KEY_STUDENT_AVATARS, {});
+  GRADES_MEM_CACHE.avatarMap =
+    stored && typeof stored === 'object' ? stored : {};
+  return GRADES_MEM_CACHE.avatarMap;
+};
+
+// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 80x80px (~2KB) សម្រាប់បង្ហាញក្នុង 0ms
+const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
+  if (!studentId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
+
+  const map = getAvatarMapSync();
+  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
+    map[studentId] = rawDataUrl;
+    if (typeof onCompressed === 'function') onCompressed(studentId, rawDataUrl);
+    return;
+  }
+
+  if (!map[studentId]) {
+    map[studentId] = rawDataUrl;
+  }
+
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 80;
+        let w = img.width || maxSize;
+        let h = img.height || maxSize;
+        if (w > h) {
+          if (w > maxSize) {
+            h = Math.round((h * maxSize) / w);
+            w = maxSize;
+          }
+        } else {
+          if (h > maxSize) {
+            w = Math.round((w * maxSize) / h);
+            h = maxSize;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const tinyWebp = canvas.toDataURL('image/webp', 0.78);
+        const bestImg =
+          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
+        map[studentId] = bestImg;
+        if (typeof onCompressed === 'function') onCompressed(studentId, bestImg);
+      } catch {}
+    };
+    img.src = rawDataUrl;
+  } catch {}
+};
+
+// ✅ ភ្ជាប់រូបភាពពី Avatar Dictionary មកដាក់ក្នុងបញ្ជីសិស្សវិញភ្លាមៗក្នុង 0ms
+const hydrateStudentsWithAvatars = (list) => {
+  if (!Array.isArray(list)) return [];
+  const avatarMap = getAvatarMapSync();
+  return list.map((stu) => {
+    if (!stu || typeof stu !== 'object') return stu;
+    const rawImg =
+      stu.profile_image ||
+      stu.user?.profile_image ||
+      stu.student?.profile_image ||
+      avatarMap[stu.student_record_id] ||
+      avatarMap[stu.id] ||
+      avatarMap[stu.student_id] ||
+      avatarMap[stu.user_id] ||
+      null;
+    if (rawImg && stu.profile_image !== rawImg) {
+      return { ...stu, profile_image: rawImg };
+    }
+    return stu;
+  });
+};
+
+// ✅ រក្សាទុកបញ្ជីសិស្ស (Slim JSON) និងរូបភាព Thumbnail ដាច់ដោយឡែក ការពារពេញ localStorage 100%
+const persistStudentsAndAvatarsSafely = (uid, studentsList) => {
+  if (!Array.isArray(studentsList)) return;
+  const avatarMap = getAvatarMapSync();
+  let pendingCompressCount = 0;
+
+  const saveAvatarMapToStorage = () => {
+    try {
+      const str = JSON.stringify(avatarMap);
+      sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+    } catch {}
+  };
+
+  const slimStudents = studentsList.map((stu) => {
+    if (!stu || typeof stu !== 'object') return stu;
+    const rawImg = stu.profile_image || stu.user?.profile_image || null;
+
+    if (stu.id && rawImg) {
+      pendingCompressCount++;
+      compressStudentAvatarAsync(stu.id, rawImg, () => {
+        if (stu.user_id) {
+          avatarMap[stu.user_id] = avatarMap[stu.id];
+        }
+        pendingCompressCount--;
+        if (pendingCompressCount <= 0) {
+          saveAvatarMapToStorage();
+        }
+      });
+    }
+
+    const copy = { ...stu };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 12000
+    ) {
+      copy.profile_image = null;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      copy.user = {
+        id: copy.user.id,
+        status: copy.user.status,
+        email: copy.user.email,
+      };
+    }
+    return copy;
+  });
+
+  if (pendingCompressCount === 0) {
+    saveAvatarMapToStorage();
+  } else {
+    setTimeout(saveAvatarMapToStorage, 300);
+  }
+
+  try {
+    const serialized = JSON.stringify(slimStudents);
+    sessionStorage.setItem(getStudentsCacheKey(uid), serialized);
+    localStorage.setItem(getStudentsCacheKey(uid), serialized);
+    localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, serialized);
+  } catch {}
+};
+
+// ✅ លុបរូបភាព Base64 ធំៗចេញពីតារាងពិន្ទុតាមមុខវិជ្ជាមុនពេល Save ចូល localStorage (ព្រោះរូបភាពមានក្នុង CACHE_KEY_STUDENT_AVATARS រួចហើយ)
+const persistCourseScoresSafely = (uid, courseId, scoresList) => {
+  if (!courseId || !Array.isArray(scoresList)) return;
+  const avatarMap = getAvatarMapSync();
+
+  const slimScores = scoresList.map((row) => {
+    if (!row || typeof row !== 'object') return row;
+    const rawImg =
+      row.profile_image ||
+      row.student?.profile_image ||
+      row.user?.profile_image ||
+      null;
+    const recId = row.student_record_id || row.id;
+    if (recId && rawImg) {
+      compressStudentAvatarAsync(recId, rawImg, (_, compressed) => {
+        if (row.student_id) avatarMap[row.student_id] = compressed;
+      });
+    }
+
+    const copy = { ...row };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 12000
+    ) {
+      copy.profile_image = null;
+    }
+    if (copy.student && typeof copy.student === 'object') {
+      const { profile_image, ...restStudent } = copy.student;
+      copy.student = restStudent;
+    }
+    return copy;
+  });
+
+  try {
+    const str = JSON.stringify(slimScores);
+    sessionStorage.setItem(getCourseScoresCacheKey(uid, courseId), str);
+    localStorage.setItem(getCourseScoresCacheKey(uid, courseId), str);
+  } catch {}
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
+const resolveTeacherUid = (contextUser, contextTeacher) => {
+  const target = contextUser || contextTeacher;
+  if (target) {
     const id =
-      contextUser.id ||
-      contextUser.user_id ||
-      contextUser.teacher?.id ||
-      contextUser.email;
+      target.id ||
+      target.user_id ||
+      target.teacher?.id ||
+      target.email;
     if (id) return String(id);
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('teacher') ||
+      localStorage.getItem('teacher');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -125,7 +324,6 @@ const FIELD_MAX_WEIGHTS = {
 };
 
 // ✅ បម្លែងពិន្ទុឆៅលើ 100 ពី Backend មកជាពិន្ទុតាមទម្ងន់ (20, 20, 25, 35)
-// ឧទាហរណ៍៖ សំណួរខ្លី 50% (50/100) -> 50 * 20 / 100 = 10
 const toWeightedScore = (rawVal100, maxWeight) => {
   if (rawVal100 === '' || rawVal100 === null || rawVal100 === undefined) return '';
   const num = Number(rawVal100);
@@ -184,7 +382,10 @@ const detectStudentYearNum = (student) => {
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+      sessionStorage.getItem('auth_user') ||
+      sessionStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      localStorage.getItem('user');
     let uid = 'default';
     let role = 'teacher';
     if (userObjStr) {
@@ -364,10 +565,7 @@ const calculateRowMetrics = (assignPts, quizPts, midtermPts, examPts) => {
     return { total: null, backendFinal: null, letter: '', isPassed: null };
   }
 
-  // ផលបូកពិន្ទុសរុបដែលបង្ហាញលើតារាង (ឧ. 10 ពិន្ទុ) ដូចក្នុង ViewScores.jsx របស់សិស្ស
   const totalPoints = Math.round(pointsSum * 100) / 100;
-
-  // ពិន្ទុសមាមាត្រលើ 100 សម្រាប់គណនានិទ្ទេស និងស្ថានភាព ជាប់/ធ្លាក់
   const normalizedScore = Math.round(((pointsSum / weightTotal) * 100) * 100) / 100;
 
   let letter = '';
@@ -390,9 +588,12 @@ const calculateRowMetrics = (assignPts, quizPts, midtermPts, examPts) => {
 // ✅ រៀបចំទម្រង់ទិន្នន័យពិន្ទុសិស្ស (បម្លែងពិន្ទុពីមាត្រដ្ឋាន 100 មកជាមាត្រដ្ឋាន 20/20/25/35)
 const formatScoresList = (scoresData, courseId = '') => {
   if (!Array.isArray(scoresData)) return [];
+  const avatarMap = getAvatarMapSync();
+
   const formatted = scoresData.map((s, idx) => {
     const resolvedUserId =
       s.user_id || s.student?.user_id || s.student_id || s.id;
+    const recId = s.student_record_id || s.id;
     const cid = String(courseId || s.course_id || '');
     const examKey = `${cid}_${resolvedUserId}`;
 
@@ -437,7 +638,6 @@ const formatScoresList = (scoresData, courseId = '') => {
       GRADES_MEM_CACHE.examScoresMap?.[examKey] !== undefined &&
       GRADES_MEM_CACHE.examScoresMap?.[examKey] !== ''
     ) {
-      // ក្នុង examScoresMap v3 រក្សាទុកជាពិន្ទុក្នុងចំណោម 35 រួចហើយ -> បម្លែងមក 100 សិន
       const cachedExam35 = cleanScoreVal(GRADES_MEM_CACHE.examScoresMap[examKey]);
       if (cachedExam35 !== '') {
         examRaw100 = toRaw100Score(cachedExam35, 35) ?? '';
@@ -482,7 +682,6 @@ const formatScoresList = (scoresData, courseId = '') => {
       }
     }
 
-    // ✅ បម្លែងមកជាពិន្ទុតាមទម្ងន់នៃផ្នែកនីមួយៗ (20, 20, 25, 35)
     const assignPts20 = toWeightedScore(assignRaw100, 20);
     const autoAssignPts20 = toWeightedScore(autoAssignRaw100, 20);
     const quizPts20 = toWeightedScore(quizRaw100, 20);
@@ -498,6 +697,8 @@ const formatScoresList = (scoresData, courseId = '') => {
     );
 
     const resolvedAvatar =
+      avatarMap[recId] ||
+      avatarMap[resolvedUserId] ||
       s.profile_image ||
       s.user?.profile_image ||
       s.student?.profile_image ||
@@ -508,7 +709,7 @@ const formatScoresList = (scoresData, courseId = '') => {
       ...s,
       profile_image: resolvedAvatar,
       student_id: resolvedUserId,
-      student_record_id: s.student_record_id || s.id,
+      student_record_id: recId,
       student_name: studentName,
       student_code: stuCode,
       gender: s.gender || s.student?.gender || '',
@@ -540,6 +741,7 @@ const buildInstantCourseScores = (
 ) => {
   const yKey = String(selectedYear || 'all');
   const cid = yKey !== 'all' ? String(courseId || '') : '';
+  const avatarMap = getAvatarMapSync();
 
   if (Array.isArray(allStudents) && allStudents.length > 0) {
     const targetStudents = allStudents.filter((student) => {
@@ -559,7 +761,12 @@ const buildInstantCourseScores = (
     const merged = targetStudents.map((std) => {
       const targetUserId = std.user_id || std.user?.id || std.id;
       const isEnrolledAny = isStudentEnrolledInAnyTeacherCourse(std, courseMap);
-      const stdAvatar = std.profile_image || std.user?.profile_image || null;
+      const stdAvatar =
+        avatarMap[std.id] ||
+        avatarMap[targetUserId] ||
+        std.profile_image ||
+        std.user?.profile_image ||
+        null;
 
       const matchedScore = scoreLookup.find(
         (sc) =>
@@ -597,11 +804,6 @@ const buildInstantCourseScores = (
             last_name: std.last_name,
             gender: std.gender,
             study_shift: std.study_shift,
-            profile_image:
-              stdAvatar ||
-              matchedScore.student?.profile_image ||
-              matchedScore.profile_image ||
-              null,
           },
         };
       }
@@ -628,7 +830,6 @@ const buildInstantCourseScores = (
               last_name: std.last_name,
               gender: std.gender,
               study_shift: std.study_shift,
-              profile_image: stdAvatar,
             },
             assignment_score: null,
             quiz_score: null,
@@ -644,12 +845,14 @@ const buildInstantCourseScores = (
     return sortStudentsOldestFirst(merged);
   }
 
-  return Array.isArray(cachedScoresList) ? cachedScoresList : [];
+  return Array.isArray(cachedScoresList)
+    ? hydrateStudentsWithAvatars(cachedScoresList)
+    : [];
 };
 
 const TeacherManageGrades = () => {
   const { t, language } = useLanguage();
-  const { user } = useAuth();
+  const { user, teacher } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [failedAvatars, setFailedAvatars] = useState({});
@@ -658,7 +861,10 @@ const TeacherManageGrades = () => {
     searchParams.get('course_id') || location.state?.courseId || '';
 
   // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
-  const currentTeacherId = useMemo(() => resolveTeacherUid(user), [user]);
+  const currentTeacherId = useMemo(
+    () => resolveTeacherUid(user, teacher),
+    [user, teacher]
+  );
 
   // បើប្ដូរគណនីគ្រូ ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
   if (GRADES_MEM_CACHE.uid && GRADES_MEM_CACHE.uid !== currentTeacherId) {
@@ -679,20 +885,22 @@ const TeacherManageGrades = () => {
     );
   }
 
-  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី
+  // ✅ ១. អានពី Cache និងភ្ជាប់រូបភាពសិស្សភ្លាមៗក្នុង 0 វិនាទី
   const [allStudents, setAllStudents] = useState(() => {
     if (Array.isArray(GRADES_MEM_CACHE.allStudents)) {
-      return GRADES_MEM_CACHE.allStudents;
+      return hydrateStudentsWithAvatars(GRADES_MEM_CACHE.allStudents);
     }
     const fromUserKey = readStorageJson(
       getStudentsCacheKey(currentTeacherId),
       null
     );
     if (Array.isArray(fromUserKey)) {
-      GRADES_MEM_CACHE.allStudents = fromUserKey;
-      return fromUserKey;
+      const hydrated = hydrateStudentsWithAvatars(fromUserKey);
+      GRADES_MEM_CACHE.allStudents = hydrated;
+      return hydrated;
     }
-    return readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
+    const fallback = readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
+    return Array.isArray(fallback) ? hydrateStudentsWithAvatars(fallback) : [];
   });
 
   const [courses, setCourses] = useState(() => {
@@ -945,8 +1153,9 @@ const TeacherManageGrades = () => {
     );
 
     if (Array.isArray(cachedStd)) {
-      setAllStudents(cachedStd);
-      GRADES_MEM_CACHE.allStudents = cachedStd;
+      const hydrated = hydrateStudentsWithAvatars(cachedStd);
+      setAllStudents(hydrated);
+      GRADES_MEM_CACHE.allStudents = hydrated;
     }
     if (Array.isArray(cachedCrs)) {
       setCourses(cachedCrs);
@@ -961,45 +1170,42 @@ const TeacherManageGrades = () => {
     if (
       GRADES_MEM_CACHE.uid === currentTeacherId &&
       Array.isArray(GRADES_MEM_CACHE.allStudents) &&
+      GRADES_MEM_CACHE.allStudents.length > 0 &&
       Array.isArray(GRADES_MEM_CACHE.courses) &&
       now - GRADES_MEM_CACHE.lastSyncedMasterAt < 30000
     ) {
       return;
     }
 
-    // ១. ទាញបញ្ជីសិស្សមុនគេ
+    // ១. ទាញបញ្ជីសិស្សមុនគេ និងបង្រួមរូបភាពទុកក្នុង Avatar Dictionary
     api
       .get('/teacher/students')
       .then((stdRes) => {
         if (!isMounted) return;
         const rawStd = stdRes.data?.data || stdRes.data || [];
         const latestStudents = Array.isArray(rawStd) ? rawStd : [];
-        setAllStudents(latestStudents);
-        GRADES_MEM_CACHE.allStudents = latestStudents;
+
+        persistStudentsAndAvatarsSafely(currentTeacherId, latestStudents);
+
+        const hydrated = hydrateStudentsWithAvatars(latestStudents);
+        setAllStudents(hydrated);
+        GRADES_MEM_CACHE.allStudents = hydrated;
         GRADES_MEM_CACHE.lastSyncedMasterAt = Date.now();
-        try {
-          localStorage.setItem(
-            getStudentsCacheKey(currentTeacherId),
-            JSON.stringify(latestStudents)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_STUDENTS,
-            JSON.stringify(latestStudents)
-          );
-        } catch {}
 
         if (stdRes.data?.course_students_map) {
           setCourseMap(stdRes.data.course_students_map);
           GRADES_MEM_CACHE.courseMap = stdRes.data.course_students_map;
           try {
+            const mapStr = JSON.stringify(stdRes.data.course_students_map);
+            sessionStorage.setItem(
+              getCourseMapCacheKey(currentTeacherId),
+              mapStr
+            );
             localStorage.setItem(
               getCourseMapCacheKey(currentTeacherId),
-              JSON.stringify(stdRes.data.course_students_map)
+              mapStr
             );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_MAP,
-              JSON.stringify(stdRes.data.course_students_map)
-            );
+            localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
           } catch {}
         }
       })
@@ -1015,14 +1221,10 @@ const TeacherManageGrades = () => {
         setCourses(latestCourses);
         GRADES_MEM_CACHE.courses = latestCourses;
         try {
-          localStorage.setItem(
-            getCoursesCacheKey(currentTeacherId),
-            JSON.stringify(latestCourses)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_COURSES,
-            JSON.stringify(latestCourses)
-          );
+          const crsStr = JSON.stringify(latestCourses);
+          sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+          localStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+          localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
         } catch {}
       })
       .catch(() => {});
@@ -1093,12 +1295,7 @@ const TeacherManageGrades = () => {
       );
 
       setStudentScores(mergedWithEnrolled);
-      try {
-        localStorage.setItem(
-          getCourseScoresCacheKey(currentTeacherId, cid),
-          JSON.stringify(mergedWithEnrolled)
-        );
-      } catch (e) {}
+      persistCourseScoresSafely(currentTeacherId, cid, mergedWithEnrolled);
     } catch (error) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED')
         return;
@@ -1252,12 +1449,7 @@ const TeacherManageGrades = () => {
 
       const cid = String(selectedCourse);
       GRADES_MEM_CACHE.scoresByCourse[cid] = updatedList;
-      try {
-        localStorage.setItem(
-          getCourseScoresCacheKey(currentTeacherId, cid),
-          JSON.stringify(updatedList)
-        );
-      } catch (e) {}
+      persistCourseScoresSafely(currentTeacherId, cid, updatedList);
       return updatedList;
     });
   };
@@ -1292,12 +1484,7 @@ const TeacherManageGrades = () => {
 
       const cid = String(selectedCourse);
       GRADES_MEM_CACHE.scoresByCourse[cid] = studentScores;
-      try {
-        localStorage.setItem(
-          getCourseScoresCacheKey(currentTeacherId, cid),
-          JSON.stringify(studentScores)
-        );
-      } catch (e) {}
+      persistCourseScoresSafely(currentTeacherId, cid, studentScores);
 
       const passResultKm =
         total === null ? 'រង់ចាំពិន្ទុ' : isPassed ? 'ជាប់' : 'ធ្លាក់';
@@ -1350,12 +1537,7 @@ const TeacherManageGrades = () => {
 
       const cid = String(selectedCourse);
       GRADES_MEM_CACHE.scoresByCourse[cid] = studentScores;
-      try {
-        localStorage.setItem(
-          getCourseScoresCacheKey(currentTeacherId, cid),
-          JSON.stringify(studentScores)
-        );
-      } catch (e) {}
+      persistCourseScoresSafely(currentTeacherId, cid, studentScores);
 
       pushLocalNotification({
         titleKm: 'បានរក្សាទុកពិន្ទុសិស្សទាំងអស់ជោគជ័យ',
@@ -1756,7 +1938,10 @@ const TeacherManageGrades = () => {
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder=""
+              placeholder={t(
+                'ស្វែងរកឈ្មោះសិស្ស ឬអត្តលេខ...',
+                'Search student name or code...'
+              )}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="grd-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
@@ -2047,7 +2232,10 @@ const TeacherManageGrades = () => {
                       ? (nameParts[0][0] + nameParts[1][0]).toUpperCase()
                       : (studentName[0] || 'S').toUpperCase();
 
+                  const avatarMap = getAvatarMapSync();
                   const rawAvatar =
+                    avatarMap[item.student_record_id] ||
+                    avatarMap[item.student_id] ||
                     item.profile_image ||
                     item.student?.profile_image ||
                     item.student?.user?.profile_image ||
@@ -2081,6 +2269,8 @@ const TeacherManageGrades = () => {
                               <img
                                 src={avatarUrl}
                                 alt={studentName}
+                                loading={idx < 15 ? 'eager' : 'lazy'}
+                                decoding="async"
                                 className="h-full w-full object-cover rounded-full"
                                 onError={() =>
                                   setFailedAvatars((prev) => ({
