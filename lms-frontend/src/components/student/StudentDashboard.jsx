@@ -1017,6 +1017,8 @@ const StudentDashboard = () => {
     return 14;
   }, [averageScoreNum, activityCompletionPercent]);
 
+  const isLiquidDarkText = liquidLevelPercent < 55;
+
   // ✅ កាតស្ថិតិទាំង ៤
   const statCards = [
     {
@@ -1217,7 +1219,7 @@ const StudentDashboard = () => {
         </div>
 
         {/* ================================================================ */}
-        {/* 📌 ១.២. កាតលទ្ធផលការសិក្សារួម + កងមូលមានទឹករលកសុទ្ធ (គ្មានអក្សរក្នុងកង) */}
+        {/* 📌 ១.២. កាតលទ្ធផលការសិក្សារួម + កងមូលមានទឹករលក និងលេខ % ចំកណ្ដាល */}
         {/* ================================================================ */}
         <div className="lg:col-span-4 std-surface-card bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-center justify-between gap-2">
@@ -1235,7 +1237,7 @@ const StudentDashboard = () => {
           </div>
 
           <div className="my-5 flex items-center justify-center gap-5 sm:gap-6">
-            {/* ✅ កងមូលមានតែទឹករលកខាងក្នុងសុទ្ធសាធ (ដកអក្សរខាងក្នុងចេញតាមសំណូមពរ) */}
+            {/* ✅ កងមូលមានទឹករលកខាងក្នុង និងបង្ហាញតែលេខ % ធំច្បាស់នៅចំកណ្ដាល */}
             <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
               <div className="std-liquid-inner absolute inset-[9px] rounded-full overflow-hidden bg-slate-100/90 dark:bg-slate-900/90 z-0 shadow-inner">
                 <div
@@ -1279,6 +1281,19 @@ const StudentDashboard = () => {
                   className="transition-all duration-1000 ease-out"
                 />
               </svg>
+
+              {/* ✅ បង្ហាញតែលេខ % ធំច្បាស់នៅចំកណ្ដាលកងទឹក (គ្មានអក្សរអមឱ្យចង្អៀតឡើយ) */}
+              <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+                <span
+                  className={`text-2xl font-black tracking-tight transition-colors duration-500 ${
+                    isLiquidDarkText
+                      ? 'std-text-primary text-slate-900'
+                      : 'text-white drop-shadow-xs'
+                  }`}
+                >
+                  {averageScoreNum}%
+                </span>
+              </div>
             </div>
 
             <div className="space-y-2 min-w-0 flex-1">
