@@ -53,8 +53,12 @@ import logo from '../../assets/image/PRIT.png';
 import NotificationBell from './NotificationBell';
 
 const EMPTY_USER_OBJ = Object.freeze({});
+const AUTH_AVATAR_THUMB_KEY = 'lms_nav_avatar_thumb_v1';
 const AUTH_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v2';
 const LEGACY_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v1';
+
+// ✅ Global RAM Cache សម្រាប់ឱ្យ Navbar បង្ហាញរូបភាពក្នុង 0ms ដោយមិនបាច់ Decode ម្ដងទៀត
+let GLOBAL_MEM_AVATAR_URL = null;
 
 const getTelegramLinkCacheKey = (email) =>
   `lms_tg_link_url_${email || 'default'}`;
@@ -75,13 +79,151 @@ const readRawStorageItem = (key) => {
   return null;
 };
 
+const writeRawStorageItem = (key, val) => {
+  if (!val) return;
+  try {
+    sessionStorage.setItem(key, val);
+  } catch {}
+  try {
+    localStorage.setItem(key, val);
+  } catch {}
+};
+
+// ✅ អានរូបភាពដែលតូចស្រាលបំផុត (Thumbnail ~4KB) មុនគេ ដើម្បីឱ្យលោតចេញភ្លាមៗក្នុង 0ms
 const readCachedAvatarSync = () => {
-  return (
+  if (GLOBAL_MEM_AVATAR_URL) return GLOBAL_MEM_AVATAR_URL;
+  const found =
+    readRawStorageItem(AUTH_AVATAR_THUMB_KEY) ||
     readRawStorageItem(AUTH_AVATAR_CACHE_KEY) ||
     readRawStorageItem(LEGACY_AVATAR_CACHE_KEY) ||
-    null
-  );
+    null;
+  if (found && found !== '__CACHED_AVATAR__') {
+    GLOBAL_MEM_AVATAR_URL = found;
+    return found;
+  }
+  return null;
 };
+
+// ✅ បង្កើតរូបភាព Thumbnail តូចច្បាស់ (128x128px ~4KB) ទុកសម្រាប់បង្ហាញលើ Navbar ក្នុង 0ms
+const cacheCrispAvatarThumbnail = (rawSrc, onReady) => {
+  if (!rawSrc || typeof rawSrc !== 'string' || rawSrc === '__CACHED_AVATAR__') {
+    return;
+  }
+
+  GLOBAL_MEM_AVATAR_URL = rawSrc;
+
+  // បើរូបភាពតូចស្រាប់ (< 25KB) រក្សាទុកភ្លាមៗក្នុង 0ms
+  if (!rawSrc.startsWith('data:image') || rawSrc.length < 25000) {
+    writeRawStorageItem(AUTH_AVATAR_THUMB_KEY, rawSrc);
+    writeRawStorageItem(AUTH_AVATAR_CACHE_KEY, rawSrc);
+    if (typeof onReady === 'function') onReady(rawSrc);
+    return;
+  }
+
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const targetSize = 128;
+        let width = img.width || targetSize;
+        let height = img.height || targetSize;
+
+        if (width > height) {
+          if (width > targetSize) {
+            height = Math.round((height * targetSize) / width);
+            width = targetSize;
+          }
+        } else {
+          if (height > targetSize) {
+            width = Math.round((width * targetSize) / height);
+            height = targetSize;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const thumbDataUrl = canvas.toDataURL('image/webp', 0.85);
+
+        GLOBAL_MEM_AVATAR_URL = thumbDataUrl;
+        writeRawStorageItem(AUTH_AVATAR_THUMB_KEY, thumbDataUrl);
+        writeRawStorageItem(AUTH_AVATAR_CACHE_KEY, thumbDataUrl);
+        if (typeof onReady === 'function') onReady(thumbDataUrl);
+      } catch {
+        writeRawStorageItem(AUTH_AVATAR_CACHE_KEY, rawSrc);
+      }
+    };
+    img.src = rawSrc;
+  } catch {}
+};
+
+// ✅ បង្រួមឯកសាររូបភាពពេល Upload ឱ្យតូចល្មម និងច្បាស់ល្អ (ការពារកុំឱ្យយឺតពេលផ្ញើទៅ Server និងពេលទាញមកវិញ)
+const compressUploadedImageFile = (file) =>
+  new Promise((resolve) => {
+    if (!file || !file.type.startsWith('image/')) {
+      resolve({ file, dataUrl: null });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const rawDataUrl = ev.target?.result;
+      if (!rawDataUrl || typeof rawDataUrl !== 'string') {
+        resolve({ file, dataUrl: null });
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxDim = 320;
+          let w = img.width || maxDim;
+          let h = img.height || maxDim;
+          if (w > h) {
+            if (w > maxDim) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            }
+          } else {
+            if (h > maxDim) {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                const compressedFile = new File(
+                  [blob],
+                  file.name.replace(/\.[^.]+$/, '.jpg'),
+                  { type: 'image/jpeg' }
+                );
+                resolve({ file: compressedFile, dataUrl: compressedDataUrl });
+              } else {
+                resolve({ file, dataUrl: compressedDataUrl });
+              }
+            },
+            'image/jpeg',
+            0.85
+          );
+        } catch {
+          resolve({ file, dataUrl: rawDataUrl });
+        }
+      };
+      img.onerror = () => resolve({ file, dataUrl: rawDataUrl });
+      img.src = rawDataUrl;
+    };
+    reader.onerror = () => resolve({ file, dataUrl: null });
+    reader.readAsDataURL(file);
+  });
 
 const hydrateEntityWithCachedAvatar = (entity) => {
   if (!entity || typeof entity !== 'object') return entity;
@@ -130,7 +272,6 @@ const readCachedTeacherSync = () => {
   }
 };
 
-// ✅ លុបរូបភាព Base64 ធំៗចេញពី Object មុនពេលរក្សាទុកចូល localStorage ដើម្បីការពារ QuotaExceededError
 const stripHeavyBase64ForStorage = (obj, depth = 0) => {
   if (!obj || typeof obj !== 'object' || depth > 4) return obj;
   if (Array.isArray(obj)) {
@@ -201,7 +342,6 @@ const pushLocalNotification = (notif) => {
   }
 };
 
-// ✅ សម្អាត Cache បញ្ជីគ្រូ និងសិស្សនៅពេលគណនីប្ដូររូបថត ឬកែប្រែឈ្មោះ ដើម្បីឱ្យគ្រប់ទំព័រទាញទិន្នន័យថ្មីភ្លាមៗ
 const invalidateDirectoryAvatarCaches = () => {
   try {
     const keysToRemove = [
@@ -240,6 +380,11 @@ const Navbar = () => {
   const teacherData = useMemo(
     () => contextTeacher || readCachedTeacherSync() || user?.teacher || null,
     [contextTeacher, user?.teacher]
+  );
+
+  // ✅ រក្សាទុករូបភាព Thumbnail ក្នុង State តាំងពីវិនាទីទី 0 ដើម្បីឱ្យបង្ហាញភ្លាមៗគ្មានការយឺតយ៉ាវ
+  const [cachedThumbUrl, setCachedThumbUrl] = useState(() =>
+    readCachedAvatarSync()
   );
 
   const [isMobileViewport, setIsMobileViewport] = useState(() =>
@@ -336,6 +481,7 @@ const Navbar = () => {
     teacherData?.profile_image,
     user?.student?.profile_image,
     instantAvatarPreview,
+    cachedThumbUrl,
   ]);
 
   useEffect(() => {
@@ -374,7 +520,6 @@ const Navbar = () => {
     setIsDarkMode((prev) => !prev);
   }, []);
 
-  // ✅ រក្សាទុកទិន្នន័យគណនីដែលបានកែប្រែចូលទាំង sessionStorage និង localStorage ដោយមិនឱ្យពេញ Quota
   const syncUserToStorage = useCallback((updatedUserObj, updatedTeacherObj) => {
     try {
       const rawAvatar =
@@ -385,49 +530,30 @@ const Navbar = () => {
         null;
 
       if (rawAvatar && rawAvatar !== '__CACHED_AVATAR__') {
-        try {
-          sessionStorage.setItem(AUTH_AVATAR_CACHE_KEY, rawAvatar);
-        } catch {}
-        try {
-          localStorage.setItem(AUTH_AVATAR_CACHE_KEY, rawAvatar);
-        } catch {}
+        cacheCrispAvatarThumbnail(rawAvatar, (thumb) => {
+          setCachedThumbUrl(thumb);
+        });
       }
 
       const slimUser = stripHeavyBase64ForStorage(updatedUserObj);
       const str = JSON.stringify(slimUser);
 
-      try {
-        sessionStorage.setItem('user', str);
-        sessionStorage.setItem('auth_user', str);
-      } catch {}
-      try {
-        localStorage.setItem('user', str);
-        localStorage.setItem('auth_user', str);
-      } catch {}
+      writeRawStorageItem('user', str);
+      writeRawStorageItem('auth_user', str);
 
       const targetTeacher = updatedTeacherObj || updatedUserObj?.teacher;
       if (targetTeacher) {
         const slimTeacherStr = JSON.stringify(
           stripHeavyBase64ForStorage(targetTeacher)
         );
-        try {
-          sessionStorage.setItem('teacher', slimTeacherStr);
-        } catch {}
-        try {
-          localStorage.setItem('teacher', slimTeacherStr);
-        } catch {}
+        writeRawStorageItem('teacher', slimTeacherStr);
       }
 
       if (updatedUserObj?.student) {
         const slimStudentStr = JSON.stringify(
           stripHeavyBase64ForStorage(updatedUserObj.student)
         );
-        try {
-          sessionStorage.setItem('student', slimStudentStr);
-        } catch {}
-        try {
-          localStorage.setItem('student', slimStudentStr);
-        } catch {}
+        writeRawStorageItem('student', slimStudentStr);
       }
 
       window.dispatchEvent(new Event('lms_user_updated'));
@@ -440,31 +566,35 @@ const Navbar = () => {
     setIsMobileMenuOpen(false);
     setIsProfileModalOpen(false);
     setIsSettingsModalOpen(false);
+    GLOBAL_MEM_AVATAR_URL = null;
+    setCachedThumbUrl(null);
 
     try {
-      sessionStorage.removeItem('lms_last_active_role');
-      localStorage.removeItem('lms_last_active_role');
+      [
+        'lms_last_active_role',
+        AUTH_AVATAR_THUMB_KEY,
+        AUTH_AVATAR_CACHE_KEY,
+        LEGACY_AVATAR_CACHE_KEY,
+      ].forEach((k) => {
+        try {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+        } catch {}
+      });
     } catch {}
 
     if (typeof logout === 'function') {
       logout();
     } else {
       try {
-        [
-          'token',
-          'auth_token',
-          'teacher',
-          'student',
-          'user',
-          'auth_user',
-          AUTH_AVATAR_CACHE_KEY,
-          LEGACY_AVATAR_CACHE_KEY,
-        ].forEach((k) => {
-          try {
-            sessionStorage.removeItem(k);
-            localStorage.removeItem(k);
-          } catch {}
-        });
+        ['token', 'auth_token', 'teacher', 'student', 'user', 'auth_user'].forEach(
+          (k) => {
+            try {
+              sessionStorage.removeItem(k);
+              localStorage.removeItem(k);
+            } catch {}
+          }
+        );
       } catch {}
 
       if (typeof setUser === 'function') {
@@ -531,31 +661,68 @@ const Navbar = () => {
     [language, user?.role_id, isAdmin, isTeacher, isStudent]
   );
 
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway, Placeholder '__CACHED_AVATAR__' និង URL ធម្មតា
-  const resolveImageUrl = useCallback((rawPath) => {
-    if (!rawPath || typeof rawPath !== 'string') return null;
-    const trimmed = rawPath.trim();
-    if (!trimmed) return null;
-    if (trimmed === '__CACHED_AVATAR__') {
-      return readCachedAvatarSync();
-    }
-    if (
-      trimmed.startsWith('data:') ||
-      trimmed.startsWith('http://') ||
-      trimmed.startsWith('https://') ||
-      trimmed.startsWith('blob:')
-    ) {
-      return trimmed;
-    }
-    const baseUrl = (
-      import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    ).replace(/\/api\/?$/, '');
-    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
-    return `${baseUrl}/storage/${cleanPath}`;
-  }, []);
+  const resolveImageUrl = useCallback(
+    (rawPath) => {
+      if (!rawPath || typeof rawPath !== 'string') return null;
+      const trimmed = rawPath.trim();
+      if (!trimmed) return null;
+      if (trimmed === '__CACHED_AVATAR__') {
+        return cachedThumbUrl || readCachedAvatarSync();
+      }
+      if (
+        trimmed.startsWith('data:') ||
+        trimmed.startsWith('http://') ||
+        trimmed.startsWith('https://') ||
+        trimmed.startsWith('blob:')
+      ) {
+        return trimmed;
+      }
+      const baseUrl = (
+        import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      ).replace(/\/api\/?$/, '');
+      const cleanPath = trimmed
+        .replace(/^\/?storage\//, '')
+        .replace(/^\/+/, '');
+      return `${baseUrl}/storage/${cleanPath}`;
+    },
+    [cachedThumbUrl]
+  );
 
+  // ✅ ប្រសិនបើទទួលបានរូបភាពថ្មីពី Context/API ត្រូវបង្កើត Thumbnail ទុកក្នុង Storage ភ្លាមៗសម្រាប់ពេល F5 លើកក្រោយ
+  useEffect(() => {
+    const incomingRaw =
+      user?.profile_image ||
+      teacherData?.profile_image ||
+      user?.teacher?.profile_image ||
+      user?.student?.profile_image ||
+      null;
+
+    if (
+      incomingRaw &&
+      typeof incomingRaw === 'string' &&
+      incomingRaw !== '__CACHED_AVATAR__'
+    ) {
+      const resolved = resolveImageUrl(incomingRaw);
+      if (resolved) {
+        cacheCrispAvatarThumbnail(resolved, (thumb) => {
+          setCachedThumbUrl(thumb);
+        });
+      }
+    }
+  }, [
+    user?.profile_image,
+    teacherData?.profile_image,
+    user?.teacher?.profile_image,
+    user?.student?.profile_image,
+    resolveImageUrl,
+  ]);
+
+  // ✅ អាទិភាពទី ១៖ ប្រើ Thumbnail ស្រាល (~4KB) ពី Memory/Cache ដើម្បីឱ្យរូបលើ Navbar បង្ហាញក្នុង 0ms គ្មានការរង់ចាំ
   const profileImgUrl = useMemo(() => {
     if (instantAvatarPreview) return instantAvatarPreview;
+    if (cachedThumbUrl && cachedThumbUrl !== '__CACHED_AVATAR__') {
+      return cachedThumbUrl;
+    }
     const rawImg =
       user?.profile_image ||
       user?.profile_image_url ||
@@ -567,7 +734,13 @@ const Navbar = () => {
       user?.student?.profile_image_url ||
       readCachedAvatarSync();
     return rawImg ? resolveImageUrl(rawImg) : null;
-  }, [user, teacherData, instantAvatarPreview, resolveImageUrl]);
+  }, [
+    user,
+    teacherData,
+    instantAvatarPreview,
+    cachedThumbUrl,
+    resolveImageUrl,
+  ]);
 
   const resolvedFirstName = useMemo(
     () =>
@@ -667,7 +840,6 @@ const Navbar = () => {
     [userEmail, checkTelegramLinkStatus, user, setUser, syncUserToStorage]
   );
 
-  // ✅ មុខងារផ្ដាច់គណនី Telegram ចេញពីប្រព័ន្ធ
   const handleUnlinkTelegram = useCallback(async () => {
     if (!userEmail || isUnlinkingTelegram) return;
     setIsUnlinkingTelegram(true);
@@ -717,7 +889,6 @@ const Navbar = () => {
     }
   }, [userEmail, isUnlinkingTelegram, user, setUser, syncUserToStorage]);
 
-  // ✅ ហៅពិនិត្យតំណភ្ជាប់ Telegram តែនៅពេលដែលអ្នកប្រើប្រាស់បើកផ្ទាំងការកំណត់ (Settings Modal) ប៉ុណ្ណោះ
   useEffect(() => {
     if (isSettingsModalOpen) {
       syncTelegramStatus(false);
@@ -736,7 +907,6 @@ const Navbar = () => {
     return () => clearInterval(timer);
   }, [isSettingsModalOpen, waitingTelegramLink, userEmail, syncTelegramStatus]);
 
-  // ✅ ប្រើប្រាស់ Clean URL '/dashboard' ឱ្យស៊ីគ្នាជាមួយ Login.jsx និង Register.jsx
   const dashboardPath = '/dashboard';
 
   const userCreatedAtFormatted = useMemo(() => {
@@ -753,7 +923,6 @@ const Navbar = () => {
     return '—';
   }, [user?.created_at, language]);
 
-  // ✅ បញ្ជីម៉ឺនុយសម្រាប់ទូរស័ព្ទ (ប្រើ Clean URLs ស៊ីគ្នាជាមួយ Login.jsx & Register.jsx)
   const navItems = useMemo(() => {
     if (isAdmin) {
       return [
@@ -1057,17 +1226,25 @@ const Navbar = () => {
       return;
     }
 
-    const localBlobUrl = URL.createObjectURL(file);
+    const { file: optimizedFile, dataUrl: compressedDataUrl } =
+      await compressUploadedImageFile(file);
+
+    const previewUrl = compressedDataUrl || URL.createObjectURL(file);
     setAvatarError(false);
-    setInstantAvatarPreview(localBlobUrl);
+    setInstantAvatarPreview(previewUrl);
+    if (compressedDataUrl) {
+      cacheCrispAvatarThumbnail(compressedDataUrl, (thumb) => {
+        setCachedThumbUrl(thumb);
+      });
+    }
     setProfileData((prev) => ({
       ...prev,
-      profile_image: localBlobUrl,
+      profile_image: previewUrl,
     }));
 
     try {
       const formData = new FormData();
-      formData.append('profile_image', file);
+      formData.append('profile_image', optimizedFile);
 
       let endpoint = '/user/profile/update-image';
       if (isTeacher) {
@@ -1076,14 +1253,15 @@ const Navbar = () => {
         endpoint = '/student/profile/update-image';
       }
 
-      // ✅ ប្រើ headers: { 'Content-Type': undefined } ដើម្បីឱ្យ Browser បង្កើត multipart boundary ដោយស្វ័យប្រវត្តិលើ Railway
       const response = await api.post(endpoint, formData, {
         headers: { 'Content-Type': undefined },
       });
 
       if (response.data) {
         const newImgPath =
-          response.data.profile_image || response.data?.data?.profile_image;
+          compressedDataUrl ||
+          response.data.profile_image ||
+          response.data?.data?.profile_image;
         const updatedUser = { ...user };
         let updatedTeacher = teacherData ? { ...teacherData } : null;
 
@@ -1115,12 +1293,9 @@ const Navbar = () => {
         const resolvedServerUrl = resolveImageUrl(newImgPath);
         setProfileData((prev) => ({
           ...prev,
-          profile_image: resolvedServerUrl || localBlobUrl,
+          profile_image: resolvedServerUrl || previewUrl,
         }));
         setInstantAvatarPreview(null);
-        if (resolvedServerUrl) {
-          URL.revokeObjectURL(localBlobUrl);
-        }
 
         pushLocalNotification({
           titleKm: 'បានដូររូបថតប្រវត្តិរូប',
@@ -1132,7 +1307,6 @@ const Navbar = () => {
       }
     } catch (error) {
       console.error('Upload error:', error);
-      URL.revokeObjectURL(localBlobUrl);
       setInstantAvatarPreview(null);
       setProfileData((prev) => ({
         ...prev,
@@ -1366,6 +1540,9 @@ const Navbar = () => {
                       <img
                         src={profileImgUrl}
                         alt="Profile"
+                        loading="eager"
+                        decoding="sync"
+                        fetchPriority="high"
                         className="nav-crisp-avatar h-full w-full object-cover rounded-full"
                         onError={() => setAvatarError(true)}
                       />
@@ -1533,6 +1710,8 @@ const Navbar = () => {
                       <img
                         src={profileImgUrl}
                         alt="Profile"
+                        loading="eager"
+                        decoding="sync"
                         className="nav-crisp-avatar h-full w-full object-cover rounded-full"
                         onError={() => setAvatarError(true)}
                       />
@@ -2152,7 +2331,7 @@ const Navbar = () => {
                   </div>
                 </section>
 
-                {/* ✅ ៣. ភ្ជាប់ ឬផ្ដាច់គណនី Telegram (គ្មានប៊ូតុងប្ដូរ Telegram ថ្មីឡើយ) */}
+                {/* ✅ ៣. ភ្ជាប់ ឬផ្ដាច់គណនី Telegram */}
                 <section className="nav-soft-divider pt-6 border-t border-gray-100">
                   <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <PaperAirplaneIcon className="h-5 w-5 text-sky-500 -rotate-45" />

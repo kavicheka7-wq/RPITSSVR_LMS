@@ -13,106 +13,270 @@ const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
 
-const AUTH_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v1';
+const AUTH_AVATAR_THUMB_KEY = 'lms_nav_avatar_thumb_v1';
+const AUTH_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v2';
+const LEGACY_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v1';
+const LAST_ACTIVE_ROLE_KEY = 'lms_last_active_role';
+
+// ✅ Global RAM Cache សម្រាប់ឱ្យអានរូបភាព Profile ក្នុងរយៈពេល 0ms
+let AUTH_MEM_AVATAR = null;
+
+const readRawStorage = (key) => {
+  try {
+    const sVal = sessionStorage.getItem(key);
+    if (sVal && sVal !== 'undefined' && sVal !== 'null') return sVal;
+  } catch {}
+  try {
+    const lVal = localStorage.getItem(key);
+    if (lVal && lVal !== 'undefined' && lVal !== 'null') return lVal;
+  } catch {}
+  return null;
+};
 
 const readStoredJson = (key) => {
+  const raw = readRawStorage(key);
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
+    return JSON.parse(raw);
   } catch {
     return null;
   }
 };
 
 const readValidTokenSync = () => {
+  return readRawStorage('token') || readRawStorage('auth_token') || null;
+};
+
+// ✅ សម្អាត Cache ចាស់ៗក្នុង localStorage ប្រសិនបើពេញទំហំ 5MB
+const freeUpLocalStorageSpace = () => {
   try {
-    const raw =
-      localStorage.getItem('token') || localStorage.getItem('auth_token');
-    if (!raw || raw === 'undefined' || raw === 'null') return null;
-    return raw;
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (
+        k &&
+        (k.startsWith('cached_') ||
+          k.startsWith('lms_notifs_') ||
+          k === LEGACY_AVATAR_CACHE_KEY)
+      ) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach((k) => {
+      try {
+        localStorage.removeItem(k);
+      } catch {}
+    });
+  } catch {}
+};
+
+const safeSetStorageItem = (key, valueStr) => {
+  if (!valueStr) return;
+  try {
+    sessionStorage.setItem(key, valueStr);
+  } catch {}
+  try {
+    localStorage.setItem(key, valueStr);
   } catch {
-    return null;
+    freeUpLocalStorageSpace();
+    try {
+      localStorage.setItem(key, valueStr);
+    } catch {}
   }
 };
 
-// ✅ អនុគមន៍ញែក និងរក្សាទុកទិន្នន័យ User/Teacher ដោយមិនឱ្យពេញទំហំ localStorage ជាដាច់ខាត
-const persistAuthSessionSafely = (newToken, enrichedUser, resolvedTeacher, resolvedStudent) => {
+const readCachedAvatarSync = () => {
+  if (AUTH_MEM_AVATAR && AUTH_MEM_AVATAR !== '__CACHED_AVATAR__') {
+    return AUTH_MEM_AVATAR;
+  }
+  const found =
+    readRawStorage(AUTH_AVATAR_THUMB_KEY) ||
+    readRawStorage(AUTH_AVATAR_CACHE_KEY) ||
+    readRawStorage(LEGACY_AVATAR_CACHE_KEY) ||
+    null;
+  if (found && found !== '__CACHED_AVATAR__') {
+    AUTH_MEM_AVATAR = found;
+    return found;
+  }
+  return null;
+};
+
+// ✅ បង្រួមរូបភាព Profile Base64 ធំៗឱ្យទៅជា Thumbnail តូចច្បាស់ (~4KB) សម្រាប់បង្ហាញលើ Navbar ក្នុង 0ms
+const compressAndCacheAvatar = (rawDataUrl) => {
+  if (
+    !rawDataUrl ||
+    typeof rawDataUrl !== 'string' ||
+    rawDataUrl === '__CACHED_AVATAR__'
+  ) {
+    return;
+  }
+
+  AUTH_MEM_AVATAR = rawDataUrl;
+
+  // ១. រក្សាទុកក្នុង sessionStorage ភ្លាមៗក្នុង 0ms ដើម្បីកុំឱ្យរង់ចាំ Canvas បង្រួម
   try {
-    if (newToken) {
-      localStorage.setItem('token', newToken);
-    }
+    sessionStorage.setItem(AUTH_AVATAR_THUMB_KEY, rawDataUrl);
+    sessionStorage.setItem(AUTH_AVATAR_CACHE_KEY, rawDataUrl);
+  } catch {}
 
-    // ទាញយករូបភាព Profile មករក្សាទុកដាច់ដោយឡែកតែ ១ កន្លែង (ជៀសវាងស្ទួន ៣-៤ កន្លែង)
-    const avatarImg =
-      resolvedTeacher?.profile_image ||
-      resolvedStudent?.profile_image ||
-      enrichedUser?.profile_image ||
-      enrichedUser?.teacher?.profile_image ||
-      enrichedUser?.student?.profile_image ||
-      null;
+  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 25000) {
+    safeSetStorageItem(AUTH_AVATAR_THUMB_KEY, rawDataUrl);
+    safeSetStorageItem(AUTH_AVATAR_CACHE_KEY, rawDataUrl);
+    safeSetStorageItem(LEGACY_AVATAR_CACHE_KEY, rawDataUrl);
+    return;
+  }
 
-    if (avatarImg) {
+  // ២. បង្រួមមកទំហំ 128x128px (~4KB) សម្រាប់រក្សាទុកក្នុង localStorage ឱ្យបើកលឿន 0ms ពេល F5
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
       try {
-        localStorage.setItem(AUTH_AVATAR_CACHE_KEY, avatarImg);
+        const canvas = document.createElement('canvas');
+        const targetSize = 128;
+        let width = img.width || targetSize;
+        let height = img.height || targetSize;
+
+        if (width > height) {
+          if (width > targetSize) {
+            height = Math.round((height * targetSize) / width);
+            width = targetSize;
+          }
+        } else {
+          if (height > targetSize) {
+            width = Math.round((width * targetSize) / height);
+            height = targetSize;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/webp', 0.85);
+        const finalAvatar =
+          compressed.length < rawDataUrl.length ? compressed : rawDataUrl;
+
+        AUTH_MEM_AVATAR = finalAvatar;
+        safeSetStorageItem(AUTH_AVATAR_THUMB_KEY, finalAvatar);
+        safeSetStorageItem(AUTH_AVATAR_CACHE_KEY, finalAvatar);
+        safeSetStorageItem(LEGACY_AVATAR_CACHE_KEY, finalAvatar);
+        window.dispatchEvent(new Event('lms_user_updated'));
       } catch {}
-    }
-
-    // បង្កើតទិន្នន័យគណនីដែលតូចស្រាល (Slim Object) សម្រាប់ធានាថាការ Save ចូល localStorage ជោគជ័យ 100%
-    const makeSlimPerson = (person) => {
-      if (!person || typeof person !== 'object') return person;
-      const isHeavyBase64 =
-        typeof person.profile_image === 'string' &&
-        person.profile_image.startsWith('data:') &&
-        person.profile_image.length > 20000;
-      return {
-        ...person,
-        profile_image: isHeavyBase64 ? '__CACHED_AVATAR__' : person.profile_image,
-      };
     };
+    img.src = rawDataUrl;
+  } catch {}
+};
 
-    const slimTeacher = makeSlimPerson(resolvedTeacher);
-    const slimStudent = makeSlimPerson(resolvedStudent);
-    const slimUser = {
-      ...makeSlimPerson(enrichedUser),
-      ...(slimTeacher ? { teacher: slimTeacher } : {}),
-      ...(slimStudent ? { student: slimStudent } : {}),
-    };
+// ✅ លុបរូបភាព Base64 ធំៗចេញពីគ្រប់កម្រិតនៃ Object (Recursive Strip) ដើម្បីឱ្យទំហំ User JSON < 1KB
+const stripHeavyBase64Deep = (obj, depth = 0) => {
+  if (!obj || typeof obj !== 'object' || depth > 4) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => stripHeavyBase64Deep(item, depth + 1));
+  }
 
-    const serializedUser = JSON.stringify(slimUser);
-    localStorage.setItem('user', serializedUser);
-    localStorage.setItem('auth_user', serializedUser);
-
-    if (slimTeacher) {
-      localStorage.setItem('teacher', JSON.stringify(slimTeacher));
+  const cleaned = {};
+  Object.keys(obj).forEach((k) => {
+    const val = obj[k];
+    if (
+      typeof val === 'string' &&
+      val.startsWith('data:') &&
+      val.length > 15000
+    ) {
+      cleaned[k] = '__CACHED_AVATAR__';
+    } else if (val && typeof val === 'object') {
+      cleaned[k] = stripHeavyBase64Deep(val, depth + 1);
     } else {
-      localStorage.removeItem('teacher');
+      cleaned[k] = val;
     }
+  });
+  return cleaned;
+};
 
-    if (slimStudent) {
-      localStorage.setItem('student', JSON.stringify(slimStudent));
-    } else {
-      localStorage.removeItem('student');
-    }
-  } catch {
-    // Fallback ករណី localStorage ពេញខ្លាំង៖ លុបរូបភាពចេញសិន តែរក្សាឈ្មោះ និងសិទ្ធិ (Role) ឱ្យនៅដដែល ដើម្បីកុំឱ្យ F5 ចេញអេក្រង់ស
+// ✅ កំណត់ឈ្មោះតួនាទីគោល ('Admin' | 'Teacher' | 'Student') សម្រាប់ Sidebar និង App
+const detectRoleLabel = (userObj, teacherObj) => {
+  const rawRole =
+    userObj?.role?.role_name ||
+    userObj?.role?.name ||
+    userObj?.role_name ||
+    (typeof userObj?.role === 'string' ? userObj.role : '') ||
+    '';
+  const r = String(rawRole).trim().toLowerCase();
+  const rid = Number(userObj?.role_id);
+
+  if (r.includes('admin') || rid === 1) return 'Admin';
+  if (
+    r.includes('teacher') ||
+    rid === 2 ||
+    Boolean(teacherObj) ||
+    Boolean(userObj?.teacher) ||
+    Boolean(userObj?.is_teacher)
+  ) {
+    return 'Teacher';
+  }
+  if (r.includes('student') || rid === 3 || Boolean(userObj?.student)) {
+    return 'Student';
+  }
+  return null;
+};
+
+// ✅ អនុគមន៍ញែក និងរក្សាទុកទិន្នន័យ User/Teacher ដោយមិនឱ្យពេញទំហំ localStorage ជាដាច់ខាត
+const persistAuthSessionSafely = (
+  newToken,
+  enrichedUser,
+  resolvedTeacher,
+  resolvedStudent
+) => {
+  if (newToken) {
+    safeSetStorageItem('token', newToken);
+  }
+
+  const detectedRole = detectRoleLabel(enrichedUser, resolvedTeacher);
+  if (detectedRole) {
+    safeSetStorageItem(LAST_ACTIVE_ROLE_KEY, detectedRole);
+  }
+
+  // ទាញយករូបភាព Profile មករក្សាទុក និងបង្រួមជា Thumbnail ដាច់ដោយឡែកតែ ១ កន្លែង
+  const avatarImg =
+    resolvedTeacher?.profile_image ||
+    resolvedStudent?.profile_image ||
+    enrichedUser?.profile_image ||
+    enrichedUser?.teacher?.profile_image ||
+    enrichedUser?.student?.profile_image ||
+    null;
+
+  if (avatarImg && avatarImg !== '__CACHED_AVATAR__') {
+    compressAndCacheAvatar(avatarImg);
+  }
+
+  // បង្កើតទិន្នន័យគណនីដែលតូចស្រាល (< 1KB) សម្រាប់ធានាថាការ Save ចូល Storage ជោគជ័យ 100%
+  const slimTeacher = stripHeavyBase64Deep(resolvedTeacher);
+  const slimStudent = stripHeavyBase64Deep(resolvedStudent);
+  const slimUser = {
+    ...stripHeavyBase64Deep(enrichedUser),
+    ...(slimTeacher ? { teacher: slimTeacher } : {}),
+    ...(slimStudent ? { student: slimStudent } : {}),
+  };
+
+  const serializedUser = JSON.stringify(slimUser);
+  safeSetStorageItem('user', serializedUser);
+  safeSetStorageItem('auth_user', serializedUser);
+
+  if (slimTeacher) {
+    safeSetStorageItem('teacher', JSON.stringify(slimTeacher));
+  } else {
     try {
-      const stripImg = (obj) => {
-        if (!obj || typeof obj !== 'object') return obj;
-        const copy = { ...obj };
-        delete copy.profile_image;
-        return copy;
-      };
-      const minimalTeacher = stripImg(resolvedTeacher);
-      const minimalStudent = stripImg(resolvedStudent);
-      const minimalUser = {
-        ...stripImg(enrichedUser),
-        ...(minimalTeacher ? { teacher: minimalTeacher } : {}),
-        ...(minimalStudent ? { student: minimalStudent } : {}),
-      };
-      localStorage.setItem('user', JSON.stringify(minimalUser));
-      localStorage.setItem('auth_user', JSON.stringify(minimalUser));
-      if (minimalTeacher) localStorage.setItem('teacher', JSON.stringify(minimalTeacher));
-      if (minimalStudent) localStorage.setItem('student', JSON.stringify(minimalStudent));
+      sessionStorage.removeItem('teacher');
+      localStorage.removeItem('teacher');
+    } catch {}
+  }
+
+  if (slimStudent) {
+    safeSetStorageItem('student', JSON.stringify(slimStudent));
+  } else {
+    try {
+      sessionStorage.removeItem('student');
+      localStorage.removeItem('student');
     } catch {}
   }
 };
@@ -120,25 +284,26 @@ const persistAuthSessionSafely = (newToken, enrichedUser, resolvedTeacher, resol
 // ✅ អនុគមន៍ភ្ជាប់រូបភាពពី Cache មកដាក់ក្នុង User និង Teacher វិញភ្លាមៗក្នុង 0ms
 const hydratePersonWithAvatar = (person) => {
   if (!person || typeof person !== 'object') return person;
-  const cachedAvatar = (() => {
-    try {
-      return localStorage.getItem(AUTH_AVATAR_CACHE_KEY);
-    } catch {
-      return null;
-    }
-  })();
+  const cachedAvatar = readCachedAvatarSync();
 
   const restoreImg = (obj) => {
     if (!obj || typeof obj !== 'object') return obj;
-    if (obj.profile_image === '__CACHED_AVATAR__' || (!obj.profile_image && cachedAvatar)) {
+    if (
+      obj.profile_image === '__CACHED_AVATAR__' ||
+      (!obj.profile_image && cachedAvatar)
+    ) {
       return { ...obj, profile_image: cachedAvatar };
     }
     return obj;
   };
 
   const hydrated = restoreImg(person);
-  if (hydrated.teacher) hydrated.teacher = restoreImg(hydrated.teacher);
-  if (hydrated.student) hydrated.student = restoreImg(hydrated.student);
+  if (hydrated.teacher && typeof hydrated.teacher === 'object') {
+    hydrated.teacher = restoreImg(hydrated.teacher);
+  }
+  if (hydrated.student && typeof hydrated.student === 'object') {
+    hydrated.student = restoreImg(hydrated.student);
+  }
   return hydrated;
 };
 
@@ -152,37 +317,69 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(() => readValidTokenSync());
   const skipNextFetchRef = useRef(false);
 
-  // ✅ អានទិន្នន័យ User និង Teacher ពី localStorage ភ្លាមៗក្នុង 0 វិនាទី
+  // ✅ អានទិន្នន័យ User និង Teacher ពី Storage ភ្លាមៗក្នុង 0 វិនាទី
   const [user, setUser] = useState(() => {
     const savedToken = readValidTokenSync();
     if (!savedToken) return null;
     const rawUser = readStoredJson('user') || readStoredJson('auth_user');
     const extracted = rawUser?.user || rawUser?.data || rawUser || null;
-    return hydratePersonWithAvatar(extracted);
+    if (extracted) {
+      return hydratePersonWithAvatar(extracted);
+    }
+    const fallbackTeacher = readStoredJson('teacher');
+    if (fallbackTeacher) {
+      return hydratePersonWithAvatar({
+        ...fallbackTeacher,
+        role_id: fallbackTeacher.role_id || 2,
+        role: fallbackTeacher.role || 'Teacher',
+        teacher: fallbackTeacher,
+        is_teacher: true,
+      });
+    }
+    return null;
   });
 
   const [teacher, setTeacher] = useState(() => {
     const savedToken = readValidTokenSync();
     if (!savedToken) return null;
-    const rawTeacher = readStoredJson('teacher');
+    const rawTeacher =
+      readStoredJson('teacher') ||
+      readStoredJson('user')?.teacher ||
+      readStoredJson('auth_user')?.teacher ||
+      null;
     return hydratePersonWithAvatar(rawTeacher);
   });
 
   const [loading, setLoading] = useState(() => {
     const savedToken = readValidTokenSync();
-    const savedUser = readStoredJson('user') || readStoredJson('auth_user');
-    return Boolean(savedToken && !savedUser);
+    const hasCachedIdentity = Boolean(
+      readStoredJson('user') ||
+        readStoredJson('auth_user') ||
+        readStoredJson('teacher')
+    );
+    return Boolean(savedToken && !hasCachedIdentity);
   });
 
   const clearAuthStorage = useCallback(() => {
+    AUTH_MEM_AVATAR = null;
     try {
-      localStorage.removeItem('token');
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('teacher');
-      localStorage.removeItem('student');
-      localStorage.removeItem('user');
-      localStorage.removeItem('auth_user');
-      localStorage.removeItem(AUTH_AVATAR_CACHE_KEY);
+      [
+        'token',
+        'auth_token',
+        'teacher',
+        'student',
+        'user',
+        'auth_user',
+        AUTH_AVATAR_THUMB_KEY,
+        AUTH_AVATAR_CACHE_KEY,
+        LEGACY_AVATAR_CACHE_KEY,
+        LAST_ACTIVE_ROLE_KEY,
+      ].forEach((k) => {
+        try {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+        } catch {}
+      });
     } catch {}
     setToken(null);
     setUser(null);
@@ -212,8 +409,8 @@ export const AuthProvider = ({ children }) => {
       api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       skipNextFetchRef.current = true;
       setToken(newToken);
-      setUser(enrichedUser);
-      setTeacher(resolvedTeacher);
+      setUser(hydratePersonWithAvatar(enrichedUser));
+      setTeacher(hydratePersonWithAvatar(resolvedTeacher));
       setLoading(false);
     },
     []
@@ -243,15 +440,15 @@ export const AuthProvider = ({ children }) => {
           ...(studentData ? { student: studentData } : {}),
         };
 
-        setUser(enrichedUser);
-        setTeacher(teacherData);
-
         persistAuthSessionSafely(
           readValidTokenSync(),
           enrichedUser,
           teacherData,
           studentData
         );
+
+        setUser(hydratePersonWithAvatar(enrichedUser));
+        setTeacher(hydratePersonWithAvatar(teacherData));
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -273,12 +470,16 @@ export const AuthProvider = ({ children }) => {
         return;
       }
 
-      const cachedUser = readStoredJson('user') || readStoredJson('auth_user');
-      if (cachedUser) {
+      const hasCachedIdentity = Boolean(
+        readStoredJson('user') ||
+          readStoredJson('auth_user') ||
+          readStoredJson('teacher')
+      );
+      if (hasCachedIdentity) {
         setLoading(false);
         const timer = setTimeout(() => {
           fetchUser();
-        }, 400);
+        }, 350);
         return () => clearTimeout(timer);
       } else {
         fetchUser();
@@ -291,7 +492,7 @@ export const AuthProvider = ({ children }) => {
 
   // ✅ ស្ដាប់ព្រឹត្តិការណ៍ផ្លាស់ប្ដូរទិន្នន័យគណនីពី Navbar, Login (Reset Password) ឬផ្ទាំង Tab ផ្សេងទៀត
   useEffect(() => {
-    const syncFromLocalStorage = () => {
+    const syncFromStorage = () => {
       const latestToken = readValidTokenSync();
       if (!latestToken) {
         setToken(null);
@@ -322,11 +523,11 @@ export const AuthProvider = ({ children }) => {
       setTeacher(latestTeacher);
     };
 
-    window.addEventListener('lms_user_updated', syncFromLocalStorage);
-    window.addEventListener('storage', syncFromLocalStorage);
+    window.addEventListener('lms_user_updated', syncFromStorage);
+    window.addEventListener('storage', syncFromStorage);
     return () => {
-      window.removeEventListener('lms_user_updated', syncFromLocalStorage);
-      window.removeEventListener('storage', syncFromLocalStorage);
+      window.removeEventListener('lms_user_updated', syncFromStorage);
+      window.removeEventListener('storage', syncFromStorage);
     };
   }, []);
 
@@ -548,29 +749,44 @@ export const AuthProvider = ({ children }) => {
   // ✅ កែលម្អ hasRole ឱ្យស្គាល់ទាំងឈ្មោះ Role និងលេខ role_id (1=Admin, 2=Teacher, 3=Student)
   const hasRole = useCallback(
     (roleName) => {
-      if (!user || !roleName) return false;
+      if (!roleName) return false;
       const target = String(roleName).trim().toLowerCase();
-      const userRole =
-        user?.role?.role_name ||
-        user?.role?.name ||
-        user?.role_name ||
-        (typeof user?.role === 'string' ? user.role : '');
 
-      if (userRole) {
-        const normRole = String(userRole).trim().toLowerCase();
-        if (normRole === target || normRole.includes(target)) {
+      if (user) {
+        const userRole =
+          user?.role?.role_name ||
+          user?.role?.name ||
+          user?.role_name ||
+          (typeof user?.role === 'string' ? user.role : '');
+
+        if (userRole) {
+          const normRole = String(userRole).trim().toLowerCase();
+          if (normRole === target || normRole.includes(target)) {
+            return true;
+          }
+        }
+
+        const rid = Number(user?.role_id);
+        if (target === 'admin' && rid === 1) return true;
+        if (
+          target === 'teacher' &&
+          (rid === 2 || Boolean(teacher) || Boolean(user?.teacher) || Boolean(user?.is_teacher))
+        ) {
+          return true;
+        }
+        if (target === 'student' && (rid === 3 || Boolean(user?.student))) {
           return true;
         }
       }
 
-      const rid = Number(user?.role_id);
-      if (target === 'admin' && rid === 1) return true;
-      if (target === 'teacher' && rid === 2) return true;
-      if (target === 'student' && rid === 3) return true;
+      const cachedRole = readRawStorage(LAST_ACTIVE_ROLE_KEY);
+      if (cachedRole && String(cachedRole).trim().toLowerCase() === target) {
+        return true;
+      }
 
       return false;
     },
-    [user]
+    [user, teacher]
   );
 
   const getTeacherData = useCallback(() => {
@@ -627,7 +843,7 @@ export const AuthProvider = ({ children }) => {
         register,
         logout,
         hasRole,
-        isAuthenticated: Boolean(token && user),
+        isAuthenticated: Boolean(token && (user || teacher)),
         getTeacherData,
         getFullName,
         getEmail,
