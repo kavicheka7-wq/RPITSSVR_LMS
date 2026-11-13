@@ -9,6 +9,26 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hanuman:wght@300;400;700;900&family=Inter:wght@300;400;500;600;700;800&family=Kantumruy+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- ✅ កំណត់ពណ៌ផ្ទៃក្រោយភ្លាមៗក្នុង 0ms ដើម្បីកុំឱ្យចាំងអេក្រង់សពេលបើកវេបសាយ ឬចុច F5 -->
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background-color: #f9fafb;
+      }
+      html.dark, html.dark body {
+        background-color: #020617;
+      }
+    </style>
+    <script>
+      try {
+        const theme = localStorage.getItem('theme') || localStorage.getItem('darkMode');
+        if (theme === 'dark' || theme === 'true') {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body class="bg-gray-50 text-gray-900 font-sans antialiased selection:bg-blue-500 selection:text-white">
     <div id="root"></div>
