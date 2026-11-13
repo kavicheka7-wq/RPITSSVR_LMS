@@ -748,7 +748,7 @@ const StudentDashboard = () => {
     [teacherAssignedQuizzes.length, doneQuizzesCount]
   );
 
-  // ✅ ប្រអប់រំកិលបង្ហាញព័ត៌មានសង្ខេប (ដកអក្សរ «ធ្វើរួច» ដែលស្ទួននៅខាងឆ្វេងចេញ ទុកតែនៅផ្លាកខាងចុងស្ដាំមួយកន្លែងគត់)
+  // ✅ ប្រអប់រំកិលបង្ហាញព័ត៌មានសង្ខេប
   const spotlightSlides = useMemo(() => {
     const slides = [];
 
@@ -1019,55 +1019,43 @@ const StudentDashboard = () => {
 
   const isLiquidDarkText = liquidLevelPercent < 58;
 
-  // ✅ កាតស្ថិតិទាំង ៤ (លុបជួរអក្សរពណ៌ខាងក្រោមចេញ ឱ្យមើលទៅស្រឡះស្អាត)
+  // ✅ កាតស្ថិតិទាំង ៤ (ដកផ្លាកជ្រុងខាងលើស្ដាំចេញទាំងអស់តាមរូបទី ១)
   const statCards = [
     {
       title: t('មុខវិជ្ជាកំពុងរៀន', 'Enrolled Courses'),
       value: stats?.total_courses ?? enrollments.length ?? 0,
-      badge: t('សកម្ម', 'Active'),
       icon: BookOpenIcon,
       cardStyle:
         'from-blue-500/10 via-indigo-500/5 to-transparent border-blue-200/70',
       iconBox:
         'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-blue-500/25',
-      badgeClass:
-        'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30',
     },
     {
       title: t('ពិន្ទុមធ្យមភាគ', 'Average Score'),
       value: `${averageScoreNum}%`,
-      badge: masteryInfo.statusText,
       icon: ChartBarIcon,
       cardStyle:
         'from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-200/70',
       iconBox:
         'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-emerald-500/25',
-      badgeClass:
-        'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
     },
     {
       title: t('កិច្ចការសិស្ស', 'Assignments'),
       value: totalHomeworkCount,
-      badge: `${doneHomeworkCount}/${totalHomeworkCount}`,
       icon: ClipboardDocumentListIcon,
       cardStyle:
         'from-purple-500/10 via-fuchsia-500/5 to-transparent border-purple-200/70',
       iconBox:
         'bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-purple-500/25',
-      badgeClass:
-        'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-500/30',
     },
     {
       title: t('កម្រងសំណួរប្រឡង', 'Quizzes'),
       value: totalQuizzesCount,
-      badge: `${doneQuizzesCount}/${totalQuizzesCount}`,
       icon: AcademicCapIcon,
       cardStyle:
         'from-amber-500/10 via-orange-500/5 to-transparent border-amber-200/70',
       iconBox:
         'bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-amber-500/25',
-      badgeClass:
-        'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30',
     },
   ];
 
@@ -1175,7 +1163,6 @@ const StudentDashboard = () => {
                       </div>
                     </div>
 
-                    {/* ✅ ផ្លាកបង្ហាញចំនួនធ្វើរួច ដាក់តែនៅខាងចុងស្ដាំនេះមួយកន្លែងគត់ (មិនស្ទួនជាមួយខាងឆ្វេងទេ) */}
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900/80 text-cyan-200 border border-white/15 font-extrabold text-xs shadow-sm">
                         <SparklesIcon className="h-4 w-4 text-yellow-300 shrink-0" />
@@ -1252,18 +1239,15 @@ const StudentDashboard = () => {
           <div className="my-5 flex items-center justify-center gap-5 sm:gap-6">
             {/* ✅ កងមូលមានទឹករលកខាងក្នុង (Liquid Wave Gauge) ពេលពិន្ទុពេញ ទឹកឡើងពេញកងមូល */}
             <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
-              {/* ផ្ទៃទឹករលកខាងក្នុងកងមូល */}
               <div className="std-liquid-inner absolute inset-[9px] rounded-full overflow-hidden bg-slate-100/90 dark:bg-slate-900/90 z-0 shadow-inner">
                 <div
                   className="absolute bottom-0 left-0 right-0 transition-all duration-1000 ease-out"
                   style={{ height: `${liquidLevelPercent}%` }}
                 >
-                  {/* រលកខាងក្រោយ */}
                   <div
                     className="std-liquid-wave-back absolute left-1/2 w-[220%] pb-[220%] rounded-[43%]"
                     style={{ backgroundColor: masteryInfo.waveBackColor }}
                   />
-                  {/* រលកខាងមុខ */}
                   <div
                     className="std-liquid-wave-front absolute left-1/2 w-[220%] pb-[220%] rounded-[40%]"
                     style={{ backgroundColor: masteryInfo.waveFrontColor }}
@@ -1271,7 +1255,6 @@ const StudentDashboard = () => {
                 </div>
               </div>
 
-              {/* រង្វង់ SVG ព័ទ្ធជុំវិញខាងក្រៅ */}
               <svg
                 className="relative z-10 w-full h-full -rotate-90 transform pointer-events-none"
                 viewBox="0 0 108 108"
@@ -1299,7 +1282,6 @@ const StudentDashboard = () => {
                 />
               </svg>
 
-              {/* អក្សរពិន្ទុនៅចំកណ្ដាលកងទឹក (បង្ហាញជា ពិន្ទុ / 100 ដើម្បីកុំឱ្យស្ទួនពាក្យមធ្យមភាគជាមួយរូបទី ២) */}
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center text-center pointer-events-none px-1">
                 <div className="flex items-baseline justify-center gap-0.5 leading-none">
                   <span
@@ -1333,7 +1315,6 @@ const StudentDashboard = () => {
               </div>
             </div>
 
-            {/* ប្រអប់ស្ថានភាពលទ្ធផល និងការរាប់ចំនួនការងារធ្វើរួច */}
             <div className="space-y-2 min-w-0 flex-1">
               <div className="std-subbox bg-gray-50 border border-gray-100 rounded-2xl px-3.5 py-2.5">
                 <span className="std-text-secondary block text-[10px] font-bold uppercase text-gray-400">
@@ -1362,11 +1343,12 @@ const StudentDashboard = () => {
             </div>
           </div>
 
+          {/* ✅ កែសម្រួលរូបទី ៣៖ ដូរពី «មុខវិជ្ជាកំពុងសិក្សា៖ 1» ទៅជា «ពិន្ទុជាប់កំណត់៖ 50 ពិន្ទុ» ដើម្បីកុំឱ្យស្ទួនជាមួយកាតទី ១ */}
           <div className="std-card-divider pt-4 border-t border-gray-100 flex items-center justify-between text-xs">
             <span className="std-text-secondary font-bold text-gray-500">
-              {t('មុខវិជ្ជាកំពុងសិក្សា៖', 'Enrolled Courses:')}{' '}
-              <strong className="std-text-primary text-gray-800">
-                {stats?.total_courses ?? enrollments.length ?? 0}
+              {t('ពិន្ទុជាប់កំណត់៖', 'Passing Score:')}{' '}
+              <strong className="std-text-primary text-emerald-600 dark:text-emerald-400">
+                50 {t('ពិន្ទុ', 'pts')}
               </strong>
             </span>
             <span className="font-extrabold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
@@ -1379,7 +1361,7 @@ const StudentDashboard = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. STATIC METRIC TILES (លុបជួរអក្សរពណ៌ខាងក្រោមចេញរួចរាល់)          */}
+      {/* 📌 2. STATIC METRIC TILES (ដកផ្លាកជ្រុងខាងលើស្ដាំចេញតាមរូបទី ១)        */}
       {/* ================================================================== */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
         {statCards.map((stat, index) => {
@@ -1389,18 +1371,12 @@ const StudentDashboard = () => {
               key={index}
               className={`std-metric-tile relative overflow-hidden rounded-2xl sm:rounded-3xl bg-white bg-gradient-to-br ${stat.cardStyle} p-4 sm:p-5 border shadow-2xs flex flex-col justify-between`}
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start justify-start">
                 <div
                   className={`h-11 w-11 sm:h-12 sm:w-12 rounded-2xl ${stat.iconBox} flex items-center justify-center shadow-lg shrink-0`}
                 >
                   <Icon className="h-5 w-5 sm:h-6 sm:w-6 stroke-[2.2]" />
                 </div>
-
-                <span
-                  className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold border ${stat.badgeClass}`}
-                >
-                  {stat.badge}
-                </span>
               </div>
 
               <div className="mt-4">
@@ -1417,32 +1393,24 @@ const StudentDashboard = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. ២ កាតទន្ទឹមគ្នា៖ កិច្ចការសិក្សា និង កម្រងសំណួរ (Static Display)    */}
+      {/* 📌 3. ២ កាតទន្ទឹមគ្នា៖ កិច្ចការថ្មីៗ និង កម្រងសំណួរថ្មីៗ (តាមរូបទី ២)      */}
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 items-stretch">
         
-        {/* ៣.១. កាតកិច្ចការថ្មីៗ */}
+        {/* ៣.១. កាតកិច្ចការថ្មីៗ (ដក «កិច្ចការសាលា» និង «0 / 0 ធ្វើរួច» នៅខាងលើចេញ) */}
         <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
           <div className="space-y-5">
-            <div className="flex items-center justify-between gap-3 pb-4 border-b border-gray-100 std-card-divider">
+            <div className="flex items-center justify-start gap-3 pb-4 border-b border-gray-100 std-card-divider">
               <div className="flex items-center gap-3.5 min-w-0">
                 <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-purple-500/20 shrink-0">
                   <ClipboardDocumentListIcon className="h-6 w-6 stroke-[2]" />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-purple-600 dark:text-purple-400">
-                    {t('កិច្ចការសាលា', 'Course Homework')}
-                  </span>
-                  <h3 className="std-text-primary text-lg sm:text-xl font-black text-gray-900 truncate mt-0.5">
+                  <h3 className="std-text-primary text-lg sm:text-xl font-black text-gray-900 truncate">
                     {t('កិច្ចការថ្មីៗ', 'Recent Assignments')}
                   </h3>
                 </div>
               </div>
-
-              <span className="px-3.5 py-1.5 rounded-full text-xs font-black bg-purple-50 text-purple-700 border border-purple-200/80 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-500/30 shrink-0">
-                {doneHomeworkCount} / {teacherAssignedHomework.length}{' '}
-                {t('ធ្វើរួច', 'Done')}
-              </span>
             </div>
 
             <div className="space-y-3">
@@ -1573,28 +1541,20 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* ៣.២. កាតកម្រងសំណួរថ្មីៗ */}
+        {/* ៣.២. កាតកម្រងសំណួរថ្មីៗ (ដក «តេស្តវាយតម្លៃសមត្ថភាព» និង «0 / 0 ធ្វើរួច» នៅខាងលើចេញ) */}
         <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
           <div className="space-y-5">
-            <div className="flex items-center justify-between gap-3 pb-4 border-b border-gray-100 std-card-divider">
+            <div className="flex items-center justify-start gap-3 pb-4 border-b border-gray-100 std-card-divider">
               <div className="flex items-center gap-3.5 min-w-0">
                 <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-md shadow-amber-500/20 shrink-0">
                   <PencilSquareIcon className="h-6 w-6 stroke-[2]" />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                    {t('តេស្តវាយតម្លៃសមត្ថភាព', 'Course Assessments')}
-                  </span>
-                  <h3 className="std-text-primary text-lg sm:text-xl font-black text-gray-900 truncate mt-0.5">
+                  <h3 className="std-text-primary text-lg sm:text-xl font-black text-gray-900 truncate">
                     {t('កម្រងសំណួរថ្មីៗ', 'Recent Quizzes')}
                   </h3>
                 </div>
               </div>
-
-              <span className="px-3.5 py-1.5 rounded-full text-xs font-black bg-amber-50 text-amber-700 border border-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 shrink-0">
-                {doneQuizzesCount} / {teacherAssignedQuizzes.length}{' '}
-                {t('ធ្វើរួច', 'Done')}
-              </span>
             </div>
 
             <div className="space-y-3">
