@@ -1017,9 +1017,7 @@ const StudentDashboard = () => {
     return 14;
   }, [averageScoreNum, activityCompletionPercent]);
 
-  const isLiquidDarkText = liquidLevelPercent < 58;
-
-  // ✅ កាតស្ថិតិទាំង ៤ (ដកផ្លាកជ្រុងខាងលើស្ដាំចេញទាំងអស់តាមរូបទី ១)
+  // ✅ កាតស្ថិតិទាំង ៤
   const statCards = [
     {
       title: t('មុខវិជ្ជាកំពុងរៀន', 'Enrolled Courses'),
@@ -1219,7 +1217,7 @@ const StudentDashboard = () => {
         </div>
 
         {/* ================================================================ */}
-        {/* 📌 ១.២. កាតលទ្ធផលការសិក្សារួម + កងមូលមានទឹករលក (Liquid Wave Ring) */}
+        {/* 📌 ១.២. កាតលទ្ធផលការសិក្សារួម + កងមូលមានទឹករលកសុទ្ធ (គ្មានអក្សរក្នុងកង) */}
         {/* ================================================================ */}
         <div className="lg:col-span-4 std-surface-card bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-center justify-between gap-2">
@@ -1237,7 +1235,7 @@ const StudentDashboard = () => {
           </div>
 
           <div className="my-5 flex items-center justify-center gap-5 sm:gap-6">
-            {/* ✅ កងមូលមានទឹករលកខាងក្នុង (Liquid Wave Gauge) ពេលពិន្ទុពេញ ទឹកឡើងពេញកងមូល */}
+            {/* ✅ កងមូលមានតែទឹករលកខាងក្នុងសុទ្ធសាធ (ដកអក្សរខាងក្នុងចេញតាមសំណូមពរ) */}
             <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
               <div className="std-liquid-inner absolute inset-[9px] rounded-full overflow-hidden bg-slate-100/90 dark:bg-slate-900/90 z-0 shadow-inner">
                 <div
@@ -1281,38 +1279,6 @@ const StudentDashboard = () => {
                   className="transition-all duration-1000 ease-out"
                 />
               </svg>
-
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center text-center pointer-events-none px-1">
-                <div className="flex items-baseline justify-center gap-0.5 leading-none">
-                  <span
-                    className={`text-xl font-black tracking-tight transition-colors duration-500 ${
-                      isLiquidDarkText
-                        ? 'std-text-primary text-slate-900'
-                        : 'text-white drop-shadow-xs'
-                    }`}
-                  >
-                    {averageScoreNum}
-                  </span>
-                  <span
-                    className={`text-[11px] font-extrabold transition-colors duration-500 ${
-                      isLiquidDarkText
-                        ? 'std-text-secondary text-slate-500'
-                        : 'text-white/90'
-                    }`}
-                  >
-                    /100
-                  </span>
-                </div>
-                <span
-                  className={`text-[9.5px] font-extrabold uppercase tracking-wider mt-1 transition-colors duration-500 ${
-                    isLiquidDarkText
-                      ? 'text-indigo-600 dark:text-indigo-300'
-                      : 'text-white/95 drop-shadow-2xs'
-                  }`}
-                >
-                  {t('ពិន្ទុសរុប', 'Score Pts')}
-                </span>
-              </div>
             </div>
 
             <div className="space-y-2 min-w-0 flex-1">
@@ -1343,7 +1309,6 @@ const StudentDashboard = () => {
             </div>
           </div>
 
-          {/* ✅ កែសម្រួលរូបទី ៣៖ ដូរពី «មុខវិជ្ជាកំពុងសិក្សា៖ 1» ទៅជា «ពិន្ទុជាប់កំណត់៖ 50 ពិន្ទុ» ដើម្បីកុំឱ្យស្ទួនជាមួយកាតទី ១ */}
           <div className="std-card-divider pt-4 border-t border-gray-100 flex items-center justify-between text-xs">
             <span className="std-text-secondary font-bold text-gray-500">
               {t('ពិន្ទុជាប់កំណត់៖', 'Passing Score:')}{' '}
@@ -1361,7 +1326,7 @@ const StudentDashboard = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. STATIC METRIC TILES (ដកផ្លាកជ្រុងខាងលើស្ដាំចេញតាមរូបទី ១)        */}
+      {/* 📌 2. STATIC METRIC TILES                                          */}
       {/* ================================================================== */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
         {statCards.map((stat, index) => {
@@ -1393,11 +1358,11 @@ const StudentDashboard = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. ២ កាតទន្ទឹមគ្នា៖ កិច្ចការថ្មីៗ និង កម្រងសំណួរថ្មីៗ (តាមរូបទី ២)      */}
+      {/* 📌 3. ២ កាតទន្ទឹមគ្នា៖ កិច្ចការថ្មីៗ និង កម្រងសំណួរថ្មីៗ                   */}
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 items-stretch">
         
-        {/* ៣.១. កាតកិច្ចការថ្មីៗ (ដក «កិច្ចការសាលា» និង «0 / 0 ធ្វើរួច» នៅខាងលើចេញ) */}
+        {/* ៣.១. កាតកិច្ចការថ្មីៗ */}
         <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
           <div className="space-y-5">
             <div className="flex items-center justify-start gap-3 pb-4 border-b border-gray-100 std-card-divider">
@@ -1541,7 +1506,7 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* ៣.២. កាតកម្រងសំណួរថ្មីៗ (ដក «តេស្តវាយតម្លៃសមត្ថភាព» និង «0 / 0 ធ្វើរួច» នៅខាងលើចេញ) */}
+        {/* ៣.២. កាតកម្រងសំណួរថ្មីៗ */}
         <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
           <div className="space-y-5">
             <div className="flex items-center justify-start gap-3 pb-4 border-b border-gray-100 std-card-divider">
