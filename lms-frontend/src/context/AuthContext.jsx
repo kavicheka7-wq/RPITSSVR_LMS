@@ -1,640 +1,459 @@
-// src/context/AuthContext.jsx
-import React, {
-  createContext,
-  useState,
-  useContext,
-  useEffect,
-  useRef,
-  useCallback,
-} from 'react';
-import api from '../services/api';
+// src/App.jsx
+import React, { useEffect, useRef } from 'react';
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+} from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { LanguageProvider } from './context/LanguageContext';
+import ProtectedRoute from './components/common/ProtectedRoute';
+import Navbar from './components/common/Navbar';
+import Sidebar from './components/common/Sidebar';
+import BottomNav from './components/common/BottomNav';
+import Login from './components/auth/Login';
+import Register from './components/auth/Register';
 
-const AuthContext = createContext();
+// Admin Components
+import AdminDashboard from './components/admin/AdminDashboard';
+import ManageTeachers from './components/admin/ManageTeachers';
+import ManageCourses from './components/admin/ManageCourses';
+import ManageDepartments from './components/admin/ManageDepartments';
+import AdminReports from './components/admin/AdminReports';
+import ManageStudentsYear1 from './components/admin/ManageStudentsYear1';
+import ManageStudentsYear2 from './components/admin/ManageStudentsYear2';
+import ManageStudentsYear3 from './components/admin/ManageStudentsYear3';
+import ManageStudentsYear4 from './components/admin/ManageStudentsYear4';
 
-export const useAuth = () => useContext(AuthContext);
+// Teacher Components
+import TeacherDashboard from './components/teacher/TeacherDashboard';
+import TeacherManageCourses from './components/teacher/TeacherManageCourses';
+import TeacherManageAssignments from './components/teacher/TeacherManageAssignments';
+import TeacherManageQuizzes from './components/teacher/TeacherManageQuizzes';
+import ManageLessons from './components/teacher/ManageLessons';
+import TeacherManageStudents from './components/teacher/TeacherManageStudents';
+import TeacherManageGrades from './components/teacher/TeacherManageGrades';
+import ManageAttendance from './components/teacher/ManageAttendance';
 
-const AUTH_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v1';
+// Student Components
+import StudentDashboard from './components/student/StudentDashboard';
+import ViewAttendance from './components/student/ViewAttendance';
+import ViewScores from './components/student/ViewScores';
+import StudentCourses from './components/student/StudentCourses';
+import StudentLessons from './components/student/StudentLessons';
+import StudentAssignments from './components/student/StudentAssignments';
+import StudentQuizzes from './components/student/StudentQuizzes';
 
-const readStoredJson = (key) => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+// ✅ ប្ដូរ URL ទៅជា /dashboard ដោយមិនបង្កឱ្យ Re-render ទំព័រសាជាថ្មី
+const RootDashboardEntry = ({ children }) => {
+  useEffect(() => {
+    if (window.location.pathname === '/') {
+      window.history.replaceState(null, '', '/dashboard');
+    }
+  }, []);
+
+  return children;
 };
 
-const readValidTokenSync = () => {
-  try {
-    const raw =
-      localStorage.getItem('token') || localStorage.getItem('auth_token');
-    if (!raw || raw === 'undefined' || raw === 'null') return null;
-    return raw;
-  } catch {
-    return null;
-  }
-};
+// Main App Content with routing
+const AppContent = () => {
+  const { user, loading, hasRole } = useAuth();
+  const location = useLocation();
+  const mainScrollRef = useRef(null);
 
-// ✅ អនុគមន៍ញែក និងរក្សាទុកទិន្នន័យ User/Teacher ដោយមិនឱ្យពេញទំហំ localStorage ជាដាច់ខាត
-const persistAuthSessionSafely = (newToken, enrichedUser, resolvedTeacher, resolvedStudent) => {
-  try {
-    if (newToken) {
-      localStorage.setItem('token', newToken);
+  // ✅ រំកិលផ្ទៃមាតិកាមកលើបំផុតវិញដោយស្វ័យប្រវត្តិរាល់ពេលប្ដូរទំព័រ (Route Change)
+  useEffect(() => {
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTo({ top: 0, behavior: 'instant' });
     }
+  }, [location.pathname]);
 
-    // ទាញយករូបភាព Profile មករក្សាទុកដាច់ដោយឡែកតែ ១ កន្លែង (ជៀសវាងស្ទួន ៣-៤ កន្លែង)
-    const avatarImg =
-      resolvedTeacher?.profile_image ||
-      resolvedStudent?.profile_image ||
-      enrichedUser?.profile_image ||
-      enrichedUser?.teacher?.profile_image ||
-      enrichedUser?.student?.profile_image ||
-      null;
+  // ✅ ចាប់សកម្មភាព Scroll គ្រប់ទីកន្លែង ដើម្បីបង្ហាញ Scrollbar តែពេលកំពុងអូស និងលាក់វិញពេលឈប់អូស
+  useEffect(() => {
+    let scrollTimer = null;
 
-    if (avatarImg) {
-      try {
-        localStorage.setItem(AUTH_AVATAR_CACHE_KEY, avatarImg);
-      } catch {}
-    }
+    const handleScroll = (e) => {
+      document.documentElement.classList.add('is-scrolling');
+      if (e?.target && e.target.classList) {
+        e.target.classList.add('is-scrolling');
+      }
 
-    // បង្កើតទិន្នន័យគណនីដែលតូចស្រាល (Slim Object) សម្រាប់ធានាថាការ Save ចូល localStorage ជោគជ័យ 100%
-    const makeSlimPerson = (person) => {
-      if (!person || typeof person !== 'object') return person;
-      const isHeavyBase64 =
-        typeof person.profile_image === 'string' &&
-        person.profile_image.startsWith('data:') &&
-        person.profile_image.length > 20000;
-      return {
-        ...person,
-        profile_image: isHeavyBase64 ? '__CACHED_AVATAR__' : person.profile_image,
-      };
+      if (scrollTimer) clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        document.documentElement.classList.remove('is-scrolling');
+        document
+          .querySelectorAll('.is-scrolling')
+          .forEach((el) => el.classList.remove('is-scrolling'));
+      }, 750);
     };
 
-    const slimTeacher = makeSlimPerson(resolvedTeacher);
-    const slimStudent = makeSlimPerson(resolvedStudent);
-    const slimUser = {
-      ...makeSlimPerson(enrichedUser),
-      ...(slimTeacher ? { teacher: slimTeacher } : {}),
-      ...(slimStudent ? { student: slimStudent } : {}),
+    window.addEventListener('scroll', handleScroll, {
+      capture: true,
+      passive: true,
+    });
+    return () => {
+      window.removeEventListener('scroll', handleScroll, { capture: true });
+      if (scrollTimer) clearTimeout(scrollTimer);
     };
+  }, []);
 
-    const serializedUser = JSON.stringify(slimUser);
-    localStorage.setItem('user', serializedUser);
-    localStorage.setItem('auth_user', serializedUser);
+  // ✅ កំណត់សិទ្ធិតួនាទីរបស់អ្នកប្រើប្រាស់ (Role Resolver - គាំទ្រទាំងលេខ និងអក្សរ)
+  const getUserRole = () => {
+    const rawRole =
+      user?.role?.role_name ||
+      user?.role?.name ||
+      user?.role_name ||
+      (typeof user?.role === 'string' ? user.role : '') ||
+      '';
+    const r = String(rawRole).trim().toLowerCase();
+    const roleIdNum = Number(user?.role_id);
 
-    if (slimTeacher) {
-      localStorage.setItem('teacher', JSON.stringify(slimTeacher));
-    } else {
-      localStorage.removeItem('teacher');
+    if (r.includes('admin') || roleIdNum === 1) return 'admin';
+    if (r.includes('teacher') || roleIdNum === 2) return 'teacher';
+    if (r.includes('student') || roleIdNum === 3) return 'student';
+
+    if (typeof hasRole === 'function') {
+      if (hasRole('Admin')) return 'admin';
+      if (hasRole('Teacher')) return 'teacher';
+      if (hasRole('Student')) return 'student';
     }
-
-    if (slimStudent) {
-      localStorage.setItem('student', JSON.stringify(slimStudent));
-    } else {
-      localStorage.removeItem('student');
-    }
-  } catch {
-    // Fallback ករណី localStorage ពេញខ្លាំង៖ លុបរូបភាពចេញសិន តែរក្សាឈ្មោះ និងសិទ្ធិ (Role) ឱ្យនៅដដែល ដើម្បីកុំឱ្យ F5 ចេញអេក្រង់ស
-    try {
-      const stripImg = (obj) => {
-        if (!obj || typeof obj !== 'object') return obj;
-        const copy = { ...obj };
-        delete copy.profile_image;
-        return copy;
-      };
-      const minimalTeacher = stripImg(resolvedTeacher);
-      const minimalStudent = stripImg(resolvedStudent);
-      const minimalUser = {
-        ...stripImg(enrichedUser),
-        ...(minimalTeacher ? { teacher: minimalTeacher } : {}),
-        ...(minimalStudent ? { student: minimalStudent } : {}),
-      };
-      localStorage.setItem('user', JSON.stringify(minimalUser));
-      localStorage.setItem('auth_user', JSON.stringify(minimalUser));
-      if (minimalTeacher) localStorage.setItem('teacher', JSON.stringify(minimalTeacher));
-      if (minimalStudent) localStorage.setItem('student', JSON.stringify(minimalStudent));
-    } catch {}
-  }
-};
-
-// ✅ អនុគមន៍ភ្ជាប់រូបភាពពី Cache មកដាក់ក្នុង User និង Teacher វិញភ្លាមៗក្នុង 0ms
-const hydratePersonWithAvatar = (person) => {
-  if (!person || typeof person !== 'object') return person;
-  const cachedAvatar = (() => {
-    try {
-      return localStorage.getItem(AUTH_AVATAR_CACHE_KEY);
-    } catch {
-      return null;
-    }
-  })();
-
-  const restoreImg = (obj) => {
-    if (!obj || typeof obj !== 'object') return obj;
-    if (obj.profile_image === '__CACHED_AVATAR__' || (!obj.profile_image && cachedAvatar)) {
-      return { ...obj, profile_image: cachedAvatar };
-    }
-    return obj;
+    return '';
   };
 
-  const hydrated = restoreImg(person);
-  if (hydrated.teacher) hydrated.teacher = restoreImg(hydrated.teacher);
-  if (hydrated.student) hydrated.student = restoreImg(hydrated.student);
-  return hydrated;
+  const role = getUserRole();
+
+  const getDashboardPath = () => {
+    if (!user) return '/';
+    return '/dashboard';
+  };
+
+  const renderRoleDashboard = () => {
+    if (role === 'admin') return <AdminDashboard />;
+    if (role === 'teacher') return <TeacherDashboard />;
+    return <StudentDashboard />;
+  };
+
+  // ✅ ប្រសិនបើកំពុងទាញទិន្នន័យ User លើកដំបូងបំផុត (មុនពេលមាន Cache) ឱ្យបង្ហាញស៊ុម Navbar និង Sidebar ភ្លាមៗ ជៀសវាងអេក្រង់ស ឬអេក្រង់ខ្មៅ
+  if (loading && !user) {
+    return (
+      <div className="flex flex-col h-screen w-full overflow-hidden bg-gray-50 dark:bg-slate-950">
+        <div className="w-full shrink-0 z-40">
+          <Navbar />
+        </div>
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-20 md:pb-6 min-w-0" />
+        </div>
+      </div>
+    );
+  }
+
+  // If user is not logged in, show auth pages without layout on clean root '/'
+  if (!user) {
+    return (
+      <Routes>
+        <Route path="/" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    );
+  }
+
+  // ✅ User is logged in: Navbar លាតពេញអេក្រង់ 100% នៅខាងលើ ហើយផ្ទៃខាងក្រោមជាអ្នក Scroll
+  return (
+    <div className="flex flex-col h-screen w-full overflow-hidden bg-gray-50 dark:bg-slate-950">
+      {/* 1. Navbar ពេញអេក្រង់ 100% ដល់គែមស្ដាំបំផុត គ្មាន Scrollbar មកបាំង */}
+      <div className="w-full shrink-0 z-40">
+        <Navbar />
+      </div>
+
+      {/* 2. ផ្ទៃខាងក្រោម Navbar (Sidebar + Main Content ដែលអាច Scroll បានយ៉ាងរលូន) */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        <Sidebar />
+        <main
+          ref={mainScrollRef}
+          id="app-main-scroll"
+          className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-20 md:pb-6 min-w-0"
+        >
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <RootDashboardEntry>{renderRoleDashboard()}</RootDashboardEntry>
+              }
+            />
+            <Route
+              path="/login"
+              element={<Navigate to="/dashboard" replace />}
+            />
+            <Route
+              path="/register"
+              element={<Navigate to="/dashboard" replace />}
+            />
+
+            {/* ========================================================== */}
+            {/* 📌 ១. CLEAN UNIFIED ROUTES (គ្មាន /admin, /teacher, /student) */}
+            {/* ========================================================== */}
+            <Route path="/dashboard" element={renderRoleDashboard()} />
+
+            <Route
+              path="/courses"
+              element={
+                role === 'admin' ? (
+                  <ManageCourses />
+                ) : role === 'teacher' ? (
+                  <TeacherManageCourses />
+                ) : (
+                  <StudentCourses />
+                )
+              }
+            />
+
+            {/* Admin Exclusive Clean Routes */}
+            <Route element={<ProtectedRoute allowedRoles={['Admin']} />}>
+              <Route path="/teachers" element={<ManageTeachers />} />
+              <Route
+                path="/users"
+                element={<Navigate to="/students/year-1" replace />}
+              />
+              <Route
+                path="/students/year-1"
+                element={<ManageStudentsYear1 />}
+              />
+              <Route
+                path="/students/year-2"
+                element={<ManageStudentsYear2 />}
+              />
+              <Route
+                path="/students/year-3"
+                element={<ManageStudentsYear3 />}
+              />
+              <Route
+                path="/students/year-4"
+                element={<ManageStudentsYear4 />}
+              />
+              <Route path="/reports" element={<AdminReports />} />
+            </Route>
+
+            {/* Admin & Teacher Shared Clean Routes */}
+            <Route
+              element={<ProtectedRoute allowedRoles={['Admin', 'Teacher']} />}
+            >
+              <Route path="/departments" element={<ManageDepartments />} />
+              <Route
+                path="/students"
+                element={
+                  role === 'admin' ? (
+                    <Navigate to="/students/year-1" replace />
+                  ) : (
+                    <TeacherManageStudents />
+                  )
+                }
+              />
+            </Route>
+
+            {/* Teacher & Student Shared Clean Routes */}
+            <Route
+              element={<ProtectedRoute allowedRoles={['Teacher', 'Student']} />}
+            >
+              <Route
+                path="/lessons"
+                element={
+                  role === 'teacher' ? <ManageLessons /> : <StudentLessons />
+                }
+              />
+              <Route
+                path="/assignments"
+                element={
+                  role === 'teacher' ? (
+                    <TeacherManageAssignments />
+                  ) : (
+                    <StudentAssignments />
+                  )
+                }
+              />
+              <Route
+                path="/quizzes"
+                element={
+                  role === 'teacher' ? (
+                    <TeacherManageQuizzes />
+                  ) : (
+                    <StudentQuizzes />
+                  )
+                }
+              />
+              <Route
+                path="/attendance"
+                element={
+                  role === 'teacher' ? <ManageAttendance /> : <ViewAttendance />
+                }
+              />
+              <Route
+                path="/scores"
+                element={
+                  role === 'teacher' ? <TeacherManageGrades /> : <ViewScores />
+                }
+              />
+              <Route
+                path="/grades"
+                element={
+                  role === 'teacher' ? <TeacherManageGrades /> : <ViewScores />
+                }
+              />
+            </Route>
+
+            {/* ========================================================== */}
+            {/* 📌 ២. AUTO-REDIRECT ពី URL ចាស់ៗមកកាន់ URL ថ្មីស្អាតដោយស្វ័យប្រវត្តិ */}
+            {/* ========================================================== */}
+            <Route
+              path="/admin/dashboard"
+              element={<Navigate to="/dashboard" replace />}
+            />
+            <Route
+              path="/admin/courses"
+              element={<Navigate to="/courses" replace />}
+            />
+            <Route
+              path="/admin/departments"
+              element={<Navigate to="/departments" replace />}
+            />
+            <Route
+              path="/admin/teachers"
+              element={<Navigate to="/teachers" replace />}
+            />
+            <Route
+              path="/admin/users"
+              element={<Navigate to="/students/year-1" replace />}
+            />
+            <Route
+              path="/admin/students"
+              element={<Navigate to="/students/year-1" replace />}
+            />
+            <Route
+              path="/admin/students/year-1"
+              element={<Navigate to="/students/year-1" replace />}
+            />
+            <Route
+              path="/admin/students/year-2"
+              element={<Navigate to="/students/year-2" replace />}
+            />
+            <Route
+              path="/admin/students/year-3"
+              element={<Navigate to="/students/year-3" replace />}
+            />
+            <Route
+              path="/admin/students/year-4"
+              element={<Navigate to="/students/year-4" replace />}
+            />
+            <Route
+              path="/admin/reports"
+              element={<Navigate to="/reports" replace />}
+            />
+
+            <Route
+              path="/teacher/dashboard"
+              element={<Navigate to="/dashboard" replace />}
+            />
+            <Route
+              path="/teacher/courses"
+              element={<Navigate to="/courses" replace />}
+            />
+            <Route
+              path="/teacher/lessons"
+              element={<Navigate to="/lessons" replace />}
+            />
+            <Route
+              path="/teacher/assignments"
+              element={<Navigate to="/assignments" replace />}
+            />
+            <Route
+              path="/teacher/quizzes"
+              element={<Navigate to="/quizzes" replace />}
+            />
+            <Route
+              path="/teacher/attendance"
+              element={<Navigate to="/attendance" replace />}
+            />
+            <Route
+              path="/teacher/scores"
+              element={<Navigate to="/scores" replace />}
+            />
+            <Route
+              path="/teacher/grades"
+              element={<Navigate to="/grades" replace />}
+            />
+            <Route
+              path="/teacher/students"
+              element={<Navigate to="/students" replace />}
+            />
+            <Route
+              path="/teacher/departments"
+              element={<Navigate to="/departments" replace />}
+            />
+
+            <Route
+              path="/student/dashboard"
+              element={<Navigate to="/dashboard" replace />}
+            />
+            <Route
+              path="/student/courses"
+              element={<Navigate to="/courses" replace />}
+            />
+            <Route
+              path="/student/lessons"
+              element={<Navigate to="/lessons" replace />}
+            />
+            <Route
+              path="/student/attendance"
+              element={<Navigate to="/attendance" replace />}
+            />
+            <Route
+              path="/student/scores"
+              element={<Navigate to="/scores" replace />}
+            />
+            <Route
+              path="/student/grades"
+              element={<Navigate to="/grades" replace />}
+            />
+            <Route
+              path="/student/assignments"
+              element={<Navigate to="/assignments" replace />}
+            />
+            <Route
+              path="/student/quizzes"
+              element={<Navigate to="/quizzes" replace />}
+            />
+
+            {/* Fallback */}
+            <Route
+              path="*"
+              element={<Navigate to={getDashboardPath()} replace />}
+            />
+          </Routes>
+        </main>
+      </div>
+
+      <BottomNav />
+    </div>
+  );
 };
 
-// ✅ កំណត់ Authorization Header ភ្លាមៗតាំងពីវិនាទីដំបូង មុនពេល Component កូនៗហៅ API
-const initialBootToken = readValidTokenSync();
-if (initialBootToken) {
-  api.defaults.headers.common['Authorization'] = `Bearer ${initialBootToken}`;
+// Main App Component
+function App() {
+  return (
+    <AuthProvider>
+      <LanguageProvider>
+        <Router
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <AppContent />
+        </Router>
+      </LanguageProvider>
+    </AuthProvider>
+  );
 }
 
-export const AuthProvider = ({ children }) => {
-  const [token, setToken] = useState(() => readValidTokenSync());
-  const skipNextFetchRef = useRef(false);
-
-  // ✅ អានទិន្នន័យ User និង Teacher ពី localStorage ភ្លាមៗក្នុង 0 វិនាទី
-  const [user, setUser] = useState(() => {
-    const savedToken = readValidTokenSync();
-    if (!savedToken) return null;
-    const rawUser = readStoredJson('user') || readStoredJson('auth_user');
-    const extracted = rawUser?.user || rawUser?.data || rawUser || null;
-    return hydratePersonWithAvatar(extracted);
-  });
-
-  const [teacher, setTeacher] = useState(() => {
-    const savedToken = readValidTokenSync();
-    if (!savedToken) return null;
-    const rawTeacher = readStoredJson('teacher');
-    return hydratePersonWithAvatar(rawTeacher);
-  });
-
-  const [loading, setLoading] = useState(() => {
-    const savedToken = readValidTokenSync();
-    const savedUser = readStoredJson('user') || readStoredJson('auth_user');
-    return Boolean(savedToken && !savedUser);
-  });
-
-  const clearAuthStorage = useCallback(() => {
-    try {
-      localStorage.removeItem('token');
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('teacher');
-      localStorage.removeItem('student');
-      localStorage.removeItem('user');
-      localStorage.removeItem('auth_user');
-      localStorage.removeItem(AUTH_AVATAR_CACHE_KEY);
-    } catch {}
-    setToken(null);
-    setUser(null);
-    setTeacher(null);
-    delete api.defaults.headers.common['Authorization'];
-  }, []);
-
-  const applyAuthSession = useCallback(
-    (newToken, userData, teacherData = null, studentData = null) => {
-      if (!newToken || !userData) return;
-
-      const resolvedTeacher = teacherData || userData?.teacher || null;
-      const resolvedStudent = studentData || userData?.student || null;
-      const enrichedUser = {
-        ...userData,
-        ...(resolvedTeacher ? { teacher: resolvedTeacher } : {}),
-        ...(resolvedStudent ? { student: resolvedStudent } : {}),
-      };
-
-      persistAuthSessionSafely(
-        newToken,
-        enrichedUser,
-        resolvedTeacher,
-        resolvedStudent
-      );
-
-      api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-      skipNextFetchRef.current = true;
-      setToken(newToken);
-      setUser(enrichedUser);
-      setTeacher(resolvedTeacher);
-      setLoading(false);
-    },
-    []
-  );
-
-  const fetchUser = useCallback(async () => {
-    try {
-      const response = await api.get('/user');
-      const resData = response.data || {};
-      const userData =
-        resData.user || resData.data?.user || resData.data || resData;
-      const teacherData =
-        resData.teacher ||
-        resData.data?.teacher ||
-        userData?.teacher ||
-        null;
-      const studentData =
-        resData.student ||
-        resData.data?.student ||
-        userData?.student ||
-        null;
-
-      if (userData && (userData.id || userData.user_id || userData.email)) {
-        const enrichedUser = {
-          ...userData,
-          ...(teacherData ? { teacher: teacherData } : {}),
-          ...(studentData ? { student: studentData } : {}),
-        };
-
-        setUser(enrichedUser);
-        setTeacher(teacherData);
-
-        persistAuthSessionSafely(
-          readValidTokenSync(),
-          enrichedUser,
-          teacherData,
-          studentData
-        );
-      }
-    } catch (error) {
-      console.error('Error fetching user:', error);
-      const status = error.response?.status;
-      if (status === 401 || status === 403) {
-        clearAuthStorage();
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [clearAuthStorage]);
-
-  useEffect(() => {
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      if (skipNextFetchRef.current) {
-        skipNextFetchRef.current = false;
-        setLoading(false);
-        return;
-      }
-
-      const cachedUser = readStoredJson('user') || readStoredJson('auth_user');
-      if (cachedUser) {
-        setLoading(false);
-        const timer = setTimeout(() => {
-          fetchUser();
-        }, 400);
-        return () => clearTimeout(timer);
-      } else {
-        fetchUser();
-      }
-    } else {
-      delete api.defaults.headers.common['Authorization'];
-      setLoading(false);
-    }
-  }, [token, fetchUser]);
-
-  // ✅ ស្ដាប់ព្រឹត្តិការណ៍ផ្លាស់ប្ដូរទិន្នន័យគណនីពី Navbar, Login (Reset Password) ឬផ្ទាំង Tab ផ្សេងទៀត
-  useEffect(() => {
-    const syncFromLocalStorage = () => {
-      const latestToken = readValidTokenSync();
-      if (!latestToken) {
-        setToken(null);
-        setUser(null);
-        setTeacher(null);
-        delete api.defaults.headers.common['Authorization'];
-        return;
-      }
-
-      api.defaults.headers.common['Authorization'] = `Bearer ${latestToken}`;
-      const latestUserRaw =
-        readStoredJson('user') || readStoredJson('auth_user');
-      const latestUser = hydratePersonWithAvatar(
-        latestUserRaw?.user || latestUserRaw?.data || latestUserRaw || null
-      );
-      const latestTeacher = hydratePersonWithAvatar(
-        readStoredJson('teacher') || latestUser?.teacher || null
-      );
-
-      setToken((prev) => {
-        if (prev !== latestToken) {
-          skipNextFetchRef.current = true;
-          return latestToken;
-        }
-        return prev;
-      });
-      if (latestUser) setUser(latestUser);
-      setTeacher(latestTeacher);
-    };
-
-    window.addEventListener('lms_user_updated', syncFromLocalStorage);
-    window.addEventListener('storage', syncFromLocalStorage);
-    return () => {
-      window.removeEventListener('lms_user_updated', syncFromLocalStorage);
-      window.removeEventListener('storage', syncFromLocalStorage);
-    };
-  }, []);
-
-  // ✅ ជំហានទី ១៖ ពិនិត្យ Email និង Password
-  const login = async (email, password) => {
-    try {
-      const response = await api.post('/login', { email, password });
-      const data = response.data || {};
-
-      if (data.requires_2fa) {
-        return {
-          success: true,
-          requires_2fa: true,
-          email: data.email || email,
-          role_name: data.role_name,
-          is_new_device: Boolean(data.is_new_device),
-          has_security_pin: Boolean(data.has_security_pin),
-          requires_pin_verify: Boolean(data.requires_pin_verify),
-          requires_pin_setup: Boolean(data.requires_pin_setup),
-          mail_sent: Boolean(data.mail_sent),
-          mail_error: data.mail_error || null,
-          telegram_sent: Boolean(data.telegram_sent),
-          telegram_linked: Boolean(data.telegram_linked),
-          telegram_link_url: data.telegram_link_url || null,
-          delivery_channel: data.delivery_channel || 'none',
-          dev_otp: data.dev_otp || null,
-          message: data.message,
-        };
-      }
-
-      const {
-        token: newToken,
-        user: userData,
-        teacher: teacherData,
-        student: studentData,
-      } = data;
-      if (newToken && userData) {
-        applyAuthSession(newToken, userData, teacherData, studentData);
-      }
-
-      return {
-        success: true,
-        requires_2fa: false,
-        user: userData,
-        role_name: data.role_name,
-      };
-    } catch (error) {
-      const validationErrors = error.response?.data?.errors || null;
-      const firstError = validationErrors
-        ? Object.values(validationErrors).flat()[0]
-        : null;
-
-      return {
-        success: false,
-        errors: validationErrors,
-        error:
-          firstError ||
-          error.response?.data?.message ||
-          'ការចូលប្រព័ន្ធបរាជ័យ',
-      };
-    }
-  };
-
-  // ✅ ជំហានទី ២៖ ផ្ទៀងផ្ទាត់លេខកូដ OTP ៦ ខ្ទង់
-  const verifyTwoFactor = async (
-    email,
-    otpCode,
-    logoutOtherDevices = true,
-    securityPin = ''
-  ) => {
-    try {
-      const payload = {
-        email,
-        otp_code: otpCode,
-        logout_other_devices: logoutOtherDevices,
-      };
-      if (securityPin && String(securityPin).length === 4) {
-        payload.security_pin = String(securityPin);
-      }
-
-      const response = await api.post('/verify-2fa', payload);
-      const {
-        token: newToken,
-        user: userData,
-        teacher: teacherData,
-        student: studentData,
-        message,
-      } = response.data || {};
-
-      if (newToken && userData) {
-        applyAuthSession(newToken, userData, teacherData, studentData);
-        return {
-          success: true,
-          user: userData,
-          teacher: teacherData,
-          student: studentData,
-          message,
-        };
-      }
-
-      return {
-        success: false,
-        error: 'មិនអាចផ្ទៀងផ្ទាត់ទិន្នន័យចូលប្រព័ន្ធបានទេ',
-      };
-    } catch (error) {
-      const validationErrors = error.response?.data?.errors || null;
-      const firstError = validationErrors
-        ? Object.values(validationErrors).flat()[0]
-        : null;
-
-      return {
-        success: false,
-        errors: validationErrors,
-        otp_expired: Boolean(error.response?.data?.otp_expired),
-        remaining_attempts: error.response?.data?.remaining_attempts,
-        error:
-          firstError ||
-          error.response?.data?.message ||
-          'លេខកូដផ្ទៀងផ្ទាត់មិនត្រឹមត្រូវ ឬបានផុតកំណត់ហើយ!',
-      };
-    }
-  };
-
-  // ✅ មុខងារស្នើសុំផ្ញើលេខកូដម្ដងទៀត
-  const resendTwoFactor = async (email) => {
-    try {
-      const response = await api.post('/resend-2fa', { email });
-      const data = response.data || {};
-      return {
-        success: true,
-        mail_sent: Boolean(data.mail_sent),
-        mail_error: data.mail_error || null,
-        telegram_linked: Boolean(data.telegram_linked),
-        telegram_sent: Boolean(data.telegram_sent),
-        telegram_link_url: data.telegram_link_url || null,
-        delivery_channel: data.delivery_channel || 'none',
-        dev_otp: data.dev_otp || null,
-        message:
-          data.message || 'បានផ្ញើលេខកូដថ្មីទៅកាន់គណនីរបស់អ្នកហើយ!',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error:
-          error.response?.data?.message ||
-          'មិនអាចផ្ញើលេខកូដម្ដងទៀតបានទេ',
-      };
-    }
-  };
-
-  // ✅ ពិនិត្យស្ថានភាពភ្ជាប់ Telegram
-  const checkTelegramLinkStatus = async (email) => {
-    try {
-      const response = await api.post('/check-telegram-link', { email });
-      const data = response.data || {};
-      return {
-        linked: Boolean(data.linked ?? data.telegram_linked),
-        telegram_sent: Boolean(data.telegram_sent),
-        telegram_link_url: data.telegram_link_url || null,
-        delivery_channel: data.delivery_channel || null,
-        dev_otp: data.dev_otp || null,
-        message: data.message,
-      };
-    } catch {
-      return { linked: false };
-    }
-  };
-
-  // ✅ ចុះឈ្មោះគណនី Admin ដំបូង
-  const register = async (userData) => {
-    try {
-      const response = await api.post('/register', userData);
-      const data = response.data || {};
-      const newToken = data.token;
-      const createdUser = data.user || data.data;
-
-      if (newToken && createdUser) {
-        applyAuthSession(newToken, createdUser, null, null);
-      }
-      return {
-        success: true,
-        user: createdUser,
-        requires_2fa: Boolean(data.requires_2fa),
-      };
-    } catch (error) {
-      const validationErrors = error.response?.data?.errors || null;
-      const firstError = validationErrors
-        ? Object.values(validationErrors).flat()[0]
-        : null;
-
-      return {
-        success: false,
-        errors: validationErrors,
-        error:
-          firstError ||
-          error.response?.data?.message ||
-          'ការបង្កើតគណនីបរាជ័យ',
-      };
-    }
-  };
-
-  const logout = async (allDevices = false) => {
-    const currentToken = token || readValidTokenSync();
-    clearAuthStorage();
-
-    if (currentToken) {
-      try {
-        await api.post(
-          '/logout',
-          { all_devices: allDevices },
-          { headers: { Authorization: `Bearer ${currentToken}` } }
-        );
-      } catch {
-        // អ្នកប្រើប្រាស់បានចាកចេញរួចហើយ
-      }
-    }
-  };
-
-  // ✅ កែលម្អ hasRole ឱ្យស្គាល់ទាំងឈ្មោះ Role និងលេខ role_id (1=Admin, 2=Teacher, 3=Student)
-  const hasRole = useCallback(
-    (roleName) => {
-      if (!user || !roleName) return false;
-      const target = String(roleName).trim().toLowerCase();
-      const userRole =
-        user?.role?.role_name ||
-        user?.role?.name ||
-        user?.role_name ||
-        (typeof user?.role === 'string' ? user.role : '');
-
-      if (userRole) {
-        const normRole = String(userRole).trim().toLowerCase();
-        if (normRole === target || normRole.includes(target)) {
-          return true;
-        }
-      }
-
-      const rid = Number(user?.role_id);
-      if (target === 'admin' && rid === 1) return true;
-      if (target === 'teacher' && rid === 2) return true;
-      if (target === 'student' && rid === 3) return true;
-
-      return false;
-    },
-    [user]
-  );
-
-  const getTeacherData = useCallback(() => {
-    return (
-      teacher ||
-      hydratePersonWithAvatar(readStoredJson('teacher')) ||
-      user?.teacher ||
-      null
-    );
-  }, [teacher, user?.teacher]);
-
-  const getFullName = useCallback(() => {
-    const activeTeacher = getTeacherData();
-    if (hasRole('Teacher') && activeTeacher) {
-      return (
-        `${
-          activeTeacher.first_name || activeTeacher.teacher_first_name || ''
-        } ${
-          activeTeacher.last_name || activeTeacher.teacher_last_name || ''
-        }`.trim() ||
-        `${user?.first_name || ''} ${user?.last_name || ''}`.trim() ||
-        user?.name ||
-        ''
-      );
-    }
-    return (
-      `${user?.first_name || ''} ${user?.last_name || ''}`.trim() ||
-      user?.name ||
-      ''
-    );
-  }, [getTeacherData, hasRole, user]);
-
-  const getEmail = useCallback(() => {
-    const activeTeacher = getTeacherData();
-    if (hasRole('Teacher') && activeTeacher) {
-      return (
-        activeTeacher.email || activeTeacher.teacher_email || user?.email || ''
-      );
-    }
-    return user?.email || '';
-  }, [getTeacherData, hasRole, user]);
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        teacher: getTeacherData(),
-        loading,
-        login,
-        verifyTwoFactor,
-        resendTwoFactor,
-        checkTelegramLinkStatus,
-        applyAuthSession,
-        register,
-        logout,
-        hasRole,
-        isAuthenticated: Boolean(token && user),
-        getTeacherData,
-        getFullName,
-        getEmail,
-        setUser,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
-};
+export default App;
