@@ -630,6 +630,8 @@ const StudentDashboard = () => {
           'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
         statusTextColor: 'text-emerald-600 dark:text-emerald-400',
         ringColor: '#10b981',
+        waveFrontColor: 'rgba(16, 185, 129, 0.78)',
+        waveBackColor: 'rgba(52, 211, 153, 0.45)',
       };
     }
     if (averageScoreNum > 0) {
@@ -640,7 +642,9 @@ const StudentDashboard = () => {
         badgeClass:
           'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30',
         statusTextColor: 'text-rose-600 dark:text-rose-400',
-        ringColor: '#ef4444',
+        ringColor: '#f43f5e',
+        waveFrontColor: 'rgba(244, 63, 94, 0.78)',
+        waveBackColor: 'rgba(251, 113, 133, 0.45)',
       };
     }
     return {
@@ -651,6 +655,8 @@ const StudentDashboard = () => {
         'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30',
       statusTextColor: 'text-indigo-600 dark:text-indigo-400',
       ringColor: '#6366f1',
+      waveFrontColor: 'rgba(99, 102, 241, 0.72)',
+      waveBackColor: 'rgba(129, 140, 248, 0.42)',
     };
   }, [averageScoreNum, t]);
 
@@ -742,7 +748,7 @@ const StudentDashboard = () => {
     [teacherAssignedQuizzes.length, doneQuizzesCount]
   );
 
-  // ✅ ប្រអប់រំកិលបង្ហាញព័ត៌មានសង្ខេប (Static Spotlight Slides - មិនបាច់ឱ្យចុចទេ)
+  // ✅ ប្រអប់រំកិលបង្ហាញព័ត៌មានសង្ខេប (ដកអក្សរ «ធ្វើរួច» ដែលស្ទួននៅខាងឆ្វេងចេញ ទុកតែនៅផ្លាកខាងចុងស្ដាំមួយកន្លែងគត់)
   const spotlightSlides = useMemo(() => {
     const slides = [];
 
@@ -771,7 +777,7 @@ const StudentDashboard = () => {
       id: 'slide-assignments',
       badge: t('កិច្ចការសិស្ស', 'Homework'),
       badgeStyle: 'bg-purple-400/20 text-purple-200 border-purple-300/30',
-      meta: `${t('ធ្វើរួច៖', 'Completed:')} ${doneHomeworkCount} / ${totalAsg} ${t('កិច្ចការ', 'Tasks')}`,
+      meta: t('កិច្ចការអនុវត្តន៍ប្រចាំមុខវិជ្ជា', 'Course Practical Assignments'),
       title: t(
         'ពិនិត្យមើល និងប្រគល់កិច្ចការសិស្សឱ្យទាន់ពេលវេលា',
         'Check & submit your course assignments on time'
@@ -786,7 +792,7 @@ const StudentDashboard = () => {
       id: 'slide-quizzes',
       badge: t('កម្រងសំណួរប្រឡង', 'Quizzes'),
       badgeStyle: 'bg-emerald-400/20 text-emerald-200 border-emerald-300/30',
-      meta: `${t('ធ្វើរួច៖', 'Completed:')} ${doneQuizzesCount} / ${totalQz} ${t('កម្រងសំណួរ', 'Quizzes')}`,
+      meta: t('វាយតម្លៃសមត្ថភាពសិក្សា', 'Academic Skill Assessment'),
       title: t(
         'ធ្វើតេស្តសាកល្បងចំណេះដឹង ដើម្បីពង្រឹងសមត្ថភាពសិក្សា',
         'Take practice quizzes to test your knowledge'
@@ -800,12 +806,12 @@ const StudentDashboard = () => {
       id: 'slide-grades',
       badge: t('លទ្ធផលការសិក្សា', 'My Grades'),
       badgeStyle: 'bg-cyan-400/20 text-cyan-200 border-cyan-300/30',
-      meta: `${t('ពិន្ទុមធ្យមភាគបច្ចុប្បន្ន៖', 'Current Average:')} ${averageScoreNum}% (${masteryInfo.statusText})`,
+      meta: t('តាមដានវឌ្ឍនភាពសិក្សាប្រចាំឆមាស', 'Track Semester Academic Progress'),
       title: t(
         '«TVET ជំនាញពិត ជីវិតប្រសើរ! រៀនឱ្យចប់ ឱ្យចេះ ឱ្យមានការងារ»',
         '“TVET Real Skills, Better Life! Study to Finish, to Know, to Get a Job”'
       ),
-      statusPill: `${averageScoreNum}%`,
+      statusPill: `${averageScoreNum} / 100 ${t('ពិន្ទុ', 'pts')}`,
       icon: ChartBarIcon,
       iconBoxStyle: 'from-cyan-400 to-blue-500 text-slate-950',
     });
@@ -819,7 +825,6 @@ const StudentDashboard = () => {
     doneHomeworkCount,
     doneQuizzesCount,
     averageScoreNum,
-    masteryInfo.statusText,
     getTeacherDisplayName,
     t,
   ]);
@@ -991,12 +996,32 @@ const StudentDashboard = () => {
   const ringOffset =
     ringCircumference - (averageScoreNum / 100) * ringCircumference;
 
+  // គណនាផលបូកការងារដែលសិស្សបានធ្វើរួច (កិច្ចការ + កម្រងសំណួរ) សម្រាប់បង្ហាញបន្ថែមឱ្យច្បាស់លាស់
   const totalHomeworkCount =
     teacherAssignedHomework.length || stats?.total_assignments || 0;
   const totalQuizzesCount =
     teacherAssignedQuizzes.length || stats?.total_quizzes || 0;
+  const totalActivitiesCount = totalHomeworkCount + totalQuizzesCount;
+  const totalCompletedActivities = doneHomeworkCount + doneQuizzesCount;
+  const activityCompletionPercent =
+    totalActivitiesCount > 0
+      ? Math.round((totalCompletedActivities / totalActivitiesCount) * 100)
+      : 0;
 
-  // ✅ កាតស្ថិតិទាំង ៤ (Static Metric Tiles - មិនបាច់ឱ្យចុចទេ)
+  // ✅ កម្ពស់ទឹកក្នុងកងមូល (Liquid Level):
+  // - បើសិស្សមានពិន្ទុមធ្យមភាគ (> 0) ទឹកនឹងឡើងតាមភាគរយពិន្ទុ (បើបាន 100 ពិន្ទុ ទឹកពេញ 100%)
+  // - បើមិនទាន់មានពិន្ទុ (0%) តែសិស្សបានធ្វើកិច្ចការ/សំណួរខ្លះហើយ ទឹកនឹងឡើងតាមភាគរយការងារដែលធ្វើរួច ឬដាក់កម្ពស់រលកអប្បបរមា 14% ដើម្បីឱ្យឃើញទឹករលកស្អាត!
+  const liquidLevelPercent = useMemo(() => {
+    if (averageScoreNum > 0) return Math.min(100, Math.max(12, averageScoreNum));
+    if (activityCompletionPercent > 0) {
+      return Math.min(100, Math.max(14, activityCompletionPercent));
+    }
+    return 14;
+  }, [averageScoreNum, activityCompletionPercent]);
+
+  const isLiquidDarkText = liquidLevelPercent < 58;
+
+  // ✅ កាតស្ថិតិទាំង ៤ (រក្សាទុកទម្រង់រូបទី ២ ឱ្យនៅដដែល ១០០%)
   const statCards = [
     {
       title: t('មុខវិជ្ជាកំពុងរៀន', 'Enrolled Courses'),
@@ -1160,9 +1185,9 @@ const StudentDashboard = () => {
                       </div>
                     </div>
 
-                    {/* ✅ ផ្លាកបង្ហាញស្ថានភាពធម្មតា (Static Status Pill - មិនអាចចុចបានទេ) */}
+                    {/* ✅ ផ្លាកបង្ហាញចំនួនធ្វើរួច ដាក់តែនៅខាងចុងស្ដាំនេះមួយកន្លែងគត់ (មិនស្ទួនជាមួយខាងឆ្វេងទេ) */}
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900/75 text-cyan-200 border border-white/15 font-extrabold text-xs shadow-sm">
+                      <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900/80 text-cyan-200 border border-white/15 font-extrabold text-xs shadow-sm">
                         <SparklesIcon className="h-4 w-4 text-yellow-300 shrink-0" />
                         <span>{currentSlide.statusPill}</span>
                       </span>
@@ -1216,7 +1241,9 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* ១.២. កាតសមត្ថភាពសិក្សា និងលទ្ធផលរួម (4 Columns - Static Display) */}
+        {/* ================================================================ */}
+        {/* 📌 ១.២. កាតលទ្ធផលការសិក្សារួម + កងមូលមានទឹករលក (Liquid Wave Ring) */}
+        {/* ================================================================ */}
         <div className="lg:col-span-4 std-surface-card bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -1235,16 +1262,40 @@ const StudentDashboard = () => {
             </span>
           </div>
 
-          <div className="my-5 flex items-center justify-center gap-6">
+          <div className="my-5 flex items-center justify-center gap-5 sm:gap-6">
+            {/* ✅ កងមូលមានទឹករលកខាងក្នុង (Liquid Wave Gauge) ពេលពិន្ទុពេញ ទឹកឡើងពេញកងមូល */}
             <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
-              <svg className="w-full h-full -rotate-90 transform" viewBox="0 0 108 108">
+              {/* ផ្ទៃទឹករលកខាងក្នុងកងមូល */}
+              <div className="std-liquid-inner absolute inset-[9px] rounded-full overflow-hidden bg-slate-100/90 dark:bg-slate-900/90 z-0 shadow-inner">
+                <div
+                  className="absolute bottom-0 left-0 right-0 transition-all duration-1000 ease-out"
+                  style={{ height: `${liquidLevelPercent}%` }}
+                >
+                  {/* រលកខាងក្រោយ */}
+                  <div
+                    className="std-liquid-wave-back absolute left-1/2 w-[220%] pb-[220%] rounded-[43%]"
+                    style={{ backgroundColor: masteryInfo.waveBackColor }}
+                  />
+                  {/* រលកខាងមុខ */}
+                  <div
+                    className="std-liquid-wave-front absolute left-1/2 w-[220%] pb-[220%] rounded-[40%]"
+                    style={{ backgroundColor: masteryInfo.waveFrontColor }}
+                  />
+                </div>
+              </div>
+
+              {/* រង្វង់ SVG ព័ទ្ធជុំវិញខាងក្រៅ */}
+              <svg
+                className="relative z-10 w-full h-full -rotate-90 transform pointer-events-none"
+                viewBox="0 0 108 108"
+              >
                 <circle
                   cx="54"
                   cy="54"
                   r={ringRadius}
                   className="std-ring-track"
-                  stroke="#f1f5f9"
-                  strokeWidth="9"
+                  stroke="#e2e8f0"
+                  strokeWidth="8"
                   fill="transparent"
                 />
                 <circle
@@ -1252,7 +1303,7 @@ const StudentDashboard = () => {
                   cy="54"
                   r={ringRadius}
                   stroke={masteryInfo.ringColor}
-                  strokeWidth="9"
+                  strokeWidth="8"
                   strokeDasharray={ringCircumference}
                   strokeDashoffset={ringOffset}
                   strokeLinecap="round"
@@ -1260,34 +1311,70 @@ const StudentDashboard = () => {
                   className="transition-all duration-1000 ease-out"
                 />
               </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                <span className="std-text-primary text-2xl font-black text-gray-900 leading-none">
-                  {averageScoreNum}%
-                </span>
-                <span className="std-text-secondary text-[10px] font-extrabold uppercase tracking-wider text-gray-400 mt-1">
-                  {t('មធ្យមភាគ', 'Average')}
+
+              {/* អក្សរពិន្ទុនៅចំកណ្ដាលកងទឹក (បង្ហាញជា ពិន្ទុ / 100 ដើម្បីកុំឱ្យស្ទួនពាក្យមធ្យមភាគជាមួយរូបទី ២) */}
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center text-center pointer-events-none px-1">
+                <div className="flex items-baseline justify-center gap-0.5 leading-none">
+                  <span
+                    className={`text-xl font-black tracking-tight transition-colors duration-500 ${
+                      isLiquidDarkText
+                        ? 'std-text-primary text-slate-900'
+                        : 'text-white drop-shadow-xs'
+                    }`}
+                  >
+                    {averageScoreNum}
+                  </span>
+                  <span
+                    className={`text-[11px] font-extrabold transition-colors duration-500 ${
+                      isLiquidDarkText
+                        ? 'std-text-secondary text-slate-500'
+                        : 'text-white/90'
+                    }`}
+                  >
+                    /100
+                  </span>
+                </div>
+                <span
+                  className={`text-[9.5px] font-extrabold uppercase tracking-wider mt-1 transition-colors duration-500 ${
+                    isLiquidDarkText
+                      ? 'text-indigo-600 dark:text-indigo-300'
+                      : 'text-white/95 drop-shadow-2xs'
+                  }`}
+                >
+                  {t('ពិន្ទុសរុប', 'Score Pts')}
                 </span>
               </div>
             </div>
 
-            <div className="space-y-2.5">
-              <div className="std-subbox bg-gray-50 border border-gray-100 rounded-2xl px-4 py-2.5">
+            {/* ប្រអប់ស្ថានភាពលទ្ធផល និងការរាប់ចំនួនការងារធ្វើរួច */}
+            <div className="space-y-2 min-w-0 flex-1">
+              <div className="std-subbox bg-gray-50 border border-gray-100 rounded-2xl px-3.5 py-2.5">
                 <span className="std-text-secondary block text-[10px] font-bold uppercase text-gray-400">
                   {t('ស្ថានភាពលទ្ធផល', 'Result Status')}
                 </span>
                 <span
-                  className={`block text-lg font-black mt-0.5 ${masteryInfo.statusTextColor}`}
+                  className={`block text-base sm:text-lg font-black mt-0.5 truncate ${masteryInfo.statusTextColor}`}
                 >
                   {masteryInfo.statusText}
                 </span>
               </div>
-              <p className="std-text-secondary text-xs font-semibold text-gray-500 leading-snug">
+
+              <div className="flex items-center justify-between text-[11px] font-extrabold px-1">
+                <span className="std-text-secondary text-gray-500">
+                  {t('ការងារធ្វើរួច៖', 'Completed:')}
+                </span>
+                <span className="text-indigo-600 dark:text-indigo-400">
+                  {totalCompletedActivities} / {totalActivitiesCount} (
+                  {activityCompletionPercent}%)
+                </span>
+              </div>
+
+              <p className="std-text-secondary text-[11px] font-semibold text-gray-500 leading-snug px-1">
                 {masteryInfo.desc}
               </p>
             </div>
           </div>
 
-          {/* ✅ របារសង្ខេបខាងក្រោម (Static Text មិនអាចចុចបានទេ) */}
           <div className="std-card-divider pt-4 border-t border-gray-100 flex items-center justify-between text-xs">
             <span className="std-text-secondary font-bold text-gray-500">
               {t('មុខវិជ្ជាកំពុងសិក្សា៖', 'Enrolled Courses:')}{' '}
@@ -1305,7 +1392,7 @@ const StudentDashboard = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. STATIC METRIC TILES (មិនបាច់ឱ្យចុចទេ)                          */}
+      {/* 📌 2. STATIC METRIC TILES (រូបទី ២ រក្សាទុកដដែល ១០០%)               */}
       {/* ================================================================== */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
         {statCards.map((stat, index) => {
@@ -1482,7 +1569,6 @@ const StudentDashboard = () => {
             </div>
           </div>
 
-          {/* ✅ របារសង្ខេបខាងក្រោមកាតកិច្ចការ (Static Summary Footer) */}
           <div className="std-card-divider pt-4 mt-5 border-t border-gray-100 flex items-center justify-between text-xs">
             <span className="std-text-secondary font-bold text-gray-500">
               {t('កិច្ចការសរុប៖', 'Total Tasks:')}{' '}
@@ -1629,7 +1715,6 @@ const StudentDashboard = () => {
             </div>
           </div>
 
-          {/* ✅ របារសង្ខេបខាងក្រោមកាតកម្រងសំណួរ (Static Summary Footer) */}
           <div className="std-card-divider pt-4 mt-5 border-t border-gray-100 flex items-center justify-between text-xs">
             <span className="std-text-secondary font-bold text-gray-500">
               {t('កម្រងសំណួរសរុប៖', 'Total Quizzes:')}{' '}
@@ -1653,7 +1738,7 @@ const StudentDashboard = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 4. CSS សម្រាប់កំណត់ចលនា និងពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)   */}
+      {/* 📌 4. CSS សម្រាប់ចលនាទឹករលកក្នុងកងមូល (LIQUID WAVE) និង DARK MODE      */}
       {/* ================================================================== */}
       <style>{`
         .std-hero-grid-pattern {
@@ -1675,6 +1760,23 @@ const StudentDashboard = () => {
           animation: carouselSlideFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
 
+        @keyframes stdLiquidSpin {
+          0% {
+            transform: translate(-50%, 0) rotate(0deg);
+          }
+          100% {
+            transform: translate(-50%, 0) rotate(360deg);
+          }
+        }
+        .std-liquid-wave-front {
+          top: -8px;
+          animation: stdLiquidSpin 6s linear infinite;
+        }
+        .std-liquid-wave-back {
+          top: -12px;
+          animation: stdLiquidSpin 9s linear infinite reverse;
+        }
+
         html.dark .std-surface-card,
         html.dark .std-metric-tile {
           background-color: #1e293b !important;
@@ -1685,6 +1787,9 @@ const StudentDashboard = () => {
         html.dark .std-empty-box {
           background-color: #0f172a !important;
           border-color: #334155 !important;
+        }
+        html.dark .std-liquid-inner {
+          background-color: #0f172a !important;
         }
         html.dark .std-ring-track {
           stroke: #0f172a !important;
