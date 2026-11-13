@@ -44,6 +44,7 @@ const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
 const getQuizReviewsCacheKey = (uid) => `cached_student_quiz_reviews_v8_${uid}`;
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
+const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v10_${uid}`;
 
 const DEFAULT_META = {
   current_page: 1,
@@ -65,14 +66,52 @@ const STUDENT_QUIZ_MEM_CACHE = {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
+// ✅ លុបជួរឈរ file_data និងរូបភាព Base64 ធំៗចេញពីទិន្នន័យមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
+const stripHeavyQuizDataDeep = (obj, depth = 0) => {
+  if (!obj || typeof obj !== 'object' || depth > 5) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => stripHeavyQuizDataDeep(item, depth + 1));
+  }
+
+  const cleaned = {};
+  Object.keys(obj).forEach((k) => {
+    if (k === 'file_data') return;
+    const val = obj[k];
+    if (
+      typeof val === 'string' &&
+      val.startsWith('data:') &&
+      val.length > 15000
+    ) {
+      cleaned[k] = null;
+    } else if (val && typeof val === 'object') {
+      cleaned[k] = stripHeavyQuizDataDeep(val, depth + 1);
+    } else {
+      cleaned[k] = val;
+    }
+  });
+  return cleaned;
+};
+
+const safeWriteStudentQuizCache = (key, payload) => {
+  try {
+    const slim = stripHeavyQuizDataDeep(payload);
+    const str = JSON.stringify(slim);
+    try {
+      sessionStorage.setItem(key, str);
+    } catch {}
+    localStorage.setItem(key, str);
+  } catch {}
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -84,7 +123,12 @@ const resolveStudentUid = (contextUser) => {
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('student') ||
+      localStorage.getItem('student');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -112,7 +156,12 @@ const ensureCleanStudentSessionCache = (newUid) => {
         'cached_student_scores_list_v5',
         'cached_student_attendance_list_v3',
       ];
-      legacySharedKeys.forEach((k) => localStorage.removeItem(k));
+      legacySharedKeys.forEach((k) => {
+        try {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+        } catch {}
+      });
     }
     localStorage.setItem(LAST_ACTIVE_STUDENT_UID_KEY, String(newUid));
   } catch (e) {}
@@ -241,7 +290,7 @@ const isOptionMarkedCorrect = (opt) => {
   );
 };
 
-// ✅ ៥. អនុគមន៍បង្កើតបញ្ជីត្រួតពិនិត្យសំណួរ និងចម្លើយដែលសិស្សបានធីក (Review Items)
+// ✅ ៥. អនុគមន៍បង្កើតបញ្ជីត្រួតពិនិត្យសំណួរ និងចម្លើយដែលសិស្សបានធីក (Slim Review Items សន្សំទំហំ Cache)
 const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
   if (!Array.isArray(questions)) return [];
 
@@ -276,7 +325,6 @@ const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
       selectedOptionText: selectedOption?.option_text ?? null,
       correctOptionId: correctOption?.id ?? null,
       correctOptionText: correctOption?.option_text ?? null,
-      options,
     };
   });
 };
@@ -285,7 +333,10 @@ const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+      sessionStorage.getItem('auth_user') ||
+      sessionStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      localStorage.getItem('user');
     let uid = 'default';
     let role = 'student';
     if (userObjStr) {
@@ -424,6 +475,7 @@ const StudentQuizzes = () => {
   const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const timerRef = useRef(null);
   const endTimeRef = useRef(null);
+  const autoSubmitHandlerRef = useRef(null);
 
   // Result & Question Review dialog state
   const [quizResult, setQuizResult] = useState(null);
@@ -476,16 +528,16 @@ const StudentQuizzes = () => {
         : Array.isArray(raw?.data)
         ? raw.data
         : [];
-      setCoursesList(list);
-      STUDENT_QUIZ_MEM_CACHE.courses = list;
+      const slimCourses = stripHeavyQuizDataDeep(list);
+      setCoursesList(slimCourses);
+      STUDENT_QUIZ_MEM_CACHE.courses = slimCourses;
       STUDENT_QUIZ_MEM_CACHE.lastCoursesSyncedAt = Date.now();
-      try {
-        localStorage.setItem(
-          getCoursesCacheKey(currentStudentId),
-          JSON.stringify(list)
-        );
-        localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(list));
-      } catch (e) {}
+
+      safeWriteStudentQuizCache(
+        getCoursesCacheKey(currentStudentId),
+        slimCourses
+      );
+      safeWriteStudentQuizCache(CACHE_KEY_SHARED_COURSES, slimCourses);
     } catch (e) {
       console.error('Error fetching student courses', e);
     }
@@ -544,7 +596,8 @@ const StudentQuizzes = () => {
           params,
           signal: controller.signal,
         });
-        const list = extractValidQuizzesList(response.data);
+        const rawList = extractValidQuizzesList(response.data);
+        const list = stripHeavyQuizDataDeep(rawList);
 
         const metaData =
           response.data?.meta ||
@@ -563,20 +616,16 @@ const StudentQuizzes = () => {
           STUDENT_QUIZ_MEM_CACHE.quizzes = list;
           STUDENT_QUIZ_MEM_CACHE.meta = metaData;
           STUDENT_QUIZ_MEM_CACHE.lastSyncedAt = Date.now();
-          try {
-            localStorage.setItem(
-              getQuizzesCacheKey(currentStudentId),
-              JSON.stringify(list)
-            );
-            localStorage.setItem(
-              getQuizzesMetaCacheKey(currentStudentId),
-              JSON.stringify(metaData)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_QUIZZES,
-              JSON.stringify(list)
-            );
-          } catch (e) {}
+
+          safeWriteStudentQuizCache(
+            getQuizzesCacheKey(currentStudentId),
+            list
+          );
+          safeWriteStudentQuizCache(
+            getQuizzesMetaCacheKey(currentStudentId),
+            metaData
+          );
+          safeWriteStudentQuizCache(CACHE_KEY_SHARED_QUIZZES, list);
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
@@ -781,24 +830,6 @@ const StudentQuizzes = () => {
     [language]
   );
 
-  useEffect(() => {
-    if (activeQuizAttempt && timeLeft > 0) {
-      timerRef.current = setInterval(() => {
-        if (!endTimeRef.current) return;
-        const remaining = Math.max(
-          0,
-          Math.round((endTimeRef.current - Date.now()) / 1000)
-        );
-        setTimeLeft(remaining);
-        if (remaining <= 0) {
-          clearInterval(timerRef.current);
-          handleQuizSubmit(null, true);
-        }
-      }, 1000);
-    }
-    return () => clearInterval(timerRef.current);
-  }, [activeQuizAttempt, timeLeft]);
-
   const handleStartAttempt = async (quiz) => {
     setLoadingQuizId(quiz.id);
     setIsAttemptExpanded(false);
@@ -907,36 +938,36 @@ const StudentQuizzes = () => {
       setSavedReviewsMap((prev) => {
         const nextMap = { ...prev, [reviewKey]: finalResultPayload };
         STUDENT_QUIZ_MEM_CACHE.reviews = nextMap;
-        try {
-          localStorage.setItem(
-            getQuizReviewsCacheKey(currentStudentId),
-            JSON.stringify(nextMap)
-          );
-        } catch (err) {}
+        safeWriteStudentQuizCache(
+          getQuizReviewsCacheKey(currentStudentId),
+          nextMap
+        );
         return nextMap;
       });
 
-      const updatedAttemptObj = resData.attempt || {
-        id: Date.now(),
-        score: earnedScore,
-        submitted_at: new Date().toISOString(),
-      };
+      const updatedAttemptObj = stripHeavyQuizDataDeep(
+        resData.attempt || {
+          id: Date.now(),
+          score: earnedScore,
+          submitted_at: new Date().toISOString(),
+        }
+      );
 
       setQuizzes((prev) => {
         const updated = prev.map((q) =>
           q.id === activeQuizAttempt.id ? { ...q, attempt: updatedAttemptObj } : q
         );
         STUDENT_QUIZ_MEM_CACHE.quizzes = updated;
+        safeWriteStudentQuizCache(
+          getQuizzesCacheKey(currentStudentId),
+          updated
+        );
+        safeWriteStudentQuizCache(CACHE_KEY_SHARED_QUIZZES, updated);
         try {
-          localStorage.setItem(
-            getQuizzesCacheKey(currentStudentId),
-            JSON.stringify(updated)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_QUIZZES,
-            JSON.stringify(updated)
-          );
+          sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
+          sessionStorage.removeItem(getStatsCacheKey(currentStudentId));
+          localStorage.removeItem(getStatsCacheKey(currentStudentId));
         } catch (err) {}
         return updated;
       });
@@ -966,6 +997,28 @@ const StudentQuizzes = () => {
       setIsSubmitting(false);
     }
   };
+
+  // រក្សាទុកអនុគមន៍ចុងក្រោយក្នុង Ref សម្រាប់ពេលអស់ម៉ោងប្រឡងស្វ័យប្រវត្តិ
+  autoSubmitHandlerRef.current = handleQuizSubmit;
+
+  useEffect(() => {
+    if (!activeQuizAttempt) return;
+    timerRef.current = setInterval(() => {
+      if (!endTimeRef.current) return;
+      const remaining = Math.max(
+        0,
+        Math.round((endTimeRef.current - Date.now()) / 1000)
+      );
+      setTimeLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(timerRef.current);
+        if (typeof autoSubmitHandlerRef.current === 'function') {
+          autoSubmitHandlerRef.current(null, true);
+        }
+      }
+    }, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [activeQuizAttempt]);
 
   // បើកមើលលទ្ធផល និងចម្លើយឡើងវិញសម្រាប់កម្រងសំណួរដែលបានធ្វើរួច
   const handleOpenSavedResult = (quiz) => {
@@ -2006,7 +2059,7 @@ const StudentQuizzes = () => {
                     </div>
                   </div>
 
-                  {/* ខាងស្ដាំ៖ ប្រអប់ពិន្ទុទទួលបាន + ប៊ូតុងពង្រីក/បង្រួម + ប៊ូតុងខ្វែង X បិទ (រៀបជួរទន្ទឹមគ្នាស្អាត មិនជាន់គ្នា) */}
+                  {/* ខាងស្ដាំ៖ ប្រអប់ពិន្ទុទទួលបាន + ប៊ូតុងពង្រីក/បង្រួម + ប៊ូតុងខ្វែង X បិទ */}
                   <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2 sm:pt-0 border-t border-white/10 sm:border-0">
                     {/* ប្រអប់ពិន្ទុទទួលបាន */}
                     <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-3.5 py-2 text-center shadow-inner">

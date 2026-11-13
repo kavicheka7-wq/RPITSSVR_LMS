@@ -62,14 +62,52 @@ const STUDENT_ASG_MEM_CACHE = {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (ការពារកុំឱ្យប្ដូរ uid ២ ដងពេល Login)
+// ✅ លុបជួរឈរ file_data (Base64 ឯកសារកិច្ចការធំៗ) និងរូបភាព Base64 ធំៗចេញពីទិន្នន័យមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
+const stripHeavyAssignmentDataDeep = (obj, depth = 0) => {
+  if (!obj || typeof obj !== 'object' || depth > 5) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => stripHeavyAssignmentDataDeep(item, depth + 1));
+  }
+
+  const cleaned = {};
+  Object.keys(obj).forEach((k) => {
+    if (k === 'file_data') return;
+    const val = obj[k];
+    if (
+      typeof val === 'string' &&
+      val.startsWith('data:') &&
+      val.length > 15000
+    ) {
+      cleaned[k] = null;
+    } else if (val && typeof val === 'object') {
+      cleaned[k] = stripHeavyAssignmentDataDeep(val, depth + 1);
+    } else {
+      cleaned[k] = val;
+    }
+  });
+  return cleaned;
+};
+
+const safeWriteStudentAsgCache = (key, payload) => {
+  try {
+    const slim = stripHeavyAssignmentDataDeep(payload);
+    const str = JSON.stringify(slim);
+    try {
+      sessionStorage.setItem(key, str);
+    } catch {}
+    localStorage.setItem(key, str);
+  } catch {}
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -81,7 +119,12 @@ const resolveStudentUid = (contextUser) => {
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('student') ||
+      localStorage.getItem('student');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -108,7 +151,12 @@ const ensureCleanStudentSessionCache = (newUid) => {
         'cached_student_scores_list_v5',
         'cached_student_attendance_list_v3',
       ];
-      legacySharedKeys.forEach((k) => localStorage.removeItem(k));
+      legacySharedKeys.forEach((k) => {
+        try {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+        } catch {}
+      });
     }
     localStorage.setItem(LAST_ACTIVE_STUDENT_UID_KEY, String(newUid));
   } catch (e) {}
@@ -226,7 +274,10 @@ const formatCleanScore = (val) => {
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+      sessionStorage.getItem('auth_user') ||
+      sessionStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      localStorage.getItem('user');
     let uid = 'default';
     let role = 'student';
     if (userObjStr) {
@@ -413,16 +464,13 @@ const StudentAssignments = () => {
         : Array.isArray(raw?.data)
         ? raw.data
         : [];
-      setCoursesList(list);
-      STUDENT_ASG_MEM_CACHE.courses = list;
+      const slimCourses = stripHeavyAssignmentDataDeep(list);
+      setCoursesList(slimCourses);
+      STUDENT_ASG_MEM_CACHE.courses = slimCourses;
       STUDENT_ASG_MEM_CACHE.lastCoursesSyncedAt = Date.now();
-      try {
-        localStorage.setItem(
-          getCoursesCacheKey(currentStudentId),
-          JSON.stringify(list)
-        );
-        localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(list));
-      } catch (e) {}
+
+      safeWriteStudentAsgCache(getCoursesCacheKey(currentStudentId), slimCourses);
+      safeWriteStudentAsgCache(CACHE_KEY_SHARED_COURSES, slimCourses);
     } catch (e) {
       console.error('Error fetching student courses', e);
     }
@@ -481,7 +529,8 @@ const StudentAssignments = () => {
           params,
           signal: controller.signal,
         });
-        const list = extractValidAssignmentsList(response.data);
+        const rawList = extractValidAssignmentsList(response.data);
+        const list = stripHeavyAssignmentDataDeep(rawList);
 
         const metaData =
           response.data?.meta ||
@@ -500,20 +549,16 @@ const StudentAssignments = () => {
           STUDENT_ASG_MEM_CACHE.assignments = list;
           STUDENT_ASG_MEM_CACHE.meta = metaData;
           STUDENT_ASG_MEM_CACHE.lastSyncedAt = Date.now();
-          try {
-            localStorage.setItem(
-              getAssignmentsCacheKey(currentStudentId),
-              JSON.stringify(list)
-            );
-            localStorage.setItem(
-              getAssignmentsMetaCacheKey(currentStudentId),
-              JSON.stringify(metaData)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_ASSIGNMENTS,
-              JSON.stringify(list)
-            );
-          } catch (e) {}
+
+          safeWriteStudentAsgCache(
+            getAssignmentsCacheKey(currentStudentId),
+            list
+          );
+          safeWriteStudentAsgCache(
+            getAssignmentsMetaCacheKey(currentStudentId),
+            metaData
+          );
+          safeWriteStudentAsgCache(CACHE_KEY_SHARED_ASSIGNMENTS, list);
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
@@ -726,7 +771,7 @@ const StudentAssignments = () => {
         headers: { 'Content-Type': undefined },
       });
 
-      const newSub = res.data?.submission ||
+      const rawSub = res.data?.submission ||
         res.data?.data || {
           id: Date.now(),
           submitted_at: new Date().toISOString(),
@@ -734,6 +779,7 @@ const StudentAssignments = () => {
           feedback: null,
           file_path: res.data?.file_path || null,
         };
+      const newSub = stripHeavyAssignmentDataDeep(rawSub);
 
       // Optimistic UI Update
       setAssignments((prev) => {
@@ -741,15 +787,13 @@ const StudentAssignments = () => {
           a.id === selectedAssignment.id ? { ...a, submission: newSub } : a
         );
         STUDENT_ASG_MEM_CACHE.assignments = updated;
+        safeWriteStudentAsgCache(
+          getAssignmentsCacheKey(currentStudentId),
+          updated
+        );
+        safeWriteStudentAsgCache(CACHE_KEY_SHARED_ASSIGNMENTS, updated);
         try {
-          localStorage.setItem(
-            getAssignmentsCacheKey(currentStudentId),
-            JSON.stringify(updated)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_ASSIGNMENTS,
-            JSON.stringify(updated)
-          );
+          sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
         } catch (err) {}
         return updated;

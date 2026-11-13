@@ -34,6 +34,7 @@ const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
 const CACHE_KEY_SHARED_COURSES_META = 'cached_student_courses_meta_v3';
 const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
 const CACHE_KEY_STD_VIEW_MODE = 'student_courses_view_mode';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
 
 const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getCoursesMetaCacheKey = (uid) => `cached_student_courses_meta_v10_${uid}`;
@@ -42,24 +43,202 @@ const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v10_${u
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 const getAttendanceCacheKey = (uid) => `cached_student_attendance_list_v10_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ
+// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ + រក្សារូបភាពគ្រូក្នុង RAM (0ms)
 const STUDENT_COURSES_MEM_CACHE = {
   uid: null,
   courses: null,
   meta: null,
+  teacherAvatarMap: null,
   lastSyncedAt: 0,
 };
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (ការពារកុំឱ្យប្ដូរ uid ២ ដងពេល Login)
+// ✅ អានតារាងរូបថតគ្រូបង្រៀន (Teacher Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
+const getTeacherAvatarMapSync = () => {
+  if (
+    STUDENT_COURSES_MEM_CACHE.teacherAvatarMap &&
+    typeof STUDENT_COURSES_MEM_CACHE.teacherAvatarMap === 'object'
+  ) {
+    return STUDENT_COURSES_MEM_CACHE.teacherAvatarMap;
+  }
+  const stored = readStorageJson(CACHE_KEY_TEACHER_AVATARS, {});
+  STUDENT_COURSES_MEM_CACHE.teacherAvatarMap =
+    stored && typeof stored === 'object' ? stored : {};
+  return STUDENT_COURSES_MEM_CACHE.teacherAvatarMap;
+};
+
+// ✅ បង្រួមរូបថតគ្រូបង្រៀនមកត្រឹម 80x80px (~2KB) ទុកក្នុង Dictionary ដើម្បីបង្ហាញភ្លាមៗក្នុង 0ms
+const compressTeacherAvatarAsync = (keyId, rawDataUrl, onDone) => {
+  if (!keyId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
+  const map = getTeacherAvatarMapSync();
+
+  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
+    map[keyId] = rawDataUrl;
+    if (typeof onDone === 'function') onDone(keyId, rawDataUrl);
+    return;
+  }
+
+  if (!map[keyId]) {
+    map[keyId] = rawDataUrl;
+  }
+
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 80;
+        let w = img.width || maxSize;
+        let h = img.height || maxSize;
+        if (w > h) {
+          if (w > maxSize) {
+            h = Math.round((h * maxSize) / w);
+            w = maxSize;
+          }
+        } else {
+          if (h > maxSize) {
+            w = Math.round((w * maxSize) / h);
+            h = maxSize;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const tinyWebp = canvas.toDataURL('image/webp', 0.8);
+        const bestImg =
+          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
+        map[keyId] = bestImg;
+        if (typeof onDone === 'function') onDone(keyId, bestImg);
+      } catch {}
+    };
+    img.src = rawDataUrl;
+  } catch {}
+};
+
+// ✅ លុប Base64 ធំៗចេញពីបញ្ជីមុខវិជ្ជា តែរក្សាទុករូបថតគ្រូជា Thumbnail (~2KB) ក្នុង CACHE_KEY_TEACHER_AVATARS
+const persistStudentCoursesSafely = (uid, coursesList, metaObj) => {
+  if (!Array.isArray(coursesList)) return;
+  const avatarMap = getTeacherAvatarMapSync();
+  let pendingCount = 0;
+
+  const saveAvatarMap = () => {
+    try {
+      const str = JSON.stringify(avatarMap);
+      sessionStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+    } catch {}
+  };
+
+  const stripPersonAvatar = (person) => {
+    if (!person || typeof person !== 'object') return person;
+    const copy = { ...person };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 12000
+    ) {
+      copy.profile_image = null;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      const uCopy = { ...copy.user };
+      if (
+        typeof uCopy.profile_image === 'string' &&
+        uCopy.profile_image.startsWith('data:') &&
+        uCopy.profile_image.length > 12000
+      ) {
+        uCopy.profile_image = null;
+      }
+      copy.user = uCopy;
+    }
+    return copy;
+  };
+
+  const slimCourses = coursesList.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const courseInfo = item.course || item;
+    const cid = String(item.course_id || courseInfo.id || item.id || '');
+    const tchId = String(
+      courseInfo.teacher?.id ||
+        courseInfo.teacher_id ||
+        item.teacher?.id ||
+        item.teacher_id ||
+        ''
+    );
+
+    const rawImg =
+      courseInfo.teacher?.profile_image_url ||
+      courseInfo.teacher?.profile_image ||
+      courseInfo.teacher?.user?.profile_image ||
+      courseInfo.teacher_profile?.profile_image ||
+      item.teacher?.profile_image ||
+      null;
+
+    if (rawImg) {
+      if (cid) {
+        pendingCount++;
+        compressTeacherAvatarAsync(`crs_${cid}`, rawImg, (_, best) => {
+          if (tchId) avatarMap[`tch_${tchId}`] = best;
+          pendingCount--;
+          if (pendingCount <= 0) saveAvatarMap();
+        });
+      } else if (tchId) {
+        pendingCount++;
+        compressTeacherAvatarAsync(`tch_${tchId}`, rawImg, () => {
+          pendingCount--;
+          if (pendingCount <= 0) saveAvatarMap();
+        });
+      }
+    }
+
+    const copy = { ...item };
+    if (copy.teacher) copy.teacher = stripPersonAvatar(copy.teacher);
+    if (copy.teacher_profile) {
+      copy.teacher_profile = stripPersonAvatar(copy.teacher_profile);
+    }
+    if (copy.course && typeof copy.course === 'object') {
+      const cCopy = { ...copy.course };
+      if (cCopy.teacher) cCopy.teacher = stripPersonAvatar(cCopy.teacher);
+      if (cCopy.teacher_profile) {
+        cCopy.teacher_profile = stripPersonAvatar(cCopy.teacher_profile);
+      }
+      copy.course = cCopy;
+    }
+    return copy;
+  });
+
+  if (pendingCount === 0) {
+    saveAvatarMap();
+  } else {
+    setTimeout(saveAvatarMap, 300);
+  }
+
+  try {
+    const crsStr = JSON.stringify(slimCourses);
+    sessionStorage.setItem(getCoursesCacheKey(uid), crsStr);
+    localStorage.setItem(getCoursesCacheKey(uid), crsStr);
+    localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
+
+    if (metaObj) {
+      const metaStr = JSON.stringify(metaObj);
+      sessionStorage.setItem(getCoursesMetaCacheKey(uid), metaStr);
+      localStorage.setItem(getCoursesMetaCacheKey(uid), metaStr);
+      localStorage.setItem(CACHE_KEY_SHARED_COURSES_META, metaStr);
+    }
+  } catch {}
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -71,7 +250,12 @@ const resolveStudentUid = (contextUser) => {
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('student') ||
+      localStorage.getItem('student');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -98,8 +282,14 @@ const ensureCleanStudentSessionCache = (newUid) => {
         'cached_student_quizzes_list_v5',
         'cached_student_scores_list_v5',
         'cached_student_attendance_list_v3',
+        CACHE_KEY_TEACHER_AVATARS,
       ];
-      sharedLocalKeys.forEach((k) => localStorage.removeItem(k));
+      sharedLocalKeys.forEach((k) => {
+        try {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+        } catch {}
+      });
     }
     localStorage.setItem(LAST_ACTIVE_STUDENT_UID_KEY, String(newUid));
   } catch (e) {}
@@ -269,7 +459,7 @@ const StudentCourses = () => {
           : readStorageJson(getCoursesCacheKey(currentStudentId), null) ||
             readStorageJson(getEnrollmentsCacheKey(currentStudentId), null);
 
-      if (page === 1 && Array.isArray(cachedForUser)) {
+      if (page === 1 && Array.isArray(cachedForUser) && cachedForUser.length > 0) {
         setCourses(cachedForUser);
         STUDENT_COURSES_MEM_CACHE.courses = cachedForUser;
 
@@ -319,24 +509,12 @@ const StudentCourses = () => {
           STUDENT_COURSES_MEM_CACHE.courses = coursesData;
           STUDENT_COURSES_MEM_CACHE.meta = resolvedMeta;
           STUDENT_COURSES_MEM_CACHE.lastSyncedAt = Date.now();
-          try {
-            localStorage.setItem(
-              getCoursesCacheKey(currentStudentId),
-              JSON.stringify(coursesData)
-            );
-            localStorage.setItem(
-              getCoursesMetaCacheKey(currentStudentId),
-              JSON.stringify(resolvedMeta)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_COURSES,
-              JSON.stringify(coursesData)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_COURSES_META,
-              JSON.stringify(resolvedMeta)
-            );
-          } catch (e) {}
+
+          persistStudentCoursesSafely(
+            currentStudentId,
+            coursesData,
+            resolvedMeta
+          );
         }
       } catch (error) {
         console.error('Error fetching courses:', error);
@@ -414,10 +592,19 @@ const StudentCourses = () => {
     return (parts[0]?.[0] || 'T').toUpperCase();
   };
 
-  // ✅ អនុគមន៍ស្វែងរករូបថតគ្រូបង្រៀនពីគ្រប់ទម្រង់ Object និងពី User-Scoped Cache ពិន្ទុ/វត្តមាន
+  // ✅ អនុគមន៍ស្វែងរករូបថតគ្រូបង្រៀនពីគ្រប់ទម្រង់ Object, ពី Teacher Avatar Dictionary (0ms) និងពី Cache ពិន្ទុ/វត្តមាន
   const resolveTeacherImagePath = useCallback(
     (courseObj) => {
       if (!courseObj) return null;
+      const cid = String(courseObj.id || courseObj.course_id || '');
+      const tchId = String(
+        courseObj.teacher?.id || courseObj.teacher_id || ''
+      );
+      const avatarMap = getTeacherAvatarMapSync();
+
+      if (cid && avatarMap[`crs_${cid}`]) return avatarMap[`crs_${cid}`];
+      if (tchId && avatarMap[`tch_${tchId}`]) return avatarMap[`tch_${tchId}`];
+
       const direct =
         courseObj.teacher?.profile_image_url ||
         courseObj.teacher?.profile_image ||
@@ -434,7 +621,6 @@ const StudentCourses = () => {
 
       if (direct) return direct;
 
-      const cid = String(courseObj.id || courseObj.course_id || '');
       const cachedScores =
         readStorageJson(getScoresCacheKey(currentStudentId), null) ||
         readStorageJson('cached_student_scores_list_v5', []);
@@ -781,6 +967,8 @@ const StudentCourses = () => {
                           <img
                             src={currentInstructor.imageUrl}
                             alt={currentInstructor.name}
+                            loading="eager"
+                            decoding="async"
                             className="h-full w-full object-cover rounded-full"
                             onError={() =>
                               setFailedAvatars((prev) => ({
@@ -1033,7 +1221,7 @@ const StudentCourses = () => {
              OPTION A: COMPACT STUDIO COURSE CARDS (តូចល្មមស្អាត ដាក់បានច្រើនមុខវិជ្ជា)
           =============================================================== */
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch">
-            {filteredCourses.map((course) => {
+            {filteredCourses.map((course, idx) => {
               const teacherName = getTeacherDisplayName(course);
               const teacherInitials = getTeacherInitials(teacherName);
               const rawImagePath = resolveTeacherImagePath(course);
@@ -1165,6 +1353,8 @@ const StudentCourses = () => {
                           <img
                             src={imageUrl}
                             alt={teacherName}
+                            loading={idx < 8 ? 'eager' : 'lazy'}
+                            decoding="async"
                             className="h-full w-full object-cover rounded-full"
                             onError={() =>
                               setFailedAvatars((prev) => ({
@@ -1290,6 +1480,8 @@ const StudentCourses = () => {
                                 <img
                                   src={imageUrl}
                                   alt={teacherName}
+                                  loading={idx < 10 ? 'eager' : 'lazy'}
+                                  decoding="async"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
                                     setFailedAvatars((prev) => ({

@@ -24,27 +24,200 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
+const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v5';
 
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (មិនឱ្យលាយទិន្នន័យគ្នាដាច់ខាត)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ + រក្សារូបថតគ្រូក្នុង RAM (0ms)
 const STUDENT_SCORES_MEM_CACHE = {
   uid: null,
   grades: null,
+  teacherAvatarMap: null,
   lastSyncedAt: 0,
 };
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (ការពារកុំឱ្យប្ដូរ uid ២ ដងពេល Login)
+// ✅ អានតារាងរូបថតគ្រូបង្រៀន (Teacher Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
+const getTeacherAvatarMapSync = () => {
+  if (
+    STUDENT_SCORES_MEM_CACHE.teacherAvatarMap &&
+    typeof STUDENT_SCORES_MEM_CACHE.teacherAvatarMap === 'object'
+  ) {
+    return STUDENT_SCORES_MEM_CACHE.teacherAvatarMap;
+  }
+  const stored = readStorageJson(CACHE_KEY_TEACHER_AVATARS, {});
+  STUDENT_SCORES_MEM_CACHE.teacherAvatarMap =
+    stored && typeof stored === 'object' ? stored : {};
+  return STUDENT_SCORES_MEM_CACHE.teacherAvatarMap;
+};
+
+// ✅ បង្រួមរូបថតគ្រូបង្រៀនមកត្រឹម 80x80px (~2KB) ទុកក្នុង Dictionary សម្រាប់បង្ហាញក្នុង 0ms
+const compressTeacherAvatarAsync = (keyId, rawDataUrl, onDone) => {
+  if (!keyId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
+  const map = getTeacherAvatarMapSync();
+
+  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
+    map[keyId] = rawDataUrl;
+    if (typeof onDone === 'function') onDone(keyId, rawDataUrl);
+    return;
+  }
+
+  if (!map[keyId]) {
+    map[keyId] = rawDataUrl;
+  }
+
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 80;
+        let w = img.width || maxSize;
+        let h = img.height || maxSize;
+        if (w > h) {
+          if (w > maxSize) {
+            h = Math.round((h * maxSize) / w);
+            w = maxSize;
+          }
+        } else {
+          if (h > maxSize) {
+            w = Math.round((w * maxSize) / h);
+            h = maxSize;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const tinyWebp = canvas.toDataURL('image/webp', 0.8);
+        const bestImg =
+          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
+        map[keyId] = bestImg;
+        if (typeof onDone === 'function') onDone(keyId, bestImg);
+      } catch {}
+    };
+    img.src = rawDataUrl;
+  } catch {}
+};
+
+// ✅ លុបរូបភាព Base64 ធំៗចេញពីបញ្ជីពិន្ទុមុនពេល Save ចូល localStorage តែរក្សាទុករូបថតគ្រូក្នុង Avatar Dictionary
+const persistStudentScoresSafely = (uid, scoresList) => {
+  if (!Array.isArray(scoresList)) return;
+  const avatarMap = getTeacherAvatarMapSync();
+  let pendingCount = 0;
+
+  const saveAvatarMap = () => {
+    try {
+      const str = JSON.stringify(avatarMap);
+      sessionStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+    } catch {}
+  };
+
+  const stripPersonAvatar = (person) => {
+    if (!person || typeof person !== 'object') return person;
+    const copy = { ...person };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 12000
+    ) {
+      copy.profile_image = null;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      const uCopy = { ...copy.user };
+      if (
+        typeof uCopy.profile_image === 'string' &&
+        uCopy.profile_image.startsWith('data:') &&
+        uCopy.profile_image.length > 12000
+      ) {
+        uCopy.profile_image = null;
+      }
+      copy.user = uCopy;
+    }
+    return copy;
+  };
+
+  const slimList = scoresList.map((row) => {
+    if (!row || typeof row !== 'object') return row;
+    const course = row.course || {};
+    const cid = String(row.course_id || course.id || row.id || '');
+    const tchId = String(
+      course.teacher?.id ||
+        course.teacher_id ||
+        course.teacher_profile?.id ||
+        row.teacher?.id ||
+        ''
+    );
+
+    const rawImg =
+      course.teacher_profile?.profile_image_url ||
+      course.teacher_profile?.profile_image ||
+      course.teacher?.profile_image_url ||
+      course.teacher?.profile_image ||
+      course.teacher?.user?.profile_image ||
+      row.teacher?.profile_image ||
+      course.teacher_image ||
+      row.teacher_image ||
+      null;
+
+    if (rawImg && cid) {
+      pendingCount++;
+      compressTeacherAvatarAsync(`crs_${cid}`, rawImg, (_, best) => {
+        if (tchId) avatarMap[`tch_${tchId}`] = best;
+        pendingCount--;
+        if (pendingCount <= 0) saveAvatarMap();
+      });
+    }
+
+    const copy = { ...row };
+    if (copy.student && typeof copy.student === 'object') {
+      copy.student = stripPersonAvatar(copy.student);
+    }
+    if (copy.teacher && typeof copy.teacher === 'object') {
+      copy.teacher = stripPersonAvatar(copy.teacher);
+    }
+    if (copy.teacher_profile && typeof copy.teacher_profile === 'object') {
+      copy.teacher_profile = stripPersonAvatar(copy.teacher_profile);
+    }
+    if (copy.course && typeof copy.course === 'object') {
+      const cCopy = { ...copy.course };
+      if (cCopy.teacher) cCopy.teacher = stripPersonAvatar(cCopy.teacher);
+      if (cCopy.teacher_profile) {
+        cCopy.teacher_profile = stripPersonAvatar(cCopy.teacher_profile);
+      }
+      copy.course = cCopy;
+    }
+    return copy;
+  });
+
+  if (pendingCount === 0) {
+    saveAvatarMap();
+  } else {
+    setTimeout(saveAvatarMap, 300);
+  }
+
+  try {
+    const listStr = JSON.stringify(slimList);
+    sessionStorage.setItem(getScoresCacheKey(uid), listStr);
+    localStorage.setItem(getScoresCacheKey(uid), listStr);
+    localStorage.setItem(CACHE_KEY_SHARED_SCORES, listStr);
+  } catch {}
+};
+
+// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -56,7 +229,12 @@ const resolveStudentUid = (contextUser) => {
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('student') ||
+      localStorage.getItem('student');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -81,8 +259,14 @@ const ensureCleanStudentSessionCache = (newUid) => {
         'cached_student_dashboard_activity_v8',
         'cached_student_courses_list_v3',
         'cached_student_attendance_list_v3',
+        CACHE_KEY_TEACHER_AVATARS,
       ];
-      legacySharedKeys.forEach((k) => localStorage.removeItem(k));
+      legacySharedKeys.forEach((k) => {
+        try {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+        } catch {}
+      });
     }
     localStorage.setItem(LAST_ACTIVE_STUDENT_UID_KEY, String(newUid));
   } catch (e) {}
@@ -125,7 +309,6 @@ const formatCleanNumber = (val) => {
 };
 
 // ✅ អនុគមន៍បម្លែងពិន្ទុលើមាត្រដ្ឋាន 100 (0-100) មកជាពិន្ទុពិតប្រាកដតាមភាគរយនៃផ្នែកនីមួយៗ (20, 20, 25, 35)
-// ឧទាហរណ៍៖ សំណួរខ្លីបាន 50% (50/100) -> ពេលគិតមក 20% គឺស្មើនឹង 50 * (20 / 100) = 10
 const toWeightedComponentPoints = (rawPercentageScore, maxWeightPoints) => {
   if (rawPercentageScore === null || rawPercentageScore === undefined || rawPercentageScore === '') {
     return null;
@@ -166,7 +349,6 @@ const enrichGradeRow = (row, idx) => {
   let examRaw100 = formatCleanNumber(row?.exam_score ?? scoreObj?.exam_score);
   let finalScore = formatCleanNumber(row?.final_score ?? scoreObj?.final_score);
 
-  // គណនាផលបូកទម្ងន់នៃផ្នែកទាំង ៣ ដំបូង (កិច្ចការ 20%, សំណួរខ្លី 20%, ពាក់កណ្តាលឆមាស 25%)
   let partialWeightedSum = 0;
   let partialWeightTotal = 0;
 
@@ -183,7 +365,6 @@ const enrichGradeRow = (row, idx) => {
     partialWeightTotal += 0.25;
   }
 
-  // ករណីក្នុង Database រក្សាទុកតែ final_score (មិនមានជួរឈរ exam_score ដាច់ដោយឡែក)៖
   if (examRaw100 === null && finalScore !== null) {
     const partialOnlyAvg =
       partialWeightTotal > 0
@@ -221,7 +402,6 @@ const enrichGradeRow = (row, idx) => {
 
   const gradedPartsCount = gradedParts.length;
 
-  // ✅ គណនាពិន្ទុសរុបជាផលបូកពិន្ទុពិតប្រាកដនៃផ្នែកទាំង ៤ (20 + 20 + 25 + 35 = 100 ពិន្ទុ)
   let totalPointsSum = null;
   if (gradedPartsCount > 0) {
     totalPointsSum =
@@ -230,7 +410,6 @@ const enrichGradeRow = (row, idx) => {
     totalPointsSum = finalScore;
   }
 
-  // គណនាសមាមាត្រភាគរយសម្រាប់ឆែកស្ថានភាព ជាប់/ធ្លាក់
   let ratioScore = finalScore;
   if (ratioScore === null) {
     let totalW = partialWeightTotal;
@@ -244,7 +423,6 @@ const enrichGradeRow = (row, idx) => {
     }
   }
 
-  // កំណត់ស្ថានភាពលទ្ធផល៖ 'passed' (≥ 50) | 'failed' (< 50) | 'pending' (មិនទាន់ដាក់ពិន្ទុ)
   const rawLetter = (row?.grade_letter || scoreObj?.grade_letter || '')
     .toString()
     .trim()
@@ -283,15 +461,15 @@ const enrichGradeRow = (row, idx) => {
         null,
       department: courseObj?.department || row?.department || null,
     },
-    cleanAssign: assignPts20, // ពិន្ទុក្នុងចំណោម 20
-    cleanQuiz: quizPts20, // ពិន្ទុក្នុងចំណោម 20
-    cleanMidterm: midtermPts25, // ពិន្ទុក្នុងចំណោម 25
-    cleanExam: examPts35, // ពិន្ទុក្នុងចំណោម 35
+    cleanAssign: assignPts20,
+    cleanQuiz: quizPts20,
+    cleanMidterm: midtermPts25,
+    cleanExam: examPts35,
     rawAssign100: assignRaw100,
     rawQuiz100: quizRaw100,
     rawMidterm100: midtermRaw100,
     rawExam100: examRaw100,
-    cleanFinal: totalPointsSum, // ផលបូកពិន្ទុសរុបជាពិន្ទុ
+    cleanFinal: totalPointsSum,
     resultStatus,
     gradedPartsCount,
   };
@@ -327,7 +505,8 @@ const ViewScores = () => {
     }
     const cached =
       readStorageJson(getScoresCacheKey(currentStudentId), null) ||
-      readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, []);
+      readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, null) ||
+      readStorageJson(CACHE_KEY_SHARED_SCORES, []);
     STUDENT_SCORES_MEM_CACHE.grades = cached;
     return cached;
   });
@@ -406,17 +585,13 @@ const ViewScores = () => {
           });
         }
 
+        // ✅ សម្អាត Base64 ធំៗចេញពីបញ្ជីពិន្ទុ តែរក្សាទុករូបថតគ្រូជា Thumbnail (~2KB) ក្នុង CACHE_KEY_TEACHER_AVATARS
+        persistStudentScoresSafely(currentStudentId, validList);
+
         setGrades(validList);
         STUDENT_SCORES_MEM_CACHE.uid = currentStudentId;
         STUDENT_SCORES_MEM_CACHE.grades = validList;
         STUDENT_SCORES_MEM_CACHE.lastSyncedAt = Date.now();
-
-        try {
-          localStorage.setItem(
-            getScoresCacheKey(currentStudentId),
-            JSON.stringify(validList)
-          );
-        } catch (e) {}
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
           return;
@@ -492,12 +667,16 @@ const ViewScores = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ ទាញយកឈ្មោះ រូបថត និងជំនាញរបស់គ្រូបង្រៀនឱ្យត្រឹមត្រូវ ១០០%
+  // ✅ ទាញយកឈ្មោះ រូបថត (ពី Avatar Dictionary 0ms) និងជំនាញរបស់គ្រូបង្រៀនឱ្យត្រឹមត្រូវ ១០០%
   const resolveGradeTeacherMeta = useCallback(
     (gradeRow) => {
       const course = gradeRow?.course || {};
+      const cid = String(course.id || gradeRow?.course_id || '');
       const tchProfile = course.teacher_profile || course.teacherProfile;
       const tch = course.teacher || gradeRow?.teacher;
+      const tchId = String(
+        course.teacher_id || tch?.id || tchProfile?.id || ''
+      );
 
       let fullName = '';
       if (tchProfile) {
@@ -541,7 +720,10 @@ const ViewScores = () => {
             }`.toUpperCase()
           : (fullName.charAt(0) || 'T').toUpperCase();
 
+      const avatarMap = getTeacherAvatarMapSync();
       const rawImg =
+        (cid && avatarMap[`crs_${cid}`]) ||
+        (tchId && avatarMap[`tch_${tchId}`]) ||
         tchProfile?.profile_image_url ||
         tchProfile?.profile_image ||
         tchProfile?.user?.profile_image ||
@@ -1107,6 +1289,8 @@ const ViewScores = () => {
                               <img
                                 src={teacherMeta.image}
                                 alt={teacherMeta.name}
+                                loading={idx < 12 ? 'eager' : 'lazy'}
+                                decoding="async"
                                 className="h-full w-full object-cover rounded-full"
                                 onError={() =>
                                   setFailedAvatars((prev) => ({
