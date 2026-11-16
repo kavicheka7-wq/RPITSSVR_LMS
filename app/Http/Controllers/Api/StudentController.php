@@ -428,7 +428,7 @@ class StudentController extends Controller
         ];
     }
 
-   // ទាញយកបញ្ជីមុខវិជ្ជារបស់សិស្ស
+    // ទាញយកបញ្ជីមុខវិជ្ជារបស់សិស្ស
     public function getCourses(Request $request)
     {
         $student = auth()->user();
@@ -446,20 +446,6 @@ class StudentController extends Controller
             ->toArray();
 
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
-        
-        // ✅ គណនាឆ្នាំសិក្សារបស់សិស្សម្នាក់នេះ
-        $studentYear = $this->parseAcademicYearNumber(
-            ($studentProfile->year ?? '') . ' ' .
-            ($studentProfile->academic_year ?? '') . ' ' .
-            ($studentProfile->batch_year ?? '') . ' ' .
-            ($student->year ?? '') . ' ' .
-            ($student->batch_year ?? '') . ' ' .
-            ($student->name ?? ''),
-            ($studentProfile->student_code ?? '') . ' ' .
-            ($student->student_code ?? '') . ' ' .
-            ($student->email ?? '') . ' ' .
-            ($studentProfile->email ?? '')
-        );
 
         $query = Course::with([
             'teacher:id,first_name,last_name,email,profile_image',
@@ -467,35 +453,11 @@ class StudentController extends Controller
             'department:id,department_name,department_code',
         ])->withCount(['lessons', 'assignments', 'quizzes']);
 
-        // ✅ ការច្រោះមុខវិជ្ជា (Course Filtering Logic) ថ្មីដែលទូលាយជាងមុន
-        $query->where(function ($q) use ($enrolledCourseIds, $deptId, $studentYear) {
-            // ១. បង្ហាញមុខវិជ្ជាដែលគាត់បានចុះឈ្មោះរួចរាល់
-            if (!empty($enrolledCourseIds)) {
-                $q->orWhereIn('id', $enrolledCourseIds);
-            }
-            
-            // ២. បង្ហាញមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់របស់គាត់
-            if ($deptId) {
-                $q->orWhere('department_id', $deptId);
-            }
-
-            // ៣. បើសិស្សអត់មានដេប៉ាតឺម៉ង់ និងអត់ទាន់ចុះឈ្មោះមុខវិជ្ជាអ្វីសោះ 
-            // ឱ្យបង្ហាញមុខវិជ្ជាដែលស្របនឹងឆ្នាំសិក្សារបស់គាត់ (បើគាត់ឆ្នាំទី២ បង្ហាញមុខវិជ្ជាឆ្នាំទី២ ទាំងអស់)
-            if (empty($enrolledCourseIds) && !$deptId && $studentYear) {
-                $q->orWhere('course_name', 'like', "%ឆ្នាំទី {$studentYear}%")
-                  ->orWhere('course_name', 'like', "%Year {$studentYear}%")
-                  ->orWhere('course_name', 'like', "%Y{$studentYear}%")
-                  ->orWhere('description', 'like', "%ឆ្នាំទី {$studentYear}%")
-                  ->orWhere('description', 'like', "%Year {$studentYear}%")
-                  ->orWhere('course_code', 'like', "%Y{$studentYear}%");
-            }
-            
-            // ៤. ករណីចុងក្រោយ បើរកអត់មានអីសោះ (សិស្សថ្មីទើបបង្កើត) បង្ហាញមុខវិជ្ជាទាំងអស់សិនចុះ 
-            // ដើម្បីកុំឱ្យផ្ទាំងសិស្សទទេស្អាត
-            if (empty($enrolledCourseIds) && !$deptId && !$studentYear) {
-                $q->orWhereNotNull('id'); // Select All fallback
-            }
-        });
+        if (!empty($enrolledCourseIds)) {
+            $query->whereIn('id', $enrolledCourseIds);
+        } elseif ($deptId) {
+            $query->where('department_id', $deptId);
+        }
 
         $includeAvatar = !$request->boolean('all');
 
