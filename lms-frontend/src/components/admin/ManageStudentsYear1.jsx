@@ -1346,6 +1346,8 @@ const ManageStudentsYear1 = () => {
     const cachedEnr = ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[student.id];
     if (Array.isArray(cachedEnr)) {
       setStudentEnrollments(cachedEnr);
+    } else if (Array.isArray(student.enrollments) && student.enrollments.length > 0) {
+      setStudentEnrollments(student.enrollments);
     } else {
       setStudentEnrollments([]);
     }
@@ -1353,11 +1355,23 @@ const ManageStudentsYear1 = () => {
     setShowEnrollmentModal(true);
 
     try {
-      const enrollmentsRes = await api.get(`/admin/students/${student.id}/enrollments`);
+      const requests = [api.get(`/admin/students/${student.id}/enrollments`)];
+      if (!allCourses || allCourses.length === 0) {
+        requests.push(getCachedCourses());
+      }
+      const [enrollmentsRes, coursesData] = await Promise.all(requests);
       const fetchedEnrollments = enrollmentsRes.data?.data || [];
+      const fetchedCourses =
+        Array.isArray(coursesData) && coursesData.length > 0 ? coursesData : allCourses;
+
       ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[student.id] = fetchedEnrollments;
       setStudentEnrollments(fetchedEnrollments);
-      syncStudentEnrolledDepts(student.id, fetchedEnrollments, allCourses);
+
+      if (Array.isArray(coursesData) && coursesData.length > 0) {
+        setAllCourses(coursesData);
+        ADMIN_STUDENTS_Y1_MEM_CACHE.courses = coursesData;
+      }
+      syncStudentEnrolledDepts(student.id, fetchedEnrollments, fetchedCourses);
     } catch (error) {
       console.error('Cannot fetch enrollment data:', error);
     }
@@ -1551,50 +1565,57 @@ const ManageStudentsYear1 = () => {
       return;
     }
 
+    const studentsToEnroll = [...selectedStudents];
+    const coursesToEnroll = [...bulkSelectedCourses];
+
+    // ✅ Optimistic UI៖ បិទផ្ទាំង និងធ្វើបច្ចុប្បន្នភាពផ្លាកដេប៉ាតឺម៉ង់ភ្លាមៗក្នុង 0ms
+    const newlyAddedDeptIds = allCourses
+      .filter((c) => coursesToEnroll.includes(Number(c.id)))
+      .map((c) => String(c.department_id || c.department?.id || ''))
+      .filter(Boolean);
+
+    if (newlyAddedDeptIds.length > 0) {
+      setEnrolledDeptsMap((prev) => {
+        const next = { ...prev };
+        studentsToEnroll.forEach((studentId) => {
+          const existing = Array.isArray(next[studentId]) ? next[studentId] : [];
+          next[studentId] = Array.from(new Set([...existing, ...newlyAddedDeptIds]));
+        });
+        ADMIN_STUDENTS_Y1_MEM_CACHE.enrolledDeptsMap = next;
+        try {
+          localStorage.setItem(getEnrolledDeptsMapKey(currentAdminId), JSON.stringify(next));
+          localStorage.setItem(CACHE_KEY_LEGACY_ENROLLED_MAP, JSON.stringify(next));
+        } catch (e) {}
+        return next;
+      });
+    }
+
+    studentsToEnroll.forEach((studentId) => {
+      delete ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[studentId];
+    });
+
+    setShowBulkEnrollModal(false);
+    setBulkSelectedCourses([]);
+    setSelectedStudents([]);
+
     setIsBulkEnrolling(true);
     try {
       await Promise.allSettled(
-        selectedStudents.map((studentId) => {
-          delete ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[studentId];
-          return api.post(`/admin/students/${studentId}/enrollments`, {
-            course_ids: bulkSelectedCourses,
-          });
-        })
+        studentsToEnroll.map((studentId) =>
+          api.post(`/admin/students/${studentId}/enrollments`, {
+            course_ids: coursesToEnroll,
+          })
+        )
       );
-
-      const newlyAddedDeptIds = allCourses
-        .filter((c) => bulkSelectedCourses.includes(Number(c.id)))
-        .map((c) => String(c.department_id || c.department?.id || ''))
-        .filter(Boolean);
-
-      if (newlyAddedDeptIds.length > 0) {
-        setEnrolledDeptsMap((prev) => {
-          const next = { ...prev };
-          selectedStudents.forEach((studentId) => {
-            const existing = Array.isArray(next[studentId]) ? next[studentId] : [];
-            next[studentId] = Array.from(new Set([...existing, ...newlyAddedDeptIds]));
-          });
-          ADMIN_STUDENTS_Y1_MEM_CACHE.enrolledDeptsMap = next;
-          try {
-            localStorage.setItem(getEnrolledDeptsMapKey(currentAdminId), JSON.stringify(next));
-            localStorage.setItem(CACHE_KEY_LEGACY_ENROLLED_MAP, JSON.stringify(next));
-          } catch (e) {}
-          return next;
-        });
-      }
 
       pushLocalNotification({
         titleKm: 'បានចុះឈ្មោះមុខវិជ្ជាជាក្រុមជោគជ័យ',
         titleEn: 'Bulk Course Enrollment Completed',
-        descKm: `បានដាក់មុខវិជ្ជាចំនួន ${bulkSelectedCourses.length} ជូនសិស្សឆ្នាំទី១ ចំនួន ${selectedStudents.length} នាក់។`,
-        descEn: `Assigned ${bulkSelectedCourses.length} courses to ${selectedStudents.length} Year 1 students.`,
+        descKm: `បានដាក់មុខវិជ្ជាចំនួន ${coursesToEnroll.length} ជូនសិស្សឆ្នាំទី១ ចំនួន ${studentsToEnroll.length} នាក់។`,
+        descEn: `Assigned ${coursesToEnroll.length} courses to ${studentsToEnroll.length} Year 1 students.`,
         category: 'student',
         link: '/students/year-1',
       });
-
-      setShowBulkEnrollModal(false);
-      setBulkSelectedCourses([]);
-      setSelectedStudents([]);
     } catch (error) {
       console.error('Failed to bulk enroll courses:', error);
     } finally {
@@ -2085,10 +2106,14 @@ const ManageStudentsYear1 = () => {
       }
 
       const rawImage =
+        teacherObj?.profile_image_url ||
         teacherObj?.profile_image ||
         teacherObj?.avatar ||
+        teacherObj?.user?.profile_image_url ||
         teacherObj?.user?.profile_image ||
+        c.teacher?.profile_image_url ||
         c.teacher?.profile_image ||
+        cat.teacher?.profile_image_url ||
         cat.teacher?.profile_image ||
         null;
 

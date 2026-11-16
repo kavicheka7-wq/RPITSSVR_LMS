@@ -21,7 +21,7 @@ use Illuminate\Validation\ValidationException;
 class CourseController extends Controller
 {
     /**
-     * ផ្គូផ្គង និងបំពេញព័ត៌មានគ្រូបង្រៀនសម្រាប់បញ្ជីមុខវិជ្ជា ក្នុងល្បឿនលឿនបំផុត (មិនទាញ Base64 profile_image ធ្ងន់ៗមកជាមួយទេ)
+     * ✅ ផ្គូផ្គង និងបំពេញព័ត៌មានគ្រូបង្រៀន (ទាំងឈ្មោះ និងរូបថត profile_image) សម្រាប់បញ្ជីមុខវិជ្ជា ក្នុងល្បឿនលឿនបំផុត (O(1) Map Lookup)
      */
     private function attachTeacherDetailsToCollection($courses)
     {
@@ -35,14 +35,25 @@ class CourseController extends Controller
             return $courses;
         }
 
-        // ✅ ទាញតែជួរឈរអក្សរស្រាលៗប៉ុណ្ណោះ (មិនទាញ profile_image Base64 ដែលធ្វើឱ្យយឺត Network ឡើយ)
+        // ✅ ទាញយកព័ត៌មានគ្រូ និង profile_image ពីតារាង teachers ក្នុង Query តែ ១ ដង
         $teachersById = Teacher::whereIn('id', $teacherIds)
             ->orWhereIn('user_id', $teacherIds)
-            ->select(['id', 'user_id', 'teacher_code', 'first_name', 'last_name', 'email', 'phone', 'department_id'])
+            ->select([
+                'id',
+                'user_id',
+                'teacher_code',
+                'first_name',
+                'last_name',
+                'email',
+                'phone',
+                'department_id',
+                'specialization',
+                'profile_image',
+            ])
             ->get();
 
         $mapById = $teachersById->keyBy('id');
-        $mapByUserId = $teachersById->keyBy('user_id');
+        $mapByUserId = $teachersById->whereNotNull('user_id')->keyBy('user_id');
 
         $userIdsToFetch = $teachersById->pluck('user_id')
             ->merge($teacherIds)
@@ -51,23 +62,42 @@ class CourseController extends Controller
             ->values()
             ->all();
 
-        $usersMap = User::whereIn('id', $userIdsToFetch)
-            ->select(['id', 'first_name', 'last_name', 'email', 'phone'])
-            ->get()
-            ->keyBy('id');
+        // ✅ ទាញយកព័ត៌មាន និង profile_image ពីតារាង users (សម្រាប់បំពេញបន្ថែមប្រសិនបើក្នុងតារាង teachers គ្មានរូប)
+        $usersMap = !empty($userIdsToFetch)
+            ? User::whereIn('id', $userIdsToFetch)
+                ->select(['id', 'first_name', 'last_name', 'email', 'phone', 'profile_image'])
+                ->get()
+                ->keyBy('id')
+            : collect();
 
         foreach ($collection as $course) {
             $tid = $course->teacher_id;
             $tProfile = $mapById->get($tid) ?? $mapByUserId->get($tid);
             $uProfile = $usersMap->get($tProfile?->user_id ?? $tid);
 
-            if ($tProfile || $uProfile) {
-                $course->setRelation('teacher', $tProfile ?? $uProfile);
+            if (!$tProfile && !$uProfile) {
+                continue;
             }
 
-            if ($tProfile) {
-                $course->setAttribute('teacher_profile', $tProfile);
-            }
+            $firstName = trim((string) ($tProfile->first_name ?? $uProfile->first_name ?? ''));
+            $lastName = trim((string) ($tProfile->last_name ?? $uProfile->last_name ?? ''));
+            $fullName = trim($firstName . ' ' . $lastName) ?: ($tProfile->email ?? $uProfile->email ?? '');
+
+            $avatar = !empty($tProfile?->profile_image)
+                ? $tProfile->profile_image
+                : ($uProfile->profile_image ?? null);
+
+            $teacherObject = $tProfile ? clone $tProfile : clone $uProfile;
+            $teacherObject->first_name = $firstName;
+            $teacherObject->last_name = $lastName;
+            $teacherObject->name = $fullName;
+            $teacherObject->full_name = $fullName;
+            $teacherObject->profile_image = $avatar;
+            $teacherObject->profile_image_url = $avatar;
+
+            $course->setRelation('teacher', $teacherObject);
+            $course->setAttribute('teacher_profile', $teacherObject);
+            $course->setAttribute('teacher_name', $fullName);
         }
 
         return $courses;

@@ -147,8 +147,7 @@ class AdminStudentController extends Controller
     }
 
     /**
-     * ✅ អនុគមន៍ល្បឿនលឿន O(1) ភ្ជាប់ឈ្មោះគ្រូបង្រៀនទៅឱ្យបញ្ជី Enrollments ក្នុង Query តែ ១ ដង
-     * (មិនទាញ Base64 profile_image ធំៗឱ្យធ្ងន់ JSON ឡើយ ដើម្បីឱ្យបើក Modal លឿនបំផុត)
+     * ✅ អនុគមន៍ល្បឿនលឿន O(1) ភ្ជាប់ឈ្មោះ និងរូបថតគ្រូបង្រៀន (profile_image) ទៅឱ្យបញ្ជី Enrollments ក្នុង Query តែ ១ ដង
      */
     private function attachTeacherToEnrollments($enrollments)
     {
@@ -168,10 +167,20 @@ class AdminStudentController extends Controller
             return $enrollments;
         }
 
+        // ✅ ទាញយកទាំងឈ្មោះ និង profile_image ពីតារាង teachers ក្នុង Query តែ ១ ដង
         $teacherRecords = DB::table('teachers')
             ->whereIn('id', $teacherIds)
             ->orWhereIn('user_id', $teacherIds)
-            ->select(['id', 'user_id', 'teacher_code', 'first_name', 'last_name', 'email', 'specialization'])
+            ->select([
+                'id',
+                'user_id',
+                'teacher_code',
+                'first_name',
+                'last_name',
+                'email',
+                'specialization',
+                'profile_image',
+            ])
             ->get();
 
         $byTeacherId = $teacherRecords->keyBy('id');
@@ -185,10 +194,11 @@ class AdminStudentController extends Controller
             ->values()
             ->all();
 
+        // ✅ ទាញយកទាំងឈ្មោះ និង profile_image ពីតារាង users (เผื่อរូបថតស្ថិតក្នុងតារាង users)
         $userRecords = !empty($allUserIds)
             ? DB::table('users')
                 ->whereIn('id', $allUserIds)
-                ->select(['id', 'first_name', 'last_name', 'email'])
+                ->select(['id', 'first_name', 'last_name', 'email', 'profile_image'])
                 ->get()
                 ->keyBy('id')
             : collect();
@@ -211,6 +221,10 @@ class AdminStudentController extends Controller
             $lastName = trim((string) ($tRec->last_name ?? $uRec->last_name ?? ''));
             $fullName = trim($firstName . ' ' . $lastName) ?: ($tRec->email ?? $uRec->email ?? '');
 
+            $avatar = !empty($tRec?->profile_image)
+                ? $tRec->profile_image
+                : ($uRec->profile_image ?? null);
+
             $teacherPayload = [
                 'id' => $tRec->id ?? $uRec->id ?? $tid,
                 'user_id' => $uRec->id ?? $tRec->user_id ?? $tid,
@@ -221,6 +235,8 @@ class AdminStudentController extends Controller
                 'full_name' => $fullName,
                 'email' => $tRec->email ?? $uRec->email ?? '',
                 'specialization' => $tRec->specialization ?? null,
+                'profile_image' => $avatar,
+                'profile_image_url' => $avatar,
             ];
 
             $course->setRelation('teacher', (object) $teacherPayload);
