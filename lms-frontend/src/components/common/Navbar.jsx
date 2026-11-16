@@ -53,210 +53,16 @@ import logo from '../../assets/image/PRIT.png';
 import NotificationBell from './NotificationBell';
 
 const EMPTY_USER_OBJ = Object.freeze({});
-const AUTH_AVATAR_THUMB_KEY = 'lms_nav_avatar_thumb_v1';
-const AUTH_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v2';
-const LEGACY_AVATAR_CACHE_KEY = 'lms_active_user_avatar_v1';
-
-// ✅ Global RAM Cache សម្រាប់ឱ្យ Navbar បង្ហាញរូបភាពក្នុង 0ms ដោយមិនបាច់ Decode ម្ដងទៀត
-let GLOBAL_MEM_AVATAR_URL = null;
-
 const getTelegramLinkCacheKey = (email) =>
   `lms_tg_link_url_${email || 'default'}`;
-
-const readRawStorageItem = (key) => {
-  try {
-    const fromSession = sessionStorage.getItem(key);
-    if (fromSession && fromSession !== 'undefined' && fromSession !== 'null') {
-      return fromSession;
-    }
-  } catch {}
-  try {
-    const fromLocal = localStorage.getItem(key);
-    if (fromLocal && fromLocal !== 'undefined' && fromLocal !== 'null') {
-      return fromLocal;
-    }
-  } catch {}
-  return null;
-};
-
-const writeRawStorageItem = (key, val) => {
-  if (!val) return;
-  try {
-    sessionStorage.setItem(key, val);
-  } catch {}
-  try {
-    localStorage.setItem(key, val);
-  } catch {}
-};
-
-// ✅ អានរូបភាពដែលតូចស្រាលបំផុត (Thumbnail ~4KB) មុនគេ ដើម្បីឱ្យលោតចេញភ្លាមៗក្នុង 0ms
-const readCachedAvatarSync = () => {
-  if (GLOBAL_MEM_AVATAR_URL) return GLOBAL_MEM_AVATAR_URL;
-  const found =
-    readRawStorageItem(AUTH_AVATAR_THUMB_KEY) ||
-    readRawStorageItem(AUTH_AVATAR_CACHE_KEY) ||
-    readRawStorageItem(LEGACY_AVATAR_CACHE_KEY) ||
-    null;
-  if (found && found !== '__CACHED_AVATAR__') {
-    GLOBAL_MEM_AVATAR_URL = found;
-    return found;
-  }
-  return null;
-};
-
-// ✅ បង្កើតរូបភាព Thumbnail តូចច្បាស់ (128x128px ~4KB) ទុកសម្រាប់បង្ហាញលើ Navbar ក្នុង 0ms
-const cacheCrispAvatarThumbnail = (rawSrc, onReady) => {
-  if (!rawSrc || typeof rawSrc !== 'string' || rawSrc === '__CACHED_AVATAR__') {
-    return;
-  }
-
-  GLOBAL_MEM_AVATAR_URL = rawSrc;
-
-  // បើរូបភាពតូចស្រាប់ (< 25KB) រក្សាទុកភ្លាមៗក្នុង 0ms
-  if (!rawSrc.startsWith('data:image') || rawSrc.length < 25000) {
-    writeRawStorageItem(AUTH_AVATAR_THUMB_KEY, rawSrc);
-    writeRawStorageItem(AUTH_AVATAR_CACHE_KEY, rawSrc);
-    if (typeof onReady === 'function') onReady(rawSrc);
-    return;
-  }
-
-  try {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const targetSize = 128;
-        let width = img.width || targetSize;
-        let height = img.height || targetSize;
-
-        if (width > height) {
-          if (width > targetSize) {
-            height = Math.round((height * targetSize) / width);
-            width = targetSize;
-          }
-        } else {
-          if (height > targetSize) {
-            width = Math.round((width * targetSize) / height);
-            height = targetSize;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        const thumbDataUrl = canvas.toDataURL('image/webp', 0.85);
-
-        GLOBAL_MEM_AVATAR_URL = thumbDataUrl;
-        writeRawStorageItem(AUTH_AVATAR_THUMB_KEY, thumbDataUrl);
-        writeRawStorageItem(AUTH_AVATAR_CACHE_KEY, thumbDataUrl);
-        if (typeof onReady === 'function') onReady(thumbDataUrl);
-      } catch {
-        writeRawStorageItem(AUTH_AVATAR_CACHE_KEY, rawSrc);
-      }
-    };
-    img.src = rawSrc;
-  } catch {}
-};
-
-// ✅ បង្រួមឯកសាររូបភាពពេល Upload ឱ្យតូចល្មម និងច្បាស់ល្អ (ការពារកុំឱ្យយឺតពេលផ្ញើទៅ Server និងពេលទាញមកវិញ)
-const compressUploadedImageFile = (file) =>
-  new Promise((resolve) => {
-    if (!file || !file.type.startsWith('image/')) {
-      resolve({ file, dataUrl: null });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const rawDataUrl = ev.target?.result;
-      if (!rawDataUrl || typeof rawDataUrl !== 'string') {
-        resolve({ file, dataUrl: null });
-        return;
-      }
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          const maxDim = 320;
-          let w = img.width || maxDim;
-          let h = img.height || maxDim;
-          if (w > h) {
-            if (w > maxDim) {
-              h = Math.round((h * maxDim) / w);
-              w = maxDim;
-            }
-          } else {
-            if (h > maxDim) {
-              w = Math.round((w * maxDim) / h);
-              h = maxDim;
-            }
-          }
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, w, h);
-
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-          canvas.toBlob(
-            (blob) => {
-              if (blob) {
-                const compressedFile = new File(
-                  [blob],
-                  file.name.replace(/\.[^.]+$/, '.jpg'),
-                  { type: 'image/jpeg' }
-                );
-                resolve({ file: compressedFile, dataUrl: compressedDataUrl });
-              } else {
-                resolve({ file, dataUrl: compressedDataUrl });
-              }
-            },
-            'image/jpeg',
-            0.85
-          );
-        } catch {
-          resolve({ file, dataUrl: rawDataUrl });
-        }
-      };
-      img.onerror = () => resolve({ file, dataUrl: rawDataUrl });
-      img.src = rawDataUrl;
-    };
-    reader.onerror = () => resolve({ file, dataUrl: null });
-    reader.readAsDataURL(file);
-  });
-
-const hydrateEntityWithCachedAvatar = (entity) => {
-  if (!entity || typeof entity !== 'object') return entity;
-  const cachedAvatar = readCachedAvatarSync();
-  const restore = (obj) => {
-    if (!obj || typeof obj !== 'object') return obj;
-    const copy = { ...obj };
-    if (
-      copy.profile_image === '__CACHED_AVATAR__' ||
-      (!copy.profile_image && cachedAvatar)
-    ) {
-      copy.profile_image = cachedAvatar;
-    }
-    return copy;
-  };
-  const hydrated = restore(entity);
-  if (hydrated.teacher && typeof hydrated.teacher === 'object') {
-    hydrated.teacher = restore(hydrated.teacher);
-  }
-  if (hydrated.student && typeof hydrated.student === 'object') {
-    hydrated.student = restore(hydrated.student);
-  }
-  return hydrated;
-};
 
 const readCachedUserSync = () => {
   try {
     const raw =
-      readRawStorageItem('user') || readRawStorageItem('auth_user');
+      localStorage.getItem('user') || localStorage.getItem('auth_user');
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    const extracted = parsed?.user || parsed?.data || parsed;
-    return hydrateEntityWithCachedAvatar(extracted);
+    return parsed?.user || parsed?.data || parsed;
   } catch {
     return null;
   }
@@ -264,41 +70,66 @@ const readCachedUserSync = () => {
 
 const readCachedTeacherSync = () => {
   try {
-    const raw = readRawStorageItem('teacher');
-    if (!raw) return null;
-    return hydrateEntityWithCachedAvatar(JSON.parse(raw));
+    const raw = localStorage.getItem('teacher');
+    return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
 };
 
-const stripHeavyBase64ForStorage = (obj, depth = 0) => {
-  if (!obj || typeof obj !== 'object' || depth > 4) return obj;
-  if (Array.isArray(obj)) {
-    return obj.map((item) => stripHeavyBase64ForStorage(item, depth + 1));
-  }
-  const copy = {};
-  Object.keys(obj).forEach((k) => {
-    const val = obj[k];
-    if (
-      typeof val === 'string' &&
-      val.startsWith('data:') &&
-      val.length > 15000
-    ) {
-      copy[k] = '__CACHED_AVATAR__';
-    } else if (val && typeof val === 'object') {
-      copy[k] = stripHeavyBase64ForStorage(val, depth + 1);
-    } else {
-      copy[k] = val;
-    }
+// ✅ មុខងារបង្រួមទំហំរូបភាពតាមរយៈ Canvas ឱ្យតូចល្មមច្បាស់ស្អាត (ប្រហែល 35KB-50KB) សម្រាប់ Railway Database
+const compressImageToBase64 = (file, maxDimension = 360, quality = 0.82) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let width = img.width || maxDimension;
+          let height = img.height || maxDimension;
+
+          if (width > height) {
+            if (width > maxDimension) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            }
+          } else if (height > maxDimension) {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          canvas.toBlob(
+            (blob) => {
+              const compressedFile = blob
+                ? new File([blob], 'avatar.jpg', { type: 'image/jpeg' })
+                : file;
+              resolve({ dataUrl, compressedFile });
+            },
+            'image/jpeg',
+            quality
+          );
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = (err) => reject(err);
+      img.src = event.target.result;
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
   });
-  return copy;
-};
 
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
-      readRawStorageItem('auth_user') || readRawStorageItem('user');
+      localStorage.getItem('auth_user') || localStorage.getItem('user');
     let uid = 'default';
     let role = 'admin';
     if (userObjStr) {
@@ -342,19 +173,6 @@ const pushLocalNotification = (notif) => {
   }
 };
 
-const invalidateDirectoryAvatarCaches = () => {
-  try {
-    const keysToRemove = [
-      'cached_admin_teachers_list',
-      'cached_admin_teachers_page1',
-      'cached_teacher_students_list_v6',
-      'cached_student_dept_lessons_v12',
-      'cached_student_dept_courses_all_years_v12',
-    ];
-    keysToRemove.forEach((k) => localStorage.removeItem(k));
-  } catch {}
-};
-
 const Navbar = () => {
   const {
     user: contextUser,
@@ -369,22 +187,13 @@ const Navbar = () => {
   const navigate = useNavigate();
 
   const user = useMemo(
-    () =>
-      contextUser ||
-      readCachedUserSync() ||
-      readCachedTeacherSync() ||
-      EMPTY_USER_OBJ,
+    () => contextUser || readCachedUserSync() || EMPTY_USER_OBJ,
     [contextUser]
   );
 
   const teacherData = useMemo(
     () => contextTeacher || readCachedTeacherSync() || user?.teacher || null,
     [contextTeacher, user?.teacher]
-  );
-
-  // ✅ រក្សាទុករូបភាព Thumbnail ក្នុង State តាំងពីវិនាទីទី 0 ដើម្បីឱ្យបង្ហាញភ្លាមៗគ្មានការយឺតយ៉ាវ
-  const [cachedThumbUrl, setCachedThumbUrl] = useState(() =>
-    readCachedAvatarSync()
   );
 
   const [isMobileViewport, setIsMobileViewport] = useState(() =>
@@ -420,7 +229,6 @@ const Navbar = () => {
   const [avatarError, setAvatarError] = useState(false);
   const [logoError, setLogoError] = useState(false);
   const [instantAvatarPreview, setInstantAvatarPreview] = useState(null);
-  const [profileFormError, setProfileFormError] = useState('');
   const [passwordFormError, setPasswordFormError] = useState('');
 
   const userEmail = useMemo(
@@ -481,7 +289,6 @@ const Navbar = () => {
     teacherData?.profile_image,
     user?.student?.profile_image,
     instantAvatarPreview,
-    cachedThumbUrl,
   ]);
 
   useEffect(() => {
@@ -522,43 +329,20 @@ const Navbar = () => {
 
   const syncUserToStorage = useCallback((updatedUserObj, updatedTeacherObj) => {
     try {
-      const rawAvatar =
-        updatedUserObj?.profile_image ||
-        updatedTeacherObj?.profile_image ||
-        updatedUserObj?.teacher?.profile_image ||
-        updatedUserObj?.student?.profile_image ||
-        null;
+      const str = JSON.stringify(updatedUserObj);
+      localStorage.setItem('user', str);
+      localStorage.setItem('auth_user', str);
 
-      if (rawAvatar && rawAvatar !== '__CACHED_AVATAR__') {
-        cacheCrispAvatarThumbnail(rawAvatar, (thumb) => {
-          setCachedThumbUrl(thumb);
-        });
-      }
-
-      const slimUser = stripHeavyBase64ForStorage(updatedUserObj);
-      const str = JSON.stringify(slimUser);
-
-      writeRawStorageItem('user', str);
-      writeRawStorageItem('auth_user', str);
-
-      const targetTeacher = updatedTeacherObj || updatedUserObj?.teacher;
-      if (targetTeacher) {
-        const slimTeacherStr = JSON.stringify(
-          stripHeavyBase64ForStorage(targetTeacher)
+      if (updatedTeacherObj) {
+        localStorage.setItem('teacher', JSON.stringify(updatedTeacherObj));
+      } else if (updatedUserObj?.teacher) {
+        localStorage.setItem(
+          'teacher',
+          JSON.stringify(updatedUserObj.teacher)
         );
-        writeRawStorageItem('teacher', slimTeacherStr);
       }
-
-      if (updatedUserObj?.student) {
-        const slimStudentStr = JSON.stringify(
-          stripHeavyBase64ForStorage(updatedUserObj.student)
-        );
-        writeRawStorageItem('student', slimStudentStr);
-      }
-
-      window.dispatchEvent(new Event('lms_user_updated'));
     } catch (e) {
-      console.warn('Failed to sync user to storage:', e);
+      console.warn('Failed to sync user to localStorage:', e);
     }
   }, []);
 
@@ -566,35 +350,15 @@ const Navbar = () => {
     setIsMobileMenuOpen(false);
     setIsProfileModalOpen(false);
     setIsSettingsModalOpen(false);
-    GLOBAL_MEM_AVATAR_URL = null;
-    setCachedThumbUrl(null);
-
-    try {
-      [
-        'lms_last_active_role',
-        AUTH_AVATAR_THUMB_KEY,
-        AUTH_AVATAR_CACHE_KEY,
-        LEGACY_AVATAR_CACHE_KEY,
-      ].forEach((k) => {
-        try {
-          sessionStorage.removeItem(k);
-          localStorage.removeItem(k);
-        } catch {}
-      });
-    } catch {}
 
     if (typeof logout === 'function') {
       logout();
     } else {
       try {
-        ['token', 'auth_token', 'teacher', 'student', 'user', 'auth_user'].forEach(
-          (k) => {
-            try {
-              sessionStorage.removeItem(k);
-              localStorage.removeItem(k);
-            } catch {}
-          }
-        );
+        localStorage.removeItem('token');
+        localStorage.removeItem('teacher');
+        localStorage.removeItem('user');
+        localStorage.removeItem('auth_user');
       } catch {}
 
       if (typeof setUser === 'function') {
@@ -611,7 +375,6 @@ const Navbar = () => {
       user?.role?.name ||
       user?.role_name ||
       (typeof user?.role === 'string' ? user.role : '') ||
-      readRawStorageItem('lms_last_active_role') ||
       '',
     [user]
   );
@@ -628,19 +391,16 @@ const Navbar = () => {
     () =>
       (typeof hasRole === 'function' && hasRole('Teacher')) ||
       String(userRoleRaw).toLowerCase().includes('teacher') ||
-      Number(user?.role_id) === 2 ||
-      Boolean(teacherData) ||
-      Boolean(user?.is_teacher),
-    [hasRole, userRoleRaw, user?.role_id, user?.is_teacher, teacherData]
+      Number(user?.role_id) === 2,
+    [hasRole, userRoleRaw, user?.role_id]
   );
 
   const isStudent = useMemo(
     () =>
       (typeof hasRole === 'function' && hasRole('Student')) ||
       String(userRoleRaw).toLowerCase().includes('student') ||
-      Number(user?.role_id) === 3 ||
-      Boolean(user?.student),
-    [hasRole, userRoleRaw, user?.role_id, user?.student]
+      Number(user?.role_id) === 3,
+    [hasRole, userRoleRaw, user?.role_id]
   );
 
   const getRoleName = useCallback(
@@ -648,106 +408,52 @@ const Navbar = () => {
       const r = (roleName || '').toString().toLowerCase();
       const rid = Number(user?.role_id);
       if (language === 'km') {
-        if (r.includes('admin') || rid === 1 || isAdmin) return 'អ្នកគ្រប់គ្រង';
-        if (r.includes('teacher') || rid === 2 || isTeacher) return 'គ្រូបង្រៀន';
-        if (r.includes('student') || rid === 3 || isStudent) return 'សិស្ស';
+        if (r.includes('admin') || rid === 1) return 'អ្នកគ្រប់គ្រង';
+        if (r.includes('teacher') || rid === 2) return 'គ្រូបង្រៀន';
+        if (r.includes('student') || rid === 3) return 'សិស្ស';
         return roleName;
       }
-      if (r.includes('admin') || rid === 1 || isAdmin) return 'Administrator';
-      if (r.includes('teacher') || rid === 2 || isTeacher) return 'Teacher';
-      if (r.includes('student') || rid === 3 || isStudent) return 'Student';
+      if (r.includes('admin') || rid === 1) return 'Administrator';
+      if (r.includes('teacher') || rid === 2) return 'Teacher';
+      if (r.includes('student') || rid === 3) return 'Student';
       return roleName;
     },
-    [language, user?.role_id, isAdmin, isTeacher, isStudent]
+    [language, user?.role_id]
   );
 
-  const resolveImageUrl = useCallback(
-    (rawPath) => {
-      if (!rawPath || typeof rawPath !== 'string') return null;
-      const trimmed = rawPath.trim();
-      if (!trimmed) return null;
-      if (trimmed === '__CACHED_AVATAR__') {
-        return cachedThumbUrl || readCachedAvatarSync();
-      }
-      if (
-        trimmed.startsWith('data:') ||
-        trimmed.startsWith('http://') ||
-        trimmed.startsWith('https://') ||
-        trimmed.startsWith('blob:')
-      ) {
-        return trimmed;
-      }
-      const baseUrl = (
-        import.meta.env.VITE_API_URL || 'http://localhost:8000'
-      ).replace(/\/api\/?$/, '');
-      const cleanPath = trimmed
-        .replace(/^\/?storage\//, '')
-        .replace(/^\/+/, '');
-      return `${baseUrl}/storage/${cleanPath}`;
-    },
-    [cachedThumbUrl]
-  );
-
-  // ✅ ប្រសិនបើទទួលបានរូបភាពថ្មីពី Context/API ត្រូវបង្កើត Thumbnail ទុកក្នុង Storage ភ្លាមៗសម្រាប់ពេល F5 លើកក្រោយ
-  useEffect(() => {
-    const incomingRaw =
-      user?.profile_image ||
-      teacherData?.profile_image ||
-      user?.teacher?.profile_image ||
-      user?.student?.profile_image ||
-      null;
-
+  const resolveImageUrl = useCallback((rawPath) => {
+    if (!rawPath || typeof rawPath !== 'string') return null;
+    const trimmed = rawPath.trim();
+    if (!trimmed) return null;
     if (
-      incomingRaw &&
-      typeof incomingRaw === 'string' &&
-      incomingRaw !== '__CACHED_AVATAR__'
+      trimmed.startsWith('http') ||
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('blob:')
     ) {
-      const resolved = resolveImageUrl(incomingRaw);
-      if (resolved) {
-        cacheCrispAvatarThumbnail(resolved, (thumb) => {
-          setCachedThumbUrl(thumb);
-        });
-      }
+      return trimmed;
     }
-  }, [
-    user?.profile_image,
-    teacherData?.profile_image,
-    user?.teacher?.profile_image,
-    user?.student?.profile_image,
-    resolveImageUrl,
-  ]);
+    const baseUrl = (
+      import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    ).replace(/\/api\/?$/, '');
+    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    return `${baseUrl}/storage/${cleanPath}`;
+  }, []);
 
-  // ✅ អាទិភាពទី ១៖ ប្រើ Thumbnail ស្រាល (~4KB) ពី Memory/Cache ដើម្បីឱ្យរូបលើ Navbar បង្ហាញក្នុង 0ms គ្មានការរង់ចាំ
   const profileImgUrl = useMemo(() => {
     if (instantAvatarPreview) return instantAvatarPreview;
-    if (cachedThumbUrl && cachedThumbUrl !== '__CACHED_AVATAR__') {
-      return cachedThumbUrl;
-    }
     const rawImg =
       user?.profile_image ||
-      user?.profile_image_url ||
       teacherData?.profile_image ||
-      teacherData?.profile_image_url ||
       user?.teacher?.profile_image ||
-      user?.teacher?.profile_image_url ||
-      user?.student?.profile_image ||
-      user?.student?.profile_image_url ||
-      readCachedAvatarSync();
+      user?.student?.profile_image;
     return rawImg ? resolveImageUrl(rawImg) : null;
-  }, [
-    user,
-    teacherData,
-    instantAvatarPreview,
-    cachedThumbUrl,
-    resolveImageUrl,
-  ]);
+  }, [user, teacherData, instantAvatarPreview, resolveImageUrl]);
 
   const resolvedFirstName = useMemo(
     () =>
       user?.first_name ||
       teacherData?.first_name ||
       user?.teacher_first_name ||
-      user?.teacher?.first_name ||
       user?.student?.first_name ||
       '',
     [user, teacherData]
@@ -758,18 +464,16 @@ const Navbar = () => {
       user?.last_name ||
       teacherData?.last_name ||
       user?.teacher_last_name ||
-      user?.teacher?.last_name ||
       user?.student?.last_name ||
       '',
     [user, teacherData]
   );
 
   const userInitials = useMemo(() => {
-    const first =
-      (resolvedFirstName || user?.name || userEmail || '')?.trim()?.[0] || '';
+    const first = (resolvedFirstName || user?.name || '')?.trim()?.[0] || '';
     const last = (resolvedLastName || '')?.trim()?.[0] || '';
     return (first + last).toUpperCase() || 'U';
-  }, [resolvedFirstName, resolvedLastName, user?.name, userEmail]);
+  }, [resolvedFirstName, resolvedLastName, user?.name]);
 
   const userDisplayName = useMemo(() => {
     if (resolvedFirstName || resolvedLastName) {
@@ -786,7 +490,6 @@ const Navbar = () => {
       user?.phone ||
       teacherData?.phone ||
       user?.teacher_phone ||
-      user?.teacher?.phone ||
       user?.student?.phone ||
       '',
     [user, teacherData]
@@ -930,7 +633,7 @@ const Navbar = () => {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
           path: '/dashboard',
-          altPaths: ['/', '/admin', '/admin/dashboard'],
+          altPaths: ['/admin/dashboard'],
         },
         {
           name: t('ដេប៉ាតឺម៉ង់', 'Departments'),
@@ -992,7 +695,7 @@ const Navbar = () => {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
           path: '/dashboard',
-          altPaths: ['/', '/teacher', '/teacher/dashboard'],
+          altPaths: ['/teacher/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
@@ -1022,7 +725,7 @@ const Navbar = () => {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
           path: '/grades',
-          altPaths: ['/scores', '/teacher/grades', '/teacher/scores'],
+          altPaths: ['/teacher/grades'],
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
@@ -1044,7 +747,7 @@ const Navbar = () => {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
           path: '/dashboard',
-          altPaths: ['/', '/student', '/student/dashboard'],
+          altPaths: ['/student/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
@@ -1068,7 +771,7 @@ const Navbar = () => {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
           path: '/grades',
-          altPaths: ['/scores', '/student/grades', '/student/scores'],
+          altPaths: ['/student/grades'],
         },
         {
           name: t('កិច្ចការ', 'Assignments'),
@@ -1087,35 +790,7 @@ const Navbar = () => {
     return [];
   }, [isAdmin, isTeacher, isStudent, t]);
 
-  // ✅ ឆែកស្ថានភាព Active នៃម៉ឺនុយលើទូរស័ព្ទ និង Tablet (គាំទ្រទាំងពេលវាយ Domain ចូលដំបូង '/' ឬ '/dashboard')
-  const checkIsMobileItemActive = useCallback(
-    (item) => {
-      const routerPath = (location.pathname || '/').replace(/\/+$/, '') || '/';
-      const browserPath =
-        typeof window !== 'undefined'
-          ? (window.location.pathname || '/').replace(/\/+$/, '') || '/'
-          : routerPath;
-
-      const pathsToCheck = [item.path, ...(item.altPaths || [])];
-
-      return pathsToCheck.some((target) => {
-        const cleanTarget = (target || '/').replace(/\/+$/, '') || '/';
-        if (cleanTarget === '/') {
-          return routerPath === '/' || browserPath === '/';
-        }
-        return (
-          routerPath === cleanTarget ||
-          routerPath.startsWith(`${cleanTarget}/`) ||
-          browserPath === cleanTarget ||
-          browserPath.startsWith(`${cleanTarget}/`)
-        );
-      });
-    },
-    [location.pathname]
-  );
-
   const openProfileModal = useCallback(() => {
-    setProfileFormError('');
     setProfileData({
       first_name: resolvedFirstName || user?.name || '',
       last_name: resolvedLastName || '',
@@ -1136,7 +811,6 @@ const Navbar = () => {
   const closeProfileModal = useCallback(() => {
     setIsProfileModalOpen(false);
     setIsEditing(false);
-    setProfileFormError('');
   }, []);
 
   const openSettingsModal = useCallback(() => {
@@ -1177,7 +851,6 @@ const Navbar = () => {
 
   const handlePasswordUpdate = async (e) => {
     e.preventDefault();
-    if (isSavingPassword) return;
     setPasswordFormError('');
 
     if (passwordData.new_password !== passwordData.new_password_confirmation) {
@@ -1225,53 +898,56 @@ const Navbar = () => {
     }
   };
 
+  // ✅ មុខងារដាក់រូបភាពប្រវត្តិរូបដែលបានបង្រួមជា Base64 សម្រាប់រក្សាទុកក្នុង Database លើ Railway ជាប់រហូត ១០០%
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setProfileFormError('');
-
     if (!file.type.startsWith('image/')) {
-      setProfileFormError(
-        t(
-          'សូមជ្រើសរើសឯកសារប្រភេទរូបភាព (JPG, PNG, WEBP)!',
-          'Please select a valid image file!'
-        )
-      );
-      if (e.target) e.target.value = null;
       return;
     }
-
-    if (file.size > 5 * 1024 * 1024) {
-      setProfileFormError(
-        t(
-          'ទំហំរូបភាពមិនត្រូវលើសពី 5MB ឡើយ!',
-          'Image size must not exceed 5MB!'
-        )
-      );
-      if (e.target) e.target.value = null;
-      return;
-    }
-
-    const { file: optimizedFile, dataUrl: compressedDataUrl } =
-      await compressUploadedImageFile(file);
-
-    const previewUrl = compressedDataUrl || URL.createObjectURL(file);
-    setAvatarError(false);
-    setInstantAvatarPreview(previewUrl);
-    if (compressedDataUrl) {
-      cacheCrispAvatarThumbnail(compressedDataUrl, (thumb) => {
-        setCachedThumbUrl(thumb);
-      });
-    }
-    setProfileData((prev) => ({
-      ...prev,
-      profile_image: previewUrl,
-    }));
 
     try {
+      const { dataUrl, compressedFile } = await compressImageToBase64(
+        file,
+        360,
+        0.82
+      );
+
+      setAvatarError(false);
+      setInstantAvatarPreview(dataUrl);
+      setProfileData((prev) => ({
+        ...prev,
+        profile_image: dataUrl,
+      }));
+
+      // រក្សាទុកចូលក្នុង State និង LocalStorage ភ្លាមៗក្នុង 0ms
+      const optimisticUser = { ...user, profile_image: dataUrl };
+      let optimisticTeacher = teacherData ? { ...teacherData } : null;
+      if (optimisticUser.teacher) {
+        optimisticUser.teacher = {
+          ...optimisticUser.teacher,
+          profile_image: dataUrl,
+        };
+      }
+      if (optimisticTeacher) {
+        optimisticTeacher.profile_image = dataUrl;
+      }
+      if (optimisticUser.student) {
+        optimisticUser.student = {
+          ...optimisticUser.student,
+          profile_image: dataUrl,
+        };
+      }
+
+      if (typeof setUser === 'function') {
+        setUser(optimisticUser);
+      }
+      syncUserToStorage(optimisticUser, optimisticTeacher);
+
       const formData = new FormData();
-      formData.append('profile_image', optimizedFile);
+      formData.append('profile_image', compressedFile);
+      formData.append('profile_image_base64', dataUrl);
 
       let endpoint = '/user/profile/update-image';
       if (isTeacher) {
@@ -1280,47 +956,41 @@ const Navbar = () => {
         endpoint = '/student/profile/update-image';
       }
 
-      const response = await api.post(endpoint, formData, {
-        headers: { 'Content-Type': undefined },
-      });
+      const response = await api.post(endpoint, formData);
 
       if (response.data) {
         const newImgPath =
-          compressedDataUrl ||
           response.data.profile_image ||
-          response.data?.data?.profile_image;
-        const updatedUser = { ...user };
-        let updatedTeacher = teacherData ? { ...teacherData } : null;
+          response.data?.data?.profile_image ||
+          dataUrl;
+        const resolvedServerUrl = resolveImageUrl(newImgPath) || dataUrl;
 
-        if (newImgPath) {
-          updatedUser.profile_image = newImgPath;
-          if (updatedUser.teacher) {
-            updatedUser.teacher = {
-              ...updatedUser.teacher,
-              profile_image: newImgPath,
-            };
-          }
-          if (updatedTeacher) {
-            updatedTeacher.profile_image = newImgPath;
-          }
-          if (updatedUser.student) {
-            updatedUser.student = {
-              ...updatedUser.student,
-              profile_image: newImgPath,
-            };
-          }
+        const updatedUser = { ...optimisticUser, profile_image: resolvedServerUrl };
+        let updatedTeacher = optimisticTeacher
+          ? { ...optimisticTeacher, profile_image: resolvedServerUrl }
+          : null;
+
+        if (updatedUser.teacher) {
+          updatedUser.teacher = {
+            ...updatedUser.teacher,
+            profile_image: resolvedServerUrl,
+          };
+        }
+        if (updatedUser.student) {
+          updatedUser.student = {
+            ...updatedUser.student,
+            profile_image: resolvedServerUrl,
+          };
         }
 
         if (typeof setUser === 'function') {
           setUser(updatedUser);
         }
         syncUserToStorage(updatedUser, updatedTeacher);
-        invalidateDirectoryAvatarCaches();
 
-        const resolvedServerUrl = resolveImageUrl(newImgPath);
         setProfileData((prev) => ({
           ...prev,
-          profile_image: resolvedServerUrl || previewUrl,
+          profile_image: resolvedServerUrl,
         }));
         setInstantAvatarPreview(null);
 
@@ -1334,31 +1004,13 @@ const Navbar = () => {
       }
     } catch (error) {
       console.error('Upload error:', error);
-      setInstantAvatarPreview(null);
-      setProfileData((prev) => ({
-        ...prev,
-        profile_image: profileImgUrl,
-      }));
-      const errMsg =
-        error.response?.data?.message ||
-        t(
-          'មិនអាចបង្ហោះរូបភាពប្រវត្តិរូបបានទេ សូមសាកល្បងម្ដងទៀត!',
-          'Failed to upload profile photo. Please try again!'
-        );
-      setProfileFormError(String(errMsg));
     } finally {
       if (e.target) e.target.value = null;
     }
   };
 
   const handleProfileUpdate = async () => {
-    if (isSavingProfile) return;
-    setProfileFormError('');
-
     if (!profileData.first_name.trim()) {
-      setProfileFormError(
-        t('សូមបញ្ចូលនាមខ្លួនរបស់អ្នក!', 'First name is required!')
-      );
       return;
     }
 
@@ -1398,6 +1050,11 @@ const Navbar = () => {
       student: user?.student ? { ...user.student, ...payload } : user?.student,
     };
 
+    if (typeof setUser === 'function') {
+      setUser(optimisticUser);
+    }
+    syncUserToStorage(optimisticUser, optimisticTeacher);
+    setIsEditing(false);
     setIsSavingProfile(true);
 
     try {
@@ -1421,8 +1078,6 @@ const Navbar = () => {
           setUser(updatedUser);
         }
         syncUserToStorage(updatedUser, optimisticTeacher);
-        invalidateDirectoryAvatarCaches();
-        setIsEditing(false);
 
         pushLocalNotification({
           titleKm: 'បានកែប្រែព័ត៌មានប្រវត្តិរូប',
@@ -1438,18 +1093,6 @@ const Navbar = () => {
         setUser(previousUser);
       }
       syncUserToStorage(previousUser, previousTeacher);
-      const apiErrors = error.response?.data?.errors;
-      const firstValidationMsg = apiErrors
-        ? Object.values(apiErrors).flat()[0]
-        : null;
-      const errMsg =
-        firstValidationMsg ||
-        error.response?.data?.message ||
-        t(
-          'មិនអាចរក្សាទុកការកែប្រែបានទេ (អ៊ីមែលអាចស្ទួន)!',
-          'Could not update profile (email may already be in use)!'
-        );
-      setProfileFormError(String(errMsg));
     } finally {
       setIsSavingProfile(false);
     }
@@ -1464,36 +1107,35 @@ const Navbar = () => {
             : 'bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 border-blue-800/40'
         }`}
       >
-        <div className="px-3 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-15 sm:h-16">
-            {/* ផ្នែកខាងឆ្វេង៖ ស្លាកសញ្ញា និងឈ្មោះវិទ្យាស្ថាន (សមាមាត្រតាម Phone, Tablet, iPad, Laptop, Desktop) */}
-            <div className="flex items-center min-w-0">
+        <div className="px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center">
               <Link
                 to={dashboardPath}
-                className="shrink-0 flex items-center gap-2.5 sm:gap-3 group min-w-0"
+                className="shrink-0 flex items-center gap-3 group"
               >
                 {!logoError ? (
                   <img
                     src={logo}
                     alt="RPITSSVR Logo"
-                    className="h-9 sm:h-10 w-auto object-contain drop-shadow-lg shrink-0 transition-transform duration-200 group-hover:scale-105"
+                    className="h-10 w-auto object-contain drop-shadow-lg"
                     onError={() => setLogoError(true)}
                   />
                 ) : (
                   <div
-                    className={`h-9 w-9 sm:h-10 sm:w-10 rounded-full flex items-center justify-center shadow-lg ring-2 ring-yellow-400/50 shrink-0 ${
+                    className={`h-10 w-10 rounded-full flex items-center justify-center shadow-lg ring-2 ring-yellow-400/50 ${
                       isStudent ? 'bg-indigo-700' : 'bg-blue-700'
                     }`}
                   >
                     <AcademicCapIcon className="h-5 w-5 text-yellow-300" />
                   </div>
                 )}
-                <div className="min-w-0">
-                  <h1 className="text-base sm:text-lg lg:text-xl font-black text-white tracking-wide drop-shadow-sm leading-tight truncate">
+                <div>
+                  <h1 className="text-lg sm:text-xl font-black text-white tracking-wide drop-shadow-sm leading-tight">
                     LMS RPITSSVR
                   </h1>
                   <p
-                    className={`text-[9.5px] sm:text-[10.5px] font-semibold tracking-wider truncate max-w-[180px] sm:max-w-xs lg:max-w-md ${
+                    className={`hidden sm:block text-[10px] font-semibold tracking-wider ${
                       isStudent ? 'text-indigo-200/85' : 'text-blue-200/80'
                     }`}
                   >
@@ -1506,14 +1148,13 @@ const Navbar = () => {
               </Link>
             </div>
 
-            {/* ផ្នែកខាងស្ដាំ៖ សម្រាប់ iPad, Tablet, Laptop និង Desktop (md: ឡើងទៅ) */}
-            <div className="hidden md:flex md:items-center gap-2 lg:gap-3">
+            <div className="hidden md:flex md:items-center space-x-3">
               {!isMobileViewport && <NotificationBell />}
 
               <button
                 type="button"
                 onClick={toggleTheme}
-                className={`p-2.5 rounded-xl border transition-all text-white cursor-pointer shadow-sm hover:scale-105 ${
+                className={`p-2.5 rounded-xl border transition-colors text-white cursor-pointer shadow-sm ${
                   isStudent
                     ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35 backdrop-blur-md'
                     : 'bg-blue-800/50 hover:bg-blue-700/60 border-blue-600/30'
@@ -1538,7 +1179,7 @@ const Navbar = () => {
               <button
                 type="button"
                 onClick={toggleLanguage}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-all text-white cursor-pointer shadow-sm hover:scale-105 ${
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-colors text-white cursor-pointer shadow-sm ${
                   isStudent
                     ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35 backdrop-blur-md'
                     : 'bg-blue-800/50 hover:bg-blue-700/60 border-blue-600/30'
@@ -1553,18 +1194,14 @@ const Navbar = () => {
                 </span>
               </button>
 
-              {/* ប៊ូតុង Profile (លើ iPad បង្ហាញរូបមូល gọn ស្អាត, លើ Laptop/Desktop បង្ហាញឈ្មោះ និងតួនាទីពេញភ្នែក) */}
-              <Menu as="div" className="relative ml-1">
+              {/* ✅ ទម្រង់ដើម៖ បង្ហាញតែរូបតំណាងមូល (Circular Avatar Only) ដោយមិនដាក់ប្រអប់វែង ឈ្មោះ ឬតួនាទីឡើយ */}
+              <Menu as="div" className="relative ml-1.5">
                 <Menu.Button
-                  className={`group relative flex items-center gap-2.5 p-1 lg:pr-3 rounded-full border transition-all duration-150 focus:outline-none cursor-pointer ${
-                    isStudent
-                      ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35'
-                      : 'bg-blue-900/50 hover:bg-blue-800/70 border-blue-700/40'
-                  }`}
+                  className="group relative flex items-center justify-center rounded-full focus:outline-none cursor-pointer"
                   title={userDisplayName}
                 >
                   <div
-                    className={`h-9 w-9 sm:h-10 sm:w-10 rounded-full flex items-center justify-center text-white font-bold text-xs overflow-hidden shrink-0 ring-2 ring-white/25 shadow-md group-hover:ring-yellow-400 group-focus-visible:ring-yellow-400 transition-colors duration-150 ${
+                    className={`h-10 w-10 rounded-full flex items-center justify-center text-white font-bold text-xs overflow-hidden shrink-0 ring-2 ring-white/25 shadow-md group-hover:ring-yellow-400 group-focus-visible:ring-yellow-400 transition-colors duration-150 ${
                       isStudent
                         ? 'bg-gradient-to-br from-indigo-500 via-blue-600 to-violet-600'
                         : 'bg-gradient-to-br from-blue-600 to-indigo-700'
@@ -1574,9 +1211,6 @@ const Navbar = () => {
                       <img
                         src={profileImgUrl}
                         alt="Profile"
-                        loading="eager"
-                        decoding="sync"
-                        fetchPriority="high"
                         className="nav-crisp-avatar h-full w-full object-cover rounded-full"
                         onError={() => setAvatarError(true)}
                       />
@@ -1584,22 +1218,11 @@ const Navbar = () => {
                       <span>{userInitials}</span>
                     )}
                   </div>
-
-                  {/* បង្ហាញឈ្មោះ និងតួនាទីនៅលើអេក្រង់ធំ (xl:) ឱ្យពេញភ្នែកស្អាត */}
-                  <div className="hidden xl:flex flex-col items-start text-left max-w-[130px]">
-                    <span className="text-xs font-extrabold text-white truncate w-full leading-tight">
-                      {userDisplayName}
-                    </span>
-                    <span className="text-[10px] font-bold text-yellow-300/90 truncate w-full mt-0.5">
-                      {getRoleName(userRoleRaw)}
-                    </span>
-                  </div>
-                  <ChevronDownIcon className="hidden xl:block h-4 w-4 text-blue-200 group-hover:text-yellow-300 transition-colors shrink-0" />
                 </Menu.Button>
 
-                <Menu.Items className="nav-menu-dropdown origin-top-right absolute right-0 mt-2.5 w-64 rounded-2xl shadow-2xl py-1.5 bg-white ring-1 ring-black/5 focus:outline-none overflow-hidden z-50 border border-gray-100">
+                <Menu.Items className="nav-menu-dropdown origin-top-right absolute right-0 mt-2.5 w-60 rounded-2xl shadow-2xl py-1.5 bg-white ring-1 ring-black/5 focus:outline-none overflow-hidden z-50 border border-gray-100">
                   <div
-                    className={`nav-dropdown-header px-4 py-3.5 border-b border-gray-100 ${
+                    className={`nav-dropdown-header px-4 py-3 border-b border-gray-100 ${
                       isStudent
                         ? 'bg-gradient-to-r from-indigo-50 to-purple-50'
                         : 'bg-gradient-to-r from-blue-50 to-indigo-50'
@@ -1621,7 +1244,7 @@ const Navbar = () => {
                           active
                             ? 'bg-blue-50 dark:bg-slate-800 text-blue-700 dark:text-blue-400'
                             : 'text-gray-700'
-                        } flex w-full items-center px-4 py-2.5 text-sm font-bold transition-colors cursor-pointer`}
+                        } flex w-full items-center px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer`}
                       >
                         <UserCircleIcon
                           className={`h-5 w-5 mr-3 ${
@@ -1641,7 +1264,7 @@ const Navbar = () => {
                           active
                             ? 'bg-blue-50 dark:bg-slate-800 text-blue-700 dark:text-blue-400'
                             : 'text-gray-700'
-                        } flex w-full items-center px-4 py-2.5 text-sm font-bold transition-colors cursor-pointer`}
+                        } flex w-full items-center px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer`}
                       >
                         <Cog6ToothIcon
                           className={`h-5 w-5 mr-3 ${
@@ -1661,7 +1284,7 @@ const Navbar = () => {
                           active
                             ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600'
                             : 'text-rose-500'
-                        } nav-soft-divider flex w-full items-center px-4 py-2.5 text-sm font-bold border-t border-gray-100 transition-colors cursor-pointer`}
+                        } nav-soft-divider flex w-full items-center px-4 py-2.5 text-sm font-medium border-t border-gray-100 transition-colors cursor-pointer`}
                       >
                         <ArrowRightOnRectangleIcon
                           className={`h-5 w-5 mr-3 ${
@@ -1676,17 +1299,14 @@ const Navbar = () => {
               </Menu>
             </div>
 
-            {/* ផ្នែកខាងស្ដាំ៖ សម្រាប់អេក្រង់ទូរស័ព្ទ (Phone < 768px) */}
             <div className="flex items-center md:hidden gap-1.5">
               {isMobileViewport && <NotificationBell isMobile={true} />}
 
               <button
                 type="button"
                 onClick={toggleTheme}
-                className={`p-2 rounded-xl text-yellow-300/85 hover:text-yellow-300 border transition-colors cursor-pointer ${
-                  isStudent
-                    ? 'bg-white/10 border-indigo-400/30 hover:bg-white/15'
-                    : 'bg-blue-800/40 border-blue-600/30 hover:bg-blue-800/60'
+                className={`p-2 rounded-xl text-yellow-300/80 hover:text-yellow-300 transition-colors cursor-pointer ${
+                  isStudent ? 'hover:bg-white/10' : 'hover:bg-blue-800/50'
                 }`}
                 title={isDarkMode ? t('ថ្ងៃ', 'Light') : t('យប់', 'Dark')}
               >
@@ -1700,7 +1320,7 @@ const Navbar = () => {
               <button
                 type="button"
                 onClick={toggleLanguage}
-                className={`flex items-center gap-1 px-2.5 py-2 rounded-xl border text-yellow-300 transition-colors cursor-pointer ${
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-yellow-300 transition-colors cursor-pointer ${
                   isStudent
                     ? 'bg-white/10 border-indigo-400/35 hover:bg-white/15'
                     : 'bg-blue-800/40 border-blue-600/30 hover:bg-blue-800/70'
@@ -1716,12 +1336,9 @@ const Navbar = () => {
               <button
                 type="button"
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className={`inline-flex items-center justify-center p-2 rounded-xl border text-yellow-300 focus:outline-none transition-colors cursor-pointer ${
-                  isStudent
-                    ? 'bg-white/10 border-indigo-400/35 hover:bg-white/15'
-                    : 'bg-blue-800/40 border-blue-600/30 hover:bg-blue-800/70'
+                className={`inline-flex items-center justify-center p-2 rounded-xl text-yellow-300/70 hover:text-yellow-300 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 transition-colors cursor-pointer ${
+                  isStudent ? 'hover:bg-white/10' : 'hover:bg-blue-800/50'
                 }`}
-                aria-label="Toggle Menu"
               >
                 {isMobileMenuOpen ? (
                   <XMarkIcon className="h-6 w-6" />
@@ -1733,21 +1350,17 @@ const Navbar = () => {
           </div>
         </div>
 
-        {/* ================================================================ */}
-        {/* 📌 ម៉ឺនុយទូរស័ព្ទបែបទំនើប (ADAPTIVE 2-COLUMN MOBILE BENTO DRAWER)   */}
-        {/* ================================================================ */}
         {isMobileMenuOpen && (
           <div
-            className={`md:hidden border-t backdrop-blur-xl max-h-[85vh] overflow-y-auto shadow-2xl ${
+            className={`md:hidden border-t backdrop-blur-md max-h-[85vh] overflow-y-auto ${
               isStudent
                 ? 'border-indigo-500/30 bg-gradient-to-b from-blue-950/98 via-indigo-950/98 to-violet-950/98'
                 : 'border-blue-700/30 bg-blue-950/98'
             }`}
           >
-            <div className="pt-3.5 pb-5 space-y-3.5 px-3.5">
-              {/* កាតព័ត៌មានអ្នកប្រើប្រាស់លើទូរស័ព្ទ */}
+            <div className="pt-3 pb-4 space-y-3 px-4">
               <div
-                className={`p-3.5 rounded-2xl border flex items-center justify-between gap-2 ${
+                className={`p-3 rounded-2xl border flex items-center justify-between ${
                   isStudent
                     ? 'bg-white/10 border-indigo-400/30'
                     : 'bg-blue-900/60 border-blue-700/30'
@@ -1755,7 +1368,7 @@ const Navbar = () => {
               >
                 <div className="flex items-center space-x-3 min-w-0">
                   <div
-                    className={`h-11 w-11 rounded-full flex items-center justify-center text-white font-extrabold text-sm overflow-hidden ring-2 ring-white/25 shadow-md shrink-0 ${
+                    className={`h-10 w-10 rounded-full flex items-center justify-center text-white font-extrabold text-sm overflow-hidden ring-2 ring-white/25 shadow-md shrink-0 ${
                       isStudent
                         ? 'bg-gradient-to-br from-indigo-500 via-blue-600 to-violet-600'
                         : 'bg-gradient-to-br from-blue-600 to-indigo-700'
@@ -1765,8 +1378,6 @@ const Navbar = () => {
                       <img
                         src={profileImgUrl}
                         alt="Profile"
-                        loading="eager"
-                        decoding="sync"
                         className="nav-crisp-avatar h-full w-full object-cover rounded-full"
                         onError={() => setAvatarError(true)}
                       />
@@ -1778,13 +1389,13 @@ const Navbar = () => {
                     <p className="text-sm font-extrabold text-white truncate">
                       {userDisplayName}
                     </p>
-                    <p className="text-xs text-yellow-300/75 truncate">
+                    <p className="text-xs text-yellow-300/70 truncate">
                       {userEmail}
                     </p>
                   </div>
                 </div>
                 <span
-                  className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold border shrink-0 ${
+                  className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border shrink-0 ${
                     isStudent
                       ? 'bg-cyan-400/20 text-cyan-200 border-cyan-300/35'
                       : 'bg-yellow-400/20 text-yellow-300 border-yellow-400/30'
@@ -1794,120 +1405,122 @@ const Navbar = () => {
                 </span>
               </div>
 
-              {/* ក្រឡាម៉ឺនុយ ២ ជួរឈរលើទូរស័ព្ទ (ងាយស្រួលចុច និងពេញភ្នែកល្អ) */}
               <div
-                className={`pt-2.5 border-t ${
+                className={`space-y-1.5 pt-2 border-t ${
                   isStudent ? 'border-white/15' : 'border-blue-800/40'
                 }`}
               >
                 <p
-                  className={`text-[11px] font-extrabold uppercase tracking-wider px-1.5 mb-2 ${
+                  className={`text-[11px] font-extrabold uppercase tracking-wider px-2 mb-1.5 ${
                     isStudent ? 'text-cyan-300/90' : 'text-blue-300/80'
                   }`}
                 >
                   {t('ម៉ឺនុយបញ្ជា', 'Navigation Menu')}
                 </p>
-
-                <div className="grid grid-cols-2 gap-2">
-                  {navItems.map((item) => {
-                    const Icon = item.icon;
-                    if (item.children) {
-                      const isParentActive = checkIsMobileItemActive(item);
-                      const isSubOpen = openMobileSubMenu === item.path;
-                      return (
-                        <div key={item.path} className="col-span-2 space-y-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setOpenMobileSubMenu(isSubOpen ? null : item.path)
-                            }
-                            className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-bold transition-colors cursor-pointer border ${
-                              isParentActive || isSubOpen
-                                ? 'bg-blue-900/90 text-yellow-300 font-extrabold border-yellow-400/40 shadow-md'
-                                : 'bg-white/5 border-white/10 text-blue-100 hover:bg-blue-800/60 hover:text-yellow-300'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <Icon className="h-5 w-5 shrink-0 text-yellow-300" />
-                              <span>{item.name}</span>
-                            </div>
-                            <ChevronDownIcon
-                              className={`h-4 w-4 transition-transform duration-150 ${
-                                isSubOpen ? 'rotate-180 text-yellow-400' : ''
-                              }`}
-                            />
-                          </button>
-                          {isSubOpen && (
-                            <div className="grid grid-cols-2 gap-2 pl-2 pr-1 py-1">
-                              {item.children.map((sub) => {
-                                const isSubActive =
-                                  location.pathname === sub.path ||
-                                  location.pathname === sub.altPath;
-                                return (
-                                  <Link
-                                    key={sub.path}
-                                    to={sub.path}
-                                    onClick={() => setIsMobileMenuOpen(false)}
-                                    className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-extrabold border transition-colors ${
-                                      isSubActive
-                                        ? 'bg-yellow-400 text-blue-950 border-yellow-300 shadow-sm'
-                                        : 'bg-blue-900/50 border-blue-800 text-blue-200 hover:bg-blue-800/70 hover:text-white'
-                                    }`}
-                                  >
-                                    <span>{sub.name}</span>
-                                    {isSubActive && (
-                                      <span className="h-2 w-2 rounded-full bg-blue-950 shrink-0"></span>
-                                    )}
-                                  </Link>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
+                {navItems.map((item) => {
+                  const Icon = item.icon;
+                  if (item.children) {
+                    const isParentActive =
+                      location.pathname.startsWith(item.path) ||
+                      (item.altPaths || []).some((alt) =>
+                        location.pathname.startsWith(alt)
                       );
-                    }
-
-                    const isItemActive = checkIsMobileItemActive(item);
-
+                    const isSubOpen = openMobileSubMenu === item.path;
                     return (
-                      <NavLink
-                        key={item.path}
-                        to={item.path}
-                        onClick={() => setIsMobileMenuOpen(false)}
-                        className={() =>
-                          `flex items-center gap-2.5 px-3 py-3 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
-                            isItemActive
-                              ? isStudent
-                                ? 'bg-white/15 text-white font-extrabold border-yellow-400/50 shadow-md'
-                                : 'bg-yellow-400 text-blue-950 font-extrabold border-yellow-300 shadow-md'
-                              : isStudent
-                              ? 'bg-white/[0.06] border-white/10 text-indigo-100 hover:bg-white/10 hover:text-white'
-                              : 'bg-blue-900/40 border-blue-800/60 text-blue-100 hover:bg-blue-800/60 hover:text-yellow-300'
-                          }`
-                        }
-                      >
-                        <Icon
-                          className={`h-5 w-5 shrink-0 ${
-                            isItemActive
-                              ? isStudent
-                                ? 'text-yellow-300'
-                                : 'text-blue-950'
-                              : 'text-yellow-300/85'
+                      <div key={item.path} className="space-y-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenMobileSubMenu(isSubOpen ? null : item.path)
+                          }
+                          className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-[15px] font-semibold transition-colors cursor-pointer ${
+                            isParentActive || isSubOpen
+                              ? 'bg-blue-900/85 text-yellow-300 font-extrabold border border-blue-700'
+                              : 'text-blue-100 hover:bg-blue-800/60 hover:text-yellow-300'
                           }`}
-                        />
-                        <span className="truncate">{item.name}</span>
-                        {isItemActive && isStudent && (
-                          <span className="ml-auto h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.8)] shrink-0" />
+                        >
+                          <div className="flex items-center gap-3">
+                            <Icon className="h-5 w-5 shrink-0" />
+                            <span>{item.name}</span>
+                          </div>
+                          <ChevronDownIcon
+                            className={`h-4 w-4 transition-transform duration-150 ${
+                              isSubOpen ? 'rotate-180 text-yellow-400' : ''
+                            }`}
+                          />
+                        </button>
+                        {isSubOpen && (
+                          <div className="pl-5 pr-2 py-1 space-y-1 border-l-2 border-blue-800/70 ml-5">
+                            {item.children.map((sub) => {
+                              const isSubActive =
+                                location.pathname === sub.path ||
+                                location.pathname === sub.altPath;
+                              return (
+                                <Link
+                                  key={sub.path}
+                                  to={sub.path}
+                                  onClick={() => setIsMobileMenuOpen(false)}
+                                  className={`flex items-center justify-between px-3.5 py-2 rounded-xl text-[13.5px] font-bold transition-colors ${
+                                    isSubActive
+                                      ? 'bg-yellow-400 text-blue-950 font-extrabold shadow-sm'
+                                      : 'text-blue-200 hover:bg-blue-800/50 hover:text-white'
+                                  }`}
+                                >
+                                  <span>{sub.name}</span>
+                                  {isSubActive && (
+                                    <span className="h-2 w-2 rounded-full bg-blue-950"></span>
+                                  )}
+                                </Link>
+                              );
+                            })}
+                          </div>
                         )}
-                      </NavLink>
+                      </div>
                     );
-                  })}
-                </div>
+                  }
+
+                  const isItemActive =
+                    location.pathname === item.path ||
+                    location.pathname.startsWith(`${item.path}/`) ||
+                    (item.altPaths || []).some(
+                      (alt) =>
+                        location.pathname === alt ||
+                        location.pathname.startsWith(`${alt}/`)
+                    );
+
+                  return (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={() =>
+                        `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[15px] font-semibold transition-colors ${
+                          isItemActive
+                            ? isStudent
+                              ? 'bg-white/15 text-white font-extrabold border border-indigo-400/45 shadow-md'
+                              : 'bg-yellow-400 text-blue-950 font-extrabold shadow-md'
+                            : isStudent
+                            ? 'text-indigo-100 hover:bg-white/10 hover:text-white'
+                            : 'text-blue-100 hover:bg-blue-800/60 hover:text-yellow-300'
+                        }`
+                      }
+                    >
+                      <Icon
+                        className={`h-5 w-5 shrink-0 ${
+                          isItemActive && isStudent ? 'text-yellow-400' : ''
+                        }`}
+                      />
+                      <span>{item.name}</span>
+                      {isItemActive && isStudent && (
+                        <span className="ml-auto h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.8)] shrink-0" />
+                      )}
+                    </NavLink>
+                  );
+                })}
               </div>
 
-              {/* ប៊ូតុងគណនី (ប្រវត្តិរូប, ការកំណត់, ចាកចេញ) លើទូរស័ព្ទ */}
               <div
-                className={`pt-3 border-t grid grid-cols-3 gap-2 ${
+                className={`pt-2 border-t space-y-1 ${
                   isStudent ? 'border-white/15' : 'border-blue-800/40'
                 }`}
               >
@@ -1917,14 +1530,14 @@ const Navbar = () => {
                     setIsMobileMenuOpen(false);
                     openProfileModal();
                   }}
-                  className={`flex flex-col items-center justify-center gap-1 p-2.5 text-xs font-extrabold rounded-xl border transition-colors cursor-pointer ${
+                  className={`flex items-center w-full px-3.5 py-2.5 text-[15px] font-normal rounded-xl transition-colors cursor-pointer ${
                     isStudent
-                      ? 'bg-white/[0.06] border-white/10 text-indigo-100 hover:bg-white/15'
-                      : 'bg-blue-900/40 border-blue-800/60 text-blue-100 hover:bg-blue-800/60'
+                      ? 'text-indigo-100 hover:bg-white/10 hover:text-white'
+                      : 'text-blue-100 hover:bg-blue-800/60 hover:text-yellow-300'
                   }`}
                 >
-                  <UserCircleIcon className="h-5 w-5 text-yellow-400" />
-                  <span>{t('ប្រវត្តិរូប', 'Profile')}</span>
+                  <UserCircleIcon className="h-5 w-5 mr-3 text-yellow-400" />
+                  {t('ប្រវត្តិរូប', 'Profile')}
                 </button>
                 <button
                   type="button"
@@ -1932,22 +1545,22 @@ const Navbar = () => {
                     setIsMobileMenuOpen(false);
                     openSettingsModal();
                   }}
-                  className={`flex flex-col items-center justify-center gap-1 p-2.5 text-xs font-extrabold rounded-xl border transition-colors cursor-pointer ${
+                  className={`flex items-center w-full px-3.5 py-2.5 text-[15px] font-normal rounded-xl transition-colors cursor-pointer ${
                     isStudent
-                      ? 'bg-white/[0.06] border-white/10 text-indigo-100 hover:bg-white/15'
-                      : 'bg-blue-900/40 border-blue-800/60 text-blue-100 hover:bg-blue-800/60'
+                      ? 'text-indigo-100 hover:bg-white/10 hover:text-white'
+                      : 'text-blue-100 hover:bg-blue-800/60 hover:text-yellow-300'
                   }`}
                 >
-                  <Cog6ToothIcon className="h-5 w-5 text-yellow-400" />
-                  <span>{t('ការកំណត់', 'Settings')}</span>
+                  <Cog6ToothIcon className="h-5 w-5 mr-3 text-yellow-400" />
+                  {t('ការកំណត់', 'Settings')}
                 </button>
                 <button
                   type="button"
                   onClick={handleInstantLogout}
-                  className="flex flex-col items-center justify-center gap-1 p-2.5 text-xs font-extrabold text-rose-200 bg-rose-500/15 border border-rose-400/30 hover:bg-rose-500/25 rounded-xl transition-colors cursor-pointer"
+                  className="flex items-center w-full px-3.5 py-2.5 text-[15px] font-normal text-rose-300 hover:bg-rose-900/40 rounded-xl transition-colors cursor-pointer"
                 >
-                  <ArrowRightOnRectangleIcon className="h-5 w-5 text-rose-400" />
-                  <span>{t('ចាកចេញ', 'Logout')}</span>
+                  <ArrowRightOnRectangleIcon className="h-5 w-5 mr-3 text-rose-400" />
+                  {t('ចាកចេញ', 'Logout')}
                 </button>
               </div>
             </div>
@@ -1956,7 +1569,7 @@ const Navbar = () => {
       </nav>
 
       {/* ------------------------------------------------------------------ */}
-      {/* ផ្ទាំង MODAL ប្រវត្តិរូប (PROFILE MODAL - Adaptive Bottom Sheet/Modal) */}
+      {/* ផ្ទាំង MODAL ប្រវត្តិរូប (PROFILE MODAL)                             */}
       {/* ------------------------------------------------------------------ */}
       <Dialog
         as="div"
@@ -1969,14 +1582,14 @@ const Navbar = () => {
           aria-hidden="true"
         />
 
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6 overflow-hidden">
-          <Dialog.Panel className="nav-modal-panel w-full max-w-2xl bg-white rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent animate-fadeIn">
-            <div className="nav-soft-divider flex justify-between items-center p-5 sm:p-7 border-b border-gray-100 shrink-0">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
+          <Dialog.Panel className="nav-modal-panel w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
+            <div className="nav-soft-divider flex justify-between items-center p-6 sm:p-8 border-b border-gray-100 shrink-0">
               <Dialog.Title
                 as="h3"
-                className="text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-3"
+                className="text-xl font-extrabold text-gray-900 flex items-center gap-3"
               >
-                <div className="nav-icon-badge h-10 w-10 bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-600 rounded-xl flex items-center justify-center border border-blue-100 shadow-sm shrink-0">
+                <div className="nav-icon-badge h-10 w-10 bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-600 rounded-xl flex items-center justify-center border border-blue-100 shadow-sm">
                   <UserCircleIcon className="h-6 w-6" />
                 </div>
                 {t('ប្រវត្តិរូប', 'Profile')}
@@ -1990,20 +1603,11 @@ const Navbar = () => {
               </button>
             </div>
 
-            <div className="p-5 sm:p-8 overflow-y-auto flex-1">
-              {profileFormError && (
-                <div className="mb-6 p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded-xl flex items-start gap-2.5 text-rose-600 dark:text-rose-400">
-                  <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
-                  <p className="text-xs font-bold leading-relaxed">
-                    {profileFormError}
-                  </p>
-                </div>
-              )}
-
-              <div className="flex flex-col items-center mb-6 sm:mb-8">
+            <div className="p-6 sm:p-8 overflow-y-auto flex-1">
+              <div className="flex flex-col items-center mb-8">
                 <div className="relative group">
                   <div
-                    className={`h-28 w-28 sm:h-32 sm:w-32 rounded-full flex items-center justify-center text-white text-3xl sm:text-4xl font-bold shadow-xl ring-4 ring-blue-50 overflow-hidden ${
+                    className={`h-32 w-32 rounded-full flex items-center justify-center text-white text-4xl font-bold shadow-xl ring-4 ring-blue-50 overflow-hidden ${
                       isStudent
                         ? 'bg-gradient-to-br from-indigo-600 via-blue-600 to-violet-600'
                         : 'bg-gradient-to-br from-blue-600 to-indigo-600'
@@ -2031,7 +1635,7 @@ const Navbar = () => {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className={`absolute bottom-1 right-1 p-2.5 sm:p-3 rounded-full text-white transition-colors shadow-lg cursor-pointer ${
+                    className={`absolute bottom-1 right-1 p-3 rounded-full text-white transition-colors shadow-lg cursor-pointer ${
                       isStudent
                         ? 'bg-indigo-600 hover:bg-indigo-700'
                         : 'bg-blue-600 hover:bg-blue-700'
@@ -2042,19 +1646,19 @@ const Navbar = () => {
                   </button>
                 </div>
 
-                <h4 className="mt-4 text-xl sm:text-2xl font-black text-gray-900 tracking-tight text-center">
+                <h4 className="mt-5 text-2xl font-black text-gray-900 tracking-tight">
                   {`${profileData.first_name || ''} ${profileData.last_name || ''}`.trim() ||
                     userDisplayName}
                 </h4>
-                <span className="nav-role-pill inline-flex items-center px-4 py-1.5 rounded-xl text-xs font-bold bg-blue-50 border border-blue-100 text-blue-700 mt-2">
+                <span className="nav-role-pill inline-flex items-center px-4 py-1.5 rounded-xl text-xs font-bold bg-blue-50 border border-blue-100 text-blue-700 mt-2.5">
                   {getRoleName(userRoleRaw)}
                 </span>
               </div>
 
               {!isEditing ? (
-                <div className="space-y-5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
-                    <div className="bg-gray-50/70 rounded-2xl p-4 sm:p-5 border border-gray-100 flex items-start gap-3.5">
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="bg-gray-50/70 rounded-2xl p-5 border border-gray-100 flex items-start gap-3.5">
                       <UserIcon className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
                       <div>
                         <p className="text-xs font-bold text-gray-500 mb-1">
@@ -2067,9 +1671,9 @@ const Navbar = () => {
                       </div>
                     </div>
 
-                    <div className="bg-gray-50/70 rounded-2xl p-4 sm:p-5 border border-gray-100 flex items-start gap-3.5">
+                    <div className="bg-gray-50/70 rounded-2xl p-5 border border-gray-100 flex items-start gap-3.5">
                       <EnvelopeIcon className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
-                      <div className="min-w-0">
+                      <div>
                         <p className="text-xs font-bold text-gray-500 mb-1">
                           {t('អ៊ីមែល', 'Email')}
                         </p>
@@ -2079,7 +1683,7 @@ const Navbar = () => {
                       </div>
                     </div>
 
-                    <div className="bg-gray-50/70 rounded-2xl p-4 sm:p-5 border border-gray-100 flex items-start gap-3.5">
+                    <div className="bg-gray-50/70 rounded-2xl p-5 border border-gray-100 flex items-start gap-3.5">
                       <PhoneIcon className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
                       <div>
                         <p className="text-xs font-bold text-gray-500 mb-1">
@@ -2091,7 +1695,7 @@ const Navbar = () => {
                       </div>
                     </div>
 
-                    <div className="bg-gray-50/70 rounded-2xl p-4 sm:p-5 border border-gray-100 flex items-start gap-3.5">
+                    <div className="bg-gray-50/70 rounded-2xl p-5 border border-gray-100 flex items-start gap-3.5">
                       <BuildingOfficeIcon className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
                       <div>
                         <p className="text-xs font-bold text-gray-500 mb-1">
@@ -2104,9 +1708,9 @@ const Navbar = () => {
                     </div>
                   </div>
 
-                  <div className="nav-status-banner bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl p-5 border border-emerald-100/50 flex flex-row items-center justify-between gap-4">
+                  <div className="nav-status-banner bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl p-6 border border-emerald-100/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div>
-                      <p className="text-xs font-bold text-emerald-600 mb-1.5">
+                      <p className="text-xs font-bold text-emerald-600 mb-2">
                         {t('ស្ថានភាពគណនី', 'Account Status')}
                       </p>
                       <span className="inline-flex items-center px-3.5 py-1.5 rounded-xl text-xs font-bold bg-white text-emerald-700 shadow-sm border border-emerald-100">
@@ -2114,8 +1718,8 @@ const Navbar = () => {
                         {t('សកម្ម', 'Active')}
                       </span>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs font-bold text-emerald-600 mb-1.5">
+                    <div className="sm:text-right">
+                      <p className="text-xs font-bold text-emerald-600 mb-2">
                         {t('សមាជិកចាប់តាំងពី', 'Member Since')}
                       </p>
                       <p className="text-sm font-extrabold text-emerald-800 dark:text-emerald-300">
@@ -2125,8 +1729,8 @@ const Navbar = () => {
                   </div>
                 </div>
               ) : (
-                <div className="nav-edit-box bg-blue-50/40 p-5 sm:p-6 rounded-2xl border border-blue-100 space-y-4">
-                  <div className="flex items-center gap-2 mb-1">
+                <div className="nav-edit-box bg-blue-50/40 p-6 rounded-2xl border border-blue-100 space-y-5">
+                  <div className="flex items-center gap-2 mb-2">
                     <PencilIcon className="h-5 w-5 text-blue-600" />
                     <h4 className="text-sm font-extrabold text-gray-900">
                       {t(
@@ -2136,73 +1740,69 @@ const Navbar = () => {
                     </h4>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
-                      <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                      <label className="block text-xs font-bold text-gray-700 mb-2">
                         {t('នាមខ្លួន', 'First Name')}
                       </label>
                       <input
                         type="text"
-                        className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                        className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.first_name}
-                        onChange={(e) => {
-                          if (profileFormError) setProfileFormError('');
+                        onChange={(e) =>
                           setProfileData({
                             ...profileData,
                             first_name: e.target.value,
-                          });
-                        }}
+                          })
+                        }
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                      <label className="block text-xs font-bold text-gray-700 mb-2">
                         {t('នាមត្រកូល', 'Last Name')}
                       </label>
                       <input
                         type="text"
-                        className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                        className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.last_name}
-                        onChange={(e) => {
-                          if (profileFormError) setProfileFormError('');
+                        onChange={(e) =>
                           setProfileData({
                             ...profileData,
                             last_name: e.target.value,
-                          });
-                        }}
+                          })
+                        }
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                      <label className="block text-xs font-bold text-gray-700 mb-2">
                         {t('អ៊ីមែល', 'Email')}
                       </label>
                       <input
                         type="email"
-                        className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                        className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.email}
-                        onChange={(e) => {
-                          if (profileFormError) setProfileFormError('');
+                        onChange={(e) =>
                           setProfileData({
                             ...profileData,
                             email: e.target.value,
-                          });
-                        }}
+                          })
+                        }
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                      <label className="block text-xs font-bold text-gray-700 mb-2">
                         {t('លេខទូរស័ព្ទ', 'Phone')}
                       </label>
                       <input
                         type="tel"
-                        className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                        className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.phone}
-                        onChange={(e) => {
-                          if (profileFormError) setProfileFormError('');
+                        onChange={(e) =>
                           setProfileData({
                             ...profileData,
                             phone: e.target.value,
-                          });
-                        }}
+                          })
+                        }
                       />
                     </div>
                   </div>
@@ -2210,23 +1810,20 @@ const Navbar = () => {
               )}
             </div>
 
-            <div className="nav-soft-divider p-5 sm:p-7 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50 shrink-0">
+            <div className="nav-soft-divider p-6 sm:p-8 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50 shrink-0">
               {!isEditing ? (
                 <>
                   <button
                     type="button"
                     onClick={closeProfileModal}
-                    className="px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer"
+                    className="px-6 py-3.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer"
                   >
                     {t('បិទ', 'Close')}
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setProfileFormError('');
-                      setIsEditing(true);
-                    }}
-                    className="px-6 py-3 bg-blue-600 text-white hover:bg-blue-700 rounded-xl text-sm font-bold flex items-center gap-2 cursor-pointer"
+                    onClick={() => setIsEditing(true)}
+                    className="px-6 py-3.5 bg-blue-600 text-white hover:bg-blue-700 rounded-xl text-sm font-bold flex items-center gap-2 cursor-pointer"
                   >
                     <PencilIcon className="h-4 w-4" />
                     {t('កែប្រែប្រវត្តិរូប', 'Edit Profile')}
@@ -2236,11 +1833,8 @@ const Navbar = () => {
                 <>
                   <button
                     type="button"
-                    onClick={() => {
-                      setProfileFormError('');
-                      setIsEditing(false);
-                    }}
-                    className="px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer"
+                    onClick={() => setIsEditing(false)}
+                    className="px-6 py-3.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer"
                     disabled={isSavingProfile}
                   >
                     {t('បោះបង់', 'Cancel')}
@@ -2249,7 +1843,7 @@ const Navbar = () => {
                     type="button"
                     onClick={handleProfileUpdate}
                     disabled={isSavingProfile}
-                    className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 rounded-xl text-sm font-bold flex items-center gap-2 cursor-pointer"
+                    className="px-6 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 rounded-xl text-sm font-bold flex items-center gap-2 cursor-pointer"
                   >
                     {isSavingProfile ? (
                       <ArrowPathIcon className="h-5 w-5 animate-spin" />
@@ -2266,7 +1860,7 @@ const Navbar = () => {
       </Dialog>
 
       {/* ------------------------------------------------------------------ */}
-      {/* ផ្ទាំង MODAL ការកំណត់ (SETTINGS MODAL - Adaptive Bottom Sheet/Modal)*/}
+      {/* ផ្ទាំង MODAL ការកំណត់ (SETTINGS MODAL)                               */}
       {/* ------------------------------------------------------------------ */}
       <Dialog
         as="div"
@@ -2275,18 +1869,18 @@ const Navbar = () => {
         onClose={closeSettingsModal}
       >
         <div
-          className="fixed inset-0 bg-blue-950/60 backdrop-blur-sm"
+          className="fixed inset-0 bg-blue-950/60 backdrop-blur-sm p-4"
           aria-hidden="true"
         />
 
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6 overflow-hidden">
-          <Dialog.Panel className="nav-modal-panel w-full max-w-2xl bg-white rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent animate-fadeIn">
-            <div className="nav-soft-divider flex justify-between items-center p-5 sm:p-7 border-b border-gray-100 shrink-0">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
+          <Dialog.Panel className="nav-modal-panel w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
+            <div className="nav-soft-divider flex justify-between items-center p-6 sm:p-8 border-b border-gray-100 shrink-0">
               <Dialog.Title
                 as="h3"
-                className="text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-3"
+                className="text-xl font-extrabold text-gray-900 flex items-center gap-3"
               >
-                <div className="nav-icon-badge h-10 w-10 bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-600 rounded-xl flex items-center justify-center border border-blue-100 shadow-sm shrink-0">
+                <div className="nav-icon-badge h-10 w-10 bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-600 rounded-xl flex items-center justify-center border border-blue-100 shadow-sm">
                   <Cog6ToothIcon className="h-6 w-6" />
                 </div>
                 {t('ការកំណត់', 'Settings')}
@@ -2300,15 +1894,15 @@ const Navbar = () => {
               </button>
             </div>
 
-            <div className="p-5 sm:p-8 overflow-y-auto flex-1">
-              <div className="space-y-6 sm:space-y-8">
+            <div className="p-6 sm:p-8 overflow-y-auto flex-1">
+              <div className="space-y-8">
                 {/* ១. ជម្រើសភាសា */}
                 <section>
-                  <h4 className="text-sm font-bold text-gray-800 mb-3.5 flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <GlobeAltIcon className="h-5 w-5 text-blue-600" />
-                    {t('ភាសា', 'Language')}
+                    {t('ភាសា (Language)', 'Language')}
                   </h4>
-                  <div className="grid grid-cols-2 gap-3.5 sm:gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <button
                       type="button"
                       onClick={() => {
@@ -2320,7 +1914,7 @@ const Navbar = () => {
                           : 'border-gray-100 text-gray-600 hover:bg-gray-50'
                       }`}
                     >
-                      <span>{t('ខ្មែរ', 'Khmer')}</span>
+                      <span>ខ្មែរ (KH)</span>
                       {language === 'km' && (
                         <span className="text-blue-600">✓</span>
                       )}
@@ -2336,7 +1930,7 @@ const Navbar = () => {
                           : 'border-gray-100 text-gray-600 hover:bg-gray-50'
                       }`}
                     >
-                      <span>{t('English', 'English')}</span>
+                      <span>English (EN)</span>
                       {language === 'en' && (
                         <span className="text-blue-600">✓</span>
                       )}
@@ -2346,15 +1940,15 @@ const Navbar = () => {
 
                 {/* ២. ជម្រើសពណ៌ផ្ទៃអេក្រង់ ថ្ងៃ-យប់ */}
                 <section className="nav-soft-divider pt-6 border-t border-gray-100">
-                  <h4 className="text-sm font-bold text-gray-800 mb-3.5 flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     {isDarkMode ? (
                       <MoonIcon className="h-5 w-5 text-indigo-600" />
                     ) : (
                       <SunIcon className="h-5 w-5 text-amber-500" />
                     )}
-                    {t('ទម្រង់ពណ៌អេក្រង់', 'Theme Mode')}
+                    {t('ទម្រង់ពណ៌អេក្រង់ (Theme Mode)', 'Theme Mode')}
                   </h4>
-                  <div className="grid grid-cols-2 gap-3.5 sm:gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <button
                       type="button"
                       onClick={() => setIsDarkMode(false)}
@@ -2365,7 +1959,7 @@ const Navbar = () => {
                       }`}
                     >
                       <SunIcon className="h-5 w-5 text-amber-500" />
-                      <span>{t('ទម្រង់ថ្ងៃ', 'Light Mode')}</span>
+                      <span>{t('ទម្រង់ថ្ងៃ (Light)', 'Light Mode')}</span>
                       {!isDarkMode && <span className="text-blue-600">✓</span>}
                     </button>
                     <button
@@ -2378,7 +1972,7 @@ const Navbar = () => {
                       }`}
                     >
                       <MoonIcon className="h-5 w-5 text-indigo-600" />
-                      <span>{t('ទម្រង់យប់', 'Dark Mode')}</span>
+                      <span>{t('ទម្រង់យប់ (Dark)', 'Dark Mode')}</span>
                       {isDarkMode && <span className="text-blue-600">✓</span>}
                     </button>
                   </div>
@@ -2386,10 +1980,10 @@ const Navbar = () => {
 
                 {/* ✅ ៣. ភ្ជាប់ ឬផ្ដាច់គណនី Telegram */}
                 <section className="nav-soft-divider pt-6 border-t border-gray-100">
-                  <h4 className="text-sm font-bold text-gray-800 mb-3.5 flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <PaperAirplaneIcon className="h-5 w-5 text-sky-500 -rotate-45" />
                     {t(
-                      'ភ្ជាប់គណនី Telegram',
+                      'ភ្ជាប់គណនី Telegram (Telegram Integration)',
                       'Telegram Account Integration'
                     )}
                   </h4>
@@ -2476,11 +2070,11 @@ const Navbar = () => {
 
                 {/* ៤. ព័ត៌មានគណនី */}
                 <section className="nav-soft-divider pt-6 border-t border-gray-100">
-                  <h4 className="text-sm font-bold text-gray-800 mb-3.5 flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <UserGroupIcon className="h-5 w-5 text-blue-600" />
                     {t('ព័ត៌មានគណនី', 'Account Information')}
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="bg-gray-50/50 rounded-xl p-4 border border-gray-100">
                       <p className="text-xs font-semibold text-gray-500 mb-1">
                         {t('ឈ្មោះពេញ', 'Full Name')}
@@ -2518,14 +2112,14 @@ const Navbar = () => {
 
                 {/* ៥. ផ្លាស់ប្តូរពាក្យសម្ងាត់ */}
                 <section className="nav-soft-divider pt-6 border-t border-gray-100">
-                  <h4 className="text-sm font-bold text-gray-800 mb-3.5 flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <KeyIcon className="h-5 w-5 text-blue-600" />
                     {t('កែប្រែពាក្យសម្ងាត់', 'Change Password')}
                   </h4>
                   <form
                     id="settingsForm"
                     onSubmit={handlePasswordUpdate}
-                    className="space-y-4 bg-gray-50/30 p-4 sm:p-5 rounded-2xl border border-gray-100"
+                    className="space-y-4 bg-gray-50/30 p-5 rounded-2xl border border-gray-100"
                   >
                     <div>
                       <label className="block text-sm font-bold text-gray-700 mb-1.5">
@@ -2630,7 +2224,7 @@ const Navbar = () => {
               </div>
             </div>
 
-            <div className="nav-soft-divider p-5 sm:p-7 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
+            <div className="nav-soft-divider p-6 sm:p-8 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
                 onClick={closeSettingsModal}
