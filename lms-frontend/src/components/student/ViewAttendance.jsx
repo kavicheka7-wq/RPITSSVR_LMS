@@ -26,11 +26,13 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Instant Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
-const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v2';
 
-const getAttListCacheKey = (uid) => `cached_student_attendance_list_v8_${uid}`;
-const getAttSummaryCacheKey = (uid) => `cached_student_attendance_summary_v8_${uid}`;
-const getAttMetaCacheKey = (uid) => `cached_student_attendance_meta_v8_${uid}`;
+const getAttListCacheKey = (uid) => `cached_student_attendance_list_v14_${uid}`;
+const getAttSummaryCacheKey = (uid) => `cached_student_attendance_summary_v14_${uid}`;
+const getAttMetaCacheKey = (uid) => `cached_student_attendance_meta_v14_${uid}`;
+const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v14_${uid}`;
+const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 
 const DEFAULT_SUMMARY = {
   present: 0,
@@ -66,7 +68,7 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ អានតារាងរូបថតគ្រូបង្រៀនពី RAM ភ្លាមៗក្នុង 0ms (គ្មានការប្រើ Canvas ឱ្យទាក់អេក្រង់ឡើយ)
+// ✅ អានតារាងរូបថតគ្រូបង្រៀនពី RAM ភ្លាមៗក្នុង 0ms
 const getTeacherAvatarMapSync = () => {
   if (
     STUDENT_ATT_MEM_CACHE.teacherAvatarMap &&
@@ -74,56 +76,143 @@ const getTeacherAvatarMapSync = () => {
   ) {
     return STUDENT_ATT_MEM_CACHE.teacherAvatarMap;
   }
-  const stored = readStorageJson(CACHE_KEY_TEACHER_AVATARS, {});
+  const stored =
+    readStorageJson(CACHE_KEY_TEACHER_AVATARS, null) ||
+    readStorageJson('cached_student_teacher_avatars_v1', {});
   STUDENT_ATT_MEM_CACHE.teacherAvatarMap =
     stored && typeof stored === 'object' ? stored : {};
   return STUDENT_ATT_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ រក្សាទុកបញ្ជីវត្តមាន និងរូបថតគ្រូដោយលឿនបំផុត (0ms Synchronous Slim Save គ្មាន Canvas)
+// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដើម្បីកុំឱ្យពេញ localStorage (QuotaExceededError)
+const compressTeacherAvatar = (dataUrl, callback) => {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
+    callback(dataUrl);
+    return;
+  }
+  if (dataUrl.length < 18000) {
+    callback(dataUrl);
+    return;
+  }
+  try {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 96;
+        let width = img.width || maxSize;
+        let height = img.height || maxSize;
+        if (width > height) {
+          if (width > maxSize) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/webp', 0.78);
+        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+      } catch {
+        callback(dataUrl);
+      }
+    };
+    img.onerror = () => callback(dataUrl);
+    img.src = dataUrl;
+  } catch {
+    callback(dataUrl);
+  }
+};
+
+let teacherAvatarSaveTimer = null;
+const schedulePersistTeacherAvatars = () => {
+  if (teacherAvatarSaveTimer) clearTimeout(teacherAvatarSaveTimer);
+  teacherAvatarSaveTimer = setTimeout(() => {
+    try {
+      const map = getTeacherAvatarMapSync();
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(map));
+    } catch {}
+  }, 150);
+};
+
+// ✅ កំណត់ទម្រង់ស្ថានភាពវត្តមានឱ្យត្រឹមត្រូវជានិច្ច ទោះបី Database បញ្ជូនអក្សរតូច ឬអក្សរធំក៏ដោយ
+const normalizeAttendanceStatus = (rawStatus) => {
+  const s = String(rawStatus || '').trim().toLowerCase();
+  if (s === 'present' || s === 'វត្តមាន' || s === 'p') return 'Present';
+  if (s === 'absent' || s === 'អវត្តមាន' || s === 'a') return 'Absent';
+  if (s === 'permission' || s === 'excused' || s === 'ច្បាប់' || s === 'លិខិតសុំច្បាប់') return 'Permission';
+  if (s === 'late' || s === 'មកយឺត' || s === 'យឺត' || s === 'l') return 'Late';
+  return rawStatus ? String(rawStatus).trim() : 'Present';
+};
+
+// ✅ រក្សាទុកបញ្ជីវត្តមាន និងរូបថតគ្រូដោយលឿនបំផុត
 const persistStudentAttendanceFast = (uid, attList, summaryObj, metaObj) => {
   if (!Array.isArray(attList)) return;
   const avatarMap = getTeacherAvatarMapSync();
-  let avatarMapUpdated = false;
 
   const extractAndSlimTeacher = (person, courseIdFallback = '') => {
     if (!person || typeof person !== 'object') return person;
     const rawImg =
       person.profile_image_url ||
       person.profile_image ||
+      person.avatar ||
       person.user?.profile_image_url ||
       person.user?.profile_image ||
       null;
 
     const tchId = String(person.id || person.user_id || '');
     const cid = String(courseIdFallback || '');
+    const nameKey =
+      person.name || person.full_name
+        ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
+        : '';
 
     if (rawImg && typeof rawImg === 'string') {
-      if (cid && avatarMap[`crs_${cid}`] !== rawImg) {
-        avatarMap[`crs_${cid}`] = rawImg;
-        avatarMapUpdated = true;
-      }
-      if (tchId && avatarMap[`tch_${tchId}`] !== rawImg) {
-        avatarMap[`tch_${tchId}`] = rawImg;
-        avatarMapUpdated = true;
-      }
+      if (cid && !avatarMap[`crs_${cid}`]) avatarMap[`crs_${cid}`] = rawImg;
+      if (tchId && !avatarMap[`tch_${tchId}`]) avatarMap[`tch_${tchId}`] = rawImg;
+      if (nameKey && !avatarMap[nameKey]) avatarMap[nameKey] = rawImg;
+
+      compressTeacherAvatar(rawImg, (tinyImg) => {
+        if (tinyImg) {
+          if (cid) avatarMap[`crs_${cid}`] = tinyImg;
+          if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
+          if (nameKey) avatarMap[nameKey] = tinyImg;
+          schedulePersistTeacherAvatars();
+        }
+      });
     }
 
     const isHeavyBase64 =
       typeof rawImg === 'string' &&
       rawImg.startsWith('data:') &&
-      rawImg.length > 2000;
+      rawImg.length > 25000;
 
     const copy = { ...person };
     if (isHeavyBase64) {
-      delete copy.profile_image;
-      delete copy.profile_image_url;
+      const cachedTiny =
+        (cid && avatarMap[`crs_${cid}`]) ||
+        (tchId && avatarMap[`tch_${tchId}`]) ||
+        null;
+      if (cachedTiny && cachedTiny.length < 25000) {
+        copy.profile_image = cachedTiny;
+        copy.profile_image_url = cachedTiny;
+      } else {
+        delete copy.profile_image;
+        delete copy.profile_image_url;
+      }
     }
     if (copy.user && typeof copy.user === 'object') {
       const uCopy = { ...copy.user };
       if (
         typeof uCopy.profile_image === 'string' &&
-        uCopy.profile_image.startsWith('data:')
+        uCopy.profile_image.startsWith('data:') &&
+        uCopy.profile_image.length > 25000
       ) {
         delete uCopy.profile_image;
         delete uCopy.profile_image_url;
@@ -138,7 +227,10 @@ const persistStudentAttendanceFast = (uid, attList, summaryObj, metaObj) => {
     const course = rec.course || {};
     const cid = String(course.id || rec.course_id || '');
 
-    const copy = { ...rec };
+    const copy = {
+      ...rec,
+      status: normalizeAttendanceStatus(rec.status),
+    };
     if (copy.student && typeof copy.student === 'object') {
       const sCopy = { ...copy.student };
       if (
@@ -162,11 +254,7 @@ const persistStudentAttendanceFast = (uid, attList, summaryObj, metaObj) => {
     return copy;
   });
 
-  if (avatarMapUpdated) {
-    try {
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(avatarMap));
-    } catch {}
-  }
+  schedulePersistTeacherAvatars();
 
   try {
     localStorage.setItem(getAttListCacheKey(uid), JSON.stringify(slimList));
@@ -222,7 +310,6 @@ const ensureCleanStudentSessionCache = (newUid) => {
         'cached_student_dashboard_activity_v8',
         'cached_student_courses_list_v3',
         'cached_student_scores_list_v5',
-        CACHE_KEY_TEACHER_AVATARS,
       ];
       legacySharedKeys.forEach((k) => {
         try {
@@ -278,7 +365,9 @@ const ViewAttendance = () => {
     if (Array.isArray(STUDENT_ATT_MEM_CACHE.attendance)) {
       return STUDENT_ATT_MEM_CACHE.attendance;
     }
-    const cached = readStorageJson(getAttListCacheKey(currentStudentId), []);
+    const cached =
+      readStorageJson(getAttListCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_attendance_list_v8_${currentStudentId}`, []);
     STUDENT_ATT_MEM_CACHE.attendance = cached;
     return cached;
   });
@@ -287,10 +376,12 @@ const ViewAttendance = () => {
     if (STUDENT_ATT_MEM_CACHE.summary) {
       return STUDENT_ATT_MEM_CACHE.summary;
     }
-    const cached = readStorageJson(
-      getAttSummaryCacheKey(currentStudentId),
-      DEFAULT_SUMMARY
-    );
+    const cached =
+      readStorageJson(getAttSummaryCacheKey(currentStudentId), null) ||
+      readStorageJson(
+        `cached_student_attendance_summary_v8_${currentStudentId}`,
+        DEFAULT_SUMMARY
+      );
     STUDENT_ATT_MEM_CACHE.summary = cached;
     return cached;
   });
@@ -301,10 +392,12 @@ const ViewAttendance = () => {
     if (STUDENT_ATT_MEM_CACHE.meta) {
       return STUDENT_ATT_MEM_CACHE.meta;
     }
-    const cached = readStorageJson(
-      getAttMetaCacheKey(currentStudentId),
-      DEFAULT_META
-    );
+    const cached =
+      readStorageJson(getAttMetaCacheKey(currentStudentId), null) ||
+      readStorageJson(
+        `cached_student_attendance_meta_v8_${currentStudentId}`,
+        DEFAULT_META
+      );
     STUDENT_ATT_MEM_CACHE.meta = cached;
     return cached;
   });
@@ -312,6 +405,22 @@ const ViewAttendance = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  // ✅ ទាញបញ្ជីមុខវិជ្ជាដែលមានក្នុង Cache មកទុកជាជំនួយសម្រាប់ផ្គូផ្គងរូបថត និងឈ្មោះគ្រូបង្រៀន
+  const cachedCatalogCoursesById = useMemo(() => {
+    const map = new Map();
+    const list1 = readStorageJson(getDeptCoursesCacheKey(currentStudentId), []);
+    const list2 = readStorageJson(getCoursesCacheKey(currentStudentId), []);
+    [...(Array.isArray(list1) ? list1 : []), ...(Array.isArray(list2) ? list2 : [])].forEach(
+      (c) => {
+        const cid = c?.id || c?.course_id;
+        if (cid && !map.has(String(cid))) {
+          map.set(String(cid), c);
+        }
+      }
+    );
+    return map;
+  }, [currentStudentId]);
 
   // ============================================================================
   // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យនៅផ្ទៃខាងក្រោយដោយមិនរាំងស្ទះ UI (0ms Sync)
@@ -333,7 +442,7 @@ const ViewAttendance = () => {
         null
       );
 
-      if (Array.isArray(cachedList)) {
+      if (Array.isArray(cachedList) && cachedList.length > 0) {
         setAttendance(cachedList);
         STUDENT_ATT_MEM_CACHE.attendance = cachedList;
       }
@@ -353,7 +462,7 @@ const ViewAttendance = () => {
       STUDENT_ATT_MEM_CACHE.uid === currentStudentId &&
       Array.isArray(STUDENT_ATT_MEM_CACHE.attendance) &&
       STUDENT_ATT_MEM_CACHE.attendance.length > 0 &&
-      now - STUDENT_ATT_MEM_CACHE.lastSyncedAt < 25000
+      now - STUDENT_ATT_MEM_CACHE.lastSyncedAt < 5000
     ) {
       return;
     }
@@ -379,7 +488,10 @@ const ViewAttendance = () => {
           response.data?.attendance ||
           response.data?.data ||
           (Array.isArray(response.data) ? response.data : []);
-        const validList = Array.isArray(rawList) ? rawList : [];
+        const validList = (Array.isArray(rawList) ? rawList : []).map((r) => ({
+          ...r,
+          status: normalizeAttendanceStatus(r?.status),
+        }));
 
         const apiSum = response.data?.summary || {};
         const computedPresent =
@@ -395,10 +507,10 @@ const ViewAttendance = () => {
           apiSum.late ?? validList.filter((r) => r.status === 'Late').length;
 
         const newSummary = {
-          present: computedPresent,
-          absent: computedAbsent,
-          permission: computedPermission,
-          late: computedLate,
+          present: Number(computedPresent) || 0,
+          absent: Number(computedAbsent) || 0,
+          permission: Number(computedPermission) || 0,
+          late: Number(computedLate) || 0,
         };
 
         const newMeta = response.data?.meta || {
@@ -498,15 +610,25 @@ const ViewAttendance = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ ទាញយកឈ្មោះ និងរូបថតគ្រូបង្រៀនពី RAM Dictionary ក្នុងល្បឿន 0ms
+  // ✅ ទាញយកឈ្មោះ និងរូបថតគ្រូបង្រៀនពី RAM Dictionary និង Catalog Fallback ក្នុងល្បឿន 0ms
   const resolveRecordTeacherInfo = useCallback(
     (record) => {
       const course = record?.course || {};
       const cid = String(course.id || record?.course_id || '');
-      const tchProfile = course.teacher_profile || course.teacherProfile;
-      const tch = course.teacher;
+      const catalogCourse = cid ? cachedCatalogCoursesById.get(cid) : null;
+
+      const tchProfile =
+        course.teacher_profile ||
+        course.teacherProfile ||
+        catalogCourse?.teacher_profile ||
+        catalogCourse?.teacherProfile;
+      const tch = course.teacher || catalogCourse?.teacher;
       const tchId = String(
-        course.teacher_id || tch?.id || tchProfile?.id || ''
+        course.teacher_id ||
+          catalogCourse?.teacher_id ||
+          tch?.id ||
+          tchProfile?.id ||
+          ''
       );
 
       let fullName = '';
@@ -537,7 +659,10 @@ const ViewAttendance = () => {
       }
 
       if (!fullName) {
-        fullName = course.teacher_name || t('គ្រូបង្រៀន', 'Instructor');
+        fullName =
+          course.teacher_name ||
+          catalogCourse?.teacher_name ||
+          t('គ្រូបង្រៀន', 'Instructor');
       }
 
       const nameParts = fullName.trim().split(/\s+/);
@@ -547,17 +672,27 @@ const ViewAttendance = () => {
           : (nameParts[0]?.[0] || 'T').toUpperCase();
 
       const avatarMap = getTeacherAvatarMapSync();
+      const nameLookupKey =
+        fullName && fullName !== 'គ្រូបង្រៀន' && fullName !== 'Instructor'
+          ? `name_${fullName.toLowerCase().trim()}`
+          : '';
+
       const rawImage =
         tchProfile?.profile_image_url ||
         tchProfile?.profile_image ||
+        tchProfile?.avatar ||
+        tchProfile?.user?.profile_image_url ||
         tchProfile?.user?.profile_image ||
         tch?.profile_image_url ||
         tch?.profile_image ||
+        tch?.avatar ||
         tch?.user?.profile_image_url ||
         tch?.user?.profile_image ||
         course?.teacher_image ||
         (cid && avatarMap[`crs_${cid}`]) ||
-        (tchId && avatarMap[`tch_${tchId}`]);
+        (tchId && avatarMap[`tch_${tchId}`]) ||
+        (nameLookupKey && avatarMap[nameLookupKey]) ||
+        null;
 
       return {
         name: fullName,
@@ -565,7 +700,7 @@ const ViewAttendance = () => {
         image: getProfileImageUrl(rawImage),
       };
     },
-    [t, getProfileImageUrl]
+    [t, cachedCatalogCoursesById, getProfileImageUrl]
   );
 
   const formatAttendanceDate = useCallback(
@@ -626,7 +761,8 @@ const ViewAttendance = () => {
 
   const resolveRecordTime = useCallback(
     (record) => {
-      if (!record || record.status !== 'Late' || !record.late_time) {
+      const normStatus = normalizeAttendanceStatus(record?.status);
+      if (!record || normStatus !== 'Late' || !record.late_time) {
         return null;
       }
 
@@ -699,7 +835,8 @@ const ViewAttendance = () => {
         if (String(cid) !== String(selectedCourse)) return false;
       }
 
-      if (statusFilter !== 'all' && rec.status !== statusFilter) {
+      const normStatus = normalizeAttendanceStatus(rec.status);
+      if (statusFilter !== 'all' && normStatus !== statusFilter) {
         return false;
       }
 
@@ -760,7 +897,8 @@ const ViewAttendance = () => {
   };
 
   const getStatusBadge = (status) => {
-    switch (status) {
+    const normStatus = normalizeAttendanceStatus(status);
+    switch (normStatus) {
       case 'Present':
         return (
           <span className="std-att-badge-emerald inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
@@ -1169,11 +1307,22 @@ const ViewAttendance = () => {
                     teacherMeta.image && !failedAvatars[avatarKey]
                   );
 
+                  const cid = String(
+                    record.course?.id || record.course_id || ''
+                  );
+                  const catalogCourse = cid
+                    ? cachedCatalogCoursesById.get(cid)
+                    : null;
+
                   const courseName =
                     record.course?.course_name ||
                     record.course_name ||
+                    catalogCourse?.course_name ||
                     t('មុខវិជ្ជាសិក្សា', 'Course');
-                  const courseCode = record.course?.course_code || '';
+                  const courseCode =
+                    record.course?.course_code ||
+                    catalogCourse?.course_code ||
+                    '';
 
                   const shiftLabel = getShiftLabel(
                     record.student?.study_shift || record.study_shift

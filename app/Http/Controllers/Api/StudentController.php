@@ -21,6 +21,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
@@ -42,6 +43,7 @@ class StudentController extends Controller
         if ($uid) {
             Cache::forget("student_dashboard_fast_v3_{$uid}");
             Cache::forget("student_dashboard_fast_v4_{$uid}");
+            Cache::forget("student_dashboard_fast_v5_{$uid}");
         }
     }
 
@@ -59,11 +61,23 @@ class StudentController extends Controller
         }
 
         $profile = Student::where('user_id', $user->id)->first();
+
         if (!$profile && !empty($user->email)) {
-            $profile = Student::whereRaw('LOWER(email) = ?', [strtolower(trim($user->email))])->first();
-            if ($profile && empty($profile->user_id)) {
+            $profile = Student::whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($user->email))])->first();
+        }
+
+        if (!$profile && !empty($user->first_name) && !empty($user->last_name)) {
+            $profile = Student::whereRaw('LOWER(TRIM(first_name)) = ? AND LOWER(TRIM(last_name)) = ?', [
+                strtolower(trim($user->first_name)),
+                strtolower(trim($user->last_name)),
+            ])->first();
+        }
+
+        if ($profile && empty($profile->user_id)) {
+            try {
                 $profile->user_id = $user->id;
                 $profile->saveQuietly();
+            } catch (\Throwable $e) {
             }
         }
 
@@ -94,7 +108,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ ទាញយកបញ្ជី course_id ដែលសិស្សបានចុះឈ្មោះ (ដោយមិនប្រកាន់អក្សរតូចធំនៃ status)
+     * ✅ ទាញយកបញ្ជី course_id ដែលសិស្សបានចុះឈ្មោះ
      */
     private function getEnrolledCourseIdsForStudent($user = null): array
     {
@@ -103,28 +117,20 @@ class StudentController extends Controller
             return [];
         }
 
-        $courseIds = Enrollment::whereIn('student_id', $studentIds)
-            ->where(function ($q) {
-                $q->whereNull('status')
-                  ->orWhereRaw("LOWER(TRIM(status)) IN ('active', 'completed', 'enrolled', '')");
-            })
-            ->pluck('course_id')
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->toArray();
-
-        // Fallback៖ បើមានការចុះឈ្មោះក្នុងតារាង enrollments តែមាន status ផ្សេងទៀត
-        if (empty($courseIds)) {
+        try {
             $courseIds = Enrollment::whereIn('student_id', $studentIds)
                 ->pluck('course_id')
+                ->filter()
                 ->map(fn ($id) => (int) $id)
                 ->unique()
                 ->values()
                 ->toArray();
-        }
 
-        return $courseIds;
+            return $courseIds;
+        } catch (\Throwable $e) {
+            Log::warning('Enrollment lookup error: ' . $e->getMessage());
+            return [];
+        }
     }
 
     private function getActiveEnrollment($studentId, $courseId)
@@ -136,72 +142,62 @@ class StudentController extends Controller
 
         return Enrollment::whereIn('student_id', $studentIds)
             ->where('course_id', $courseId)
-            ->where(function ($q) {
-                $q->whereNull('status')
-                  ->orWhereRaw("LOWER(TRIM(status)) IN ('active', 'completed', 'enrolled', '')");
-            })
             ->first();
     }
 
     /**
-     * ✅ ទាញយកព័ត៌មានគ្រូបង្រៀនទាំងអស់ក្នុង Query តែ ១ ដង (ការពារ Error 500 ពេលគ្មាន Relation teacherProfile ក្នុង Model Course)
+     * ✅ ទាញយកព័ត៌មានគ្រូបង្រៀនទាំងអស់ក្នុង Query តែ ១ ដង (ដោយមិនបង្ខំឈ្មោះជួរឈរដែលអាចគ្មានក្នុង DB)
      */
     private function preloadTeachersForCourses($courses): void
     {
-        $collection = collect($courses)->filter();
-        if ($collection->isEmpty()) {
-            return;
-        }
-
-        $teacherIds = $collection->pluck('teacher_id')
-            ->filter()
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-
-        if (empty($teacherIds)) {
-            return;
-        }
-
-        $teachers = Teacher::whereIn('id', $teacherIds)
-            ->orWhereIn('user_id', $teacherIds)
-            ->select([
-                'id',
-                'user_id',
-                'teacher_code',
-                'first_name',
-                'last_name',
-                'email',
-                'phone',
-                'specialization',
-                'profile_image',
-            ])
-            ->get();
-
-        foreach ($teachers as $t) {
-            $this->preloadedTeachersById[(int) $t->id] = $t;
-            if (!empty($t->user_id)) {
-                $this->preloadedTeachersByUserId[(int) $t->user_id] = $t;
+        try {
+            $collection = collect($courses)->filter();
+            if ($collection->isEmpty()) {
+                return;
             }
-        }
 
-        $allUserIds = $teachers->pluck('user_id')
-            ->merge($teacherIds)
-            ->filter()
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
+            $teacherIds = $collection->pluck('teacher_id')
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->all();
 
-        if (!empty($allUserIds)) {
-            $users = User::whereIn('id', $allUserIds)
-                ->select(['id', 'first_name', 'last_name', 'email', 'phone', 'profile_image'])
+            if (empty($teacherIds)) {
+                return;
+            }
+
+            $teachers = DB::table('teachers')
+                ->whereIn('id', $teacherIds)
+                ->orWhereIn('user_id', $teacherIds)
                 ->get();
 
-            foreach ($users as $u) {
-                $this->preloadedUsersById[(int) $u->id] = $u;
+            foreach ($teachers as $t) {
+                $this->preloadedTeachersById[(int) $t->id] = $t;
+                if (!empty($t->user_id)) {
+                    $this->preloadedTeachersByUserId[(int) $t->user_id] = $t;
+                }
             }
+
+            $allUserIds = $teachers->pluck('user_id')
+                ->merge($teacherIds)
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->all();
+
+            if (!empty($allUserIds)) {
+                $users = DB::table('users')
+                    ->whereIn('id', $allUserIds)
+                    ->get();
+
+                foreach ($users as $u) {
+                    $this->preloadedUsersById[(int) $u->id] = $u;
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('preloadTeachersForCourses error: ' . $e->getMessage());
         }
     }
 
@@ -254,7 +250,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយប្រើ Preloaded Map (លឿនបំផុត 0ms និងគ្មានបញ្ហាបាត់រូបថត)
+     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយប្រើ Preloaded Map
      */
     private function formatTeacherData($course, bool $includeAvatar = true)
     {
@@ -268,10 +264,10 @@ class StudentController extends Controller
         }
 
         $teacherProfile = $tid ? ($this->preloadedTeachersById[$tid] ?? $this->preloadedTeachersByUserId[$tid] ?? null) : null;
-        $userIdToLookup = $teacherProfile?->user_id ? (int) $teacherProfile->user_id : $tid;
+        $userIdToLookup = !empty($teacherProfile?->user_id) ? (int) $teacherProfile->user_id : $tid;
         $teacherUser = $userIdToLookup ? ($this->preloadedUsersById[$userIdToLookup] ?? null) : null;
 
-        if (!$teacherUser && $course->relationLoaded('teacher')) {
+        if (!$teacherUser && $course instanceof \Illuminate\Database\Eloquent\Model && $course->relationLoaded('teacher')) {
             $teacherUser = $course->teacher;
         }
 
@@ -332,63 +328,66 @@ class StudentController extends Controller
             return [];
         }
 
-        $cacheKey = 'dept_courses_years_map_v4_' . md5(implode('_', $deptCourseIds));
+        $cacheKey = 'dept_courses_years_map_v5_' . md5(implode('_', $deptCourseIds));
 
         return Cache::remember($cacheKey, 120, function () use ($deptCourses, $deptCourseIds) {
             $courseYearsMap = [];
 
-            $enrollmentsInDept = Enrollment::whereIn('course_id', $deptCourseIds)
-                ->get(['course_id', 'student_id']);
+            try {
+                $enrollmentsInDept = Enrollment::whereIn('course_id', $deptCourseIds)
+                    ->get(['course_id', 'student_id']);
 
-            $rawStudentIds = $enrollmentsInDept->pluck('student_id')
-                ->filter()
-                ->map(fn ($id) => (int) $id)
-                ->unique()
-                ->values()
-                ->all();
+                $rawStudentIds = $enrollmentsInDept->pluck('student_id')
+                    ->filter()
+                    ->map(fn ($id) => (int) $id)
+                    ->unique()
+                    ->values()
+                    ->all();
 
-            $matchedStudents = !empty($rawStudentIds)
-                ? Student::select('id', 'user_id', 'batch_year', 'student_code', 'email', 'department_id')
-                    ->whereIn('id', $rawStudentIds)
-                    ->orWhereIn('user_id', $rawStudentIds)
-                    ->get()
-                : collect();
+                $matchedStudents = !empty($rawStudentIds)
+                    ? Student::whereIn('id', $rawStudentIds)
+                        ->orWhereIn('user_id', $rawStudentIds)
+                        ->get()
+                    : collect();
 
-            $studentsById = $matchedStudents->keyBy('id');
-            $studentsByUserId = $matchedStudents->whereNotNull('user_id')->keyBy('user_id');
+                $studentsById = $matchedStudents->keyBy('id');
+                $studentsByUserId = $matchedStudents->whereNotNull('user_id')->keyBy('user_id');
 
-            $onlyMatchesStudentPK = false;
-            foreach ($enrollmentsInDept as $enr) {
-                $v = (int) $enr->student_id;
-                if (isset($studentsById[$v]) && !isset($studentsByUserId[$v])) {
-                    $onlyMatchesStudentPK = true;
-                    break;
-                }
-            }
-
-            $freqByCourse = [];
-            foreach ($enrollmentsInDept as $enr) {
-                $cid = (int) $enr->course_id;
-                $val = (int) $enr->student_id;
-
-                $matchedStudent = null;
-                if (!$onlyMatchesStudentPK && isset($studentsByUserId[$val])) {
-                    $matchedStudent = $studentsByUserId[$val];
-                } elseif (isset($studentsById[$val])) {
-                    $matchedStudent = $studentsById[$val];
-                } elseif (isset($studentsByUserId[$val])) {
-                    $matchedStudent = $studentsByUserId[$val];
-                }
-
-                if ($matchedStudent) {
-                    $y = $this->parseAcademicYearNumber(
-                        $matchedStudent->batch_year ?? '',
-                        ($matchedStudent->student_code ?? '') . ' ' . ($matchedStudent->email ?? '')
-                    );
-                    if ($y) {
-                        $freqByCourse[$cid][$y] = ($freqByCourse[$cid][$y] ?? 0) + 1;
+                $onlyMatchesStudentPK = false;
+                foreach ($enrollmentsInDept as $enr) {
+                    $v = (int) $enr->student_id;
+                    if (isset($studentsById[$v]) && !isset($studentsByUserId[$v])) {
+                        $onlyMatchesStudentPK = true;
+                        break;
                     }
                 }
+
+                $freqByCourse = [];
+                foreach ($enrollmentsInDept as $enr) {
+                    $cid = (int) $enr->course_id;
+                    $val = (int) $enr->student_id;
+
+                    $matchedStudent = null;
+                    if (!$onlyMatchesStudentPK && isset($studentsByUserId[$val])) {
+                        $matchedStudent = $studentsByUserId[$val];
+                    } elseif (isset($studentsById[$val])) {
+                        $matchedStudent = $studentsById[$val];
+                    } elseif (isset($studentsByUserId[$val])) {
+                        $matchedStudent = $studentsByUserId[$val];
+                    }
+
+                    if ($matchedStudent) {
+                        $y = $this->parseAcademicYearNumber(
+                            $matchedStudent->batch_year ?? '',
+                            ($matchedStudent->student_code ?? '') . ' ' . ($matchedStudent->email ?? '')
+                        );
+                        if ($y) {
+                            $freqByCourse[$cid][$y] = ($freqByCourse[$cid][$y] ?? 0) + 1;
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                $freqByCourse = [];
             }
 
             foreach ($deptCourses as $cid => $crs) {
@@ -431,30 +430,29 @@ class StudentController extends Controller
     // Dashboard
     public function dashboard()
     {
-        $student = auth()->user();
-        $studentIds = $this->getStudentAllIds($student);
-        $studentProfile = $this->resolveStudentProfile($student);
+        try {
+            $student = auth()->user();
+            $studentIds = $this->getStudentAllIds($student);
+            $studentProfile = $this->resolveStudentProfile($student);
 
-        $enrollments = Enrollment::whereIn('student_id', $studentIds)
-            ->with(['course' => function ($query) {
-                $query->with([
-                    'department:id,department_name,department_code',
-                ])->withCount(['lessons', 'assignments', 'quizzes']);
-            }])
-            ->where(function ($q) {
-                $q->whereNull('status')
-                  ->orWhereRaw("LOWER(TRIM(status)) IN ('active', 'completed', 'enrolled', '')");
-            })
-            ->get();
+            $enrollments = Enrollment::whereIn('student_id', $studentIds)
+                ->with(['course' => function ($query) {
+                    $query->with(['department'])
+                        ->withCount(['lessons', 'assignments', 'quizzes']);
+                }])
+                ->get();
 
-        // ✅ ប្រសិនបើសិស្សមិនទាន់មានទិន្នន័យក្នុងតារាង enrollments ត្រូវទាញមុខវិជ្ជាតាម department_id របស់គាត់មកបង្ហាញជំនួស
-        if ($enrollments->isEmpty()) {
-            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
-            if ($deptId) {
-                $deptCourses = Course::with(['department:id,department_name,department_code'])
-                    ->withCount(['lessons', 'assignments', 'quizzes'])
-                    ->where('department_id', $deptId)
-                    ->get();
+            // ✅ បើសិស្សមិនទាន់មានក្នុងតារាង enrollments ទាញតាម department_id ឬទាញមុខវិជ្ជាទាំងអស់ជំនួស
+            if ($enrollments->isEmpty()) {
+                $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+                $deptCoursesQuery = Course::with(['department'])
+                    ->withCount(['lessons', 'assignments', 'quizzes']);
+
+                if ($deptId) {
+                    $deptCoursesQuery->where('department_id', $deptId);
+                }
+
+                $deptCourses = $deptCoursesQuery->get();
 
                 $enrollments = $deptCourses->map(function ($course) use ($student) {
                     $fakeEnrollment = new Enrollment([
@@ -467,66 +465,87 @@ class StudentController extends Controller
                     return $fakeEnrollment;
                 });
             }
-        }
 
-        $coursesList = $enrollments->pluck('course')->filter()->values();
-        $this->preloadTeachersForCourses($coursesList);
+            $coursesList = $enrollments->pluck('course')->filter()->values();
+            $this->preloadTeachersForCourses($coursesList);
 
-        $stats = [
-            'total_courses' => $coursesList->count(),
-            'total_lessons' => 0,
-            'total_assignments' => 0,
-            'total_quizzes' => 0,
-            'average_score' => 0,
-        ];
+            $stats = [
+                'total_courses' => $coursesList->count(),
+                'total_lessons' => 0,
+                'total_assignments' => 0,
+                'total_quizzes' => 0,
+                'average_score' => 0,
+            ];
 
-        foreach ($enrollments as $enrollment) {
-            if ($enrollment->course) {
-                $teacherData = $this->formatTeacherData($enrollment->course, true);
-                $enrollment->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
-                $enrollment->course->setAttribute('teacher_profile', $teacherData);
-                $enrollment->course->setAttribute('teacher', $teacherData);
+            foreach ($enrollments as $enrollment) {
+                if ($enrollment->course) {
+                    $teacherData = $this->formatTeacherData($enrollment->course, true);
+                    $enrollment->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                    $enrollment->course->setAttribute('teacher_profile', $teacherData);
+                    $enrollment->course->setAttribute('teacher', $teacherData);
 
-                $stats['total_lessons'] += (int) ($enrollment->course->lessons_count ?? 0);
-                $stats['total_assignments'] += (int) ($enrollment->course->assignments_count ?? 0);
-                $stats['total_quizzes'] += (int) ($enrollment->course->quizzes_count ?? 0);
+                    $stats['total_lessons'] += (int) ($enrollment->course->lessons_count ?? 0);
+                    $stats['total_assignments'] += (int) ($enrollment->course->assignments_count ?? 0);
+                    $stats['total_quizzes'] += (int) ($enrollment->course->quizzes_count ?? 0);
+                }
             }
+
+            $avgScore = Grade::whereIn('student_id', $studentIds)
+                ->whereNotNull('final_score')
+                ->avg('final_score');
+
+            if ($avgScore !== null) {
+                $stats['average_score'] = round((float) $avgScore, 2);
+            }
+
+            return response()->json([
+                'stats' => $stats,
+                'enrollments' => $enrollments->values(),
+                'recent_activity' => $this->getRecentActivity($studentIds),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Student dashboard error: ' . $e->getMessage());
+            return response()->json([
+                'stats' => [
+                    'total_courses' => 0,
+                    'total_lessons' => 0,
+                    'total_assignments' => 0,
+                    'total_quizzes' => 0,
+                    'average_score' => 0,
+                ],
+                'enrollments' => [],
+                'recent_activity' => ['submissions' => [], 'quiz_attempts' => []],
+                'error_debug' => $e->getMessage(),
+            ]);
         }
-
-        $avgScore = Grade::whereIn('student_id', $studentIds)
-            ->whereNotNull('final_score')
-            ->avg('final_score');
-
-        if ($avgScore !== null) {
-            $stats['average_score'] = round((float) $avgScore, 2);
-        }
-
-        return response()->json([
-            'stats' => $stats,
-            'enrollments' => $enrollments->values(),
-            'recent_activity' => $this->getRecentActivity($studentIds),
-        ]);
     }
 
     private function getRecentActivity($studentIds)
     {
         $ids = is_array($studentIds) ? $studentIds : [$studentIds];
 
-        $submissions = AssignmentSubmission::select([
-            'id', 'assignment_id', 'student_id', 'file_path', 'submitted_at', 'score', 'feedback', 'created_at', 'updated_at',
-        ])
-            ->whereIn('student_id', $ids)
-            ->with('assignment:id,course_id,title,due_date,total_score')
-            ->orderBy('submitted_at', 'desc')
-            ->limit(5)
-            ->get();
+        try {
+            $submissions = AssignmentSubmission::whereIn('student_id', $ids)
+                ->with('assignment')
+                ->orderBy('id', 'desc')
+                ->limit(5)
+                ->get()
+                ->each(function ($sub) {
+                    $sub->makeHidden(['file_data', 'base64_data']);
+                });
+        } catch (\Throwable $e) {
+            $submissions = [];
+        }
 
-        $attempts = QuizAttempt::select('id', 'quiz_id', 'student_id', 'score', 'started_at', 'submitted_at')
-            ->whereIn('student_id', $ids)
-            ->with('quiz:id,course_id,title,duration,total_mark,start_date,end_date')
-            ->orderBy('submitted_at', 'desc')
-            ->limit(5)
-            ->get();
+        try {
+            $attempts = QuizAttempt::whereIn('student_id', $ids)
+                ->with('quiz')
+                ->orderBy('id', 'desc')
+                ->limit(5)
+                ->get();
+        } catch (\Throwable $e) {
+            $attempts = [];
+        }
 
         return [
             'submissions' => $submissions,
@@ -537,71 +556,79 @@ class StudentController extends Controller
     // ទាញយកបញ្ជីមុខវិជ្ជារបស់សិស្ស
     public function getCourses(Request $request)
     {
-        $student = auth()->user();
-        $studentProfile = $this->resolveStudentProfile($student);
-        $perPage = max(1, min((int) $request->input('per_page', 12), 100));
+        try {
+            $student = auth()->user();
+            $studentProfile = $this->resolveStudentProfile($student);
+            $perPage = max(1, min((int) $request->input('per_page', 12), 100));
 
-        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
-        $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+            $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
+            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
 
-        $query = Course::with([
-            'department:id,department_name,department_code',
-        ])->withCount(['lessons', 'assignments', 'quizzes']);
+            $query = Course::with(['department'])
+                ->withCount(['lessons', 'assignments', 'quizzes']);
 
-        if (!empty($enrolledCourseIds)) {
-            $query->whereIn('id', $enrolledCourseIds);
-        } elseif ($deptId) {
-            $query->where('department_id', $deptId);
-        }
+            if (!empty($enrolledCourseIds)) {
+                $query->whereIn('id', $enrolledCourseIds);
+            } elseif ($deptId) {
+                $query->where('department_id', $deptId);
+            }
 
-        $formatCourse = function ($course) {
-            $teacherData = $this->formatTeacherData($course, true);
-            $teacherName = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+            $formatCourse = function ($course) {
+                $teacherData = $this->formatTeacherData($course, true);
+                $teacherName = $teacherData['name'] ?? 'គ្រូបង្រៀន';
 
-            return [
-                'id' => $course->id,
-                'course_id' => $course->id,
-                'course_code' => $course->course_code,
-                'course_name' => $course->course_name,
-                'description' => $course->description,
-                'credit' => $course->credit ?? 3,
-                'semester' => $course->semester ?? null,
-                'department_id' => $course->department_id,
-                'department' => $course->department,
-                'teacher_id' => $course->teacher_id,
-                'teacher_name' => $teacherName,
-                'teacher_profile' => $teacherData,
-                'teacher' => $teacherData,
-                'lessons_count' => (int) ($course->lessons_count ?? 0),
-                'assignments_count' => (int) ($course->assignments_count ?? 0),
-                'quizzes_count' => (int) ($course->quizzes_count ?? 0),
-            ];
-        };
+                return [
+                    'id' => $course->id,
+                    'course_id' => $course->id,
+                    'course_code' => $course->course_code,
+                    'course_name' => $course->course_name,
+                    'description' => $course->description,
+                    'credit' => $course->credit ?? 3,
+                    'semester' => $course->semester ?? null,
+                    'department_id' => $course->department_id,
+                    'department' => $course->department,
+                    'teacher_id' => $course->teacher_id,
+                    'teacher_name' => $teacherName,
+                    'teacher_profile' => $teacherData,
+                    'teacher' => $teacherData,
+                    'lessons_count' => (int) ($course->lessons_count ?? 0),
+                    'assignments_count' => (int) ($course->assignments_count ?? 0),
+                    'quizzes_count' => (int) ($course->quizzes_count ?? 0),
+                ];
+            };
 
-        if ($request->boolean('all')) {
-            $rawCourses = $query->get();
-            $this->preloadTeachersForCourses($rawCourses);
-            $courses = $rawCourses->map($formatCourse);
+            if ($request->boolean('all')) {
+                $rawCourses = $query->get();
+                $this->preloadTeachersForCourses($rawCourses);
+                $courses = $rawCourses->map($formatCourse);
+
+                return response()->json([
+                    'data' => $courses,
+                ]);
+            }
+
+            $paginated = $query->paginate($perPage);
+            $rawItems = collect($paginated->items());
+            $this->preloadTeachersForCourses($rawItems);
+            $items = $rawItems->map($formatCourse);
 
             return response()->json([
-                'data' => $courses,
+                'data' => $items,
+                'meta' => [
+                    'current_page' => $paginated->currentPage(),
+                    'last_page' => $paginated->lastPage(),
+                    'per_page' => $paginated->perPage(),
+                    'total' => $paginated->total(),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Student getCourses error: ' . $e->getMessage());
+            return response()->json([
+                'data' => [],
+                'meta' => ['current_page' => 1, 'last_page' => 1, 'per_page' => 12, 'total' => 0],
+                'error_debug' => $e->getMessage(),
             ]);
         }
-
-        $paginated = $query->paginate($perPage);
-        $rawItems = collect($paginated->items());
-        $this->preloadTeachersForCourses($rawItems);
-        $items = $rawItems->map($formatCourse);
-
-        return response()->json([
-            'data' => $items,
-            'meta' => [
-                'current_page' => $paginated->currentPage(),
-                'last_page' => $paginated->lastPage(),
-                'per_page' => $paginated->perPage(),
-                'total' => $paginated->total(),
-            ],
-        ]);
     }
 
     // View Attendance
@@ -616,10 +643,10 @@ class StudentController extends Controller
             $baseQuery = Attendance::whereIn('student_id', $studentIds);
 
             $summaryRaw = (clone $baseQuery)->selectRaw("
-                SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
-                SUM(CASE WHEN LOWER(status) = 'absent' THEN 1 ELSE 0 END) as absent,
-                SUM(CASE WHEN LOWER(status) = 'permission' THEN 1 ELSE 0 END) as permission,
-                SUM(CASE WHEN LOWER(status) = 'late' THEN 1 ELSE 0 END) as late
+                SUM(CASE WHEN LOWER(TRIM(status)) = 'present' THEN 1 ELSE 0 END) as present,
+                SUM(CASE WHEN LOWER(TRIM(status)) = 'absent' THEN 1 ELSE 0 END) as absent,
+                SUM(CASE WHEN LOWER(TRIM(status)) = 'permission' THEN 1 ELSE 0 END) as permission,
+                SUM(CASE WHEN LOWER(TRIM(status)) = 'late' THEN 1 ELSE 0 END) as late
             ")->first();
 
             $summary = [
@@ -630,7 +657,7 @@ class StudentController extends Controller
             ];
 
             $paginated = (clone $baseQuery)
-                ->with(['course'])
+                ->with(['course.department'])
                 ->orderBy('attendance_date', 'desc')
                 ->paginate($perPage);
 
@@ -674,11 +701,14 @@ class StudentController extends Controller
                     'total' => $paginated->total(),
                 ],
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            Log::error('Student getAttendance error: ' . $e->getMessage());
             return response()->json([
-                'error' => true,
-                'message' => 'មូលហេតុដែលគាំង: ' . $e->getMessage(),
-            ], 500);
+                'attendance' => [],
+                'summary' => ['present' => 0, 'absent' => 0, 'permission' => 0, 'late' => 0],
+                'meta' => ['current_page' => 1, 'last_page' => 1, 'per_page' => 20, 'total' => 0],
+                'error_debug' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -698,174 +728,175 @@ class StudentController extends Controller
     // View Scores
     public function getScores()
     {
-        $student = auth()->user();
-        $studentIds = $this->getStudentAllIds($student);
-        $studentProfile = $this->resolveStudentProfile($student);
+        try {
+            $student = auth()->user();
+            $studentIds = $this->getStudentAllIds($student);
+            $studentProfile = $this->resolveStudentProfile($student);
 
-        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
+            $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
 
-        $coursesQuery = Course::with([
-            'department:id,department_name,department_code',
-        ]);
+            $coursesQuery = Course::with(['department']);
 
-        if (!empty($enrolledCourseIds)) {
-            $courses = $coursesQuery->whereIn('id', $enrolledCourseIds)->get();
-        } elseif ($studentProfile && $studentProfile->department_id) {
-            $courses = $coursesQuery->where('department_id', $studentProfile->department_id)->get();
-        } else {
-            $courses = $coursesQuery->get();
+            if (!empty($enrolledCourseIds)) {
+                $courses = $coursesQuery->whereIn('id', $enrolledCourseIds)->get();
+            } elseif ($studentProfile && $studentProfile->department_id) {
+                $courses = $coursesQuery->where('department_id', $studentProfile->department_id)->get();
+            } else {
+                $courses = $coursesQuery->get();
+            }
+
+            $this->preloadTeachersForCourses($courses);
+
+            $grades = Grade::whereIn('student_id', $studentIds)->get()->keyBy('course_id');
+            $courseIds = $courses->pluck('id');
+
+            $allAssignments = Assignment::whereIn('course_id', $courseIds)
+                ->get()
+                ->groupBy('course_id');
+            $allAssignmentIds = $allAssignments->flatten()->pluck('id');
+
+            $allSubmissions = $allAssignmentIds->isNotEmpty()
+                ? AssignmentSubmission::select('id', 'assignment_id', 'student_id', 'score')
+                    ->whereIn('assignment_id', $allAssignmentIds)
+                    ->whereIn('student_id', $studentIds)
+                    ->whereNotNull('score')
+                    ->get()
+                    ->groupBy('assignment_id')
+                : collect();
+
+            $allQuizzes = Quiz::whereIn('course_id', $courseIds)
+                ->get()
+                ->groupBy('course_id');
+            $allQuizIds = $allQuizzes->flatten()->pluck('id');
+
+            $allAttempts = $allQuizIds->isNotEmpty()
+                ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score')
+                    ->whereIn('quiz_id', $allQuizIds)
+                    ->whereIn('student_id', $studentIds)
+                    ->whereNotNull('score')
+                    ->get()
+                    ->groupBy('quiz_id')
+                : collect();
+
+            $result = $courses->map(function ($course) use ($grades, $allAssignments, $allSubmissions, $allQuizzes, $allAttempts) {
+                $grade = $grades->get($course->id);
+
+                $assignments = $allAssignments->get($course->id, collect());
+                $autoAssignmentScore = null;
+                if ($assignments->isNotEmpty()) {
+                    $totalEarned = 0;
+                    $totalMax = 0;
+                    $hasGraded = false;
+
+                    foreach ($assignments as $assign) {
+                        $submissions = $allSubmissions->get($assign->id, collect());
+                        if ($submissions->isNotEmpty()) {
+                            $subScore = $submissions->max('score');
+                            $maxScore = $assign->total_score ?? $assign->marks ?? 20;
+                            if ($maxScore > 0) {
+                                $totalEarned += $subScore;
+                                $totalMax += $maxScore;
+                                $hasGraded = true;
+                            }
+                        }
+                    }
+                    if ($hasGraded && $totalMax > 0) {
+                        $autoAssignmentScore = round(($totalEarned / $totalMax) * 100, 2);
+                    }
+                }
+
+                $quizzes = $allQuizzes->get($course->id, collect());
+                $autoQuizScore = null;
+                if ($quizzes->isNotEmpty()) {
+                    $totalEarned = 0;
+                    $totalMax = 0;
+                    $hasAttempts = false;
+
+                    foreach ($quizzes as $quiz) {
+                        $attempts = $allAttempts->get($quiz->id, collect());
+                        if ($attempts->isNotEmpty()) {
+                            $bestScore = $attempts->max('score');
+                            $maxMark = $quiz->total_mark ?? 20;
+                            if ($maxMark > 0) {
+                                $totalEarned += $bestScore;
+                                $totalMax += $maxMark;
+                                $hasAttempts = true;
+                            }
+                        }
+                    }
+                    if ($hasAttempts && $totalMax > 0) {
+                        $autoQuizScore = round(($totalEarned / $totalMax) * 100, 2);
+                    }
+                }
+
+                $assignScore = $grade && $grade->assignment_score !== null ? $grade->assignment_score : $autoAssignmentScore;
+                $quizScore = $grade && $grade->quiz_score !== null ? $grade->quiz_score : $autoQuizScore;
+                $midtermScore = $grade && $grade->midterm_score !== null ? $grade->midterm_score : null;
+                $examScore = $grade && isset($grade->exam_score) && $grade->exam_score !== null ? $grade->exam_score : null;
+                $finalScore = $grade && $grade->final_score !== null ? $grade->final_score : null;
+
+                if ($finalScore === null) {
+                    $a = $assignScore !== null ? (float) $assignScore : null;
+                    $q = $quizScore !== null ? (float) $quizScore : null;
+                    $m = $midtermScore !== null ? (float) $midtermScore : null;
+                    $e = $examScore !== null ? (float) $examScore : null;
+
+                    $weightedSum = 0;
+                    $weightTotal = 0;
+                    if ($a !== null) { $weightedSum += $a * 0.20; $weightTotal += 0.20; }
+                    if ($q !== null) { $weightedSum += $q * 0.20; $weightTotal += 0.20; }
+                    if ($m !== null) { $weightedSum += $m * 0.25; $weightTotal += 0.25; }
+                    if ($e !== null) { $weightedSum += $e * 0.35; $weightTotal += 0.35; }
+
+                    if ($weightTotal > 0) {
+                        $finalScore = round(($weightedSum / $weightTotal), 2);
+                    }
+                }
+
+                $gradeLetter = $grade && $grade->grade_letter ? $grade->grade_letter : null;
+                if (!$gradeLetter && $finalScore !== null) {
+                    if ($finalScore >= 90) $gradeLetter = 'A';
+                    elseif ($finalScore >= 85) $gradeLetter = 'B+';
+                    elseif ($finalScore >= 80) $gradeLetter = 'B';
+                    elseif ($finalScore >= 70) $gradeLetter = 'C+';
+                    elseif ($finalScore >= 65) $gradeLetter = 'C';
+                    elseif ($finalScore >= 50) $gradeLetter = 'D';
+                    else $gradeLetter = 'F';
+                }
+
+                $teacherData = $this->formatTeacherData($course, true);
+
+                return [
+                    'id' => $grade ? $grade->id : null,
+                    'course_id' => $course->id,
+                    'course' => [
+                        'id' => $course->id,
+                        'course_code' => $course->course_code,
+                        'course_name' => $course->course_name,
+                        'credit' => $course->credit,
+                        'description' => $course->description,
+                        'teacher_id' => $course->teacher_id,
+                        'teacher_name' => $teacherData['name'] ?? 'គ្រូបង្រៀន',
+                        'teacher_profile' => $teacherData,
+                        'teacher' => $teacherData,
+                        'department' => $course->department,
+                    ],
+                    'assignment_score' => $assignScore,
+                    'auto_assignment_score' => $autoAssignmentScore,
+                    'quiz_score' => $quizScore,
+                    'auto_quiz_score' => $autoQuizScore,
+                    'midterm_score' => $midtermScore,
+                    'exam_score' => $examScore,
+                    'final_score' => $finalScore,
+                    'grade_letter' => $gradeLetter,
+                ];
+            });
+
+            return response()->json($result);
+        } catch (\Throwable $e) {
+            Log::error('Student getScores error: ' . $e->getMessage());
+            return response()->json([]);
         }
-
-        $this->preloadTeachersForCourses($courses);
-
-        $grades = Grade::whereIn('student_id', $studentIds)->get()->keyBy('course_id');
-        $courseIds = $courses->pluck('id');
-
-        $allAssignments = Assignment::select('id', 'course_id', 'total_score')
-            ->whereIn('course_id', $courseIds)
-            ->get()
-            ->groupBy('course_id');
-        $allAssignmentIds = $allAssignments->flatten()->pluck('id');
-
-        $allSubmissions = $allAssignmentIds->isNotEmpty()
-            ? AssignmentSubmission::select('id', 'assignment_id', 'student_id', 'score')
-                ->whereIn('assignment_id', $allAssignmentIds)
-                ->whereIn('student_id', $studentIds)
-                ->whereNotNull('score')
-                ->get()
-                ->groupBy('assignment_id')
-            : collect();
-
-        $allQuizzes = Quiz::select('id', 'course_id', 'total_mark')
-            ->whereIn('course_id', $courseIds)
-            ->get()
-            ->groupBy('course_id');
-        $allQuizIds = $allQuizzes->flatten()->pluck('id');
-
-        $allAttempts = $allQuizIds->isNotEmpty()
-            ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score')
-                ->whereIn('quiz_id', $allQuizIds)
-                ->whereIn('student_id', $studentIds)
-                ->whereNotNull('score')
-                ->get()
-                ->groupBy('quiz_id')
-            : collect();
-
-        $result = $courses->map(function ($course) use ($grades, $allAssignments, $allSubmissions, $allQuizzes, $allAttempts) {
-            $grade = $grades->get($course->id);
-
-            $assignments = $allAssignments->get($course->id, collect());
-            $autoAssignmentScore = null;
-            if ($assignments->isNotEmpty()) {
-                $totalEarned = 0;
-                $totalMax = 0;
-                $hasGraded = false;
-
-                foreach ($assignments as $assign) {
-                    $submissions = $allSubmissions->get($assign->id, collect());
-                    if ($submissions->isNotEmpty()) {
-                        $subScore = $submissions->max('score');
-                        $maxScore = $assign->total_score ?? 20;
-                        if ($maxScore > 0) {
-                            $totalEarned += $subScore;
-                            $totalMax += $maxScore;
-                            $hasGraded = true;
-                        }
-                    }
-                }
-                if ($hasGraded && $totalMax > 0) {
-                    $autoAssignmentScore = round(($totalEarned / $totalMax) * 100, 2);
-                }
-            }
-
-            $quizzes = $allQuizzes->get($course->id, collect());
-            $autoQuizScore = null;
-            if ($quizzes->isNotEmpty()) {
-                $totalEarned = 0;
-                $totalMax = 0;
-                $hasAttempts = false;
-
-                foreach ($quizzes as $quiz) {
-                    $attempts = $allAttempts->get($quiz->id, collect());
-                    if ($attempts->isNotEmpty()) {
-                        $bestScore = $attempts->max('score');
-                        $maxMark = $quiz->total_mark ?? 20;
-                        if ($maxMark > 0) {
-                            $totalEarned += $bestScore;
-                            $totalMax += $maxMark;
-                            $hasAttempts = true;
-                        }
-                    }
-                }
-                if ($hasAttempts && $totalMax > 0) {
-                    $autoQuizScore = round(($totalEarned / $totalMax) * 100, 2);
-                }
-            }
-
-            $assignScore = $grade && $grade->assignment_score !== null ? $grade->assignment_score : $autoAssignmentScore;
-            $quizScore = $grade && $grade->quiz_score !== null ? $grade->quiz_score : $autoQuizScore;
-            $midtermScore = $grade && $grade->midterm_score !== null ? $grade->midterm_score : null;
-            $examScore = $grade && isset($grade->exam_score) && $grade->exam_score !== null ? $grade->exam_score : null;
-            $finalScore = $grade && $grade->final_score !== null ? $grade->final_score : null;
-
-            if ($finalScore === null) {
-                $a = $assignScore !== null ? (float) $assignScore : null;
-                $q = $quizScore !== null ? (float) $quizScore : null;
-                $m = $midtermScore !== null ? (float) $midtermScore : null;
-                $e = $examScore !== null ? (float) $examScore : null;
-
-                $weightedSum = 0;
-                $weightTotal = 0;
-                if ($a !== null) { $weightedSum += $a * 0.20; $weightTotal += 0.20; }
-                if ($q !== null) { $weightedSum += $q * 0.20; $weightTotal += 0.20; }
-                if ($m !== null) { $weightedSum += $m * 0.25; $weightTotal += 0.25; }
-                if ($e !== null) { $weightedSum += $e * 0.35; $weightTotal += 0.35; }
-
-                if ($weightTotal > 0) {
-                    $finalScore = round(($weightedSum / $weightTotal), 2);
-                }
-            }
-
-            $gradeLetter = $grade && $grade->grade_letter ? $grade->grade_letter : null;
-            if (!$gradeLetter && $finalScore !== null) {
-                if ($finalScore >= 90) $gradeLetter = 'A';
-                elseif ($finalScore >= 85) $gradeLetter = 'B+';
-                elseif ($finalScore >= 80) $gradeLetter = 'B';
-                elseif ($finalScore >= 70) $gradeLetter = 'C+';
-                elseif ($finalScore >= 65) $gradeLetter = 'C';
-                elseif ($finalScore >= 50) $gradeLetter = 'D';
-                else $gradeLetter = 'F';
-            }
-
-            $teacherData = $this->formatTeacherData($course, true);
-
-            return [
-                'id' => $grade ? $grade->id : null,
-                'course_id' => $course->id,
-                'course' => [
-                    'id' => $course->id,
-                    'course_code' => $course->course_code,
-                    'course_name' => $course->course_name,
-                    'credit' => $course->credit,
-                    'description' => $course->description,
-                    'teacher_id' => $course->teacher_id,
-                    'teacher_name' => $teacherData['name'] ?? 'គ្រូបង្រៀន',
-                    'teacher_profile' => $teacherData,
-                    'teacher' => $teacherData,
-                    'department' => $course->department,
-                ],
-                'assignment_score' => $assignScore,
-                'auto_assignment_score' => $autoAssignmentScore,
-                'quiz_score' => $quizScore,
-                'auto_quiz_score' => $autoQuizScore,
-                'midterm_score' => $midtermScore,
-                'exam_score' => $examScore,
-                'final_score' => $finalScore,
-                'grade_letter' => $gradeLetter,
-            ];
-        });
-
-        return response()->json($result);
     }
 
     public function getCourseScores($courseId)
@@ -884,196 +915,209 @@ class StudentController extends Controller
     // ✅ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សា (ឆ្នាំទី ១-៤) ក្នុងដេប៉ាតឺម៉ង់របស់សិស្ស
     public function getAllLessons(Request $request)
     {
-        $student = auth()->user();
-        $studentProfile = $this->resolveStudentProfile($student);
+        try {
+            $student = auth()->user();
+            $studentProfile = $this->resolveStudentProfile($student);
 
-        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
+            $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
 
-        $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
-        if (!$deptId && !empty($enrolledCourseIds)) {
-            $deptId = Course::whereIn('id', $enrolledCourseIds)
-                ->whereNotNull('department_id')
-                ->value('department_id');
-        }
-
-        $coursesQuery = Course::with([
-            'department:id,department_name,department_code',
-        ]);
-
-        if ($deptId) {
-            $coursesQuery->where(function ($q) use ($deptId, $enrolledCourseIds) {
-                $q->where('department_id', $deptId);
-                if (!empty($enrolledCourseIds)) {
-                    $q->orWhereIn('id', $enrolledCourseIds);
-                }
-            });
-        } elseif (!empty($enrolledCourseIds)) {
-            $coursesQuery->whereIn('id', $enrolledCourseIds);
-        }
-
-        $deptCourses = $coursesQuery->get()->keyBy('id');
-        $this->preloadTeachersForCourses($deptCourses->values());
-        $deptCourseIds = $deptCourses->keys()->toArray();
-
-        $courseYearsMap = $this->buildCourseYearsMap($deptCourses);
-
-        $detectedYear = $this->parseAcademicYearNumber(
-            ($studentProfile->year ?? '') . ' ' .
-            ($studentProfile->academic_year ?? '') . ' ' .
-            ($studentProfile->batch_year ?? '') . ' ' .
-            ($student->year ?? '') . ' ' .
-            ($student->batch_year ?? '') . ' ' .
-            ($student->name ?? ''),
-            ($studentProfile->student_code ?? '') . ' ' .
-            ($student->student_code ?? '') . ' ' .
-            ($student->email ?? '') . ' ' .
-            ($studentProfile->email ?? '')
-        );
-
-        if (!$detectedYear && !empty($enrolledCourseIds)) {
-            $enrolledYears = [];
-            foreach ($enrolledCourseIds as $ecid) {
-                if (!empty($courseYearsMap[$ecid]['primary_year'])) {
-                    $enrolledYears[] = (int) $courseYearsMap[$ecid]['primary_year'];
-                }
+            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+            if (!$deptId && !empty($enrolledCourseIds)) {
+                $deptId = Course::whereIn('id', $enrolledCourseIds)
+                    ->whereNotNull('department_id')
+                    ->value('department_id');
             }
-            if (!empty($enrolledYears)) {
-                $detectedYear = max($enrolledYears);
+
+            $coursesQuery = Course::with(['department']);
+
+            if ($deptId) {
+                $coursesQuery->where(function ($q) use ($deptId, $enrolledCourseIds) {
+                    $q->where('department_id', $deptId);
+                    if (!empty($enrolledCourseIds)) {
+                        $q->orWhereIn('id', $enrolledCourseIds);
+                    }
+                });
+            } elseif (!empty($enrolledCourseIds)) {
+                $coursesQuery->whereIn('id', $enrolledCourseIds);
             }
-        }
 
-        $studentCurrentYear = $detectedYear ?? 1;
+            $deptCourses = $coursesQuery->get()->keyBy('id');
 
-        $fileCols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
-        if (Schema::hasColumn('lesson_files', 'mime_type')) {
-            $fileCols[] = 'mime_type';
-        }
+            // Fallback៖ បើនៅតែទទេ ទាញមុខវិជ្ជាទាំងអស់ក្នុងប្រព័ន្ធមកបង្ហាញ
+            if ($deptCourses->isEmpty()) {
+                $deptCourses = Course::with(['department'])->get()->keyBy('id');
+            }
 
-        $lessonsQuery = Lesson::with([
-            'files' => function ($q) use ($fileCols) {
-                $q->select($fileCols);
-            },
-            'videos:id,lesson_id,title,video_url,duration,created_at,updated_at',
-        ])->orderBy('lesson_order', 'asc');
+            $this->preloadTeachersForCourses($deptCourses->values());
+            $deptCourseIds = $deptCourses->keys()->toArray();
 
-        if (!empty($deptCourseIds)) {
-            $lessonsQuery->whereIn('course_id', $deptCourseIds);
-        }
+            $courseYearsMap = $this->buildCourseYearsMap($deptCourses);
 
-        $teacherByCourseId = [];
-        foreach ($deptCourses as $cid => $crs) {
-            $teacherByCourseId[(int) $cid] = $this->formatTeacherData($crs, true);
-        }
-
-        $lessons = $lessonsQuery->get()->map(function ($lesson) use ($enrolledCourseIds, $studentProfile, $studentCurrentYear, $courseYearsMap, $deptCourses, $teacherByCourseId) {
-            $cid = (int) $lesson->course_id;
-            $course = $deptCourses->get($cid);
-            $isEnrolled = in_array($cid, $enrolledCourseIds, true);
-
-            $yearInfo = $courseYearsMap[$cid] ?? null;
-            $explicitCourseY = $this->parseAcademicYearNumber(
-                ($course->course_name ?? '') . ' ' . ($course->description ?? '') . ' ' . ($lesson->title ?? ''),
-                $course->course_code ?? '',
-                $course->semester ?? null
+            $detectedYear = $this->parseAcademicYearNumber(
+                ($studentProfile->year ?? '') . ' ' .
+                ($studentProfile->academic_year ?? '') . ' ' .
+                ($studentProfile->batch_year ?? '') . ' ' .
+                ($student->year ?? '') . ' ' .
+                ($student->batch_year ?? '') . ' ' .
+                ($student->name ?? ''),
+                ($studentProfile->student_code ?? '') . ' ' .
+                ($student->student_code ?? '') . ' ' .
+                ($student->email ?? '') . ' ' .
+                ($studentProfile->email ?? '')
             );
 
-            $primaryYear = $explicitCourseY ?? ($yearInfo['primary_year'] ?? ($isEnrolled ? $studentCurrentYear : 1));
-            $yearsList = $yearInfo['years_list'] ?? [(string) $primaryYear];
-
-            $fullTeacher = $teacherByCourseId[$cid] ?? null;
-
-            $studyStatus = 'current_class';
-            if ((int) $primaryYear < (int) $studentCurrentYear) {
-                $studyStatus = 'past_review';
-            } elseif ((int) $primaryYear > (int) $studentCurrentYear || !$isEnrolled) {
-                $studyStatus = 'learn_ahead';
+            if (!$detectedYear && !empty($enrolledCourseIds)) {
+                $enrolledYears = [];
+                foreach ($enrolledCourseIds as $ecid) {
+                    if (!empty($courseYearsMap[$ecid]['primary_year'])) {
+                        $enrolledYears[] = (int) $courseYearsMap[$ecid]['primary_year'];
+                    }
+                }
+                if (!empty($enrolledYears)) {
+                    $detectedYear = max($enrolledYears);
+                }
             }
 
-            return [
-                'id' => $lesson->id,
-                'course_id' => $cid,
-                'title' => $lesson->title,
-                'description' => $lesson->description,
-                'lesson_order' => $lesson->lesson_order,
-                'year' => (int) $primaryYear,
-                'years_list' => $yearsList,
-                'is_enrolled' => $isEnrolled,
-                'study_status' => $studyStatus,
-                'student_current_year' => (int) $studentCurrentYear,
-                'student_study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
-                'teacher' => $fullTeacher,
-                'course' => $course ? [
-                    'id' => $course->id,
-                    'course_code' => $course->course_code,
-                    'course_name' => $course->course_name,
-                    'description' => $course->description,
-                    'credit' => $course->credit ?? 3,
-                    'semester' => $course->semester ?? null,
+            $studentCurrentYear = $detectedYear ?? 1;
+
+            $lessonsQuery = Lesson::with(['files', 'videos'])
+                ->orderBy('lesson_order', 'asc');
+
+            if (!empty($deptCourseIds)) {
+                $lessonsQuery->whereIn('course_id', $deptCourseIds);
+            }
+
+            $teacherByCourseId = [];
+            foreach ($deptCourses as $cid => $crs) {
+                $teacherByCourseId[(int) $cid] = $this->formatTeacherData($crs, true);
+            }
+
+            $lessons = $lessonsQuery->get()->map(function ($lesson) use ($enrolledCourseIds, $studentProfile, $studentCurrentYear, $courseYearsMap, $deptCourses, $teacherByCourseId) {
+                $cid = (int) $lesson->course_id;
+                $course = $deptCourses->get($cid);
+                $isEnrolled = in_array($cid, $enrolledCourseIds, true);
+
+                $yearInfo = $courseYearsMap[$cid] ?? null;
+                $explicitCourseY = $this->parseAcademicYearNumber(
+                    ($course->course_name ?? '') . ' ' . ($course->description ?? '') . ' ' . ($lesson->title ?? ''),
+                    $course->course_code ?? '',
+                    $course->semester ?? null
+                );
+
+                $primaryYear = $explicitCourseY ?? ($yearInfo['primary_year'] ?? ($isEnrolled ? $studentCurrentYear : 1));
+                $yearsList = $yearInfo['years_list'] ?? [(string) $primaryYear];
+
+                $fullTeacher = $teacherByCourseId[$cid] ?? null;
+
+                $studyStatus = 'current_class';
+                if ((int) $primaryYear < (int) $studentCurrentYear) {
+                    $studyStatus = 'past_review';
+                } elseif ((int) $primaryYear > (int) $studentCurrentYear || !$isEnrolled) {
+                    $studyStatus = 'learn_ahead';
+                }
+
+                // លាក់ទិន្នន័យ Base64 ធំៗក្នុង lesson_files កុំឱ្យធ្ងន់ JSON
+                $cleanFiles = collect($lesson->files ?? [])->map(function ($f) {
+                    if ($f instanceof \Illuminate\Database\Eloquent\Model) {
+                        $f->makeHidden(['file_data', 'base64_data', 'file_content']);
+                    }
+                    return $f;
+                });
+
+                return [
+                    'id' => $lesson->id,
+                    'course_id' => $cid,
+                    'title' => $lesson->title,
+                    'description' => $lesson->description,
+                    'lesson_order' => $lesson->lesson_order,
                     'year' => (int) $primaryYear,
                     'years_list' => $yearsList,
                     'is_enrolled' => $isEnrolled,
                     'study_status' => $studyStatus,
-                    'department_id' => $course->department_id,
-                    'department' => $course->department,
-                    'teacher_id' => $course->teacher_id,
-                    'teacher_name' => $fullTeacher['name'] ?? 'គ្រូបង្រៀន',
+                    'student_current_year' => (int) $studentCurrentYear,
+                    'student_study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
                     'teacher' => $fullTeacher,
-                    'teacher_profile' => $fullTeacher,
-                ] : null,
-                'files' => $lesson->files ?? [],
-                'videos' => $lesson->videos ?? [],
-            ];
-        });
+                    'course' => $course ? [
+                        'id' => $course->id,
+                        'course_code' => $course->course_code,
+                        'course_name' => $course->course_name,
+                        'description' => $course->description,
+                        'credit' => $course->credit ?? 3,
+                        'semester' => $course->semester ?? null,
+                        'year' => (int) $primaryYear,
+                        'years_list' => $yearsList,
+                        'is_enrolled' => $isEnrolled,
+                        'study_status' => $studyStatus,
+                        'department_id' => $course->department_id,
+                        'department' => $course->department,
+                        'teacher_id' => $course->teacher_id,
+                        'teacher_name' => $fullTeacher['name'] ?? 'គ្រូបង្រៀន',
+                        'teacher' => $fullTeacher,
+                        'teacher_profile' => $fullTeacher,
+                    ] : null,
+                    'files' => $cleanFiles,
+                    'videos' => $lesson->videos ?? [],
+                ];
+            });
 
-        $formattedDeptCourses = $deptCourses->values()->map(function ($crs) use ($courseYearsMap, $enrolledCourseIds, $studentCurrentYear, $teacherByCourseId) {
-            $cid = (int) $crs->id;
-            $isEnrolled = in_array($cid, $enrolledCourseIds, true);
-            $yearInfo = $courseYearsMap[$cid] ?? null;
+            $formattedDeptCourses = $deptCourses->values()->map(function ($crs) use ($courseYearsMap, $enrolledCourseIds, $studentCurrentYear, $teacherByCourseId) {
+                $cid = (int) $crs->id;
+                $isEnrolled = in_array($cid, $enrolledCourseIds, true);
+                $yearInfo = $courseYearsMap[$cid] ?? null;
 
-            $explicitCourseY = $this->parseAcademicYearNumber(
-                ($crs->course_name ?? '') . ' ' . ($crs->description ?? ''),
-                $crs->course_code ?? '',
-                $crs->semester ?? null
-            );
+                $explicitCourseY = $this->parseAcademicYearNumber(
+                    ($crs->course_name ?? '') . ' ' . ($crs->description ?? ''),
+                    $crs->course_code ?? '',
+                    $crs->semester ?? null
+                );
 
-            $primaryYear = (int) ($explicitCourseY ?? ($yearInfo['primary_year'] ?? ($isEnrolled ? $studentCurrentYear : 1)));
-            $yearsList = $yearInfo['years_list'] ?? [(string) $primaryYear];
+                $primaryYear = (int) ($explicitCourseY ?? ($yearInfo['primary_year'] ?? ($isEnrolled ? $studentCurrentYear : 1)));
+                $yearsList = $yearInfo['years_list'] ?? [(string) $primaryYear];
 
-            $teacherData = $teacherByCourseId[$cid] ?? null;
+                $teacherData = $teacherByCourseId[$cid] ?? null;
 
-            $studyStatus = 'current_class';
-            if ($primaryYear < (int) $studentCurrentYear) {
-                $studyStatus = 'past_review';
-            } elseif ($primaryYear > (int) $studentCurrentYear || !$isEnrolled) {
-                $studyStatus = 'learn_ahead';
-            }
+                $studyStatus = 'current_class';
+                if ($primaryYear < (int) $studentCurrentYear) {
+                    $studyStatus = 'past_review';
+                } elseif ($primaryYear > (int) $studentCurrentYear || !$isEnrolled) {
+                    $studyStatus = 'learn_ahead';
+                }
 
-            return [
-                'id' => $cid,
-                'course_id' => $cid,
-                'course_code' => $crs->course_code,
-                'course_name' => $crs->course_name,
-                'description' => $crs->description,
-                'credit' => $crs->credit ?? 3,
-                'semester' => $crs->semester ?? null,
-                'year' => $primaryYear,
-                'years_list' => $yearsList,
-                'is_enrolled' => $isEnrolled,
-                'study_status' => $studyStatus,
-                'department_id' => $crs->department_id,
-                'department' => $crs->department,
-                'teacher_id' => $crs->teacher_id,
-                'teacher_name' => $teacherData['name'] ?? 'គ្រូបង្រៀន',
-                'teacher_profile' => $teacherData,
-                'teacher' => $teacherData,
-            ];
-        });
+                return [
+                    'id' => $cid,
+                    'course_id' => $cid,
+                    'course_code' => $crs->course_code,
+                    'course_name' => $crs->course_name,
+                    'description' => $crs->description,
+                    'credit' => $crs->credit ?? 3,
+                    'semester' => $crs->semester ?? null,
+                    'year' => $primaryYear,
+                    'years_list' => $yearsList,
+                    'is_enrolled' => $isEnrolled,
+                    'study_status' => $studyStatus,
+                    'department_id' => $crs->department_id,
+                    'department' => $crs->department,
+                    'teacher_id' => $crs->teacher_id,
+                    'teacher_name' => $teacherData['name'] ?? 'គ្រូបង្រៀន',
+                    'teacher_profile' => $teacherData,
+                    'teacher' => $teacherData,
+                ];
+            });
 
-        return response()->json([
-            'data' => $lessons,
-            'department_courses' => $formattedDeptCourses,
-            'student_current_year' => (int) $studentCurrentYear,
-        ]);
+            return response()->json([
+                'data' => $lessons,
+                'department_courses' => $formattedDeptCourses,
+                'student_current_year' => (int) $studentCurrentYear,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Student getAllLessons error: ' . $e->getMessage());
+            return response()->json([
+                'data' => [],
+                'department_courses' => [],
+                'student_current_year' => 1,
+                'error_debug' => $e->getMessage(),
+            ]);
+        }
     }
 
     // ✅ អានឯកសារមេរៀនជា Base64
@@ -1139,47 +1183,43 @@ class StudentController extends Controller
     // View Lessons by Course
     public function getCourseLessons($courseId)
     {
-        $course = Course::with([
-            'department:id,department_name,department_code',
-        ])->find($courseId);
+        try {
+            $course = Course::with(['department'])->find($courseId);
 
-        if ($course) {
-            $this->preloadTeachersForCourses([$course]);
+            if ($course) {
+                $this->preloadTeachersForCourses([$course]);
+            }
+
+            $courseYearsMap = $course ? $this->buildCourseYearsMap(collect([$course->id => $course])) : [];
+            $yearInfo = $courseYearsMap[(int) $courseId] ?? ['primary_year' => 1, 'years_list' => ['1']];
+
+            $lessons = Lesson::with([
+                'files',
+                'videos',
+                'course.department',
+            ])
+                ->where('course_id', $courseId)
+                ->orderBy('lesson_order')
+                ->get()
+                ->map(function ($lesson) use ($yearInfo) {
+                    $lesson->year = (int) $yearInfo['primary_year'];
+                    $lesson->years_list = $yearInfo['years_list'];
+                    if ($lesson->course) {
+                        $teacherData = $this->formatTeacherData($lesson->course, true);
+                        $lesson->course->year = (int) $yearInfo['primary_year'];
+                        $lesson->course->years_list = $yearInfo['years_list'];
+                        $lesson->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                        $lesson->course->setAttribute('teacher_profile', $teacherData);
+                        $lesson->course->setAttribute('teacher', $teacherData);
+                    }
+                    return $lesson;
+                });
+
+            return response()->json($lessons);
+        } catch (\Throwable $e) {
+            Log::error('Student getCourseLessons error: ' . $e->getMessage());
+            return response()->json([]);
         }
-
-        $courseYearsMap = $course ? $this->buildCourseYearsMap(collect([$course->id => $course])) : [];
-        $yearInfo = $courseYearsMap[(int) $courseId] ?? ['primary_year' => 1, 'years_list' => ['1']];
-
-        $fileCols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
-        if (Schema::hasColumn('lesson_files', 'mime_type')) {
-            $fileCols[] = 'mime_type';
-        }
-
-        $lessons = Lesson::with([
-            'files' => function ($q) use ($fileCols) {
-                $q->select($fileCols);
-            },
-            'videos:id,lesson_id,title,video_url,duration,created_at,updated_at',
-            'course.department:id,department_name,department_code',
-        ])
-            ->where('course_id', $courseId)
-            ->orderBy('lesson_order')
-            ->get()
-            ->map(function ($lesson) use ($yearInfo) {
-                $lesson->year = (int) $yearInfo['primary_year'];
-                $lesson->years_list = $yearInfo['years_list'];
-                if ($lesson->course) {
-                    $teacherData = $this->formatTeacherData($lesson->course, true);
-                    $lesson->course->year = (int) $yearInfo['primary_year'];
-                    $lesson->course->years_list = $yearInfo['years_list'];
-                    $lesson->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
-                    $lesson->course->setAttribute('teacher_profile', $teacherData);
-                    $lesson->course->setAttribute('teacher', $teacherData);
-                }
-                return $lesson;
-            });
-
-        return response()->json($lessons);
     }
 
     // Upload Assignment
@@ -1214,9 +1254,12 @@ class StudentController extends Controller
             'assignment_id' => $request->assignment_id,
             'student_id' => $student->id,
             'file_path' => $filePath,
-            'original_filename' => $file->getClientOriginalName(),
             'submitted_at' => now(),
         ];
+
+        if (Schema::hasColumn('assignment_submissions', 'original_filename')) {
+            $submissionData['original_filename'] = $file->getClientOriginalName();
+        }
 
         if (Schema::hasColumn('assignment_submissions', 'file_data')) {
             $mime = $file->getMimeType() ?: 'application/octet-stream';
@@ -1420,164 +1463,176 @@ class StudentController extends Controller
     // ទាញយកកិច្ចការសិស្ស
     public function getAllAssignments(Request $request)
     {
-        $student = auth()->user();
-        $studentIds = $this->getStudentAllIds($student);
-        $studentProfile = $this->resolveStudentProfile($student);
-        $perPage = max(1, min((int) $request->input('per_page', 15), 100));
+        try {
+            $student = auth()->user();
+            $studentIds = $this->getStudentAllIds($student);
+            $studentProfile = $this->resolveStudentProfile($student);
+            $perPage = max(1, min((int) $request->input('per_page', 15), 100));
 
-        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
-        $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+            $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
+            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
 
-        $query = Assignment::with([
-            'course.department:id,department_name,department_code',
-        ])->orderBy('due_date', 'asc');
+            $query = Assignment::with(['course.department'])
+                ->orderBy('due_date', 'asc');
 
-        if ($request->filled('course_id') && $request->course_id !== 'all') {
-            $query->where('course_id', $request->course_id);
-        } elseif (!empty($enrolledCourseIds)) {
-            $query->whereIn('course_id', $enrolledCourseIds);
-        } elseif ($deptId) {
-            $query->whereHas('course', function ($q) use ($deptId) {
-                $q->where('department_id', $deptId);
-            });
-        }
-
-        $paginated = $query->paginate($perPage);
-        $rawItems = collect($paginated->items());
-        $this->preloadTeachersForCourses($rawItems->pluck('course')->filter());
-
-        $assignmentIds = $rawItems->pluck('id');
-
-        $submissions = $assignmentIds->isNotEmpty()
-            ? AssignmentSubmission::select([
-                'id', 'assignment_id', 'student_id', 'file_path', 'submitted_at', 'score', 'feedback', 'created_at', 'updated_at',
-            ])
-                ->whereIn('student_id', $studentIds)
-                ->whereIn('assignment_id', $assignmentIds)
-                ->get()
-                ->keyBy('assignment_id')
-            : collect();
-
-        $items = $rawItems->map(function ($assignment) use ($submissions) {
-            $submission = $submissions->get($assignment->id);
-            $courseData = $assignment->course ? clone $assignment->course : null;
-            if ($courseData) {
-                $teacherData = $this->formatTeacherData($courseData, true);
-                $courseData->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
-                $courseData->setAttribute('teacher_profile', $teacherData);
-                $courseData->setAttribute('teacher', $teacherData);
+            if ($request->filled('course_id') && $request->course_id !== 'all') {
+                $query->where('course_id', $request->course_id);
+            } elseif (!empty($enrolledCourseIds)) {
+                $query->whereIn('course_id', $enrolledCourseIds);
+            } elseif ($deptId) {
+                $query->whereHas('course', function ($q) use ($deptId) {
+                    $q->where('department_id', $deptId);
+                });
             }
 
-            return [
-                'id' => $assignment->id,
-                'course_id' => $assignment->course_id,
-                'title' => $assignment->title,
-                'description' => $assignment->description,
-                'due_date' => $assignment->due_date,
-                'marks' => $assignment->marks ?? $assignment->total_score ?? 20,
-                'total_score' => $assignment->total_score ?? $assignment->marks ?? 20,
-                'course' => $courseData,
-                'submission' => $submission ? [
-                    'id' => $submission->id,
-                    'file_path' => $submission->file_path,
-                    'submitted_at' => $submission->submitted_at,
-                    'score' => $submission->score,
-                    'feedback' => $submission->feedback,
-                ] : null,
-            ];
-        });
+            $paginated = $query->paginate($perPage);
+            $rawItems = collect($paginated->items());
+            $this->preloadTeachersForCourses($rawItems->pluck('course')->filter());
 
-        return response()->json([
-            'data' => $items,
-            'meta' => [
-                'current_page' => $paginated->currentPage(),
-                'last_page' => $paginated->lastPage(),
-                'per_page' => $paginated->perPage(),
-                'total' => $paginated->total(),
-            ],
-        ]);
+            $assignmentIds = $rawItems->pluck('id');
+
+            $submissions = $assignmentIds->isNotEmpty()
+                ? AssignmentSubmission::whereIn('student_id', $studentIds)
+                    ->whereIn('assignment_id', $assignmentIds)
+                    ->get()
+                    ->each(fn ($s) => $s->makeHidden(['file_data', 'base64_data']))
+                    ->keyBy('assignment_id')
+                : collect();
+
+            $items = $rawItems->map(function ($assignment) use ($submissions) {
+                $submission = $submissions->get($assignment->id);
+                $courseData = $assignment->course ? clone $assignment->course : null;
+                if ($courseData) {
+                    $teacherData = $this->formatTeacherData($courseData, true);
+                    $courseData->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                    $courseData->setAttribute('teacher_profile', $teacherData);
+                    $courseData->setAttribute('teacher', $teacherData);
+                }
+
+                return [
+                    'id' => $assignment->id,
+                    'course_id' => $assignment->course_id,
+                    'title' => $assignment->title,
+                    'description' => $assignment->description,
+                    'due_date' => $assignment->due_date,
+                    'marks' => $assignment->marks ?? $assignment->total_score ?? 20,
+                    'total_score' => $assignment->total_score ?? $assignment->marks ?? 20,
+                    'course' => $courseData,
+                    'submission' => $submission ? [
+                        'id' => $submission->id,
+                        'file_path' => $submission->file_path ?? null,
+                        'submitted_at' => $submission->submitted_at ?? $submission->created_at ?? null,
+                        'score' => $submission->score ?? null,
+                        'feedback' => $submission->feedback ?? null,
+                    ] : null,
+                ];
+            });
+
+            return response()->json([
+                'data' => $items,
+                'meta' => [
+                    'current_page' => $paginated->currentPage(),
+                    'last_page' => $paginated->lastPage(),
+                    'per_page' => $paginated->perPage(),
+                    'total' => $paginated->total(),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Student getAllAssignments error: ' . $e->getMessage());
+            return response()->json([
+                'data' => [],
+                'meta' => ['current_page' => 1, 'last_page' => 1, 'per_page' => 15, 'total' => 0],
+                'error_debug' => $e->getMessage(),
+            ]);
+        }
     }
 
     // ទាញយកកម្រងសំណួរប្រឡង
     public function getAllQuizzes(Request $request)
     {
-        $student = auth()->user();
-        $studentIds = $this->getStudentAllIds($student);
-        $studentProfile = $this->resolveStudentProfile($student);
-        $perPage = max(1, min((int) $request->input('per_page', 15), 100));
+        try {
+            $student = auth()->user();
+            $studentIds = $this->getStudentAllIds($student);
+            $studentProfile = $this->resolveStudentProfile($student);
+            $perPage = max(1, min((int) $request->input('per_page', 15), 100));
 
-        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
-        $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+            $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
+            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
 
-        $query = Quiz::with([
-            'course.department:id,department_name,department_code',
-        ])
-            ->withSum('questions as questions_total_mark', 'mark')
-            ->orderBy('start_date', 'asc');
+            $query = Quiz::with(['course.department'])
+                ->withSum('questions as questions_total_mark', 'mark')
+                ->orderBy('start_date', 'asc');
 
-        if ($request->filled('course_id') && $request->course_id !== 'all') {
-            $query->where('course_id', $request->course_id);
-        } elseif (!empty($enrolledCourseIds)) {
-            $query->whereIn('course_id', $enrolledCourseIds);
-        } elseif ($deptId) {
-            $query->whereHas('course', function ($q) use ($deptId) {
-                $q->where('department_id', $deptId);
-            });
-        }
-
-        $paginated = $query->paginate($perPage);
-        $rawItems = collect($paginated->items());
-        $this->preloadTeachersForCourses($rawItems->pluck('course')->filter());
-
-        $quizIds = $rawItems->pluck('id');
-
-        $attempts = $quizIds->isNotEmpty()
-            ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score', 'started_at', 'submitted_at')
-                ->whereIn('student_id', $studentIds)
-                ->whereIn('quiz_id', $quizIds)
-                ->get()
-                ->keyBy('quiz_id')
-            : collect();
-
-        $items = $rawItems->map(function ($quiz) use ($attempts) {
-            $attempt = $attempts->get($quiz->id);
-            $resolvedTotalMark = $quiz->total_mark ?? $quiz->questions_total_mark ?? 20;
-
-            $courseData = $quiz->course ? clone $quiz->course : null;
-            if ($courseData) {
-                $teacherData = $this->formatTeacherData($courseData, true);
-                $courseData->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
-                $courseData->setAttribute('teacher_profile', $teacherData);
-                $courseData->setAttribute('teacher', $teacherData);
+            if ($request->filled('course_id') && $request->course_id !== 'all') {
+                $query->where('course_id', $request->course_id);
+            } elseif (!empty($enrolledCourseIds)) {
+                $query->whereIn('course_id', $enrolledCourseIds);
+            } elseif ($deptId) {
+                $query->whereHas('course', function ($q) use ($deptId) {
+                    $q->where('department_id', $deptId);
+                });
             }
 
-            return [
-                'id' => $quiz->id,
-                'course_id' => $quiz->course_id,
-                'title' => $quiz->title,
-                'description' => $quiz->description,
-                'duration' => $quiz->duration ?? 30,
-                'total_mark' => $resolvedTotalMark,
-                'start_date' => $quiz->start_date,
-                'end_date' => $quiz->end_date,
-                'course' => $courseData,
-                'attempt' => $attempt ? [
-                    'id' => $attempt->id,
-                    'score' => $attempt->score,
-                    'started_at' => $attempt->started_at,
-                    'submitted_at' => $attempt->submitted_at,
-                ] : null,
-            ];
-        });
+            $paginated = $query->paginate($perPage);
+            $rawItems = collect($paginated->items());
+            $this->preloadTeachersForCourses($rawItems->pluck('course')->filter());
 
-        return response()->json([
-            'data' => $items,
-            'meta' => [
-                'current_page' => $paginated->currentPage(),
-                'last_page' => $paginated->lastPage(),
-                'per_page' => $paginated->perPage(),
-                'total' => $paginated->total(),
-            ],
-        ]);
+            $quizIds = $rawItems->pluck('id');
+
+            $attempts = $quizIds->isNotEmpty()
+                ? QuizAttempt::whereIn('student_id', $studentIds)
+                    ->whereIn('quiz_id', $quizIds)
+                    ->get()
+                    ->keyBy('quiz_id')
+                : collect();
+
+            $items = $rawItems->map(function ($quiz) use ($attempts) {
+                $attempt = $attempts->get($quiz->id);
+                $resolvedTotalMark = $quiz->total_mark ?? $quiz->questions_total_mark ?? 20;
+
+                $courseData = $quiz->course ? clone $quiz->course : null;
+                if ($courseData) {
+                    $teacherData = $this->formatTeacherData($courseData, true);
+                    $courseData->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                    $courseData->setAttribute('teacher_profile', $teacherData);
+                    $courseData->setAttribute('teacher', $teacherData);
+                }
+
+                return [
+                    'id' => $quiz->id,
+                    'course_id' => $quiz->course_id,
+                    'title' => $quiz->title,
+                    'description' => $quiz->description,
+                    'duration' => $quiz->duration ?? 30,
+                    'total_mark' => $resolvedTotalMark,
+                    'start_date' => $quiz->start_date,
+                    'end_date' => $quiz->end_date,
+                    'course' => $courseData,
+                    'attempt' => $attempt ? [
+                        'id' => $attempt->id,
+                        'score' => $attempt->score,
+                        'started_at' => $attempt->started_at,
+                        'submitted_at' => $attempt->submitted_at,
+                    ] : null,
+                ];
+            });
+
+            return response()->json([
+                'data' => $items,
+                'meta' => [
+                    'current_page' => $paginated->currentPage(),
+                    'last_page' => $paginated->lastPage(),
+                    'per_page' => $paginated->perPage(),
+                    'total' => $paginated->total(),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Student getAllQuizzes error: ' . $e->getMessage());
+            return response()->json([
+                'data' => [],
+                'meta' => ['current_page' => 1, 'last_page' => 1, 'per_page' => 15, 'total' => 0],
+                'error_debug' => $e->getMessage(),
+            ]);
+        }
     }
 }
