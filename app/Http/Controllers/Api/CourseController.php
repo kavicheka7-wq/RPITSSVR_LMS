@@ -35,7 +35,7 @@ class CourseController extends Controller
             return $courses;
         }
 
-        // ទាញតែជួរឈរអក្សរស្រាលៗប៉ុណ្ណោះ
+        // ✅ ទាញតែជួរឈរអក្សរស្រាលៗប៉ុណ្ណោះ (មិនទាញ profile_image Base64 ដែលធ្វើឱ្យយឺត Network ឡើយ)
         $teachersById = Teacher::whereIn('id', $teacherIds)
             ->orWhereIn('user_id', $teacherIds)
             ->select(['id', 'user_id', 'teacher_code', 'first_name', 'last_name', 'email', 'phone', 'department_id'])
@@ -75,6 +75,7 @@ class CourseController extends Controller
 
     /**
      * កំណត់យក teacher_id ដែលត្រឹមត្រូវ ទោះបីជា Frontend បញ្ជូន teachers.id ឬ users.id មកក៏ដោយ
+     * និងការពារកំហុស SQLSTATE[23000] 1452 Foreign Key Constraint (courses_teacher_id_foreign -> users.id)
      */
     private function resolveValidTeacherId($rawTeacherId): ?int
     {
@@ -131,11 +132,9 @@ class CourseController extends Controller
     public function index(Request $request)
     {
         try {
-            // ✅ ដំណោះស្រាយ៖ បន្ថែម 'teacher' និង 'teacherProfile' ទៅក្នុង with() តែម្ដង!
+            // ✅ ប្រើ with(['department:id,department_name']) ស្រាលបំផុត ហើយភ្ជាប់គ្រូតាម attachTeacherDetailsToCollection
             $query = Course::with([
                 'department:id,department_name',
-                'teacher:id,first_name,last_name,email,profile_image',
-                'teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image'
             ])
                 ->withCount('enrollments')
                 ->select([
@@ -193,11 +192,11 @@ class CourseController extends Controller
                 });
             }
 
-            // ✅ Option សម្រាប់ទាញយកទាំងអស់ (សម្រាប់ Dropdown បញ្ចូលសិស្ស)
+            // ✅ Option សម្រាប់ទាញយកទាំងអស់ (សម្រាប់ Dropdown/Select)
             if ($request->boolean('all')) {
                 $courses = $query->orderBy('course_name')->get();
-                
-                // មិនបាច់ប្រើ attachTeacherDetailsToCollection ទេ ព្រោះ with() ទាញយកមកគ្រប់គ្រាន់ហើយ
+                $this->attachTeacherDetailsToCollection($courses);
+
                 return response()->json([
                     'data' => $courses,
                     'message' => 'បានទាញយកបញ្ជីមុខវិជ្ជាទាំងអស់ដោយជោគជ័យ',
@@ -207,8 +206,11 @@ class CourseController extends Controller
             $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
             $courses = $query->orderBy('id', 'desc')->paginate($perPage);
 
+            $items = $courses->items();
+            $this->attachTeacherDetailsToCollection($items);
+
             return response()->json([
-                'data' => $courses->items(),
+                'data' => $items,
                 'meta' => [
                     'current_page' => $courses->currentPage(),
                     'last_page' => $courses->lastPage(),
