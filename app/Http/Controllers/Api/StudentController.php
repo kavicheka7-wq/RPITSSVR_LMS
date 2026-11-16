@@ -1,4 +1,5 @@
 <?php
+// app/Http/Controllers/Api/StudentController.php
 
 namespace App\Http\Controllers\Api;
 
@@ -28,6 +29,9 @@ class StudentController extends Controller
     private ?Student $cachedProfile = null;
     private bool $profileResolved = false;
     private ?array $cachedStudentIds = null;
+    private array $preloadedTeachersById = [];
+    private array $preloadedTeachersByUserId = [];
+    private array $preloadedUsersById = [];
 
     /**
      * ✅ សម្អាត Cache របស់សិស្សម្នាក់នេះនៅពេលគាត់ប្រគល់កិច្ចការ ឬប្រឡងចប់
@@ -37,11 +41,12 @@ class StudentController extends Controller
         $uid = auth()->id();
         if ($uid) {
             Cache::forget("student_dashboard_fast_v3_{$uid}");
+            Cache::forget("student_dashboard_fast_v4_{$uid}");
         }
     }
 
     /**
-     * ✅ ទាញយក Profile សិស្សតែ ១ ដងគត់ក្នុង ១ Request
+     * ✅ ទាញយក Profile សិស្សតែ ១ ដងគត់ក្នុង ១ Request និងភ្ជាប់ user_id ដោយស្វ័យប្រវត្តិបើខ្វះ
      */
     private function resolveStudentProfile($user = null): ?Student
     {
@@ -52,17 +57,23 @@ class StudentController extends Controller
         if ($this->profileResolved) {
             return $this->cachedProfile;
         }
+
         $profile = Student::where('user_id', $user->id)->first();
         if (!$profile && !empty($user->email)) {
-            $profile = Student::where('email', $user->email)->first();
+            $profile = Student::whereRaw('LOWER(email) = ?', [strtolower(trim($user->email))])->first();
+            if ($profile && empty($profile->user_id)) {
+                $profile->user_id = $user->id;
+                $profile->saveQuietly();
+            }
         }
+
         $this->cachedProfile = $profile;
         $this->profileResolved = true;
         return $profile;
     }
 
     /**
-     * ✅ ទាញយកបញ្ជី ID ទាំងអស់របស់សិស្សម្នាក់ (ទាំង users.id និង students.id)
+     * ✅ ទាញយកបញ្ជី ID ទាំងអស់របស់សិស្សម្នាក់ (គាំទ្រទាំងករណី Admin ចុះឈ្មោះតាម users.id ឬ students.id)
      */
     private function getStudentAllIds($user = null): array
     {
@@ -82,6 +93,40 @@ class StudentController extends Controller
         return $this->cachedStudentIds;
     }
 
+    /**
+     * ✅ ទាញយកបញ្ជី course_id ដែលសិស្សបានចុះឈ្មោះ (ដោយមិនប្រកាន់អក្សរតូចធំនៃ status)
+     */
+    private function getEnrolledCourseIdsForStudent($user = null): array
+    {
+        $studentIds = $this->getStudentAllIds($user);
+        if (empty($studentIds)) {
+            return [];
+        }
+
+        $courseIds = Enrollment::whereIn('student_id', $studentIds)
+            ->where(function ($q) {
+                $q->whereNull('status')
+                  ->orWhereRaw("LOWER(TRIM(status)) IN ('active', 'completed', 'enrolled', '')");
+            })
+            ->pluck('course_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->toArray();
+
+        // Fallback៖ បើមានការចុះឈ្មោះក្នុងតារាង enrollments តែមាន status ផ្សេងទៀត
+        if (empty($courseIds)) {
+            $courseIds = Enrollment::whereIn('student_id', $studentIds)
+                ->pluck('course_id')
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->toArray();
+        }
+
+        return $courseIds;
+    }
+
     private function getActiveEnrollment($studentId, $courseId)
     {
         $studentIds = is_array($studentId) ? $studentId : $this->getStudentAllIds(auth()->user());
@@ -93,10 +138,71 @@ class StudentController extends Controller
             ->where('course_id', $courseId)
             ->where(function ($q) {
                 $q->whereNull('status')
-                  ->orWhere('status', 'active')
-                  ->orWhere('status', '');
+                  ->orWhereRaw("LOWER(TRIM(status)) IN ('active', 'completed', 'enrolled', '')");
             })
             ->first();
+    }
+
+    /**
+     * ✅ ទាញយកព័ត៌មានគ្រូបង្រៀនទាំងអស់ក្នុង Query តែ ១ ដង (ការពារ Error 500 ពេលគ្មាន Relation teacherProfile ក្នុង Model Course)
+     */
+    private function preloadTeachersForCourses($courses): void
+    {
+        $collection = collect($courses)->filter();
+        if ($collection->isEmpty()) {
+            return;
+        }
+
+        $teacherIds = $collection->pluck('teacher_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($teacherIds)) {
+            return;
+        }
+
+        $teachers = Teacher::whereIn('id', $teacherIds)
+            ->orWhereIn('user_id', $teacherIds)
+            ->select([
+                'id',
+                'user_id',
+                'teacher_code',
+                'first_name',
+                'last_name',
+                'email',
+                'phone',
+                'specialization',
+                'profile_image',
+            ])
+            ->get();
+
+        foreach ($teachers as $t) {
+            $this->preloadedTeachersById[(int) $t->id] = $t;
+            if (!empty($t->user_id)) {
+                $this->preloadedTeachersByUserId[(int) $t->user_id] = $t;
+            }
+        }
+
+        $allUserIds = $teachers->pluck('user_id')
+            ->merge($teacherIds)
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if (!empty($allUserIds)) {
+            $users = User::whereIn('id', $allUserIds)
+                ->select(['id', 'first_name', 'last_name', 'email', 'phone', 'profile_image'])
+                ->get();
+
+            foreach ($users as $u) {
+                $this->preloadedUsersById[(int) $u->id] = $u;
+            }
+        }
     }
 
     /**
@@ -148,7 +254,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយមិនប្រើ Teacher::all() ដាច់ខាត (ការពារកុំឱ្យពេញ RAM Server ពេលសិស្សច្រើន Login)
+     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយប្រើ Preloaded Map (លឿនបំផុត 0ms និងគ្មានបញ្ហាបាត់រូបថត)
      */
     private function formatTeacherData($course, bool $includeAvatar = true)
     {
@@ -156,29 +262,25 @@ class StudentController extends Controller
             return null;
         }
 
-        static $fallbackTeachersCache = [];
-
-        $tid = $course->teacher_id;
-        $teacherProfile = $course->relationLoaded('teacherProfile') ? $course->teacherProfile : null;
-        $teacherUser = $course->relationLoaded('teacher') ? $course->teacher : null;
-
-        if (!$teacherProfile && !$teacherUser && $tid) {
-            if (!array_key_exists($tid, $fallbackTeachersCache)) {
-                $prof = Teacher::where('id', $tid)->orWhere('user_id', $tid)->first();
-                $usr = User::select('id', 'first_name', 'last_name', 'email', 'profile_image')
-                    ->find($prof ? $prof->user_id : $tid);
-                $fallbackTeachersCache[$tid] = ['profile' => $prof, 'user' => $usr];
-            }
-            $teacherProfile = $fallbackTeachersCache[$tid]['profile'];
-            $teacherUser = $fallbackTeachersCache[$tid]['user'];
+        $tid = $course->teacher_id ? (int) $course->teacher_id : null;
+        if ($tid && !isset($this->preloadedTeachersById[$tid]) && !isset($this->preloadedTeachersByUserId[$tid]) && !isset($this->preloadedUsersById[$tid])) {
+            $this->preloadTeachersForCourses([$course]);
         }
 
-        $firstName = $teacherProfile->first_name ?? ($teacherUser->first_name ?? '');
-        $lastName = $teacherProfile->last_name ?? ($teacherUser->last_name ?? '');
+        $teacherProfile = $tid ? ($this->preloadedTeachersById[$tid] ?? $this->preloadedTeachersByUserId[$tid] ?? null) : null;
+        $userIdToLookup = $teacherProfile?->user_id ? (int) $teacherProfile->user_id : $tid;
+        $teacherUser = $userIdToLookup ? ($this->preloadedUsersById[$userIdToLookup] ?? null) : null;
+
+        if (!$teacherUser && $course->relationLoaded('teacher')) {
+            $teacherUser = $course->teacher;
+        }
+
+        $firstName = trim((string) ($teacherProfile->first_name ?? ($teacherUser->first_name ?? '')));
+        $lastName = trim((string) ($teacherProfile->last_name ?? ($teacherUser->last_name ?? '')));
         $teacherName = trim($firstName . ' ' . $lastName);
 
         if (empty($teacherName)) {
-            $teacherName = $teacherUser->name ?? ($teacherProfile->name ?? ($teacherUser->email ?? 'គ្រូបង្រៀន'));
+            $teacherName = $teacherUser->name ?? ($teacherProfile->name ?? ($teacherProfile->email ?? ($teacherUser->email ?? 'គ្រូបង្រៀន')));
         }
 
         $profileImg = null;
@@ -221,8 +323,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ គណនាឆ្នាំសិក្សា (1, 2, 3, 4) សម្រាប់មុខវិជ្ជានីមួយៗ ដោយប្រើ Server Cache ១០ នាទី
-     * ទោះសិស្ស ១,០០០ នាក់បើកទំព័រមេរៀនដំណាលគ្នា ក៏គណនាតែ ១ ដងគត់!
+     * ✅ គណនាឆ្នាំសិក្សា (1, 2, 3, 4) សម្រាប់មុខវិជ្ជានីមួយៗ
      */
     private function buildCourseYearsMap($deptCourses)
     {
@@ -231,23 +332,13 @@ class StudentController extends Controller
             return [];
         }
 
-        $cacheKey = 'dept_courses_years_map_v3_' . md5(implode('_', $deptCourseIds));
+        $cacheKey = 'dept_courses_years_map_v4_' . md5(implode('_', $deptCourseIds));
 
-        return Cache::remember($cacheKey, 600, function () use ($deptCourses, $deptCourseIds) {
+        return Cache::remember($cacheKey, 120, function () use ($deptCourses, $deptCourseIds) {
             $courseYearsMap = [];
 
             $enrollmentsInDept = Enrollment::whereIn('course_id', $deptCourseIds)
-                ->where(function ($q) {
-                    $q->whereNull('status')
-                      ->orWhere('status', 'active')
-                      ->orWhere('status', '');
-                })
                 ->get(['course_id', 'student_id']);
-
-            if ($enrollmentsInDept->isEmpty()) {
-                $enrollmentsInDept = Enrollment::whereIn('course_id', $deptCourseIds)
-                    ->get(['course_id', 'student_id']);
-            }
 
             $rawStudentIds = $enrollmentsInDept->pluck('student_id')
                 ->filter()
@@ -256,7 +347,6 @@ class StudentController extends Controller
                 ->values()
                 ->all();
 
-            // ទាញតែសិស្សណាដែលពាក់ព័ន្ធនឹងមុខវិជ្ជានេះប៉ុណ្ណោះ (មិនប្រើ Student::all() ឡើយ)
             $matchedStudents = !empty($rawStudentIds)
                 ? Student::select('id', 'user_id', 'batch_year', 'student_code', 'email', 'department_id')
                     ->whereIn('id', $rawStudentIds)
@@ -342,70 +432,86 @@ class StudentController extends Controller
     public function dashboard()
     {
         $student = auth()->user();
-        $uid = $student->id ?? 0;
+        $studentIds = $this->getStudentAllIds($student);
+        $studentProfile = $this->resolveStudentProfile($student);
 
-        $payload = Cache::remember("student_dashboard_fast_v3_{$uid}", 45, function () use ($student) {
-            $studentIds = $this->getStudentAllIds($student);
+        $enrollments = Enrollment::whereIn('student_id', $studentIds)
+            ->with(['course' => function ($query) {
+                $query->with([
+                    'department:id,department_name,department_code',
+                ])->withCount(['lessons', 'assignments', 'quizzes']);
+            }])
+            ->where(function ($q) {
+                $q->whereNull('status')
+                  ->orWhereRaw("LOWER(TRIM(status)) IN ('active', 'completed', 'enrolled', '')");
+            })
+            ->get();
 
-            $enrollments = Enrollment::whereIn('student_id', $studentIds)
-                ->with(['course' => function ($query) {
-                    $query->with([
-                        'teacher:id,first_name,last_name,email',
-                        'teacherProfile:id,user_id,first_name,last_name,email,specialization',
-                        'department:id,department_name,department_code',
-                    ])->withCount(['lessons', 'assignments', 'quizzes']);
-                }])
-                ->where(function ($q) {
-                    $q->whereNull('status')
-                      ->orWhere('status', 'active')
-                      ->orWhere('status', '');
-                })
-                ->get();
+        // ✅ ប្រសិនបើសិស្សមិនទាន់មានទិន្នន័យក្នុងតារាង enrollments ត្រូវទាញមុខវិជ្ជាតាម department_id របស់គាត់មកបង្ហាញជំនួស
+        if ($enrollments->isEmpty()) {
+            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+            if ($deptId) {
+                $deptCourses = Course::with(['department:id,department_name,department_code'])
+                    ->withCount(['lessons', 'assignments', 'quizzes'])
+                    ->where('department_id', $deptId)
+                    ->get();
 
-            $stats = [
-                'total_courses' => $enrollments->count(),
-                'total_lessons' => 0,
-                'total_assignments' => 0,
-                'total_quizzes' => 0,
-                'average_score' => 0,
-            ];
-
-            foreach ($enrollments as $enrollment) {
-                if ($enrollment->course) {
-                    $teacherData = $this->formatTeacherData($enrollment->course, false);
-                    $enrollment->course->unsetRelation('teacher');
-                    $enrollment->course->unsetRelation('teacherProfile');
-                    $enrollment->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
-                    $enrollment->course->setAttribute('teacher_profile', $teacherData);
-                }
-                $stats['total_lessons'] += $enrollment->course->lessons_count ?? 0;
-                $stats['total_assignments'] += $enrollment->course->assignments_count ?? 0;
-                $stats['total_quizzes'] += $enrollment->course->quizzes_count ?? 0;
+                $enrollments = $deptCourses->map(function ($course) use ($student) {
+                    $fakeEnrollment = new Enrollment([
+                        'student_id' => $student->id,
+                        'course_id' => $course->id,
+                        'status' => 'active',
+                    ]);
+                    $fakeEnrollment->id = $course->id;
+                    $fakeEnrollment->setRelation('course', $course);
+                    return $fakeEnrollment;
+                });
             }
+        }
 
-            $avgScore = Grade::whereIn('student_id', $studentIds)
-                ->whereNotNull('final_score')
-                ->avg('final_score');
+        $coursesList = $enrollments->pluck('course')->filter()->values();
+        $this->preloadTeachersForCourses($coursesList);
 
-            if ($avgScore !== null) {
-                $stats['average_score'] = round((float) $avgScore, 2);
+        $stats = [
+            'total_courses' => $coursesList->count(),
+            'total_lessons' => 0,
+            'total_assignments' => 0,
+            'total_quizzes' => 0,
+            'average_score' => 0,
+        ];
+
+        foreach ($enrollments as $enrollment) {
+            if ($enrollment->course) {
+                $teacherData = $this->formatTeacherData($enrollment->course, true);
+                $enrollment->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                $enrollment->course->setAttribute('teacher_profile', $teacherData);
+                $enrollment->course->setAttribute('teacher', $teacherData);
+
+                $stats['total_lessons'] += (int) ($enrollment->course->lessons_count ?? 0);
+                $stats['total_assignments'] += (int) ($enrollment->course->assignments_count ?? 0);
+                $stats['total_quizzes'] += (int) ($enrollment->course->quizzes_count ?? 0);
             }
+        }
 
-            return [
-                'stats' => $stats,
-                'enrollments' => $enrollments,
-                'recent_activity' => $this->getRecentActivity($studentIds),
-            ];
-        });
+        $avgScore = Grade::whereIn('student_id', $studentIds)
+            ->whereNotNull('final_score')
+            ->avg('final_score');
 
-        return response()->json($payload);
+        if ($avgScore !== null) {
+            $stats['average_score'] = round((float) $avgScore, 2);
+        }
+
+        return response()->json([
+            'stats' => $stats,
+            'enrollments' => $enrollments->values(),
+            'recent_activity' => $this->getRecentActivity($studentIds),
+        ]);
     }
 
     private function getRecentActivity($studentIds)
     {
         $ids = is_array($studentIds) ? $studentIds : [$studentIds];
 
-        // ✅ មិនទាញជួរឈរ file_data (Base64 រាប់មេកាបៃ) ដាច់ខាត!
         $submissions = AssignmentSubmission::select([
             'id', 'assignment_id', 'student_id', 'file_path', 'submitted_at', 'score', 'feedback', 'created_at', 'updated_at',
         ])
@@ -432,24 +538,13 @@ class StudentController extends Controller
     public function getCourses(Request $request)
     {
         $student = auth()->user();
-        $studentIds = $this->getStudentAllIds($student);
         $studentProfile = $this->resolveStudentProfile($student);
         $perPage = max(1, min((int) $request->input('per_page', 12), 100));
 
-        $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
-            ->where(function ($q) {
-                $q->whereNull('status')
-                  ->orWhere('status', 'active')
-                  ->orWhere('status', '');
-            })
-            ->pluck('course_id')
-            ->toArray();
-
+        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
 
         $query = Course::with([
-            'teacher:id,first_name,last_name,email,profile_image',
-            'teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
             'department:id,department_name,department_code',
         ])->withCount(['lessons', 'assignments', 'quizzes']);
 
@@ -459,10 +554,8 @@ class StudentController extends Controller
             $query->where('department_id', $deptId);
         }
 
-        $includeAvatar = !$request->boolean('all');
-
-        $formatCourse = function ($course) use ($includeAvatar) {
-            $teacherData = $this->formatTeacherData($course, $includeAvatar);
+        $formatCourse = function ($course) {
+            $teacherData = $this->formatTeacherData($course, true);
             $teacherName = $teacherData['name'] ?? 'គ្រូបង្រៀន';
 
             return [
@@ -478,7 +571,7 @@ class StudentController extends Controller
                 'teacher_id' => $course->teacher_id,
                 'teacher_name' => $teacherName,
                 'teacher_profile' => $teacherData,
-                'teacher' => $teacherData ? array_merge($teacherData, ['profile_image' => null, 'profile_image_url' => null]) : null,
+                'teacher' => $teacherData,
                 'lessons_count' => (int) ($course->lessons_count ?? 0),
                 'assignments_count' => (int) ($course->assignments_count ?? 0),
                 'quizzes_count' => (int) ($course->quizzes_count ?? 0),
@@ -486,14 +579,19 @@ class StudentController extends Controller
         };
 
         if ($request->boolean('all')) {
-            $courses = $query->get()->map($formatCourse);
+            $rawCourses = $query->get();
+            $this->preloadTeachersForCourses($rawCourses);
+            $courses = $rawCourses->map($formatCourse);
+
             return response()->json([
                 'data' => $courses,
             ]);
         }
 
         $paginated = $query->paginate($perPage);
-        $items = collect($paginated->items())->map($formatCourse);
+        $rawItems = collect($paginated->items());
+        $this->preloadTeachersForCourses($rawItems);
+        $items = $rawItems->map($formatCourse);
 
         return response()->json([
             'data' => $items,
@@ -532,21 +630,20 @@ class StudentController extends Controller
             ];
 
             $paginated = (clone $baseQuery)
-                ->with([
-                    'course.teacher:id,first_name,last_name,email,profile_image',
-                    'course.teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
-                ])
+                ->with(['course'])
                 ->orderBy('attendance_date', 'desc')
                 ->paginate($perPage);
 
-            $formattedAttendance = collect($paginated->items())->map(function ($record) use ($studentProfile) {
+            $rawItems = collect($paginated->items());
+            $this->preloadTeachersForCourses($rawItems->pluck('course')->filter());
+
+            $formattedAttendance = $rawItems->map(function ($record) use ($studentProfile) {
                 $courseData = $record->course ? clone $record->course : null;
                 if ($courseData) {
                     $teacherData = $this->formatTeacherData($courseData, true);
-                    $courseData->unsetRelation('teacher');
-                    $courseData->unsetRelation('teacherProfile');
                     $courseData->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
                     $courseData->setAttribute('teacher_profile', $teacherData);
+                    $courseData->setAttribute('teacher', $teacherData);
                 }
 
                 return [
@@ -605,26 +702,21 @@ class StudentController extends Controller
         $studentIds = $this->getStudentAllIds($student);
         $studentProfile = $this->resolveStudentProfile($student);
 
-        $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
-            ->where(function ($q) {
-                $q->whereNull('status')
-                  ->orWhere('status', 'active')
-                  ->orWhere('status', '');
-            })
-            ->pluck('course_id');
+        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
 
         $coursesQuery = Course::with([
-            'teacher:id,first_name,last_name,email,profile_image',
-            'teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
             'department:id,department_name,department_code',
         ]);
-        if ($enrolledCourseIds->isNotEmpty()) {
+
+        if (!empty($enrolledCourseIds)) {
             $courses = $coursesQuery->whereIn('id', $enrolledCourseIds)->get();
         } elseif ($studentProfile && $studentProfile->department_id) {
             $courses = $coursesQuery->where('department_id', $studentProfile->department_id)->get();
         } else {
             $courses = $coursesQuery->get();
         }
+
+        $this->preloadTeachersForCourses($courses);
 
         $grades = Grade::whereIn('student_id', $studentIds)->get()->keyBy('course_id');
         $courseIds = $courses->pluck('id');
@@ -759,7 +851,7 @@ class StudentController extends Controller
                     'teacher_id' => $course->teacher_id,
                     'teacher_name' => $teacherData['name'] ?? 'គ្រូបង្រៀន',
                     'teacher_profile' => $teacherData,
-                    'teacher' => $teacherData ? array_merge($teacherData, ['profile_image' => null, 'profile_image_url' => null]) : null,
+                    'teacher' => $teacherData,
                     'department' => $course->department,
                 ],
                 'assignment_score' => $assignScore,
@@ -789,23 +881,13 @@ class StudentController extends Controller
         return response()->json($grade);
     }
 
-    // ✅ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សា (ឆ្នាំទី ១-៤) ក្នុងដេប៉ាតឺម៉ង់របស់សិស្ស (លឿនបំផុត មិនស្ទួនទិន្នន័យ)
+    // ✅ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សា (ឆ្នាំទី ១-៤) ក្នុងដេប៉ាតឺម៉ង់របស់សិស្ស
     public function getAllLessons(Request $request)
     {
         $student = auth()->user();
-        $studentIds = $this->getStudentAllIds($student);
         $studentProfile = $this->resolveStudentProfile($student);
 
-        $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
-            ->where(function ($q) {
-                $q->whereNull('status')
-                  ->orWhere('status', 'active')
-                  ->orWhere('status', 'completed')
-                  ->orWhere('status', '');
-            })
-            ->pluck('course_id')
-            ->map(fn ($id) => (int) $id)
-            ->toArray();
+        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
 
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
         if (!$deptId && !empty($enrolledCourseIds)) {
@@ -815,10 +897,9 @@ class StudentController extends Controller
         }
 
         $coursesQuery = Course::with([
-            'teacher:id,first_name,last_name,email,profile_image',
-            'teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
             'department:id,department_name,department_code',
         ]);
+
         if ($deptId) {
             $coursesQuery->where(function ($q) use ($deptId, $enrolledCourseIds) {
                 $q->where('department_id', $deptId);
@@ -831,6 +912,7 @@ class StudentController extends Controller
         }
 
         $deptCourses = $coursesQuery->get()->keyBy('id');
+        $this->preloadTeachersForCourses($deptCourses->values());
         $deptCourseIds = $deptCourses->keys()->toArray();
 
         $courseYearsMap = $this->buildCourseYearsMap($deptCourses);
@@ -899,10 +981,6 @@ class StudentController extends Controller
             $yearsList = $yearInfo['years_list'] ?? [(string) $primaryYear];
 
             $fullTeacher = $teacherByCourseId[$cid] ?? null;
-            $slimTeacher = $fullTeacher ? array_merge($fullTeacher, [
-                'profile_image' => null,
-                'profile_image_url' => null,
-            ]) : null;
 
             $studyStatus = 'current_class';
             if ((int) $primaryYear < (int) $studentCurrentYear) {
@@ -923,7 +1001,7 @@ class StudentController extends Controller
                 'study_status' => $studyStatus,
                 'student_current_year' => (int) $studentCurrentYear,
                 'student_study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
-                'teacher' => $slimTeacher,
+                'teacher' => $fullTeacher,
                 'course' => $course ? [
                     'id' => $course->id,
                     'course_code' => $course->course_code,
@@ -938,9 +1016,9 @@ class StudentController extends Controller
                     'department_id' => $course->department_id,
                     'department' => $course->department,
                     'teacher_id' => $course->teacher_id,
-                    'teacher_name' => $slimTeacher['name'] ?? 'គ្រូបង្រៀន',
-                    'teacher' => $slimTeacher,
-                    'teacher_profile' => $slimTeacher,
+                    'teacher_name' => $fullTeacher['name'] ?? 'គ្រូបង្រៀន',
+                    'teacher' => $fullTeacher,
+                    'teacher_profile' => $fullTeacher,
                 ] : null,
                 'files' => $lesson->files ?? [],
                 'videos' => $lesson->videos ?? [],
@@ -987,7 +1065,7 @@ class StudentController extends Controller
                 'teacher_id' => $crs->teacher_id,
                 'teacher_name' => $teacherData['name'] ?? 'គ្រូបង្រៀន',
                 'teacher_profile' => $teacherData,
-                'teacher' => $teacherData ? array_merge($teacherData, ['profile_image' => null, 'profile_image_url' => null]) : null,
+                'teacher' => $teacherData,
             ];
         });
 
@@ -1062,10 +1140,13 @@ class StudentController extends Controller
     public function getCourseLessons($courseId)
     {
         $course = Course::with([
-            'teacher:id,first_name,last_name,email,profile_image',
-            'teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
             'department:id,department_name,department_code',
         ])->find($courseId);
+
+        if ($course) {
+            $this->preloadTeachersForCourses([$course]);
+        }
+
         $courseYearsMap = $course ? $this->buildCourseYearsMap(collect([$course->id => $course])) : [];
         $yearInfo = $courseYearsMap[(int) $courseId] ?? ['primary_year' => 1, 'years_list' => ['1']];
 
@@ -1079,8 +1160,6 @@ class StudentController extends Controller
                 $q->select($fileCols);
             },
             'videos:id,lesson_id,title,video_url,duration,created_at,updated_at',
-            'course.teacher:id,first_name,last_name,email,profile_image',
-            'course.teacherProfile:id,user_id,first_name,last_name,email,specialization,profile_image',
             'course.department:id,department_name,department_code',
         ])
             ->where('course_id', $courseId)
@@ -1091,12 +1170,11 @@ class StudentController extends Controller
                 $lesson->years_list = $yearInfo['years_list'];
                 if ($lesson->course) {
                     $teacherData = $this->formatTeacherData($lesson->course, true);
-                    $lesson->course->unsetRelation('teacher');
-                    $lesson->course->unsetRelation('teacherProfile');
                     $lesson->course->year = (int) $yearInfo['primary_year'];
                     $lesson->course->years_list = $yearInfo['years_list'];
                     $lesson->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
                     $lesson->course->setAttribute('teacher_profile', $teacherData);
+                    $lesson->course->setAttribute('teacher', $teacherData);
                 }
                 return $lesson;
             });
@@ -1347,20 +1425,10 @@ class StudentController extends Controller
         $studentProfile = $this->resolveStudentProfile($student);
         $perPage = max(1, min((int) $request->input('per_page', 15), 100));
 
-        $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
-            ->where(function ($q) {
-                $q->whereNull('status')
-                  ->orWhere('status', 'active')
-                  ->orWhere('status', '');
-            })
-            ->pluck('course_id')
-            ->toArray();
-
+        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
 
         $query = Assignment::with([
-            'course.teacher:id,first_name,last_name,email',
-            'course.teacherProfile:id,user_id,first_name,last_name,email,specialization',
             'course.department:id,department_name,department_code',
         ])->orderBy('due_date', 'asc');
 
@@ -1375,7 +1443,10 @@ class StudentController extends Controller
         }
 
         $paginated = $query->paginate($perPage);
-        $assignmentIds = collect($paginated->items())->pluck('id');
+        $rawItems = collect($paginated->items());
+        $this->preloadTeachersForCourses($rawItems->pluck('course')->filter());
+
+        $assignmentIds = $rawItems->pluck('id');
 
         $submissions = $assignmentIds->isNotEmpty()
             ? AssignmentSubmission::select([
@@ -1387,15 +1458,14 @@ class StudentController extends Controller
                 ->keyBy('assignment_id')
             : collect();
 
-        $items = collect($paginated->items())->map(function ($assignment) use ($submissions) {
+        $items = $rawItems->map(function ($assignment) use ($submissions) {
             $submission = $submissions->get($assignment->id);
             $courseData = $assignment->course ? clone $assignment->course : null;
             if ($courseData) {
-                $teacherData = $this->formatTeacherData($courseData, false);
-                $courseData->unsetRelation('teacher');
-                $courseData->unsetRelation('teacherProfile');
+                $teacherData = $this->formatTeacherData($courseData, true);
                 $courseData->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
                 $courseData->setAttribute('teacher_profile', $teacherData);
+                $courseData->setAttribute('teacher', $teacherData);
             }
 
             return [
@@ -1436,20 +1506,10 @@ class StudentController extends Controller
         $studentProfile = $this->resolveStudentProfile($student);
         $perPage = max(1, min((int) $request->input('per_page', 15), 100));
 
-        $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
-            ->where(function ($q) {
-                $q->whereNull('status')
-                  ->orWhere('status', 'active')
-                  ->orWhere('status', '');
-            })
-            ->pluck('course_id')
-            ->toArray();
-
+        $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
 
         $query = Quiz::with([
-            'course.teacher:id,first_name,last_name,email',
-            'course.teacherProfile:id,user_id,first_name,last_name,email,specialization',
             'course.department:id,department_name,department_code',
         ])
             ->withSum('questions as questions_total_mark', 'mark')
@@ -1466,7 +1526,10 @@ class StudentController extends Controller
         }
 
         $paginated = $query->paginate($perPage);
-        $quizIds = collect($paginated->items())->pluck('id');
+        $rawItems = collect($paginated->items());
+        $this->preloadTeachersForCourses($rawItems->pluck('course')->filter());
+
+        $quizIds = $rawItems->pluck('id');
 
         $attempts = $quizIds->isNotEmpty()
             ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score', 'started_at', 'submitted_at')
@@ -1476,17 +1539,16 @@ class StudentController extends Controller
                 ->keyBy('quiz_id')
             : collect();
 
-        $items = collect($paginated->items())->map(function ($quiz) use ($attempts) {
+        $items = $rawItems->map(function ($quiz) use ($attempts) {
             $attempt = $attempts->get($quiz->id);
             $resolvedTotalMark = $quiz->total_mark ?? $quiz->questions_total_mark ?? 20;
 
             $courseData = $quiz->course ? clone $quiz->course : null;
             if ($courseData) {
-                $teacherData = $this->formatTeacherData($courseData, false);
-                $courseData->unsetRelation('teacher');
-                $courseData->unsetRelation('teacherProfile');
+                $teacherData = $this->formatTeacherData($courseData, true);
                 $courseData->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
                 $courseData->setAttribute('teacher_profile', $teacherData);
+                $courseData->setAttribute('teacher', $teacherData);
             }
 
             return [
@@ -1498,7 +1560,7 @@ class StudentController extends Controller
                 'total_mark' => $resolvedTotalMark,
                 'start_date' => $quiz->start_date,
                 'end_date' => $quiz->end_date,
-                'course' => $quiz->course,
+                'course' => $courseData,
                 'attempt' => $attempt ? [
                     'id' => $attempt->id,
                     'score' => $attempt->score,

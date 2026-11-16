@@ -26,26 +26,26 @@ import {
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 
-const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
-const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
-const CACHE_KEY_SHARED_ASSIGNMENTS = 'cached_student_assignments_list_v5';
-const CACHE_KEY_SHARED_QUIZZES = 'cached_student_quizzes_list_v5';
-const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v5';
-const CACHE_KEY_SHARED_ATTENDANCE = 'cached_student_attendance_list_v3';
-const CACHE_KEY_SHARED_LESSONS = 'cached_student_dept_lessons_v12';
-const CACHE_KEY_SHARED_DEPT_COURSES = 'cached_student_dept_courses_all_years_v12';
-const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
+const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v15';
+const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v15';
+const CACHE_KEY_SHARED_ASSIGNMENTS = 'cached_student_assignments_list_v15';
+const CACHE_KEY_SHARED_QUIZZES = 'cached_student_quizzes_list_v15';
+const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v15';
+const CACHE_KEY_SHARED_ATTENDANCE = 'cached_student_attendance_list_v15';
+const CACHE_KEY_SHARED_LESSONS = 'cached_student_dept_lessons_v15';
+const CACHE_KEY_SHARED_DEPT_COURSES = 'cached_student_dept_courses_all_years_v15';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v15';
 
-const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v10_${uid}`;
-const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
-const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
-const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v10_${uid}`;
-const getQuizzesCacheKey = (uid) => `cached_student_quizzes_list_v8_${uid}`;
-const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
-const getAttendanceCacheKey = (uid) => `cached_student_attendance_list_v8_${uid}`;
-const getLessonsCacheKey = (uid) => `cached_student_dept_lessons_v12_${uid}`;
-const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v12_${uid}`;
-const getStudentYearCacheKey = (uid) => `cached_student_current_year_v12_${uid}`;
+const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v15_${uid}`;
+const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v15_${uid}`;
+const getCoursesCacheKey = (uid) => `cached_student_courses_list_v15_${uid}`;
+const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v15_${uid}`;
+const getQuizzesCacheKey = (uid) => `cached_student_quizzes_list_v15_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v15_${uid}`;
+const getAttendanceCacheKey = (uid) => `cached_student_attendance_list_v15_${uid}`;
+const getLessonsCacheKey = (uid) => `cached_student_dept_lessons_v15_${uid}`;
+const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v15_${uid}`;
+const getStudentYearCacheKey = (uid) => `cached_student_current_year_v15_${uid}`;
 
 // ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ
 const STUDENT_DASH_MEM_CACHE = {
@@ -166,15 +166,12 @@ const ensureCleanStudentSessionCache = (newUid) => {
     const prevUid = localStorage.getItem(LAST_ACTIVE_STUDENT_UID_KEY);
     if (prevUid && prevUid !== String(newUid)) {
       const sharedLocalKeys = [
-        'cached_student_dashboard_stats_v8',
-        'cached_student_dashboard_enrollments_v8',
-        'cached_student_dashboard_activity_v8',
-        'cached_student_courses_list_v3',
-        'cached_student_courses_meta_v3',
-        'cached_student_assignments_list_v5',
-        'cached_student_quizzes_list_v5',
-        'cached_student_scores_list_v5',
-        'cached_student_attendance_list_v3',
+        CACHE_KEY_SHARED_ENROLLMENTS,
+        CACHE_KEY_SHARED_COURSES,
+        CACHE_KEY_SHARED_ASSIGNMENTS,
+        CACHE_KEY_SHARED_QUIZZES,
+        CACHE_KEY_SHARED_SCORES,
+        CACHE_KEY_SHARED_ATTENDANCE,
         CACHE_KEY_SHARED_LESSONS,
         CACHE_KEY_SHARED_DEPT_COURSES,
         CACHE_KEY_TEACHER_AVATARS,
@@ -203,16 +200,22 @@ const extractArrayFromRes = (resData) => {
   return [];
 };
 
-// ✅ ទាញទិន្នន័យគ្រប់ទំព័រទាំងអស់របស់សិស្សទុកមុនភ្លាមៗ (រួមទាំង មេរៀន /student/lessons ដើម្បីចុចលើ Sidebar ភ្លាមចេញភ្លាមក្នុង 0ms)
+// ✅ ទាញទិន្នន័យគ្រប់ទំព័រទាំងអស់របស់សិស្សទុកមុនភ្លាមៗ (ទោះ uid ជា default_student ក៏អនុញ្ញាតឱ្យទាញដែរ ឱ្យតែមាន Token)
 const prefetchAllStudentPagesData = (
   uid,
   onAssignmentsSynced,
   onQuizzesSynced,
   onCoursesSynced
 ) => {
-  if (!uid || uid === 'default_student') return;
-  if (STUDENT_DASH_MEM_CACHE.prefetchedUid === uid) return;
-  STUDENT_DASH_MEM_CACHE.prefetchedUid = uid;
+  const effectiveUid = uid || 'default_student';
+  if (
+    STUDENT_DASH_MEM_CACHE.prefetchedUid === effectiveUid &&
+    Array.isArray(STUDENT_DASH_MEM_CACHE.assignments) &&
+    STUDENT_DASH_MEM_CACHE.assignments.length > 0
+  ) {
+    return;
+  }
+  STUDENT_DASH_MEM_CACHE.prefetchedUid = effectiveUid;
 
   // ១. ទាញបញ្ជីកិច្ចការសិស្សភ្លាមៗ
   api
@@ -224,7 +227,7 @@ const prefetchAllStudentPagesData = (
         onAssignmentsSynced(data);
       }
       try {
-        localStorage.setItem(getAssignmentsCacheKey(uid), JSON.stringify(data));
+        localStorage.setItem(getAssignmentsCacheKey(effectiveUid), JSON.stringify(data));
         localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, JSON.stringify(data));
       } catch {}
     })
@@ -240,7 +243,7 @@ const prefetchAllStudentPagesData = (
         onQuizzesSynced(data);
       }
       try {
-        localStorage.setItem(getQuizzesCacheKey(uid), JSON.stringify(data));
+        localStorage.setItem(getQuizzesCacheKey(effectiveUid), JSON.stringify(data));
         localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, JSON.stringify(data));
       } catch {}
     })
@@ -258,7 +261,7 @@ const prefetchAllStudentPagesData = (
           }
           const slim = saveCoursesAndAvatarsFast(data);
           try {
-            localStorage.setItem(getCoursesCacheKey(uid), JSON.stringify(slim));
+            localStorage.setItem(getCoursesCacheKey(effectiveUid), JSON.stringify(slim));
             localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(slim));
           } catch {}
         }
@@ -281,7 +284,7 @@ const prefetchAllStudentPagesData = (
           const slimDept = saveCoursesAndAvatarsFast(deptCoursesData);
           try {
             localStorage.setItem(
-              getDeptCoursesCacheKey(uid),
+              getDeptCoursesCacheKey(effectiveUid),
               JSON.stringify(slimDept)
             );
             localStorage.setItem(
@@ -293,7 +296,7 @@ const prefetchAllStudentPagesData = (
         if (lessonsData.length > 0) {
           try {
             localStorage.setItem(
-              getLessonsCacheKey(uid),
+              getLessonsCacheKey(effectiveUid),
               JSON.stringify(lessonsData)
             );
             localStorage.setItem(
@@ -305,7 +308,7 @@ const prefetchAllStudentPagesData = (
         if (res.data?.student_current_year) {
           try {
             localStorage.setItem(
-              getStudentYearCacheKey(uid),
+              getStudentYearCacheKey(effectiveUid),
               String(res.data.student_current_year)
             );
           } catch {}
@@ -319,7 +322,7 @@ const prefetchAllStudentPagesData = (
         const data = extractArrayFromRes(res.data);
         const slim = saveCoursesAndAvatarsFast(data);
         try {
-          localStorage.setItem(getScoresCacheKey(uid), JSON.stringify(slim));
+          localStorage.setItem(getScoresCacheKey(effectiveUid), JSON.stringify(slim));
           localStorage.setItem(CACHE_KEY_SHARED_SCORES, JSON.stringify(slim));
         } catch {}
       })
@@ -331,7 +334,7 @@ const prefetchAllStudentPagesData = (
         const data = extractArrayFromRes(res.data);
         const slim = saveCoursesAndAvatarsFast(data);
         try {
-          localStorage.setItem(getAttendanceCacheKey(uid), JSON.stringify(slim));
+          localStorage.setItem(getAttendanceCacheKey(effectiveUid), JSON.stringify(slim));
           localStorage.setItem(
             CACHE_KEY_SHARED_ATTENDANCE,
             JSON.stringify(slim)
@@ -446,14 +449,17 @@ const StudentDashboard = () => {
   });
 
   const [enrollments, setEnrollments] = useState(() => {
-    if (Array.isArray(STUDENT_DASH_MEM_CACHE.enrollments)) {
+    if (
+      Array.isArray(STUDENT_DASH_MEM_CACHE.enrollments) &&
+      STUDENT_DASH_MEM_CACHE.enrollments.length > 0
+    ) {
       return STUDENT_DASH_MEM_CACHE.enrollments;
     }
     const cached =
       readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
       readStorageJson(getCoursesCacheKey(currentStudentId), null) ||
       readStorageJson(CACHE_KEY_SHARED_ENROLLMENTS, []);
-    if (Array.isArray(cached)) {
+    if (Array.isArray(cached) && cached.length > 0) {
       STUDENT_DASH_MEM_CACHE.enrollments = cached;
       return cached;
     }
@@ -461,13 +467,16 @@ const StudentDashboard = () => {
   });
 
   const [assignments, setAssignments] = useState(() => {
-    if (Array.isArray(STUDENT_DASH_MEM_CACHE.assignments)) {
+    if (
+      Array.isArray(STUDENT_DASH_MEM_CACHE.assignments) &&
+      STUDENT_DASH_MEM_CACHE.assignments.length > 0
+    ) {
       return STUDENT_DASH_MEM_CACHE.assignments;
     }
     const cached =
       readStorageJson(getAssignmentsCacheKey(currentStudentId), null) ||
       readStorageJson(CACHE_KEY_SHARED_ASSIGNMENTS, []);
-    if (Array.isArray(cached)) {
+    if (Array.isArray(cached) && cached.length > 0) {
       STUDENT_DASH_MEM_CACHE.assignments = cached;
       return cached;
     }
@@ -475,13 +484,16 @@ const StudentDashboard = () => {
   });
 
   const [quizzes, setQuizzes] = useState(() => {
-    if (Array.isArray(STUDENT_DASH_MEM_CACHE.quizzes)) {
+    if (
+      Array.isArray(STUDENT_DASH_MEM_CACHE.quizzes) &&
+      STUDENT_DASH_MEM_CACHE.quizzes.length > 0
+    ) {
       return STUDENT_DASH_MEM_CACHE.quizzes;
     }
     const cached =
       readStorageJson(getQuizzesCacheKey(currentStudentId), null) ||
       readStorageJson(CACHE_KEY_SHARED_QUIZZES, []);
-    if (Array.isArray(cached)) {
+    if (Array.isArray(cached) && cached.length > 0) {
       STUDENT_DASH_MEM_CACHE.quizzes = cached;
       return cached;
     }
@@ -748,7 +760,6 @@ const StudentDashboard = () => {
     [teacherAssignedQuizzes.length, doneQuizzesCount]
   );
 
-  // ✅ ប្រអប់រំកិលបង្ហាញព័ត៌មានសង្ខេប
   const spotlightSlides = useMemo(() => {
     const slides = [];
 
@@ -889,20 +900,23 @@ const StudentDashboard = () => {
     if (cachedSt && Object.keys(cachedSt).length > 0) {
       setStats(cachedSt);
     }
-    if (Array.isArray(cachedEnr)) {
+    if (Array.isArray(cachedEnr) && cachedEnr.length > 0) {
       setEnrollments(cachedEnr);
     }
-    if (Array.isArray(cachedAsg)) {
+    if (Array.isArray(cachedAsg) && cachedAsg.length > 0) {
       setAssignments(cachedAsg);
     }
-    if (Array.isArray(cachedQz)) {
+    if (Array.isArray(cachedQz) && cachedQz.length > 0) {
       setQuizzes(cachedQz);
     }
 
+    // ✅ Skip API តែនៅពេលមានទិន្នន័យមុខវិជ្ជាពិតប្រាកដ (> 0) ប៉ុណ្ណោះ
     if (
       STUDENT_DASH_MEM_CACHE.uid === currentStudentId &&
       cachedSt &&
-      Object.keys(cachedSt).length > 0 &&
+      Number(cachedSt.total_courses) > 0 &&
+      Array.isArray(cachedEnr) &&
+      cachedEnr.length > 0 &&
       now - STUDENT_DASH_MEM_CACHE.lastSyncedAt < 25000
     ) {
       return;
@@ -996,7 +1010,6 @@ const StudentDashboard = () => {
   const ringOffset =
     ringCircumference - (averageScoreNum / 100) * ringCircumference;
 
-  // គណនាផលបូកការងារដែលសិស្សបានធ្វើរួច (កិច្ចការ + កម្រងសំណួរ) សម្រាប់បង្ហាញបន្ថែមឱ្យច្បាស់លាស់
   const totalHomeworkCount =
     teacherAssignedHomework.length || stats?.total_assignments || 0;
   const totalQuizzesCount =
@@ -1008,7 +1021,6 @@ const StudentDashboard = () => {
       ? Math.round((totalCompletedActivities / totalActivitiesCount) * 100)
       : 0;
 
-  // ✅ កម្ពស់ទឹកក្នុងកងមូល (Liquid Level)
   const liquidLevelPercent = useMemo(() => {
     if (averageScoreNum > 0) return Math.min(100, Math.max(12, averageScoreNum));
     if (activityCompletionPercent > 0) {
@@ -1019,11 +1031,10 @@ const StudentDashboard = () => {
 
   const isLiquidDarkText = liquidLevelPercent < 55;
 
-  // ✅ កាតស្ថិតិទាំង ៤
   const statCards = [
     {
       title: t('មុខវិជ្ជាកំពុងរៀន', 'Enrolled Courses'),
-      value: stats?.total_courses ?? enrollments.length ?? 0,
+      value: stats?.total_courses || enrollments.length || 0,
       icon: BookOpenIcon,
       cardStyle:
         'from-blue-500/10 via-indigo-500/5 to-transparent border-blue-200/70',
@@ -1237,7 +1248,6 @@ const StudentDashboard = () => {
           </div>
 
           <div className="my-5 flex items-center justify-center gap-5 sm:gap-6">
-            {/* ✅ កងមូលមានទឹករលកខាងក្នុង និងបង្ហាញតែលេខ % ធំច្បាស់នៅចំកណ្ដាល */}
             <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
               <div className="std-liquid-inner absolute inset-[9px] rounded-full overflow-hidden bg-slate-100/90 dark:bg-slate-900/90 z-0 shadow-inner">
                 <div
@@ -1282,7 +1292,6 @@ const StudentDashboard = () => {
                 />
               </svg>
 
-              {/* ✅ បង្ហាញតែលេខ % ធំច្បាស់នៅចំកណ្ដាលកងទឹក (គ្មានអក្សរអមឱ្យចង្អៀតឡើយ) */}
               <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
                 <span
                   className={`text-2xl font-black tracking-tight transition-colors duration-500 ${

@@ -25,17 +25,16 @@ import {
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 
-const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
-const CACHE_KEY_SHARED_COURSES_META = 'cached_student_courses_meta_v3';
-const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
-const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
+const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v15';
+const CACHE_KEY_SHARED_COURSES_META = 'cached_student_courses_meta_v15';
+const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v15';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v15';
 
-const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
-const getCoursesMetaCacheKey = (uid) => `cached_student_courses_meta_v10_${uid}`;
-const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
-const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v10_${uid}`;
-const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
-const getAttendanceCacheKey = (uid) => `cached_student_attendance_list_v10_${uid}`;
+const getCoursesCacheKey = (uid) => `cached_student_courses_list_v15_${uid}`;
+const getCoursesMetaCacheKey = (uid) => `cached_student_courses_meta_v15_${uid}`;
+const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v15_${uid}`;
+const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v15_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v15_${uid}`;
 
 // ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
 const STUDENT_COURSES_MEM_CACHE = {
@@ -202,15 +201,9 @@ const ensureCleanStudentSessionCache = (newUid) => {
     const prevUid = localStorage.getItem(LAST_ACTIVE_STUDENT_UID_KEY);
     if (prevUid && prevUid !== String(newUid)) {
       const sharedLocalKeys = [
-        'cached_student_dashboard_stats_v8',
-        'cached_student_dashboard_enrollments_v8',
-        'cached_student_dashboard_activity_v8',
-        'cached_student_courses_list_v3',
-        'cached_student_courses_meta_v3',
-        'cached_student_assignments_list_v5',
-        'cached_student_quizzes_list_v5',
-        'cached_student_scores_list_v5',
-        'cached_student_attendance_list_v3',
+        CACHE_KEY_SHARED_COURSES,
+        CACHE_KEY_SHARED_COURSES_META,
+        CACHE_KEY_SHARED_ENROLLMENTS,
         CACHE_KEY_TEACHER_AVATARS,
       ];
       sharedLocalKeys.forEach((k) => {
@@ -300,16 +293,19 @@ const StudentCourses = () => {
   }
   STUDENT_COURSES_MEM_CACHE.uid = currentStudentId;
 
-  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី
+  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី (តែបើមានទិន្នន័យពិតប្រាកដប៉ុណ្ណោះ)
   const [courses, setCourses] = useState(() => {
-    if (Array.isArray(STUDENT_COURSES_MEM_CACHE.courses)) {
+    if (
+      Array.isArray(STUDENT_COURSES_MEM_CACHE.courses) &&
+      STUDENT_COURSES_MEM_CACHE.courses.length > 0
+    ) {
       return STUDENT_COURSES_MEM_CACHE.courses;
     }
     const fromUserCourse = readStorageJson(
       getCoursesCacheKey(currentStudentId),
       null
     );
-    if (Array.isArray(fromUserCourse)) {
+    if (Array.isArray(fromUserCourse) && fromUserCourse.length > 0) {
       STUDENT_COURSES_MEM_CACHE.courses = fromUserCourse;
       return fromUserCourse;
     }
@@ -317,15 +313,18 @@ const StudentCourses = () => {
       getEnrollmentsCacheKey(currentStudentId),
       null
     );
-    if (Array.isArray(fromUserDash)) {
+    if (Array.isArray(fromUserDash) && fromUserDash.length > 0) {
       STUDENT_COURSES_MEM_CACHE.courses = fromUserDash;
       return fromUserDash;
     }
     const fromShared =
       readStorageJson(CACHE_KEY_SHARED_COURSES, null) ||
       readStorageJson(CACHE_KEY_SHARED_ENROLLMENTS, []);
-    STUDENT_COURSES_MEM_CACHE.courses = fromShared;
-    return fromShared;
+    if (Array.isArray(fromShared) && fromShared.length > 0) {
+      STUDENT_COURSES_MEM_CACHE.courses = fromShared;
+      return fromShared;
+    }
+    return [];
   });
 
   const [page, setPage] = useState(1);
@@ -355,7 +354,8 @@ const StudentCourses = () => {
     async (forceRefresh = false) => {
       const now = Date.now();
       const cachedForUser =
-        STUDENT_COURSES_MEM_CACHE.courses !== null
+        Array.isArray(STUDENT_COURSES_MEM_CACHE.courses) &&
+        STUDENT_COURSES_MEM_CACHE.courses.length > 0
           ? STUDENT_COURSES_MEM_CACHE.courses
           : readStorageJson(getCoursesCacheKey(currentStudentId), null) ||
             readStorageJson(getEnrollmentsCacheKey(currentStudentId), null);
@@ -412,7 +412,7 @@ const StudentCourses = () => {
         setCourses(coursesData);
         setMeta(resolvedMeta);
 
-        if (page === 1) {
+        if (page === 1 && coursesData.length > 0) {
           persistStudentCoursesFast(
             currentStudentId,
             coursesData,
@@ -498,7 +498,7 @@ const StudentCourses = () => {
     const map = {};
     const cachedScores =
       readStorageJson(getScoresCacheKey(currentStudentId), null) ||
-      readStorageJson('cached_student_scores_list_v5', []);
+      readStorageJson('cached_student_scores_list_v15', []);
     if (Array.isArray(cachedScores)) {
       cachedScores.forEach((s) => {
         const cid = String(s?.course_id || s?.course?.id || '');
@@ -644,7 +644,7 @@ const StudentCourses = () => {
     if (totalAssignments === 0) {
       const cachedAsg =
         readStorageJson(getAssignmentsCacheKey(currentStudentId), null) ||
-        readStorageJson('cached_student_assignments_list_v5', []);
+        readStorageJson('cached_student_assignments_list_v15', []);
       if (Array.isArray(cachedAsg) && cachedAsg.length > 0) {
         totalAssignments = cachedAsg.length;
       }
@@ -667,7 +667,7 @@ const StudentCourses = () => {
 
     const cachedScores =
       readStorageJson(getScoresCacheKey(currentStudentId), null) ||
-      readStorageJson('cached_student_scores_list_v5', []);
+      readStorageJson('cached_student_scores_list_v15', []);
     const combinedList = [...enrichedCourses];
 
     if (Array.isArray(cachedScores)) {
@@ -1049,7 +1049,7 @@ const StudentCourses = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. MAIN COURSES CARDS (Static Display - មិនបាច់ឱ្យចុចទេ)          */}
+      {/* 📌 3. MAIN COURSES CARDS (Static Display)                           */}
       {/* ================================================================== */}
       <div className="w-full">
         {filteredCourses.length === 0 ? (
@@ -1100,7 +1100,6 @@ const StudentCourses = () => {
                   className={`stdc-course-card group relative bg-white rounded-2xl border border-gray-200/80 shadow-xs ${theme.glow} transition-all duration-300 overflow-hidden flex flex-col justify-between h-full select-none`}
                 >
                   <div>
-                    {/* ១. គម្របខាងលើនៃកាតមុខវិជ្ជា (Static div មិនអាចចុចបានទេ) */}
                     <div
                       className={`relative h-20 bg-gradient-to-r ${theme.coverBg} p-3 flex flex-col justify-between text-white overflow-hidden`}
                     >
@@ -1125,7 +1124,6 @@ const StudentCourses = () => {
                       </div>
                     </div>
 
-                    {/* ✅ ២. តួកាតខាងក្រោម (កែសម្រួលផ្លាកឈ្មោះដេប៉ាតឺម៉ង់ឱ្យធ្លាក់ចុះមកក្រោមមានគម្លាតស្អាត មិនឆ្មៀតជាប់គម្របលើ) */}
                     <div className="px-4 pb-3 pt-2.5 relative">
                       <div className="flex items-center justify-between gap-2 mb-3 relative z-20">
                         <div
@@ -1153,7 +1151,6 @@ const StudentCourses = () => {
                         </p>
                       </div>
 
-                      {/* ផ្លាកបង្ហាញចំនួន៖ មេរៀន • កិច្ចការ • កម្រងសំណួរ (Static span មិនអាចចុចបានទេ) */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-gray-100 dark:border-slate-700/70">
                         <span className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50/80 text-blue-700 border border-blue-100">
                           <FolderIcon className="h-3 w-3" />
@@ -1182,7 +1179,6 @@ const StudentCourses = () => {
                     </div>
                   </div>
 
-                  {/* ៣. ផ្នែកខាងក្រោមកាត៖ បង្ហាញរូបថតមូល និងឈ្មោះគ្រូបង្រៀន */}
                   <div className="stdc-card-footer px-4 py-2.5 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div
