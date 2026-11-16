@@ -61,6 +61,7 @@ const ADMIN_STUDENTS_Y1_MEM_CACHE = {
   students: null,
   meta: null,
   enrolledDeptsMap: null,
+  enrollmentsByStudentId: {},
   departments: null,
   courses: null,
   studentRoleId: null,
@@ -469,6 +470,7 @@ const ManageStudentsYear1 = () => {
     ADMIN_STUDENTS_Y1_MEM_CACHE.students = null;
     ADMIN_STUDENTS_Y1_MEM_CACHE.meta = null;
     ADMIN_STUDENTS_Y1_MEM_CACHE.enrolledDeptsMap = null;
+    ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId = {};
     ADMIN_STUDENTS_Y1_MEM_CACHE.departments = null;
     ADMIN_STUDENTS_Y1_MEM_CACHE.courses = null;
     ADMIN_STUDENTS_Y1_MEM_CACHE.lastSyncedAt = 0;
@@ -634,7 +636,6 @@ const ManageStudentsYear1 = () => {
   // 📌 ផ្នែកទី ៣៖ ការច្រោះទិន្នន័យល្បឿនលឿន O(1) Map Lookup (មិនរាំងស្ទះទោះមានសិស្ស/គ្រូច្រើន)
   // ============================================================================
 
-  // ✅ បង្កើត Hash Map សម្រាប់មុខវិជ្ជា និងដេប៉ាតឺម៉ង់ ដើម្បីស្វែងរកក្នុងល្បឿន O(1) (0ms)
   const coursesByIdMap = useMemo(() => {
     const map = new Map();
     if (Array.isArray(allCourses)) {
@@ -1331,7 +1332,7 @@ const ManageStudentsYear1 = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី ៧៖ មុខងារចុះឈ្មោះមុខវិជ្ជាឱ្យសិស្ស (SINGLE MULTI-SELECT & BULK ENROLLMENT)
+  // 📌 ផ្នែកទី ៧៖ មុខងារចុះឈ្មោះមុខវិជ្ជាល្បឿន 0ms (Optimistic UI & Instant Memory Cache)
   // ============================================================================
 
   const openEnrollmentModal = async (student) => {
@@ -1340,20 +1341,23 @@ const ManageStudentsYear1 = () => {
     setEnrollCourseSearch('');
     const studentDeptId = student.department_id || student.department?.id;
     setEnrollDeptFilter(studentDeptId ? 'student_dept' : 'all');
+
+    // ✅ បង្ហាញបញ្ជីមុខវិជ្ជាពី RAM Cache ភ្លាមៗក្នុង 0ms បើធ្លាប់បើកមើលសិស្សនេះម្ដងហើយ
+    const cachedEnr = ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[student.id];
+    if (Array.isArray(cachedEnr)) {
+      setStudentEnrollments(cachedEnr);
+    } else {
+      setStudentEnrollments([]);
+    }
+
     setShowEnrollmentModal(true);
+
     try {
-      const [enrollmentsRes, coursesData] = await Promise.all([
-        api.get(`/admin/students/${student.id}/enrollments`),
-        getCachedCourses()
-      ]);
-      const fetchedEnrollments = enrollmentsRes.data.data || [];
-      const fetchedCourses = Array.isArray(coursesData) ? coursesData : allCourses;
+      const enrollmentsRes = await api.get(`/admin/students/${student.id}/enrollments`);
+      const fetchedEnrollments = enrollmentsRes.data?.data || [];
+      ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[student.id] = fetchedEnrollments;
       setStudentEnrollments(fetchedEnrollments);
-      if (Array.isArray(coursesData) && coursesData.length > 0) {
-        setAllCourses(coursesData);
-        ADMIN_STUDENTS_Y1_MEM_CACHE.courses = coursesData;
-      }
-      syncStudentEnrolledDepts(student.id, fetchedEnrollments, fetchedCourses);
+      syncStudentEnrolledDepts(student.id, fetchedEnrollments, allCourses);
     } catch (error) {
       console.error('Cannot fetch enrollment data:', error);
     }
@@ -1410,36 +1414,68 @@ const ManageStudentsYear1 = () => {
     }
   };
 
-  const handleEnrollSelectedCourses = async (e) => {
-    if (e) e.preventDefault();
-    if (!selectedStudent || selectedCoursesToEnroll.length === 0) return;
+  // ✅ ចុចចុះឈ្មោះភ្លាម បង្ហាញក្នុងបញ្ជីខាងក្រោមភ្លាមៗក្នុង 0ms (Optimistic Update) មិនបាច់ហៅ GET ម្ដងទៀតទេ
+  const executeInstantEnrollment = async (courseIdsToEnroll, isDeptBulk = false) => {
+    if (!selectedStudent || courseIdsToEnroll.length === 0) return;
+
+    const prevEnrollments = [...studentEnrollments];
+    const studentName = getStudentFullName(selectedStudent);
+
+    const optimisticNewItems = courseIdsToEnroll.map((cid) => {
+      const matchedCourse =
+        coursesByIdMap.get(Number(cid)) || coursesByIdMap.get(String(cid)) || {};
+      return {
+        id: `temp_${cid}_${Date.now()}`,
+        student_id: selectedStudent.user_id || selectedStudent.id,
+        course_id: Number(cid),
+        status: 'active',
+        course: matchedCourse,
+      };
+    });
+
+    const nextOptimisticList = [...prevEnrollments, ...optimisticNewItems];
+    setStudentEnrollments(nextOptimisticList);
+    ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = nextOptimisticList;
+    syncStudentEnrolledDepts(selectedStudent.id, nextOptimisticList, allCourses);
+    setSelectedCoursesToEnroll([]);
+
     setIsEnrollingCourses(true);
     try {
-      const countToEnroll = selectedCoursesToEnroll.length;
-      const studentName = getStudentFullName(selectedStudent);
-
-      await api.post(`/admin/students/${selectedStudent.id}/enrollments`, {
-        course_ids: selectedCoursesToEnroll,
+      const res = await api.post(`/admin/students/${selectedStudent.id}/enrollments`, {
+        course_ids: courseIdsToEnroll,
       });
-      const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
-      const updatedEnrollments = enrollmentsRes.data.data || [];
-      setStudentEnrollments(updatedEnrollments);
-      syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
-      setSelectedCoursesToEnroll([]);
+
+      const serverList = res.data?.data;
+      if (Array.isArray(serverList) && serverList.length > 0) {
+        setStudentEnrollments(serverList);
+        ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = serverList;
+        syncStudentEnrolledDepts(selectedStudent.id, serverList, allCourses);
+      }
 
       pushLocalNotification({
-        titleKm: 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្ស',
-        titleEn: 'Student Courses Enrolled',
-        descKm: `បានចុះឈ្មោះមុខវិជ្ជាចំនួន ${countToEnroll} មុខវិជ្ជាជូនសិស្ស «${studentName}» ដោយជោគជ័យ។`,
-        descEn: `Enrolled "${studentName}" in ${countToEnroll} courses successfully.`,
+        titleKm: isDeptBulk
+          ? 'បានដាក់បញ្ចូលគ្រប់មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់'
+          : 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្ស',
+        titleEn: isDeptBulk
+          ? 'Enrolled All Department Courses'
+          : 'Student Courses Enrolled',
+        descKm: `បានចុះឈ្មោះមុខវិជ្ជាចំនួន ${courseIdsToEnroll.length} មុខវិជ្ជាជូនសិស្ស «${studentName}» ដោយជោគជ័យ។`,
+        descEn: `Enrolled "${studentName}" in ${courseIdsToEnroll.length} courses successfully.`,
         category: 'student',
-        link: '/students/year-1'
+        link: '/students/year-1',
       });
     } catch (error) {
       console.error('Failed to enroll courses:', error);
+      setStudentEnrollments(prevEnrollments);
+      ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = prevEnrollments;
     } finally {
       setIsEnrollingCourses(false);
     }
+  };
+
+  const handleEnrollSelectedCourses = async (e) => {
+    if (e) e.preventDefault();
+    await executeInstantEnrollment(selectedCoursesToEnroll, false);
   };
 
   const handleQuickEnrollAllDeptCourses = async () => {
@@ -1451,35 +1487,9 @@ const ManageStudentsYear1 = () => {
         !enrolledCourseIdSet.has(Number(c.id))
     );
 
-    if (deptUnenrolled.length === 0) {
-      return;
-    }
-
-    setIsEnrollingCourses(true);
-    try {
-      const courseIds = deptUnenrolled.map((c) => Number(c.id));
-      const studentName = getStudentFullName(selectedStudent);
-
-      await api.post(`/admin/students/${selectedStudent.id}/enrollments`, { course_ids: courseIds });
-      const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
-      const updatedEnrollments = enrollmentsRes.data.data || [];
-      setStudentEnrollments(updatedEnrollments);
-      syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
-      setSelectedCoursesToEnroll([]);
-
-      pushLocalNotification({
-        titleKm: 'បានដាក់បញ្ចូលគ្រប់មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់',
-        titleEn: 'Enrolled All Department Courses',
-        descKm: `បានដាក់បញ្ចូលមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់ទាំង ${courseIds.length} មុខវិជ្ជាជូនសិស្ស «${studentName}» ជោគជ័យ។`,
-        descEn: `Enrolled all ${courseIds.length} department courses for "${studentName}".`,
-        category: 'student',
-        link: '/students/year-1'
-      });
-    } catch (error) {
-      console.error('Failed to quick enroll department courses:', error);
-    } finally {
-      setIsEnrollingCourses(false);
-    }
+    if (deptUnenrolled.length === 0) return;
+    const courseIds = deptUnenrolled.map((c) => Number(c.id));
+    await executeInstantEnrollment(courseIds, true);
   };
 
   const handleOpenBulkEnrollModal = async () => {
@@ -1544,11 +1554,12 @@ const ManageStudentsYear1 = () => {
     setIsBulkEnrolling(true);
     try {
       await Promise.allSettled(
-        selectedStudents.map((studentId) =>
-          api.post(`/admin/students/${studentId}/enrollments`, {
+        selectedStudents.map((studentId) => {
+          delete ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[studentId];
+          return api.post(`/admin/students/${studentId}/enrollments`, {
             course_ids: bulkSelectedCourses,
-          })
-        )
+          });
+        })
       );
 
       const newlyAddedDeptIds = allCourses
@@ -1591,18 +1602,26 @@ const ManageStudentsYear1 = () => {
     }
   };
 
+  // ✅ ចុចលុបមុខវិជ្ជាភ្លាម ដកចេញពីអេក្រង់ភ្លាមៗក្នុង 0ms (Optimistic Unenroll)
   const confirmUnenrollCourse = async () => {
-    if (!unenrollTarget) return;
+    if (!unenrollTarget || !selectedStudent) return;
+    const targetCourseId = Number(unenrollTarget);
+    const prevEnrollments = [...studentEnrollments];
+
+    setUnenrollTarget(null);
+    const updatedList = prevEnrollments.filter(
+      (e) => Number(e.course_id ?? e.course?.id) !== targetCourseId
+    );
+    setStudentEnrollments(updatedList);
+    ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = updatedList;
+    syncStudentEnrolledDepts(selectedStudent.id, updatedList, allCourses);
+
     try {
-      await api.delete(`/admin/students/${selectedStudent.id}/enrollments/${unenrollTarget}`);
-      const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
-      const updatedEnrollments = enrollmentsRes.data.data || [];
-      setStudentEnrollments(updatedEnrollments);
-      syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
+      await api.delete(`/admin/students/${selectedStudent.id}/enrollments/${targetCourseId}`);
     } catch (error) {
       console.error('Failed to unenroll:', error);
-    } finally {
-      setUnenrollTarget(null);
+      setStudentEnrollments(prevEnrollments);
+      ADMIN_STUDENTS_Y1_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = prevEnrollments;
     }
   };
 

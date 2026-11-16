@@ -35,7 +35,6 @@ class AdminStudentController extends Controller
             return null;
         }
 
-        // បង្រួមទំហំរូបភាពឱ្យតូចល្មម (Max 240x240px) ប្រសិនបើ Server មាន GD Extension
         if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
             $srcImg = @imagecreatefromstring($contents);
             if ($srcImg !== false) {
@@ -113,19 +112,16 @@ class AdminStudentController extends Controller
             return null;
         }
 
-        // បម្លែងលេខខ្មែរ (០-៩) ទៅជាលេខសากล (0-9)
         $str = str_replace(
             ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'],
             ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
             $str
         );
 
-        // 1. ករណីជាលេខ Serial Date របស់ Excel (ឧទាហរណ៍ 38472)
         if (is_numeric($str) && (float) $str > 1000 && (float) $str < 100000) {
             return gmdate('Y-m-d', ((int) round((float) $str) - 25569) * 86400);
         }
 
-        // 2. ករណីទម្រង់ DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (ឧទាហរណ៍ 30-04-2005)
         if (preg_match('/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/', $str, $m)) {
             $first = (int) $m[1];
             $second = (int) $m[2];
@@ -137,7 +133,6 @@ class AdminStudentController extends Controller
             }
         }
 
-        // 3. ករណីទម្រង់ YYYY-MM-DD ឬ YYYY/MM/DD
         if (preg_match('/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})/', $str, $m)) {
             if (checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
                 return sprintf('%04d-%02d-%02d', (int) $m[1], (int) $m[2], (int) $m[3]);
@@ -152,8 +147,8 @@ class AdminStudentController extends Controller
     }
 
     /**
-     * ✅ អនុគមន៍ល្បឿនលឿន O(1) ភ្ជាប់ឈ្មោះ និងរូបភាពគ្រូបង្រៀនទៅឱ្យបញ្ជី Enrollments
-     * គាំទ្រទាំងករណី courses.teacher_id ជា teachers.id ឬជា users.id ដោយមិនបង្កើត N+1 Query
+     * ✅ អនុគមន៍ល្បឿនលឿន O(1) ភ្ជាប់ឈ្មោះគ្រូបង្រៀនទៅឱ្យបញ្ជី Enrollments ក្នុង Query តែ ១ ដង
+     * (មិនទាញ Base64 profile_image ធំៗឱ្យធ្ងន់ JSON ឡើយ ដើម្បីឱ្យបើក Modal លឿនបំផុត)
      */
     private function attachTeacherToEnrollments($enrollments)
     {
@@ -176,17 +171,7 @@ class AdminStudentController extends Controller
         $teacherRecords = DB::table('teachers')
             ->whereIn('id', $teacherIds)
             ->orWhereIn('user_id', $teacherIds)
-            ->select([
-                'id',
-                'user_id',
-                'teacher_code',
-                'first_name',
-                'last_name',
-                'email',
-                'phone',
-                'specialization',
-                'profile_image',
-            ])
+            ->select(['id', 'user_id', 'teacher_code', 'first_name', 'last_name', 'email', 'specialization'])
             ->get();
 
         $byTeacherId = $teacherRecords->keyBy('id');
@@ -203,7 +188,7 @@ class AdminStudentController extends Controller
         $userRecords = !empty($allUserIds)
             ? DB::table('users')
                 ->whereIn('id', $allUserIds)
-                ->select(['id', 'first_name', 'last_name', 'email', 'phone', 'profile_image'])
+                ->select(['id', 'first_name', 'last_name', 'email'])
                 ->get()
                 ->keyBy('id')
             : collect();
@@ -224,15 +209,7 @@ class AdminStudentController extends Controller
 
             $firstName = trim((string) ($tRec->first_name ?? $uRec->first_name ?? ''));
             $lastName = trim((string) ($tRec->last_name ?? $uRec->last_name ?? ''));
-            $fullName = trim($firstName . ' ' . $lastName);
-
-            if ($fullName === '') {
-                $fullName = $tRec->email ?? $uRec->email ?? '';
-            }
-
-            $avatar = !empty($tRec?->profile_image)
-                ? $tRec->profile_image
-                : ($uRec->profile_image ?? null);
+            $fullName = trim($firstName . ' ' . $lastName) ?: ($tRec->email ?? $uRec->email ?? '');
 
             $teacherPayload = [
                 'id' => $tRec->id ?? $uRec->id ?? $tid,
@@ -243,9 +220,7 @@ class AdminStudentController extends Controller
                 'name' => $fullName,
                 'full_name' => $fullName,
                 'email' => $tRec->email ?? $uRec->email ?? '',
-                'phone' => $tRec->phone ?? $uRec->phone ?? null,
                 'specialization' => $tRec->specialization ?? null,
-                'profile_image' => $avatar,
             ];
 
             $course->setRelation('teacher', (object) $teacherPayload);
@@ -261,7 +236,6 @@ class AdminStudentController extends Controller
         $perPage = max(1, min(500, (int) $request->input('per_page', 15)));
         $search = trim((string) $request->input('search', ''));
 
-        // ✅ select columns ចាំបាច់ និងប្រើ with() ត្រឹមត្រូវ
         $query = Student::with([
             'department:id,department_name',
             'user:id,status,email,profile_image',
@@ -282,7 +256,6 @@ class AdminStudentController extends Controller
             $query->where('study_shift', $request->input('study_shift'));
         }
 
-        // ✅ ច្រោះតាមឆ្នាំសិក្សា (ដាក់មុន paginate ដើម្បីឱ្យដំណើរការត្រឹមត្រូវ)
         if ($request->filled('year')) {
             $y = trim((string) $request->input('year'));
             if (preg_match('/([1-4])/', $y, $m)) {
@@ -316,7 +289,6 @@ class AdminStudentController extends Controller
 
         $students = $query->orderBy('id', 'desc')->paginate($perPage);
 
-        // ✅ ភ្ជាប់រូបភាព និងលុបរូបភាពស្ទួនក្នុង user ចេញ ដើម្បីឱ្យទាញទិន្នន័យលឿនបំផុត
         $items = collect($students->items())->map(function ($student) {
             return $this->deduplicateStudentAvatar($student);
         })->all();
@@ -404,7 +376,6 @@ class AdminStudentController extends Controller
             return $this->deduplicateStudentAvatar($loaded);
         });
 
-        // ✅ លុប Cache ពេលបង្កើតសិស្សថ្មី
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
@@ -539,7 +510,6 @@ class AdminStudentController extends Controller
             }
         });
 
-        // ✅ លុប Cache ពេលលុបសិស្ស
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
@@ -559,8 +529,12 @@ class AdminStudentController extends Controller
                 $student->id,
             ])));
 
-            $enrollments = Enrollment::with(['course.department:id,department_name'])
+            $enrollments = Enrollment::with([
+                'course:id,course_code,course_name,credit,department_id,teacher_id',
+                'course.department:id,department_name',
+            ])
                 ->whereIn('student_id', $studentIds)
+                ->select(['id', 'student_id', 'course_id', 'enrolled_date', 'status'])
                 ->get();
 
             $this->attachTeacherToEnrollments($enrollments);
@@ -578,14 +552,14 @@ class AdminStudentController extends Controller
     }
 
     /**
-     * ✅ ចុះឈ្មោះមុខវិជ្ជាជូនសិស្ស និងភ្ជាប់ឈ្មោះគ្រូបង្រៀនត្រឡប់ទៅវិញភ្លាមៗ
+     * ✅ ចុះឈ្មោះមុខវិជ្ជាជូនសិស្សដោយប្រើ Batch Insert (លឿនបំផុត 0ms) និងបញ្ជូនបញ្ជីសរុបត្រឡប់ទៅវិញភ្លាមៗ
      */
     public function enrollStudent(Request $request, Student $student)
     {
         try {
             $validated = $request->validate([
                 'course_ids' => 'required|array',
-                'course_ids.*' => 'required|exists:courses,id',
+                'course_ids.*' => 'required|integer',
             ]);
 
             $studentIds = array_values(array_unique(array_filter([
@@ -593,33 +567,45 @@ class AdminStudentController extends Controller
                 $student->id,
             ])));
             $targetStudentId = $student->user_id ?: $student->id;
+            $courseIds = array_values(array_unique(array_map('intval', $validated['course_ids'])));
 
-            $enrolledCourses = [];
-            foreach ($validated['course_ids'] as $courseId) {
-                $exists = Enrollment::whereIn('student_id', $studentIds)
-                    ->where('course_id', $courseId)
-                    ->exists();
+            $alreadyEnrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
+                ->whereIn('course_id', $courseIds)
+                ->pluck('course_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
 
-                if (!$exists) {
-                    $enrollment = Enrollment::create([
-                        'student_id' => $targetStudentId,
-                        'course_id' => $courseId,
-                        'enrolled_date' => now(),
-                        'status' => 'active',
-                    ]);
+            $newCourseIds = array_values(array_diff($courseIds, $alreadyEnrolledCourseIds));
 
-                    $loadedEnrollment = $enrollment->load(['course.department:id,department_name']);
-                    $enrolledCourses[] = $loadedEnrollment;
-                }
+            if (!empty($newCourseIds)) {
+                $now = now();
+                $insertRows = array_map(fn ($cid) => [
+                    'student_id' => $targetStudentId,
+                    'course_id' => $cid,
+                    'enrolled_date' => $now,
+                    'status' => 'active',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ], $newCourseIds);
+
+                Enrollment::insert($insertRows);
             }
 
-            $this->attachTeacherToEnrollments($enrolledCourses);
+            $allEnrollments = Enrollment::with([
+                'course:id,course_code,course_name,credit,department_id,teacher_id',
+                'course.department:id,department_name',
+            ])
+                ->whereIn('student_id', $studentIds)
+                ->select(['id', 'student_id', 'course_id', 'enrolled_date', 'status'])
+                ->get();
+
+            $this->attachTeacherToEnrollments($allEnrollments);
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
 
             return response()->json([
-                'data' => $enrolledCourses,
+                'data' => $allEnrollments,
                 'message' => 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្សដោយជោគជ័យ',
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -679,7 +665,6 @@ class AdminStudentController extends Controller
 
         return response()->stream(function () {
             $handle = fopen('php://output', 'w');
-            // Write UTF-8 BOM so Microsoft Excel correctly renders Khmer Unicode characters
             fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
 
             fputcsv($handle, [
@@ -765,7 +750,6 @@ class AdminStudentController extends Controller
         $skipped = [];
 
         DB::transaction(function () use ($request, $studentRoleId, &$importedCount, &$skipped) {
-            // ✅ ទាញ Emails ដែលមានរួច ក្នុង Query តែម្តង
             $emails = collect($request->students)
                 ->pluck('email')
                 ->filter()
