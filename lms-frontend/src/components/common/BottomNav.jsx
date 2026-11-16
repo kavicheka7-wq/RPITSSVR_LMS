@@ -1,5 +1,5 @@
 // src/components/common/BottomNav.jsx
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -14,14 +14,36 @@ import {
 } from '@heroicons/react/24/outline';
 
 const LAST_ADMIN_STUDENT_PATH_KEY = 'lms_admin_last_student_year_path';
+const LAST_ACTIVE_ROLE_KEY = 'lms_last_active_role';
 
-// ✅ អនុគមន៍ចាប់យកតួនាទីអ្នកប្រើប្រាស់ភ្លាមៗក្នុង 0ms (គាំទ្រទាំង Context, LocalStorage និង role_id ជាលេខ/អក្សរ)
+const readStorageSafe = (key) => {
+  try {
+    const fromSession = sessionStorage.getItem(key);
+    if (fromSession && fromSession !== 'undefined' && fromSession !== 'null') {
+      return fromSession;
+    }
+  } catch {}
+  try {
+    const fromLocal = localStorage.getItem(key);
+    if (fromLocal && fromLocal !== 'undefined' && fromLocal !== 'null') {
+      return fromLocal;
+    }
+  } catch {}
+  return null;
+};
+
+// ✅ អនុគមន៍ចាប់យកតួនាទីអ្នកប្រើប្រាស់ភ្លាមៗក្នុង 0ms (គាំទ្រទាំង Context, SessionStorage, LocalStorage និង role_id)
 const resolveRoleSync = (contextUser, hasRoleFn) => {
+  if (typeof hasRoleFn === 'function') {
+    if (hasRoleFn('Admin')) return 'admin';
+    if (hasRoleFn('Teacher')) return 'teacher';
+    if (hasRoleFn('Student')) return 'student';
+  }
+
   let u = contextUser;
   if (!u || (!u.role && !u.role_name && !u.role_id)) {
     try {
-      const raw =
-        localStorage.getItem('user') || localStorage.getItem('auth_user');
+      const raw = readStorageSafe('user') || readStorageSafe('auth_user');
       if (raw) {
         const parsed = JSON.parse(raw);
         u = parsed?.user || parsed?.data || parsed;
@@ -34,18 +56,26 @@ const resolveRoleSync = (contextUser, hasRoleFn) => {
     u?.role?.name ||
     u?.role_name ||
     (typeof u?.role === 'string' ? u.role : '') ||
+    readStorageSafe(LAST_ACTIVE_ROLE_KEY) ||
     '';
   const r = rawRole.toString().trim().toLowerCase();
   const roleIdNum = Number(u?.role_id);
 
   if (r.includes('admin') || roleIdNum === 1) return 'admin';
-  if (r.includes('teacher') || roleIdNum === 2) return 'teacher';
-  if (r.includes('student') || roleIdNum === 3) return 'student';
-
-  if (typeof hasRoleFn === 'function') {
-    if (hasRoleFn('Admin')) return 'admin';
-    if (hasRoleFn('Teacher')) return 'teacher';
-    if (hasRoleFn('Student')) return 'student';
+  if (
+    r.includes('teacher') ||
+    roleIdNum === 2 ||
+    Boolean(u?.is_teacher) ||
+    Boolean(u?.teacher)
+  ) {
+    return 'teacher';
+  }
+  if (
+    r.includes('student') ||
+    roleIdNum === 3 ||
+    Boolean(u?.student)
+  ) {
+    return 'student';
   }
 
   return '';
@@ -88,7 +118,7 @@ const BottomNav = () => {
     }
   }, [currentRole, location.pathname]);
 
-  // ✅ គណនាបញ្ជីម៉ឺនុយទាំង ៥ ដោយប្រើ Clean URLs
+  // ✅ គណនាបញ្ជីម៉ឺនុយទាំង ៥ ដោយប្រើ Clean URLs និងរាប់បញ្ចូល '/' សម្រាប់ផ្ទាំងគ្រប់គ្រង
   const navItems = useMemo(() => {
     if (currentRole === 'admin') {
       return [
@@ -96,7 +126,7 @@ const BottomNav = () => {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
           path: '/dashboard',
-          matchPaths: ['/dashboard', '/admin/dashboard'],
+          matchPaths: ['/', '/dashboard', '/admin', '/admin/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
@@ -115,6 +145,7 @@ const BottomNav = () => {
           icon: UserGroupIcon,
           path: adminStudentPath,
           matchPrefix: '/students',
+          altPrefix: '/admin/students',
         },
         {
           name: t('របាយការណ៍', 'Reports'),
@@ -131,7 +162,7 @@ const BottomNav = () => {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
           path: '/dashboard',
-          matchPaths: ['/dashboard', '/teacher/dashboard'],
+          matchPaths: ['/', '/dashboard', '/teacher', '/teacher/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
@@ -155,7 +186,7 @@ const BottomNav = () => {
           name: t('ពិន្ទុ', 'Grades'),
           icon: ChartBarIcon,
           path: '/grades',
-          matchPaths: ['/grades', '/scores', '/teacher/grades'],
+          matchPaths: ['/grades', '/scores', '/teacher/grades', '/teacher/scores'],
         },
       ];
     }
@@ -166,7 +197,7 @@ const BottomNav = () => {
           name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
           icon: HomeIcon,
           path: '/dashboard',
-          matchPaths: ['/dashboard', '/student/dashboard'],
+          matchPaths: ['/', '/dashboard', '/student', '/student/dashboard'],
         },
         {
           name: t('មុខវិជ្ជា', 'Courses'),
@@ -190,7 +221,7 @@ const BottomNav = () => {
           name: t('ពិន្ទុ', 'Scores'),
           icon: ChartBarIcon,
           path: '/grades',
-          matchPaths: ['/grades', '/scores', '/student/scores'],
+          matchPaths: ['/grades', '/scores', '/student/grades', '/student/scores'],
         },
       ];
     }
@@ -198,28 +229,62 @@ const BottomNav = () => {
     return [];
   }, [currentRole, adminStudentPath, t]);
 
+  // ✅ ឆែកស្ថានភាព Active ឱ្យត្រឹមត្រូវ ១០០% ទាំងពេលវាយ Domain ចូលដំបូង ('/' ឬ '/dashboard')
+  const checkIsItemActive = useCallback(
+    (item) => {
+      const routerPath = (location.pathname || '/').replace(/\/+$/, '') || '/';
+      const browserPath =
+        typeof window !== 'undefined'
+          ? (window.location.pathname || '/').replace(/\/+$/, '') || '/'
+          : routerPath;
+
+      if (item.matchPrefix) {
+        if (
+          routerPath.startsWith(item.matchPrefix) ||
+          browserPath.startsWith(item.matchPrefix) ||
+          (item.altPrefix &&
+            (routerPath.startsWith(item.altPrefix) ||
+              browserPath.startsWith(item.altPrefix)))
+        ) {
+          return true;
+        }
+      }
+
+      if (Array.isArray(item.matchPaths)) {
+        return item.matchPaths.some((target) => {
+          const cleanTarget = (target || '/').replace(/\/+$/, '') || '/';
+          if (cleanTarget === '/') {
+            return routerPath === '/' || browserPath === '/';
+          }
+          return (
+            routerPath === cleanTarget ||
+            routerPath.startsWith(`${cleanTarget}/`) ||
+            browserPath === cleanTarget ||
+            browserPath.startsWith(`${cleanTarget}/`)
+          );
+        });
+      }
+
+      return false;
+    },
+    [location.pathname]
+  );
+
   if (navItems.length === 0) return null;
 
-  const cleanPathname =
-    location.pathname.replace(/\/+$/, '') || '/';
-
   return (
-    <div className="md:hidden fixed bottom-5 left-0 right-0 z-40 flex justify-center px-4 pb-[env(safe-area-inset-bottom,0px)] animate-slideUp pointer-events-none select-none">
-      {/* ✅ ផ្ទៃ Background ស៊ីគ្នាជាមួយ Navbar (Student ពណ៌ Indigo/Violet, Teacher/Admin ពណ៌ Blue/Indigo) */}
+    <div className="md:hidden fixed bottom-3 sm:bottom-4 left-0 right-0 z-40 flex justify-center px-3 sm:px-4 pb-[env(safe-area-inset-bottom,0px)] animate-slideUp pointer-events-none select-none">
+      {/* ✅ ប្រអប់របារម៉ឺនុយខាងក្រោម សមាមាត្រគ្រប់ទំហំទូរស័ព្ទ (Small & Large Phones) */}
       <div
-        className={`backdrop-blur-xl border rounded-2xl p-1.5 flex items-center justify-between w-full max-w-[365px] pointer-events-auto transition-colors duration-300 ${
+        className={`backdrop-blur-xl border rounded-2xl p-1.5 flex items-center justify-between gap-1 w-full max-w-[400px] pointer-events-auto transition-all duration-300 ${
           isStudent
-            ? 'bg-gradient-to-r from-blue-950/95 via-indigo-900/95 to-violet-950/95 border-indigo-500/40 shadow-[0_12px_32px_rgba(49,46,129,0.45)]'
-            : 'bg-gradient-to-r from-blue-950/95 via-blue-900/95 to-indigo-950/95 border-blue-800/60 shadow-[0_12px_32px_rgba(30,58,138,0.45)]'
+            ? 'bg-gradient-to-r from-blue-950/95 via-indigo-900/95 to-violet-950/95 border-indigo-400/35 shadow-[0_14px_34px_rgba(30,27,75,0.55)]'
+            : 'bg-gradient-to-r from-slate-950/95 via-blue-950/95 to-indigo-950/95 border-blue-700/45 shadow-[0_14px_34px_rgba(15,23,42,0.55)]'
         }`}
       >
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isCustomActive =
-            (item.matchPrefix &&
-              cleanPathname.startsWith(item.matchPrefix)) ||
-            (Array.isArray(item.matchPaths) &&
-              item.matchPaths.includes(cleanPathname));
+          const isCustomActive = checkIsItemActive(item);
 
           return (
             <NavLink
@@ -227,12 +292,12 @@ const BottomNav = () => {
               to={item.path}
               className={({ isActive }) => {
                 const activeState = isActive || isCustomActive;
-                return `relative flex flex-col items-center justify-center py-2 px-1 w-[64px] rounded-xl transition-all duration-200 ${
+                return `relative flex-1 min-w-0 flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all duration-200 ${
                   activeState
                     ? isStudent
-                      ? 'bg-white/15 text-white shadow-inner border border-indigo-400/30'
-                      : 'bg-blue-800/60 text-white shadow-inner border border-blue-700/40'
-                    : 'text-blue-200/75 hover:text-white hover:bg-white/5'
+                      ? 'bg-white/15 text-white shadow-inner border border-yellow-400/35'
+                      : 'bg-blue-800/70 text-white shadow-inner border border-yellow-400/35'
+                    : 'text-blue-200/75 hover:text-white hover:bg-white/5 border border-transparent'
                 }`;
               }}
             >
@@ -240,18 +305,23 @@ const BottomNav = () => {
                 const activeState = isActive || isCustomActive;
                 return (
                   <>
+                    {/* ចំណុចពន្លឺពណ៌លឿងតូចនៅខាងលើពេល Active */}
+                    {activeState && (
+                      <span className="absolute top-1 right-2 h-1.5 w-1.5 rounded-full bg-yellow-400 shadow-[0_0_6px_rgba(250,204,21,0.9)]" />
+                    )}
+
                     <Icon
-                      className={`transition-all duration-200 mb-0.5 ${
+                      className={`transition-all duration-200 mb-0.5 shrink-0 ${
                         activeState
-                          ? 'h-5 w-5 stroke-[2.5] text-yellow-400 drop-shadow-md scale-110'
-                          : 'h-5 w-5 stroke-2 text-blue-200/80'
+                          ? 'h-5 w-5 stroke-[2.4] text-yellow-400 drop-shadow-md scale-105'
+                          : 'h-5 w-5 stroke-[1.9] text-blue-200/80'
                       }`}
                     />
                     <span
-                      className={`text-[10px] transition-all duration-200 truncate w-full text-center leading-snug ${
+                      className={`text-[9.5px] xs:text-[10px] transition-all duration-200 truncate w-full text-center leading-tight px-0.5 ${
                         activeState
-                          ? 'font-extrabold text-white'
-                          : 'font-medium text-blue-200/75'
+                          ? 'font-extrabold text-yellow-300'
+                          : 'font-semibold text-blue-100/80'
                       }`}
                     >
                       {item.name}

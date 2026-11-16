@@ -16,6 +16,16 @@ import {
   TrashIcon,
   SparklesIcon,
   ExclamationTriangleIcon,
+  AcademicCapIcon,
+  BookOpenIcon,
+  ClipboardDocumentListIcon,
+  ChartBarIcon,
+  FolderIcon,
+  DocumentArrowUpIcon,
+  PencilSquareIcon,
+  UserGroupIcon,
+  ShieldCheckIcon,
+  ClockIcon,
 } from '@heroicons/react/24/outline';
 import api from '../../services/api';
 
@@ -62,7 +72,10 @@ const resolveUserIdentitySync = (contextUser, hasRoleFn, pathname = '') => {
   if (!u || (!u.id && !u.user_id && !u.email)) {
     try {
       const raw =
-        localStorage.getItem('user') || localStorage.getItem('auth_user');
+        sessionStorage.getItem('user') ||
+        sessionStorage.getItem('auth_user') ||
+        localStorage.getItem('user') ||
+        localStorage.getItem('auth_user');
       if (raw) {
         const parsed = JSON.parse(raw);
         u = parsed?.user || parsed?.data || parsed;
@@ -442,8 +455,61 @@ const extractTeacherModuleNotifications = (url, resData) => {
   return batch;
 };
 
+// ✅ កំណត់រូបតំណាង (Icon) និងពណ៌តាមប្រភេទនៃសារជូនដំណឹងឱ្យមើលទៅទាក់ភ្នែកលើគ្រប់ឧបករណ៍
+const getCategoryVisuals = (category, isUnread, isStudent) => {
+  const cat = (category || '').toString().toLowerCase();
+
+  let IconComponent = SparklesIcon;
+  let unreadStyle = isStudent
+    ? 'bg-gradient-to-br from-indigo-500 to-violet-600 text-white border-indigo-400/50 shadow-indigo-500/20'
+    : 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white border-blue-400/50 shadow-blue-500/20';
+
+  if (cat.includes('quiz')) {
+    IconComponent = PencilSquareIcon;
+    unreadStyle =
+      'bg-gradient-to-br from-amber-500 to-orange-500 text-white border-amber-400/50 shadow-amber-500/20';
+  } else if (cat.includes('assignment') || cat.includes('submission')) {
+    IconComponent = DocumentArrowUpIcon;
+    unreadStyle =
+      'bg-gradient-to-br from-purple-600 to-indigo-600 text-white border-purple-400/50 shadow-purple-500/20';
+  } else if (cat.includes('grade') || cat.includes('score') || cat.includes('export')) {
+    IconComponent = ChartBarIcon;
+    unreadStyle =
+      'bg-gradient-to-br from-emerald-500 to-teal-600 text-white border-emerald-400/50 shadow-emerald-500/20';
+  } else if (cat.includes('attendance')) {
+    IconComponent = ClipboardDocumentListIcon;
+    unreadStyle =
+      'bg-gradient-to-br from-cyan-500 to-blue-600 text-white border-cyan-400/50 shadow-cyan-500/20';
+  } else if (cat.includes('lesson')) {
+    IconComponent = FolderIcon;
+    unreadStyle =
+      'bg-gradient-to-br from-blue-500 to-indigo-600 text-white border-blue-400/50 shadow-blue-500/20';
+  } else if (cat.includes('course')) {
+    IconComponent = BookOpenIcon;
+    unreadStyle =
+      'bg-gradient-to-br from-indigo-500 to-blue-600 text-white border-indigo-400/50 shadow-indigo-500/20';
+  } else if (cat.includes('student') || cat.includes('teacher')) {
+    IconComponent = UserGroupIcon;
+    unreadStyle =
+      'bg-gradient-to-br from-sky-500 to-indigo-600 text-white border-sky-400/50 shadow-sky-500/20';
+  } else if (cat.includes('security') || cat.includes('profile')) {
+    IconComponent = ShieldCheckIcon;
+    unreadStyle =
+      'bg-gradient-to-br from-rose-500 to-pink-600 text-white border-rose-400/50 shadow-rose-500/20';
+  } else if (cat.includes('department')) {
+    IconComponent = AcademicCapIcon;
+  }
+
+  return {
+    IconComponent,
+    boxClass: isUnread
+      ? `${unreadStyle} shadow-sm`
+      : 'nbell-icon-read bg-gray-100 text-gray-500 border-gray-200/80',
+  };
+};
+
 // ============================================================================
-// 📌 COMPONENT កណ្ដឹងជូនដំណឹង (NOTIFICATION BELL)
+// 📌 COMPONENT កណ្ដឹងជូនដំណឹង (NOTIFICATION BELL - Adaptive All Devices)
 // ============================================================================
 const NotificationBell = ({ isMobile = false }) => {
   const { user, hasRole } = useAuth();
@@ -594,7 +660,7 @@ const NotificationBell = ({ isMobile = false }) => {
     NOTIF_MEM_CACHE.latestPushFn = pushNotificationsBatch;
   }, [normalizedRole, pushNotificationsBatch]);
 
-  // ✅ ភ្ជាប់ API Interceptor តែ ១ គត់ក្នុងប្រព័ន្ធ (មិនដាច់នៅពេលបិទ/បើកម៉ឺនុយទូរស័ព្ទ)
+  // ✅ ភ្ជាប់ API Interceptor តែ ១ គត់ក្នុងប្រព័ន្ធ
   useEffect(() => {
     NOTIF_MEM_CACHE.mountedInstances += 1;
 
@@ -754,15 +820,17 @@ const NotificationBell = ({ isMobile = false }) => {
 
   return (
     <Menu as="div" className="relative">
-      {/* ✅ ប៊ូតុងកណ្ដឹង៖ ពណ៌ និងទំហំស៊ីគ្នា ១០០% ជាមួយប៊ូតុងថ្ងៃ-យប់ និងប៊ូតុងភាសាលើ Navbar */}
+      {/* ✅ ប៊ូតុងកណ្ដឹង៖ សមាមាត្រជាមួយប៊ូតុង Navbar ទាំងលើទូរស័ព្ទ, iPad, Laptop និង Desktop */}
       <Menu.Button
         onClick={() => setShowClearPopover(false)}
         className={
           isMobile
-            ? `relative p-2 rounded-xl text-yellow-300/80 hover:text-yellow-300 transition-all cursor-pointer focus:outline-none ${
-                isStudent ? 'hover:bg-white/10' : 'hover:bg-blue-800/50'
+            ? `relative p-2 rounded-xl border text-yellow-300/90 hover:text-yellow-300 transition-all cursor-pointer focus:outline-none ${
+                isStudent
+                  ? 'bg-white/10 border-indigo-400/30 hover:bg-white/15'
+                  : 'bg-blue-800/40 border-blue-600/30 hover:bg-blue-800/60'
               }`
-            : `relative p-2.5 rounded-xl border transition-all text-white cursor-pointer focus:outline-none shadow-sm ${
+            : `relative p-2.5 rounded-xl border transition-all text-white cursor-pointer focus:outline-none shadow-sm hover:scale-105 ${
                 isStudent
                   ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35 backdrop-blur-md'
                   : 'bg-blue-800/50 hover:bg-blue-700/60 border-blue-600/30'
@@ -775,10 +843,10 @@ const NotificationBell = ({ isMobile = false }) => {
           <span
             className={
               isMobile
-                ? `absolute top-0.5 right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-extrabold flex items-center justify-center border ${
+                ? `absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-rose-500 text-white text-[9.5px] font-black flex items-center justify-center border-2 shadow-xs ${
                     isStudent ? 'border-indigo-950' : 'border-blue-900'
                   }`
-                : `absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-extrabold flex items-center justify-center border-2 shadow-md animate-pulse ${
+                : `absolute -top-1.5 -right-1.5 min-w-[19px] h-[19px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center border-2 shadow-md animate-pulse ${
                     isStudent ? 'border-indigo-950' : 'border-blue-900'
                   }`
             }
@@ -790,63 +858,74 @@ const NotificationBell = ({ isMobile = false }) => {
 
       <Transition
         as={Fragment}
-        enter="transition ease-out duration-100"
-        enterFrom="transform opacity-0 scale-95"
-        enterTo="transform opacity-100 scale-100"
-        leave="transition ease-in duration-75"
-        leaveFrom="transform opacity-100 scale-100"
-        leaveTo="transform opacity-0 scale-95"
+        enter="transition ease-out duration-150"
+        enterFrom="transform opacity-0 scale-95 translate-y-1"
+        enterTo="transform opacity-100 scale-100 translate-y-0"
+        leave="transition ease-in duration-100"
+        leaveFrom="transform opacity-100 scale-100 translate-y-0"
+        leaveTo="transform opacity-0 scale-95 translate-y-1"
       >
-        <Menu.Items className="nbell-dropdown origin-top-right absolute right-0 mt-2.5 w-[calc(100vw-1.5rem)] max-w-[20rem] sm:max-w-[24rem] sm:w-96 rounded-2xl shadow-2xl bg-white ring-1 ring-black/5 focus:outline-none z-50 border border-gray-100">
+        {/* ✅ លើទូរស័ព្ទ (Phone < 640px) ប្រើ fixed left-3 right-3 ដើម្បីកុំឱ្យដាច់គែមអេក្រង់ រីឯលើ iPad/Laptop/Desktop (sm:+) ប្រើ absolute right-0 */}
+        <Menu.Items className="nbell-dropdown fixed sm:absolute left-3 right-3 sm:left-auto sm:right-0 top-[66px] sm:top-auto sm:mt-2.5 w-auto sm:w-[360px] md:w-[380px] lg:w-[400px] rounded-2xl shadow-[0_20px_50px_rgba(15,23,42,0.25)] bg-white ring-1 ring-black/5 focus:outline-none z-50 border border-gray-100 overflow-hidden">
+          {/* ក្បាលប្រអប់សារជូនដំណឹង */}
           <div
-            className={`nbell-header relative px-4 py-3.5 border-b border-gray-100 rounded-t-2xl flex items-center justify-between ${
+            className={`nbell-header relative px-4 py-3.5 border-b border-gray-100 flex items-center justify-between gap-2 ${
               isStudent
-                ? 'bg-gradient-to-r from-indigo-50 to-purple-50'
-                : 'bg-gradient-to-r from-blue-50 to-indigo-50'
+                ? 'bg-gradient-to-r from-indigo-50/90 to-purple-50/90'
+                : 'bg-gradient-to-r from-blue-50/90 to-indigo-50/90'
             }`}
           >
-            <div className="flex items-center gap-2">
-              <BellIcon
-                className={`h-5 w-5 ${
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div
+                className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 border shadow-2xs ${
                   isStudent
-                    ? 'text-indigo-600 dark:text-indigo-400'
-                    : 'text-blue-600 dark:text-blue-400'
+                    ? 'bg-indigo-600 text-white border-indigo-500'
+                    : 'bg-blue-600 text-white border-blue-500'
                 }`}
-              />
-              <div>
-                <h3 className="nbell-title text-sm font-extrabold text-gray-900">
-                  {t('សារជូនដំណឹង', 'Notifications')}
-                </h3>
+              >
+                <BellIcon className="h-5 w-5 text-yellow-300" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <h3 className="nbell-title text-sm font-extrabold text-gray-900 truncate">
+                    {t('សារជូនដំណឹង', 'Notifications')}
+                  </h3>
+                  {unreadCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white">
+                      {unreadCount} {t('ថ្មី', 'New')}
+                    </span>
+                  )}
+                </div>
                 <p
-                  className={`text-[10px] font-bold uppercase tracking-wider ${
+                  className={`text-[10px] font-bold uppercase tracking-wider truncate mt-0.5 ${
                     isStudent
                       ? 'text-indigo-600 dark:text-indigo-400'
                       : 'text-blue-600 dark:text-blue-400'
                   }`}
                 >
-                  {roleLabel} {t('ផ្ទាល់ខ្លួន', 'Portal')} •{' '}
-                  {NOTIFICATION_EXPIRE_DAYS} {t('ថ្ងៃ', 'Days')}
+                  {roleLabel} • {NOTIFICATION_EXPIRE_DAYS} {t('ថ្ងៃ', 'Days')}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
               {unreadCount > 0 && (
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setShowClearPopover(false);
                     markAllAsRead();
                   }}
-                  className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
+                  className={`px-2.5 py-1.5 text-[11px] font-extrabold rounded-xl border transition-colors flex items-center gap-1 cursor-pointer ${
                     isStudent
-                      ? 'text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100/70 dark:hover:bg-indigo-900/30'
-                      : 'text-blue-600 dark:text-blue-400 hover:bg-blue-100/70 dark:hover:bg-blue-900/30'
+                      ? 'bg-white/80 dark:bg-slate-800 border-indigo-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100/70'
+                      : 'bg-white/80 dark:bg-slate-800 border-blue-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 hover:bg-blue-100/70'
                   }`}
                   title={t('កំណត់ថាអានរួចទាំងអស់', 'Mark all as read')}
                 >
-                  <CheckIcon className="h-3.5 w-3.5" />
-                  {t('អានទាំងអស់', 'Mark read')}
+                  <CheckIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+                  <span>{t('អានទាំងអស់', 'Read all')}</span>
                 </button>
               )}
               {notifications.length > 0 && (
@@ -856,10 +935,10 @@ const NotificationBell = ({ isMobile = false }) => {
                     e.stopPropagation();
                     setShowClearPopover((prev) => !prev);
                   }}
-                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                  className={`p-2 rounded-xl border transition-all cursor-pointer ${
                     showClearPopover
-                      ? 'bg-rose-600 text-white shadow-xs scale-105'
-                      : 'text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-xs scale-105'
+                      : 'bg-white/80 dark:bg-slate-800 border-gray-200/80 dark:border-slate-700 text-gray-500 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/40'
                   }`}
                   title={t('សម្អាតទាំងអស់', 'Clear all')}
                 >
@@ -868,6 +947,7 @@ const NotificationBell = ({ isMobile = false }) => {
               )}
             </div>
 
+            {/* ផ្ទាំងបញ្ជាក់ការលុបសារជូនដំណឹងទាំងអស់ */}
             <Transition
               show={showClearPopover && notifications.length > 0}
               as={Fragment}
@@ -880,20 +960,20 @@ const NotificationBell = ({ isMobile = false }) => {
             >
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="nbell-popover absolute right-3 top-13 z-30 w-60 bg-white rounded-2xl shadow-[0_12px_32px_rgba(15,23,42,0.18)] border border-rose-100 p-3.5"
+                className="nbell-popover absolute right-3 top-14 z-30 w-64 bg-white rounded-2xl shadow-[0_12px_32px_rgba(15,23,42,0.22)] border border-rose-100 p-3.5"
               >
-                <div className="nbell-popover-arrow absolute -top-1.5 right-3 w-3 h-3 bg-white border-t border-l border-rose-100 rotate-45" />
+                <div className="nbell-popover-arrow absolute -top-1.5 right-3.5 w-3 h-3 bg-white border-t border-l border-rose-100 rotate-45" />
 
                 <div className="relative z-10">
                   <div className="flex items-start gap-2.5">
-                    <div className="p-1.5 bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 rounded-xl border border-rose-100 dark:border-rose-800/50 shrink-0">
+                    <div className="p-2 bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 rounded-xl border border-rose-100 dark:border-rose-800/50 shrink-0">
                       <ExclamationTriangleIcon className="h-4 w-4" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="nbell-title text-xs font-extrabold text-gray-900 leading-snug">
                         {t('លុបសារទាំងអស់មែនទេ?', 'Clear all notifications?')}
                       </p>
-                      <p className="nbell-desc text-[10px] font-medium text-gray-500 mt-0.5 leading-relaxed">
+                      <p className="nbell-desc text-[11px] font-medium text-gray-500 mt-0.5 leading-relaxed">
                         {t(
                           `សារទាំង ${notifications.length} នឹងត្រូវសម្អាតចេញ។`,
                           `All ${notifications.length} items will be removed.`
@@ -902,21 +982,21 @@ const NotificationBell = ({ isMobile = false }) => {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-end gap-1.5 mt-3 pt-2.5 border-t border-gray-100 dark:border-slate-700">
+                  <div className="flex items-center justify-end gap-2 mt-3 pt-2.5 border-t border-gray-100 dark:border-slate-700">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         setShowClearPopover(false);
                       }}
-                      className="nbell-cancel-btn px-2.5 py-1 text-[11px] font-bold text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200/80 rounded-lg transition-colors cursor-pointer"
+                      className="nbell-cancel-btn px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200/80 rounded-xl transition-colors cursor-pointer"
                     >
                       {t('បោះបង់', 'Cancel')}
                     </button>
                     <button
                       type="button"
                       onClick={confirmClearAllNotifications}
-                      className="px-3 py-1 text-[11px] font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-xs transition-colors cursor-pointer"
+                      className="px-3.5 py-1.5 text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors cursor-pointer"
                     >
                       {t('លុបចោល', 'Delete')}
                     </button>
@@ -926,84 +1006,89 @@ const NotificationBell = ({ isMobile = false }) => {
             </Transition>
           </div>
 
+          {/* បញ្ជីសារជូនដំណឹង (Adaptive Max-Height សម្រាប់ទូរស័ព្ទ, iPad, Laptop និង Desktop) */}
           <div
             onClick={() => {
               if (showClearPopover) setShowClearPopover(false);
             }}
-            className="nbell-list max-h-80 overflow-y-auto rounded-b-2xl"
+            className="nbell-list max-h-[65vh] sm:max-h-[380px] lg:max-h-[420px] overflow-y-auto"
           >
             {notifications.length === 0 ? (
-              <div className="py-12 px-4 text-center">
-                <div className="nbell-empty-icon h-12 w-12 rounded-full bg-gray-50 flex items-center justify-center mx-auto mb-2.5 border border-gray-100">
-                  <BellIcon className="h-6 w-6 text-gray-300 dark:text-slate-500" />
+              <div className="py-12 px-5 text-center">
+                <div className="nbell-empty-icon h-14 w-14 rounded-2xl bg-gray-50 flex items-center justify-center mx-auto mb-3 border border-gray-100 shadow-2xs">
+                  <BellIcon className="h-7 w-7 text-gray-300 dark:text-slate-500" />
                 </div>
-                <p className="nbell-title text-sm font-bold text-gray-600">
+                <p className="nbell-title text-sm font-extrabold text-gray-700">
                   {t('មិនទាន់មានសារជូនដំណឹងថ្មីទេ', 'No notifications yet')}
                 </p>
-                <p className="nbell-desc text-xs text-gray-400 mt-1">
+                <p className="nbell-desc text-xs text-gray-400 mt-1 max-w-xs mx-auto leading-relaxed">
                   {t(
-                    'រាល់សកម្មភាពក្នុងផ្ទាំងរបស់អ្នកនឹងបង្ហាញនៅទីនេះ',
-                    'Activities in your portal will appear here'
+                    'រាល់សកម្មភាពក្នុងផ្ទាំងរបស់អ្នកនឹងបង្ហាញនៅទីនេះដោយស្វ័យប្រវត្តិ។',
+                    'Activities in your portal will appear here automatically.'
                   )}
                 </p>
               </div>
             ) : (
-              notifications.map((notif) => (
-                <Menu.Item key={notif.id}>
-                  {({ active }) => (
-                    <button
-                      type="button"
-                      onClick={() => handleNotificationClick(notif)}
-                      className={`nbell-item w-full text-left px-4 py-3.5 transition-colors flex items-start gap-3 cursor-pointer ${
-                        active
-                          ? isStudent
-                            ? 'bg-indigo-50/60 dark:bg-slate-800/90'
-                            : 'bg-blue-50/60 dark:bg-slate-800/90'
-                          : !notif.read
-                          ? isStudent
-                            ? 'nbell-item-unread bg-indigo-50/30'
-                            : 'nbell-item-unread bg-blue-50/30'
-                          : 'bg-white dark:bg-slate-900'
-                      }`}
-                    >
-                      <div
-                        className={`mt-0.5 p-2 rounded-xl shrink-0 border ${
-                          !notif.read
+              notifications.map((notif) => {
+                const isUnread = !notif.read;
+                const { IconComponent, boxClass } = getCategoryVisuals(
+                  notif.category,
+                  isUnread,
+                  isStudent
+                );
+
+                return (
+                  <Menu.Item key={notif.id}>
+                    {({ active }) => (
+                      <button
+                        type="button"
+                        onClick={() => handleNotificationClick(notif)}
+                        className={`nbell-item w-full text-left px-4 py-3.5 transition-colors flex items-start gap-3.5 cursor-pointer ${
+                          active
                             ? isStudent
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                              : 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                            : 'nbell-icon-read bg-gray-100 text-gray-500 border-gray-200'
+                              ? 'bg-indigo-50/70 dark:bg-slate-800/90'
+                              : 'bg-blue-50/70 dark:bg-slate-800/90'
+                            : isUnread
+                            ? isStudent
+                              ? 'nbell-item-unread bg-indigo-50/35'
+                              : 'nbell-item-unread bg-blue-50/35'
+                            : 'bg-white dark:bg-slate-900'
                         }`}
                       >
-                        <SparklesIcon className="h-4 w-4" />
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <p
-                            className={`text-xs truncate ${
-                              !notif.read
-                                ? 'nbell-title font-extrabold text-gray-900'
-                                : 'nbell-title-read font-bold text-gray-700'
-                            }`}
-                          >
-                            {t(notif.titleKm, notif.titleEn)}
-                          </p>
-                          {!notif.read && (
-                            <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0 mt-1"></span>
-                          )}
+                        <div
+                          className={`mt-0.5 h-9 w-9 rounded-xl flex items-center justify-center shrink-0 border transition-transform ${boxClass}`}
+                        >
+                          <IconComponent className="h-4 w-4 stroke-[2.2]" />
                         </div>
-                        <p className="nbell-desc text-[11px] font-medium text-gray-500 mt-0.5 line-clamp-2 leading-relaxed">
-                          {t(notif.descKm, notif.descEn)}
-                        </p>
-                        <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 mt-1.5 block">
-                          {formatNotifTime(notif.time)}
-                        </span>
-                      </div>
-                    </button>
-                  )}
-                </Menu.Item>
-              ))
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <p
+                              className={`text-xs sm:text-[13px] leading-snug line-clamp-1 ${
+                                isUnread
+                                  ? 'nbell-title font-extrabold text-gray-900'
+                                  : 'nbell-title-read font-bold text-gray-700'
+                              }`}
+                            >
+                              {t(notif.titleKm, notif.titleEn)}
+                            </p>
+                            {isUnread && (
+                              <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0 mt-1.5 shadow-[0_0_6px_rgba(244,63,94,0.8)]"></span>
+                            )}
+                          </div>
+                          <p className="nbell-desc text-[11.5px] font-medium text-gray-500 mt-0.5 line-clamp-2 leading-relaxed">
+                            {t(notif.descKm, notif.descEn)}
+                          </p>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-gray-400 dark:text-slate-500 mt-1.5">
+                            <ClockIcon className="h-3 w-3 shrink-0" />
+                            <span>{formatNotifTime(notif.time)}</span>
+                          </span>
+                        </div>
+                      </button>
+                    )}
+                  </Menu.Item>
+                );
+              })
             )}
           </div>
         </Menu.Items>
@@ -1012,6 +1097,16 @@ const NotificationBell = ({ isMobile = false }) => {
       <style>{`
         .nbell-item + .nbell-item {
           border-top: 1px solid #f1f5f9;
+        }
+        .nbell-list::-webkit-scrollbar {
+          width: 4px;
+        }
+        .nbell-list::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .nbell-list::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.35);
+          border-radius: 10px;
         }
 
         html.dark .nbell-dropdown,

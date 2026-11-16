@@ -154,7 +154,7 @@ const Sidebar = () => {
     return () => window.removeEventListener('resize', updatePosition);
   }, []);
 
-  // បិទផ្ទាំងផុសដោយស្វ័យប្រវត្តិ ពេលចុចក្រៅប្រអប់ (សម្រាប់អេក្រង់ Tablet ទាំង Mouse និង Touch)
+  // បិទផ្ទាំងផុសដោយស្វ័យប្រវត្តិ ពេលចុចក្រៅប្រអប់ (សម្រាប់អេក្រង់ Tablet)
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (
@@ -190,7 +190,7 @@ const Sidebar = () => {
   }, [location.pathname, location.search]);
 
   // ==========================================
-  // NAVIGATION CONFIGURATION (CLEAN URLS + ALT PATHS)
+  // NAVIGATION CONFIGURATION (CLEAN URLS + ALT PATHS + SHORT LABELS FOR IPAD)
   // ==========================================
   const NAV_CONFIG = useMemo(
     () => ({
@@ -199,30 +199,35 @@ const Sidebar = () => {
         items: [
           {
             name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
+            shortName: t('ទំព័រដើម', 'Home'),
             icon: HomeIcon,
             path: '/dashboard',
             altPaths: ['/', '/admin', '/admin/dashboard'],
           },
           {
             name: t('ដេប៉ាតឺម៉ង់', 'Departments'),
+            shortName: t('ដេប៉ាតឺម៉ង់', 'Depts'),
             icon: BuildingLibraryIcon,
             path: '/departments',
             altPaths: ['/admin/departments'],
           },
           {
             name: t('គ្រូបង្រៀន', 'Teachers'),
+            shortName: t('គ្រូបង្រៀន', 'Teachers'),
             icon: AcademicCapIcon,
             path: '/teachers',
             altPaths: ['/admin/teachers'],
           },
           {
             name: t('មុខវិជ្ជា', 'Courses'),
+            shortName: t('មុខវិជ្ជា', 'Courses'),
             icon: BookOpenIcon,
             path: '/courses',
             altPaths: ['/admin/courses'],
           },
           {
             name: t('គ្រប់គ្រងសិស្ស', 'Manage Students'),
+            shortName: t('សិស្ស', 'Students'),
             icon: UserGroupIcon,
             path: '/students',
             altPaths: ['/admin/students'],
@@ -255,6 +260,7 @@ const Sidebar = () => {
           },
           {
             name: t('របាយការណ៍', 'Reports'),
+            shortName: t('របាយការណ៍', 'Reports'),
             icon: ChartBarIcon,
             path: '/reports',
             altPaths: ['/admin/reports'],
@@ -266,48 +272,56 @@ const Sidebar = () => {
         items: [
           {
             name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
+            shortName: t('ទំព័រដើម', 'Home'),
             icon: HomeIcon,
             path: '/dashboard',
             altPaths: ['/', '/teacher', '/teacher/dashboard'],
           },
           {
             name: t('មុខវិជ្ជា', 'Courses'),
+            shortName: t('មុខវិជ្ជា', 'Courses'),
             icon: BookOpenIcon,
             path: '/courses',
             altPaths: ['/teacher/courses'],
           },
           {
             name: t('មេរៀន', 'Lessons'),
+            shortName: t('មេរៀន', 'Lessons'),
             icon: FolderIcon,
             path: '/lessons',
             altPaths: ['/teacher/lessons'],
           },
           {
             name: t('សិស្ស', 'Students'),
+            shortName: t('សិស្ស', 'Students'),
             icon: UsersIcon,
             path: '/students',
             altPaths: ['/teacher/students'],
           },
           {
             name: t('វត្តមានសិស្ស', 'Attendance'),
+            shortName: t('វត្តមាន', 'Attend'),
             icon: ClipboardDocumentListIcon,
             path: '/attendance',
             altPaths: ['/teacher/attendance'],
           },
           {
             name: t('ពិន្ទុ', 'Grades'),
+            shortName: t('ពិន្ទុ', 'Grades'),
             icon: ChartBarIcon,
             path: '/grades',
             altPaths: ['/scores', '/teacher/grades', '/teacher/scores'],
           },
           {
             name: t('កិច្ចការ', 'Assignments'),
+            shortName: t('កិច្ចការ', 'Tasks'),
             icon: DocumentArrowUpIcon,
             path: '/assignments',
             altPaths: ['/teacher/assignments'],
           },
           {
             name: t('កម្រងសំណួរ', 'Quizzes'),
+            shortName: t('សំណួរ', 'Quizzes'),
             icon: PencilSquareIcon,
             path: '/quizzes',
             altPaths: ['/teacher/quizzes'],
@@ -319,42 +333,49 @@ const Sidebar = () => {
         items: [
           {
             name: t('ផ្ទាំងគ្រប់គ្រង', 'Dashboard'),
+            shortName: t('ទំព័រដើម', 'Home'),
             icon: HomeIcon,
             path: '/dashboard',
             altPaths: ['/', '/student', '/student/dashboard'],
           },
           {
             name: t('មុខវិជ្ជា', 'Courses'),
+            shortName: t('មុខវិជ្ជា', 'Courses'),
             icon: BookOpenIcon,
             path: '/courses',
             altPaths: ['/student/courses'],
           },
           {
             name: t('មេរៀន', 'Lessons'),
+            shortName: t('មេរៀន', 'Lessons'),
             icon: FolderIcon,
             path: '/lessons',
             altPaths: ['/student/lessons'],
           },
           {
             name: t('វត្តមាន', 'Attendance'),
+            shortName: t('វត្តមាន', 'Attend'),
             icon: ClipboardDocumentListIcon,
             path: '/attendance',
             altPaths: ['/student/attendance'],
           },
           {
             name: t('ពិន្ទុ', 'Grades'),
+            shortName: t('ពិន្ទុ', 'Grades'),
             icon: ChartBarIcon,
             path: '/grades',
             altPaths: ['/scores', '/student/grades', '/student/scores'],
           },
           {
             name: t('កិច្ចការ', 'Assignments'),
+            shortName: t('កិច្ចការ', 'Tasks'),
             icon: DocumentArrowUpIcon,
             path: '/assignments',
             altPaths: ['/student/assignments'],
           },
           {
             name: t('កម្រងសំណួរ', 'Quizzes'),
+            shortName: t('សំណួរ', 'Quizzes'),
             icon: PencilSquareIcon,
             path: '/quizzes',
             altPaths: ['/student/quizzes'],
@@ -428,20 +449,24 @@ const Sidebar = () => {
 
   return (
     <>
-      {/* ✅ Spacer Div សម្រាប់ទប់ទទឹងជួរឈរខាងឆ្វេងឱ្យនៅដដែល */}
+      {/* ================================================================== */}
+      {/* 📌 1. SPACER DIV សម្រាប់ទប់ទទឹងជួរឈរខាងឆ្វេងលើ iPad, Laptop, Desktop */}
+      {/* ================================================================== */}
       <div
         ref={spacerRef}
-        className="hidden md:block md:w-20 lg:w-[260px] shrink-0 ml-4 mr-2 my-3 pointer-events-none select-none"
+        className="hidden md:block md:w-[88px] lg:w-[252px] xl:w-[264px] shrink-0 ml-3 lg:ml-4 mr-2 my-3 pointer-events-none select-none transition-all duration-300"
         aria-hidden="true"
       />
 
-      {/* ✅ Modern V18 Floating Sidebar */}
+      {/* ================================================================== */}
+      {/* 📌 2. FLOATING SIDEBAR សម្រាប់ iPad, Tablet, Laptop និង Desktop     */}
+      {/* ================================================================== */}
       <aside
         style={{
           top: `${topOffset}px`,
           height: `calc(100vh - ${topOffset + 16}px)`,
         }}
-        className={`hidden md:flex md:w-20 lg:w-[260px] fixed left-4 rounded-[1.75rem] flex-col shrink-0 transition-all duration-300 z-30 shadow-[0_20px_50px_rgba(8,15,40,0.45)] md:overflow-visible lg:overflow-hidden ${
+        className={`hidden md:flex md:w-[88px] lg:w-[252px] xl:w-[264px] fixed left-3 lg:left-4 rounded-[1.75rem] flex-col shrink-0 transition-all duration-300 z-30 shadow-[0_20px_50px_rgba(8,15,40,0.45)] md:overflow-visible lg:overflow-hidden ${
           isStudent
             ? 'bg-gradient-to-b from-blue-950 via-indigo-950 to-violet-950 border border-indigo-400/25'
             : 'bg-gradient-to-b from-slate-950 via-blue-950 to-indigo-950 border border-blue-800/45'
@@ -455,21 +480,27 @@ const Sidebar = () => {
         </div>
 
         <div className="relative z-10 flex flex-col h-full w-full py-2.5">
-          {/* ============================================================== */}
-          {/* 📌 1. MODERN HEADER LOGO & ROLE BADGE                          */}
-          {/* ============================================================== */}
-          <div className="px-3.5 lg:px-5 pt-3.5 pb-2 shrink-0">
-            <div className="flex items-center justify-center lg:justify-start gap-3.5">
+          {/* ក្បាល Sidebar (Logo + ផ្លាកតួនាទី) */}
+          <div className="px-2.5 lg:px-5 pt-3 pb-2 shrink-0">
+            <div className="flex flex-col lg:flex-row items-center justify-center lg:justify-start gap-1.5 lg:gap-3.5">
               <div
-                className={`group relative h-11 w-11 rounded-2xl flex items-center justify-center shadow-lg shrink-0 border transition-transform duration-300 hover:scale-105 ${
+                className={`group relative h-10 w-10 lg:h-11 lg:w-11 rounded-2xl flex items-center justify-center shadow-lg shrink-0 border transition-transform duration-300 hover:scale-105 ${
                   isStudent
                     ? 'bg-gradient-to-br from-indigo-500 via-blue-600 to-violet-600 border-indigo-300/40 shadow-indigo-500/25'
                     : 'bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 border-blue-300/40 shadow-blue-500/25'
                 }`}
               >
-                <AcademicCapIcon className="h-6 w-6 stroke-[2.2] text-yellow-300" />
+                <AcademicCapIcon className="h-5 w-5 lg:h-6 lg:w-6 stroke-[2.2] text-yellow-300" />
               </div>
 
+              {/* លើ iPad/Tablet បង្ហាញផ្លាកតួនាទីតូចស្អាតនៅក្រោម Logo */}
+              {section && (
+                <span className="hidden md:inline-flex lg:hidden items-center px-2 py-0.5 rounded-full text-[9.5px] font-extrabold bg-white/10 text-yellow-300 border border-white/15 truncate max-w-[76px]">
+                  {section.label}
+                </span>
+              )}
+
+              {/* លើ Laptop/Desktop បង្ហាញឈ្មោះពេញ */}
               <div className="hidden lg:block min-w-0">
                 <div className="flex items-center gap-1.5">
                   <p className="text-[15.5px] font-black text-white tracking-wide truncate leading-tight">
@@ -498,10 +529,8 @@ const Sidebar = () => {
             )}
           </div>
 
-          {/* ============================================================== */}
-          {/* 📌 2. NAVIGATION LINKS (V18 Smooth Micro-Interactions)         */}
-          {/* ============================================================== */}
-          <nav className="sidebar-nav px-3 lg:px-4 pt-1.5 pb-3 flex-1 space-y-1.5 md:overflow-visible lg:overflow-y-auto">
+          {/* បញ្ជីម៉ឺនុយ (លើ iPad បង្ហាញ Icon + អក្សរខ្លីពីក្រោម, លើ Laptop/Desktop បង្ហាញជួរដេកពេញ) */}
+          <nav className="sidebar-nav px-2 lg:px-4 pt-1.5 pb-3 flex-1 space-y-1.5 overflow-y-auto">
             {uniqueNavItems.map((item) => {
               // ១. ប៊ូតុងមានម៉ឺនុយរង (គ្រប់គ្រងសិស្ស សម្រាប់ Admin)
               if (item.children) {
@@ -517,17 +546,17 @@ const Sidebar = () => {
                     <button
                       type="button"
                       onClick={() => setOpenPopover(isPopoverOpen ? null : item.path)}
-                      className={`w-full group relative flex items-center justify-center lg:justify-between p-2 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 cursor-pointer ${
+                      className={`w-full group relative flex flex-col lg:flex-row items-center justify-center lg:justify-between py-2 px-1.5 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 cursor-pointer ${
                         isParentActive || isPopoverOpen
                           ? 'bg-gradient-to-r from-white/15 to-white/[0.06] backdrop-blur-md text-white font-extrabold border-white/20 shadow-lg'
                           : 'border-transparent text-blue-100/80 font-semibold hover:bg-white/[0.07] hover:text-white lg:hover:translate-x-1'
                       }`}
                     >
                       {(isParentActive || isPopoverOpen) && (
-                        <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
                       )}
 
-                      <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex flex-col lg:flex-row items-center gap-1 lg:gap-3 min-w-0">
                         <div
                           className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200 ${
                             isParentActive || isPopoverOpen
@@ -544,6 +573,19 @@ const Sidebar = () => {
                             aria-hidden="true"
                           />
                         </div>
+
+                        {/* អក្សរខ្លីនៅក្រោម Icon សម្រាប់អេក្រង់ iPad / Tablet */}
+                        <span
+                          className={`hidden md:block lg:hidden text-[10px] leading-tight text-center truncate max-w-[68px] ${
+                            isParentActive || isPopoverOpen
+                              ? 'text-yellow-300 font-extrabold'
+                              : 'text-blue-100/85 font-bold'
+                          }`}
+                        >
+                          {item.shortName || item.name}
+                        </span>
+
+                        {/* អក្សរពេញសម្រាប់អេក្រង់ Laptop / Desktop */}
                         <span className="truncate hidden lg:inline leading-relaxed">
                           {item.name}
                         </span>
@@ -558,18 +600,11 @@ const Sidebar = () => {
                           }`}
                         />
                       </div>
-
-                      {/* Tablet Hover Tooltip */}
-                      {!isPopoverOpen && (
-                        <span className="hidden md:group-hover:block lg:group-hover:hidden absolute left-full ml-4 px-3.5 py-2 bg-slate-900/95 backdrop-blur-md text-white text-[13px] font-bold rounded-xl shadow-xl border border-white/15 whitespace-nowrap z-50 pointer-events-none">
-                          {item.name}
-                        </span>
-                      )}
                     </button>
 
                     {/* ម៉ឺនុយរង (ឆ្នាំទី១ - ឆ្នាំទី៤) */}
                     {isPopoverOpen && (
-                      <div className="absolute left-full top-0 ml-3 w-52 bg-slate-950/95 backdrop-blur-xl border border-white/15 rounded-2xl shadow-[0_12px_32px_rgba(0,0,0,0.45)] p-2 z-50 lg:static lg:ml-6 lg:mt-1.5 lg:w-auto lg:bg-transparent lg:backdrop-blur-none lg:border-0 lg:border-l-2 lg:border-white/15 lg:rounded-none lg:shadow-none lg:p-0 lg:pl-3.5 animate-dropDown">
+                      <div className="md:mt-1.5 md:pl-2 md:border-l-2 md:border-white/15 lg:ml-6 lg:pl-3.5 animate-dropDown">
                         <div className="flex flex-col space-y-1 relative z-10">
                           {item.children.map((sub) => {
                             const isSubActive =
@@ -586,7 +621,7 @@ const Sidebar = () => {
                                 onClick={() => {
                                   if (window.innerWidth < 1024) setOpenPopover(null);
                                 }}
-                                className={`flex items-center justify-between px-3.5 py-2 rounded-xl text-[13.5px] transition-all duration-200 ${
+                                className={`flex items-center justify-center lg:justify-between px-2 lg:px-3.5 py-1.5 lg:py-2 rounded-xl text-[11px] lg:text-[13.5px] transition-all duration-200 ${
                                   isSubActive
                                     ? 'bg-white/15 text-yellow-300 font-extrabold border border-white/20 shadow-xs'
                                     : 'text-blue-100/75 hover:bg-white/[0.08] hover:text-white lg:hover:translate-x-1 font-bold border border-transparent'
@@ -594,7 +629,7 @@ const Sidebar = () => {
                               >
                                 <span className="truncate leading-relaxed">{sub.name}</span>
                                 {isSubActive && (
-                                  <span className="h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.9)] shrink-0"></span>
+                                  <span className="hidden lg:block h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.9)] shrink-0"></span>
                                 )}
                               </Link>
                             );
@@ -606,7 +641,7 @@ const Sidebar = () => {
                 );
               }
 
-              // ✅ ២. ម៉ឺនុយធម្មតា (សម្រាប់ Admin, Teacher, Student) ឆែកទាំង isActive របស់ NavLink និង checkIsNavItemActive
+              // ២. ម៉ឺនុយធម្មតា (សម្រាប់ Admin, Teacher, Student)
               const isCustomActive = checkIsNavItemActive(item);
 
               return (
@@ -615,7 +650,7 @@ const Sidebar = () => {
                   to={item.path}
                   className={({ isActive }) => {
                     const activeState = isActive || isCustomActive;
-                    return `group relative flex items-center justify-center lg:justify-start gap-3 p-2 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 ${
+                    return `group relative flex flex-col lg:flex-row items-center justify-center lg:justify-start gap-1 lg:gap-3 py-2 px-1.5 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 ${
                       activeState
                         ? 'bg-gradient-to-r from-white/15 to-white/[0.06] backdrop-blur-md text-white font-extrabold border-white/20 shadow-lg'
                         : 'border-transparent text-blue-100/80 font-semibold hover:bg-white/[0.07] hover:text-white lg:hover:translate-x-1'
@@ -626,9 +661,9 @@ const Sidebar = () => {
                     const activeState = isActive || isCustomActive;
                     return (
                       <>
-                        {/* របារពន្លឺតូចនៅគែមឆ្វេងពេល Active */}
+                        {/* របារពន្លឺតូចនៅគែមឆ្វេងពេល Active (បង្ហាញទាំងលើ iPad និង Desktop) */}
                         {activeState && (
-                          <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
+                          <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.9)]" />
                         )}
 
                         {/* ប្រអប់រូបតំណាងបែប V18 Glass Box */}
@@ -647,6 +682,18 @@ const Sidebar = () => {
                           />
                         </div>
 
+                        {/* អក្សរខ្លីនៅក្រោម Icon សម្រាប់អេក្រង់ iPad / Tablet (មិនបាច់ប្រើ Mouse Hover) */}
+                        <span
+                          className={`hidden md:block lg:hidden text-[10px] leading-tight text-center truncate max-w-[68px] ${
+                            activeState
+                              ? 'text-yellow-300 font-extrabold'
+                              : 'text-blue-100/85 font-bold group-hover:text-white'
+                          }`}
+                        >
+                          {item.shortName || item.name}
+                        </span>
+
+                        {/* អក្សរពេញសម្រាប់អេក្រង់ Laptop / Desktop */}
                         <span className="truncate hidden lg:inline leading-relaxed">
                           {item.name}
                         </span>
@@ -654,11 +701,6 @@ const Sidebar = () => {
                         {activeState && (
                           <span className="hidden lg:block ml-auto mr-1 h-2 w-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.9)] shrink-0" />
                         )}
-
-                        {/* Tablet Hover Tooltip */}
-                        <span className="hidden md:group-hover:block lg:group-hover:hidden absolute left-full ml-4 px-3.5 py-2 bg-slate-900/95 backdrop-blur-md text-white text-[13px] font-bold rounded-xl shadow-xl border border-white/15 whitespace-nowrap z-50 pointer-events-none">
-                          {item.name}
-                        </span>
                       </>
                     );
                   }}
@@ -667,10 +709,8 @@ const Sidebar = () => {
             })}
           </nav>
 
-          {/* ============================================================== */}
-          {/* 📌 3. MINIMALIST FOOTER SECTION                                */}
-          {/* ============================================================== */}
-          <div className="px-4 lg:px-5 pb-3 pt-2.5 shrink-0 mt-auto border-t border-white/10">
+          {/* ផ្នែកខាងក្រោមនៃ Sidebar (Footer) */}
+          <div className="px-2.5 lg:px-5 pb-3 pt-2.5 shrink-0 mt-auto border-t border-white/10">
             <div className="hidden lg:flex items-center justify-between text-[11.5px] font-semibold text-blue-200/70">
               <span className="truncate">© {new Date().getFullYear()} RPITSSVR</span>
               <span className="inline-flex items-center gap-1.5 text-[10.5px] text-emerald-300 font-extrabold bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-400/25 shrink-0">
@@ -680,51 +720,52 @@ const Sidebar = () => {
             </div>
             <div className="flex lg:hidden justify-center">
               <span
-                className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-emerald-500/15 border border-emerald-400/25"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-extrabold text-emerald-300 bg-emerald-500/15 border border-emerald-400/25"
                 title={t('កំពុងដំណើរការ (v2.0)', 'System Online (v2.0)')}
               >
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>v2.0</span>
               </span>
             </div>
           </div>
         </div>
-
-        <style>{`
-          .std-sidebar-grid-pattern {
-            background-image: radial-gradient(rgba(255, 255, 255, 0.25) 1px, transparent 1px);
-            background-size: 20px 20px;
-          }
-          @keyframes dropDown {
-            0% {
-              opacity: 0;
-              transform: translateY(-6px) scale(0.98);
-            }
-            100% {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-            }
-          }
-          .animate-dropDown {
-            animation: dropDown 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-          }
-          .sidebar-nav::-webkit-scrollbar {
-            width: 4px;
-          }
-          .sidebar-nav::-webkit-scrollbar-track {
-            background: transparent;
-          }
-          .sidebar-nav::-webkit-scrollbar-thumb {
-            background: transparent;
-            border-radius: 10px;
-          }
-          .sidebar-nav:hover::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.12);
-          }
-          .sidebar-nav::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.25);
-          }
-        `}</style>
       </aside>
+
+      <style>{`
+        .std-sidebar-grid-pattern {
+          background-image: radial-gradient(rgba(255, 255, 255, 0.25) 1px, transparent 1px);
+          background-size: 20px 20px;
+        }
+        @keyframes dropDown {
+          0% {
+            opacity: 0;
+            transform: translateY(-6px) scale(0.98);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+        .animate-dropDown {
+          animation: dropDown 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .sidebar-nav::-webkit-scrollbar {
+          width: 4px;
+        }
+        .sidebar-nav::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .sidebar-nav::-webkit-scrollbar-thumb {
+          background: transparent;
+          border-radius: 10px;
+        }
+        .sidebar-nav:hover::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.12);
+        }
+        .sidebar-nav::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.25);
+        }
+      `}</style>
     </>
   );
 };
