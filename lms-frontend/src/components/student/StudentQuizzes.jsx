@@ -34,15 +34,15 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
-const CACHE_KEY_SHARED_QUIZZES = 'cached_student_quizzes_list_v5';
+const CACHE_KEY_SHARED_QUIZZES = 'cached_student_quizzes_list_v14';
 const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
 const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
 
-const getQuizzesCacheKey = (uid) => `cached_student_quizzes_list_v8_${uid}`;
-const getQuizzesMetaCacheKey = (uid) => `cached_student_quizzes_meta_v8_${uid}`;
+const getQuizzesCacheKey = (uid) => `cached_student_quizzes_list_v14_${uid}`;
+const getQuizzesMetaCacheKey = (uid) => `cached_student_quizzes_meta_v14_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
-const getQuizReviewsCacheKey = (uid) => `cached_student_quiz_reviews_v8_${uid}`;
+const getQuizReviewsCacheKey = (uid) => `cached_student_quiz_reviews_v14_${uid}`;
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v10_${uid}`;
 
@@ -53,7 +53,7 @@ const DEFAULT_META = {
   per_page: 15,
 };
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (មិនឱ្យលាយទិន្នន័យគ្នាដាច់ខាត)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ
 const STUDENT_QUIZ_MEM_CACHE = {
   uid: null,
   quizzes: null,
@@ -74,7 +74,6 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ លុបជួរឈរ file_data និងរូបភាព Base64 ធំៗចេញពីទិន្នន័យមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
 const stripHeavyQuizDataDeep = (obj, depth = 0) => {
   if (!obj || typeof obj !== 'object' || depth > 5) return obj;
   if (Array.isArray(obj)) {
@@ -111,7 +110,6 @@ const safeWriteStudentQuizCache = (key, payload) => {
   } catch {}
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -139,7 +137,6 @@ const resolveStudentUid = (contextUser) => {
   return 'default_student';
 };
 
-// ✅ អនុគមន៍សម្អាត Cache ចាស់របស់សិស្សមុន នៅពេលមានសិស្សថ្មី Login ចូលលើ Browser តែមួយ
 const ensureCleanStudentSessionCache = (newUid) => {
   if (!newUid || newUid === 'default_student') return;
   try {
@@ -182,7 +179,6 @@ const normalizeShiftKey = (shiftVal) => {
   return 'Monday-Friday';
 };
 
-// ✅ អនុគមន៍ស្រង់យកថ្ងៃខែ និងម៉ោងពិតប្រាកដ ១០០%
 const extractExactDateTimeParts = (rawVal, isEndBoundary = false) => {
   if (!rawVal) return null;
 
@@ -238,7 +234,6 @@ const toComparableTimeMs = (val, isEndBoundary = false) => {
   return new Date(p.year, p.month - 1, p.day, p.hour, p.minute, 0, 0).getTime();
 };
 
-// ✅ ១. អនុគមន៍ស្រង់យកបញ្ជីកម្រងសំណួរពី API Response គ្រប់ទម្រង់ទាំងអស់
 const extractValidQuizzesList = (resData) => {
   if (!resData) return [];
   if (Array.isArray(resData)) return resData;
@@ -250,7 +245,6 @@ const extractValidQuizzesList = (resData) => {
   return [];
 };
 
-// ✅ ២. អនុគមន៍ស្រង់យកទិន្នន័យការប្រឡងរបស់សិស្ស (Attempt)
 const resolveStudentAttempt = (quiz) => {
   if (!quiz) return null;
   if (
@@ -272,14 +266,12 @@ const resolveStudentAttempt = (quiz) => {
   return null;
 };
 
-// ✅ ៣. អនុគមន៍កាត់ .00 ចេញពីពិន្ទុ
 const formatCleanScore = (val, fallback = 0) => {
   if (val === null || val === undefined || val === '') return fallback;
   const num = Number(val);
   return isNaN(num) ? val : Math.round(num * 100) / 100;
 };
 
-// ✅ ៤. អនុគមន៍ពិនិត្យថាតើជម្រើសនោះជាចម្លើយត្រឹមត្រូវឬអត់
 const isOptionMarkedCorrect = (opt) => {
   if (!opt) return false;
   return (
@@ -290,7 +282,6 @@ const isOptionMarkedCorrect = (opt) => {
   );
 };
 
-// ✅ ៥. អនុគមន៍បង្កើតបញ្ជីត្រួតពិនិត្យសំណួរ និងចម្លើយដែលសិស្សបានធីក (Slim Review Items សន្សំទំហំ Cache)
 const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
   if (!Array.isArray(questions)) return [];
 
@@ -329,7 +320,6 @@ const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
   });
 };
 
-// ✅ ៦. អនុគមន៍បញ្ជូនសារជូនដំណឹងទៅកាន់រូបកណ្ដឹង (NotificationBell) លើ Navbar
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
@@ -383,14 +373,12 @@ const StudentQuizzes = () => {
   const [searchParams] = useSearchParams();
   const abortControllerRef = useRef(null);
 
-  // ✅ កំណត់អត្តសញ្ញាណសិស្សបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
     ensureCleanStudentSessionCache(uid);
     return uid;
   }, [user]);
 
-  // បើប្ដូរគណនីសិស្ស ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗក្នុង 0ms
   if (
     STUDENT_QUIZ_MEM_CACHE.uid &&
     STUDENT_QUIZ_MEM_CACHE.uid !== currentStudentId
@@ -407,16 +395,16 @@ const StudentQuizzes = () => {
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || 'all';
 
-  // ✅ ១. អានពី Cache តាមគណនីសិស្សម្នាក់ៗភ្លាមៗក្នុង 0 វិនាទី (គ្មាន Skeleton Loading)
   const [quizzes, setQuizzes] = useState(() => {
     if (Array.isArray(STUDENT_QUIZ_MEM_CACHE.quizzes)) {
       return STUDENT_QUIZ_MEM_CACHE.quizzes;
     }
     const cached =
       readStorageJson(getQuizzesCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_quizzes_list_v8_${currentStudentId}`, null) ||
       readStorageJson(CACHE_KEY_SHARED_QUIZZES, []);
-    STUDENT_QUIZ_MEM_CACHE.quizzes = cached;
-    return cached;
+    STUDENT_QUIZ_MEM_CACHE.quizzes = Array.isArray(cached) ? cached : [];
+    return STUDENT_QUIZ_MEM_CACHE.quizzes;
   });
 
   const [coursesList, setCoursesList] = useState(() => {
@@ -428,8 +416,8 @@ const StudentQuizzes = () => {
       readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
       readStorageJson(CACHE_KEY_SHARED_COURSES, null) ||
       readStorageJson(CACHE_KEY_SHARED_ENROLLMENTS, []);
-    STUDENT_QUIZ_MEM_CACHE.courses = cached;
-    return cached;
+    STUDENT_QUIZ_MEM_CACHE.courses = Array.isArray(cached) ? cached : [];
+    return STUDENT_QUIZ_MEM_CACHE.courses;
   });
 
   const [savedReviewsMap, setSavedReviewsMap] = useState(() => {
@@ -447,9 +435,8 @@ const StudentQuizzes = () => {
   const [selectedCourse, setSelectedCourse] = useState(
     String(initialRouteCourseId)
   );
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'available' | 'completed' | 'upcoming' | 'expired'
+  const [statusFilter, setStatusFilter] = useState('all');
 
-  // Pagination states
   const [page, setPage] = useState(1);
   const [perPage] = useState(15);
   const [meta, setMeta] = useState(() => {
@@ -464,7 +451,6 @@ const StudentQuizzes = () => {
     return cached;
   });
 
-  // Attempt Quiz State
   const [activeQuizAttempt, setActiveQuizAttempt] = useState(null);
   const [attemptAnswers, setAttemptAnswers] = useState({});
   const [loadingQuizId, setLoadingQuizId] = useState(null);
@@ -477,14 +463,10 @@ const StudentQuizzes = () => {
   const endTimeRef = useRef(null);
   const autoSubmitHandlerRef = useRef(null);
 
-  // Result & Question Review dialog state
   const [quizResult, setQuizResult] = useState(null);
-
-  // ✅ States សម្រាប់ចុចពង្រីកពេញអេក្រង់ (Expand / Fullscreen Toggle)
   const [isAttemptExpanded, setIsAttemptExpanded] = useState(false);
   const [isResultExpanded, setIsResultExpanded] = useState(false);
 
-  // ✅ ចាក់សោរការអូសទំព័រខាងក្រោយ (Lock Body Scroll) នៅពេលបើកផ្ទាំងប្រឡង ឬផ្ទាំងលទ្ធផល
   useEffect(() => {
     if (activeQuizAttempt || quizResult) {
       const prevOverflow = document.body.style.overflow;
@@ -506,9 +488,6 @@ const StudentQuizzes = () => {
     return () => clearInterval(timerRef.current);
   }, []);
 
-  // ============================================================================
-  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី Backend API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
-  // ============================================================================
   const fetchStudentCourses = useCallback(async () => {
     const now = Date.now();
     if (
@@ -554,7 +533,7 @@ const StudentQuizzes = () => {
           getQuizzesMetaCacheKey(currentStudentId),
           null
         );
-        if (Array.isArray(cachedQuz)) {
+        if (Array.isArray(cachedQuz) && cachedQuz.length > 0) {
           setQuizzes(cachedQuz);
           STUDENT_QUIZ_MEM_CACHE.quizzes = cachedQuz;
         }
@@ -572,7 +551,7 @@ const StudentQuizzes = () => {
         STUDENT_QUIZ_MEM_CACHE.uid === currentStudentId &&
         Array.isArray(STUDENT_QUIZ_MEM_CACHE.quizzes) &&
         STUDENT_QUIZ_MEM_CACHE.quizzes.length > 0 &&
-        now - STUDENT_QUIZ_MEM_CACHE.lastSyncedAt < 25000
+        now - STUDENT_QUIZ_MEM_CACHE.lastSyncedAt < 5000
       ) {
         return;
       }
@@ -650,9 +629,6 @@ const StudentQuizzes = () => {
     };
   }, [fetchQuizzes]);
 
-  // ============================================================================
-  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ព័ត៌មានសិស្ស កាលបរិច្ឆេទខ្មែរសុទ្ធ និងការធ្វើតេស្ត
-  // ============================================================================
   const availableCourses = useMemo(() => {
     const map = new Map();
     if (Array.isArray(coursesList)) {
@@ -769,7 +745,6 @@ const StudentQuizzes = () => {
     return isWeekendShift ? 'Shift: Sat-Sun' : 'Shift: Mon-Fri';
   }, [isWeekendShift, language]);
 
-  // ✅ បម្លែងថ្ងៃខែ និងម៉ោងជាភាសាខ្មែរសុទ្ធ ១០០% ដោយមិនឱ្យលោតខុសម៉ោង UTC
   const formatDateTime = useCallback(
     (dateString, includeTime = false) => {
       const parts = extractExactDateTimeParts(dateString);
@@ -874,7 +849,6 @@ const StudentQuizzes = () => {
     }));
   };
 
-  // ✅ មុខងារបញ្ជូនចម្លើយប្រឡង និងបង្កើតទិន្នន័យពិនិត្យសំណួរ (Review Items)
   const handleQuizSubmit = async (e, isAuto = false, forceSubmit = false) => {
     if (e) e.preventDefault();
     if (isSubmitting || !activeQuizAttempt) return;
@@ -972,7 +946,6 @@ const StudentQuizzes = () => {
         return updated;
       });
 
-      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar (Clean URL '/quizzes')
       pushLocalNotification({
         titleKm: 'បានបញ្ចប់ការប្រឡងកម្រងសំណួរ',
         titleEn: 'Quiz Completed',
@@ -989,7 +962,7 @@ const StudentQuizzes = () => {
       const errMsg =
         error.response?.data?.message ||
         t(
-          'មានបញ្ហាក្នុងការបញ្ជូនចម្លើយ សូមសាកល្បងម្ដងទៀត!',
+          'មានបញ្ហាក្នុងการបញ្ជូនចម្លើយ សូមសាកល្បងម្ដងទៀត!',
           'Failed to submit quiz answers. Please try again!'
         );
       setSubmitError(String(errMsg));
@@ -998,7 +971,6 @@ const StudentQuizzes = () => {
     }
   };
 
-  // រក្សាទុកអនុគមន៍ចុងក្រោយក្នុង Ref សម្រាប់ពេលអស់ម៉ោងប្រឡងស្វ័យប្រវត្តិ
   autoSubmitHandlerRef.current = handleQuizSubmit;
 
   useEffect(() => {
@@ -1020,7 +992,6 @@ const StudentQuizzes = () => {
     return () => clearInterval(timerRef.current);
   }, [activeQuizAttempt]);
 
-  // បើកមើលលទ្ធផល និងចម្លើយឡើងវិញសម្រាប់កម្រងសំណួរដែលបានធ្វើរួច
   const handleOpenSavedResult = (quiz) => {
     setIsResultExpanded(false);
     const reviewKey = `${currentStudentId}_${quiz.id}`;
@@ -1059,9 +1030,6 @@ const StudentQuizzes = () => {
       .padStart(2, '0')}`;
   };
 
-  // ============================================================================
-  // 📌 ផ្នែកទី៤៖ គណនាស្ថិតិកម្រងសំណួរ និងការច្រោះទិន្នន័យ
-  // ============================================================================
   const quizStats = useMemo(() => {
     let total = enrichedQuizzes.length;
     let completed = 0;
@@ -1126,7 +1094,7 @@ const StudentQuizzes = () => {
   }, [enrichedQuizzes, selectedCourse, statusFilter, searchQuery]);
 
   const getActiveStatusTitle = () => {
-    if (statusFilter === 'available') return t('អាចធ្វើតេស្តបាន', 'Available Quizzes');
+    if (statusFilter === 'available') return t('អាចធ្វើតេស្តได้', 'Available Quizzes');
     if (statusFilter === 'completed') return t('ធ្វើតេស្តរួចរាល់', 'Completed Quizzes');
     if (statusFilter === 'upcoming') return t('មិនទាន់បើកប្រឡង', 'Upcoming Quizzes');
     if (statusFilter === 'expired') return t('ហួសពេលកំណត់', 'Expired Quizzes');
@@ -1136,7 +1104,7 @@ const StudentQuizzes = () => {
   const statusSelectorItems = [
     {
       id: 'available',
-      title: t('អាចធ្វើបាន', 'Available'),
+      title: t('អាចធ្វើได้', 'Available'),
       count: quizStats.available,
       icon: PencilSquareIcon,
       iconStyle:
@@ -1183,7 +1151,6 @@ const StudentQuizzes = () => {
       ? Math.round((answeredCount / totalAttemptQuestions) * 100)
       : 0;
 
-  // ✅ គណនាចំនួនសំណួរក្នុងផ្ទាំងលទ្ធផល ដើម្បីកំណត់ទទឹង Modal ដោយស្វ័យប្រវត្តិ (Smart Adaptive Width)
   const resultQuestionCount = Array.isArray(quizResult?.reviewItems)
     ? quizResult.reviewItems.length
     : 0;
@@ -1194,7 +1161,7 @@ const StudentQuizzes = () => {
     <div className="std-qz-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
       {/* ================================================================== */}
-      {/* 📌 1. MODERN BENTO HERO SECTION                                    */}
+      {/* 1. MODERN BENTO HERO SECTION                                       */}
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
         
@@ -1278,7 +1245,7 @@ const StudentQuizzes = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns - សង្ខេបតេស្តតាមស្ថានភាពទាំង ៤) */}
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
         <div className="lg:col-span-4 std-qz-surface bg-white rounded-[1.75rem] sm:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -1383,7 +1350,7 @@ const StudentQuizzes = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. SEARCH & COURSE FILTER BAR                                   */}
+      {/* 2. SEARCH & COURSE FILTER BAR                                      */}
       {/* ================================================================== */}
       <div className="std-qz-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-3.5 items-center justify-between">
         <div className="relative w-full sm:max-w-md flex-1">
@@ -1474,7 +1441,6 @@ const StudentQuizzes = () => {
                 className="std-qz-card group bg-white border border-gray-200/80 hover:border-indigo-400 rounded-[1.75rem] p-6 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between h-full"
               >
                 <div className="space-y-4">
-                  {/* ផ្លាកកូដមុខវិជ្ជា និងស្ថានភាព */}
                   <div className="flex items-center justify-between gap-2">
                     <span className="std-qz-code-pill text-xs font-extrabold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100 uppercase truncate max-w-[140px]">
                       {quiz.course?.course_code || 'COURSE'}
@@ -1522,7 +1488,6 @@ const StudentQuizzes = () => {
                     </span>
                   </div>
 
-                  {/* ចំណងជើងកម្រងសំណួរ និងឈ្មោះមុខវិជ្ជា */}
                   <div className="space-y-1.5">
                     <div className="std-qz-text-secondary text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 truncate">
                       <BookOpenIcon className="h-3.5 w-3.5 shrink-0" />
@@ -1541,7 +1506,6 @@ const StudentQuizzes = () => {
                     )}
                   </div>
 
-                  {/* ប្រអប់ព័ត៌មានរយៈពេល ពិន្ទុ និងថ្ងៃខែ */}
                   <div className="std-qz-subbox bg-gray-50/80 border border-gray-100 rounded-2xl p-3.5 space-y-2 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="std-qz-text-secondary font-semibold text-gray-500 flex items-center gap-1.5">
@@ -1576,7 +1540,6 @@ const StudentQuizzes = () => {
                   </div>
                 </div>
 
-                {/* ✅ ប៊ូតុងសកម្មភាពខាងក្រោមកាត */}
                 <div className="std-qz-divider mt-5 pt-4 border-t border-gray-100">
                   {quiz.isCompleted ? (
                     <button
@@ -1715,7 +1678,7 @@ const StudentQuizzes = () => {
       )}
 
       {/* ================================================================== */}
-      {/* 📌 5. INTERACTIVE QUIZ ATTEMPT STUDIO MODAL (Smart Adaptive Width) */}
+      {/* 📌 5. INTERACTIVE QUIZ ATTEMPT STUDIO MODAL                        */}
       {/* ================================================================== */}
       {activeQuizAttempt &&
         typeof document !== 'undefined' &&
@@ -1767,7 +1730,6 @@ const StudentQuizzes = () => {
                       </span>
                     </div>
 
-                    {/* ✅ ប៊ូតុងពង្រីកពេញអេក្រង់ / បង្រួមវិញ */}
                     <button
                       type="button"
                       onClick={() => setIsAttemptExpanded((prev) => !prev)}
@@ -2009,7 +1971,7 @@ const StudentQuizzes = () => {
         )}
 
       {/* ================================================================== */}
-      {/* 📌 6. QUIZ RESULT & ANSWER REVIEW DIALOG (រៀបចំថ្មីស្អាត មិនជាន់គ្នា) */}
+      {/* 📌 6. QUIZ RESULT & ANSWER REVIEW DIALOG                           */}
       {/* ================================================================== */}
       {quizResult &&
         typeof document !== 'undefined' &&
@@ -2033,12 +1995,10 @@ const StudentQuizzes = () => {
               }`}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* ✅ ក្បាលផ្ទាំងលទ្ធផល (រៀបជួរទន្ទឹមគ្នាស្អាត៖ ចំណងជើងខាងឆ្វេង | ពិន្ទុ + ប៊ូតុងពង្រីក + ប៊ូតុង X ខាងស្ដាំ ដោយមិនជាន់គ្នាដាច់ខាត) */}
               <div className="relative overflow-hidden bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 text-white px-5 py-4 sm:px-6 sm:py-5 shrink-0">
                 <div className="std-qz-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
 
                 <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  {/* ខាងឆ្វេង៖ រូបធីក + ចំណងជើងលទ្ធផល */}
                   <div className="flex items-center gap-3.5 min-w-0 flex-1">
                     <div className="h-12 w-12 rounded-2xl bg-emerald-400/20 border border-emerald-300/30 flex items-center justify-center shrink-0 shadow-lg">
                       <CheckBadgeIcon className="h-7 w-7 text-emerald-300" />
@@ -2056,9 +2016,7 @@ const StudentQuizzes = () => {
                     </div>
                   </div>
 
-                  {/* ខាងស្ដាំ៖ ប្រអប់ពិន្ទុទទួលបាន + ប៊ូតុងពង្រីក/បង្រួម + ប៊ូតុងខ្វែង X បិទ */}
                   <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2 sm:pt-0 border-t border-white/10 sm:border-0">
-                    {/* ប្រអប់ពិន្ទុទទួលបាន */}
                     <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-3.5 py-2 text-center shadow-inner">
                       <span className="block text-[9px] font-extrabold uppercase tracking-wider text-blue-200 leading-none">
                         {t('ពិន្ទុទទួលបាន', 'Score Earned')}
@@ -2077,7 +2035,6 @@ const StudentQuizzes = () => {
                       </div>
                     </div>
 
-                    {/* ប៊ូតុងពង្រីកធំ / បង្រួមវិញ និងប៊ូតុងបិទ X */}
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
@@ -2112,7 +2069,6 @@ const StudentQuizzes = () => {
                 </div>
               </div>
 
-              {/* ✅ តួផ្ទាំងពិនិត្យចម្លើយ */}
               <div className="flex-1 overflow-y-auto px-4 sm:px-5 pt-4 pb-6 space-y-3.5">
                 {Array.isArray(quizResult.reviewItems) &&
                 quizResult.reviewItems.length > 0 ? (
@@ -2154,7 +2110,6 @@ const StudentQuizzes = () => {
                                 : 'std-qz-review-wrong bg-rose-50/40 border-rose-200/90'
                             }`}
                           >
-                            {/* ជួរទី១៖ លេខរៀងសំណួរ + អត្ថបទសំណួរ + ផ្លាកពិន្ទុ */}
                             <div className="flex items-start justify-between gap-2.5">
                               <div className="flex items-start gap-2.5 min-w-0">
                                 <span
@@ -2197,7 +2152,6 @@ const StudentQuizzes = () => {
                               </span>
                             </div>
 
-                            {/* ជួរទី២៖ ប្រអប់ចម្លើយ (បើឆ្លើយខុស ដាក់ទន្ទឹមគ្នា ឆ្វេង-ស្ដាំ ស្អាតហាប់ណែន) */}
                             <div
                               className={`mt-2.5 sm:pl-8 ${
                                 showWrongSideBySide
@@ -2297,7 +2251,7 @@ const StudentQuizzes = () => {
         )}
 
       {/* ================================================================== */}
-      {/* 📌 7. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
+      {/* 7. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
       {/* ================================================================== */}
       <style>{`
         .std-qz-grid-pattern {

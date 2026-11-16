@@ -33,15 +33,14 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
-const CACHE_KEY_SHARED_ASSIGNMENTS = 'cached_student_assignments_list_v5';
+const CACHE_KEY_SHARED_ASSIGNMENTS = 'cached_student_assignments_list_v14';
 const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
 const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
 
-const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v10_${uid}`;
-const getAssignmentsMetaCacheKey = (uid) => `cached_student_assignments_meta_v10_${uid}`;
+const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v14_${uid}`;
+const getAssignmentsMetaCacheKey = (uid) => `cached_student_assignments_meta_v14_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
-const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
 
 const DEFAULT_META = {
   current_page: 1,
@@ -50,7 +49,7 @@ const DEFAULT_META = {
   per_page: 15,
 };
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (មិនឱ្យលាយទិន្នន័យគ្នាដាច់ខាត)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ
 const STUDENT_ASG_MEM_CACHE = {
   uid: null,
   assignments: null,
@@ -70,7 +69,6 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ លុបជួរឈរ file_data (Base64 ឯកសារកិច្ចការធំៗ) និងរូបភាព Base64 ធំៗចេញពីទិន្នន័យមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
 const stripHeavyAssignmentDataDeep = (obj, depth = 0) => {
   if (!obj || typeof obj !== 'object' || depth > 5) return obj;
   if (Array.isArray(obj)) {
@@ -107,7 +105,6 @@ const safeWriteStudentAsgCache = (key, payload) => {
   } catch {}
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -135,7 +132,6 @@ const resolveStudentUid = (contextUser) => {
   return 'default_student';
 };
 
-// ✅ អនុគមន៍សម្អាត Cache ចាស់របស់សិស្សមុន នៅពេលមានសិស្សថ្មី Login ចូលលើ Browser តែមួយ
 const ensureCleanStudentSessionCache = (newUid) => {
   if (!newUid || newUid === 'default_student') return;
   try {
@@ -177,7 +173,6 @@ const normalizeShiftKey = (shiftVal) => {
   return 'Monday-Friday';
 };
 
-// ✅ អនុគមន៍ស្រង់យកថ្ងៃខែ និងម៉ោងពិតប្រាកដ ១០០% (ការពារកុំឱ្យលោតខុស +7 ម៉ោងដោយសារ UTC)
 const extractExactDateTimeParts = (rawVal) => {
   if (!rawVal) return null;
 
@@ -223,7 +218,6 @@ const toComparableTimeMs = (val) => {
   return new Date(p.year, p.month - 1, p.day, p.hour, p.minute, 0, 0).getTime();
 };
 
-// ✅ ១. អនុគមន៍ស្រង់យកបញ្ជីកិច្ចការពី API Response គ្រប់ទម្រង់ទាំងអស់យ៉ាងត្រឹមត្រូវ
 const extractValidAssignmentsList = (resData) => {
   if (!resData) return [];
   if (Array.isArray(resData)) return resData;
@@ -235,7 +229,6 @@ const extractValidAssignmentsList = (resData) => {
   return [];
 };
 
-// ✅ ២. អនុគមន៍ស្រង់យកទិន្នន័យការប្រគល់កិច្ចការរបស់សិស្ស
 const resolveStudentSubmission = (assign) => {
   if (!assign) return null;
   if (
@@ -263,14 +256,12 @@ const resolveStudentSubmission = (assign) => {
   return null;
 };
 
-// ✅ ៣. អនុគមន៍កាត់ .00 ចេញពីពិន្ទុ (ឧ. 20.00 -> 20)
 const formatCleanScore = (val) => {
   if (val === null || val === undefined || val === '') return 20;
   const num = Number(val);
   return isNaN(num) ? val : Math.round(num * 100) / 100;
 };
 
-// ✅ ៤. អនុគមន៍បញ្ជូនសារជូនដំណឹងទៅកាន់រូបកណ្ដឹង (NotificationBell) លើ Navbar
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
@@ -324,14 +315,12 @@ const StudentAssignments = () => {
   const [searchParams] = useSearchParams();
   const abortControllerRef = useRef(null);
 
-  // ✅ កំណត់អត្តសញ្ញាណសិស្សបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
     ensureCleanStudentSessionCache(uid);
     return uid;
   }, [user]);
 
-  // បើប្ដូរគណនីសិស្ស ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗក្នុង 0ms
   if (
     STUDENT_ASG_MEM_CACHE.uid &&
     STUDENT_ASG_MEM_CACHE.uid !== currentStudentId
@@ -347,7 +336,6 @@ const StudentAssignments = () => {
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || 'all';
 
-  // ✅ ១. អានពី Cache តាមគណនីសិស្សម្នាក់ៗភ្លាមៗក្នុង 0 វិនាទី (គ្មាន Skeleton Loading)
   const [assignments, setAssignments] = useState(() => {
     if (Array.isArray(STUDENT_ASG_MEM_CACHE.assignments)) {
       return STUDENT_ASG_MEM_CACHE.assignments;
@@ -356,8 +344,8 @@ const StudentAssignments = () => {
       readStorageJson(getAssignmentsCacheKey(currentStudentId), null) ||
       readStorageJson(`cached_student_assignments_list_v8_${currentStudentId}`, null) ||
       readStorageJson(CACHE_KEY_SHARED_ASSIGNMENTS, []);
-    STUDENT_ASG_MEM_CACHE.assignments = cached;
-    return cached;
+    STUDENT_ASG_MEM_CACHE.assignments = Array.isArray(cached) ? cached : [];
+    return STUDENT_ASG_MEM_CACHE.assignments;
   });
 
   const [coursesList, setCoursesList] = useState(() => {
@@ -369,17 +357,16 @@ const StudentAssignments = () => {
       readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
       readStorageJson(CACHE_KEY_SHARED_COURSES, null) ||
       readStorageJson(CACHE_KEY_SHARED_ENROLLMENTS, []);
-    STUDENT_ASG_MEM_CACHE.courses = cached;
-    return cached;
+    STUDENT_ASG_MEM_CACHE.courses = Array.isArray(cached) ? cached : [];
+    return STUDENT_ASG_MEM_CACHE.courses;
   });
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCourse, setSelectedCourse] = useState(
     String(initialRouteCourseId)
   );
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending' | 'submitted' | 'graded' | 'overdue'
+  const [statusFilter, setStatusFilter] = useState('all');
 
-  // Pagination states
   const [page, setPage] = useState(1);
   const [perPage] = useState(15);
   const [meta, setMeta] = useState(() => {
@@ -394,14 +381,12 @@ const StudentAssignments = () => {
     return cached;
   });
 
-  // Submit modal states
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [uploadFile, setUploadFile] = useState(null);
   const [submittingFile, setSubmittingFile] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  // ✅ ចាក់សោរការអូសទំព័រខាងក្រោយ (Lock Body Scroll) នៅពេលបើកផ្ទាំងប្រគល់កិច្ចការ
   useEffect(() => {
     if (submitModalOpen) {
       const prevOverflow = document.body.style.overflow;
@@ -419,7 +404,6 @@ const StudentAssignments = () => {
     }
   }, [searchParams, location.state]);
 
-  // ✅ គាំទ្រទាំង Domain Server Online លើ Railway (VITE_API_URL) និង Data URI/URL ធម្មតា
   const getStorageUrl = useCallback((path) => {
     if (!path || typeof path !== 'string') return '#';
     const trimmed = path.trim();
@@ -442,9 +426,6 @@ const StudentAssignments = () => {
     return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
   }, []);
 
-  // ============================================================================
-  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី Backend API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
-  // ============================================================================
   const fetchStudentCourses = useCallback(async () => {
     const now = Date.now();
     if (
@@ -487,7 +468,7 @@ const StudentAssignments = () => {
           getAssignmentsMetaCacheKey(currentStudentId),
           null
         );
-        if (Array.isArray(cachedAsg)) {
+        if (Array.isArray(cachedAsg) && cachedAsg.length > 0) {
           setAssignments(cachedAsg);
           STUDENT_ASG_MEM_CACHE.assignments = cachedAsg;
         }
@@ -505,7 +486,7 @@ const StudentAssignments = () => {
         STUDENT_ASG_MEM_CACHE.uid === currentStudentId &&
         Array.isArray(STUDENT_ASG_MEM_CACHE.assignments) &&
         STUDENT_ASG_MEM_CACHE.assignments.length > 0 &&
-        now - STUDENT_ASG_MEM_CACHE.lastSyncedAt < 25000
+        now - STUDENT_ASG_MEM_CACHE.lastSyncedAt < 5000
       ) {
         return;
       }
@@ -583,9 +564,6 @@ const StudentAssignments = () => {
     };
   }, [fetchAssignments]);
 
-  // ============================================================================
-  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ព័ត៌មានសិស្ស កាលបរិច្ឆេទខ្មែរសុទ្ធ និងការប្រគល់កិច្ចការ
-  // ============================================================================
   const availableCourses = useMemo(() => {
     const map = new Map();
     if (Array.isArray(coursesList)) {
@@ -619,7 +597,6 @@ const StudentAssignments = () => {
     return Array.from(map.values());
   }, [coursesList, assignments]);
 
-  // ✅ រៀបចំទិន្នន័យកិច្ចការនីមួយៗឱ្យមាន submission និងព័ត៌មាន course គ្រប់គ្រាន់ជានិច្ច
   const enrichedAssignments = useMemo(() => {
     if (!Array.isArray(assignments)) return [];
     return assignments.map((assign) => {
@@ -678,7 +655,6 @@ const StudentAssignments = () => {
     return isWeekendShift ? 'Shift: Sat-Sun' : 'Shift: Mon-Fri';
   }, [isWeekendShift, language]);
 
-  // ✅ បម្លែងថ្ងៃខែ និងម៉ោងជាភាសាខ្មែរសុទ្ធ ១០០% ដោយមិនឱ្យលោតខុសម៉ោង UTC
   const formatDateTime = useCallback(
     (dateString, includeTime = true) => {
       const parts = extractExactDateTimeParts(dateString);
@@ -766,12 +742,12 @@ const StudentAssignments = () => {
     formData.append('file', uploadFile);
 
     try {
-      // ✅ ប្រើ headers: { 'Content-Type': undefined } ដើម្បីឱ្យ Browser បង្កើត multipart boundary ដោយស្វ័យប្រវត្តិលើ Railway
       const res = await api.post('/student/assignments/submit', formData, {
         headers: { 'Content-Type': undefined },
       });
 
-      const rawSub = res.data?.submission ||
+      const rawSub =
+        res.data?.submission ||
         res.data?.data || {
           id: Date.now(),
           submitted_at: new Date().toISOString(),
@@ -781,7 +757,6 @@ const StudentAssignments = () => {
         };
       const newSub = stripHeavyAssignmentDataDeep(rawSub);
 
-      // Optimistic UI Update
       setAssignments((prev) => {
         const updated = prev.map((a) =>
           a.id === selectedAssignment.id ? { ...a, submission: newSub } : a
@@ -799,7 +774,6 @@ const StudentAssignments = () => {
         return updated;
       });
 
-      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar (Clean URL '/assignments')
       pushLocalNotification({
         titleKm: 'បានប្រគល់កិច្ចការសិក្សាជោគជ័យ',
         titleEn: 'Assignment Submitted',
@@ -831,9 +805,6 @@ const StudentAssignments = () => {
     }
   };
 
-  // ============================================================================
-  // 📌 ផ្នែកទី៤៖ គណនាស្ថិតិកិច្ចការ និងការច្រោះទិន្នន័យ
-  // ============================================================================
   const assignmentStats = useMemo(() => {
     let total = 0;
     let submitted = 0;
@@ -899,13 +870,11 @@ const StudentAssignments = () => {
     const nowMs = Date.now();
 
     return enrichedAssignments.filter((assign) => {
-      // ១. ច្រោះតាមមុខវិជ្ជា
       if (selectedCourse !== 'all') {
         const cid = assign.course?.id || assign.course_id;
         if (String(cid) !== String(selectedCourse)) return false;
       }
 
-      // ២. ច្រោះតាមស្ថានភាពកិច្ចការ (pending, submitted, graded, overdue)
       const sub = assign.resolvedSubmission;
       const isSubmitted = Boolean(sub);
       const isGraded =
@@ -918,10 +887,10 @@ const StudentAssignments = () => {
 
       if (statusFilter === 'pending' && (isSubmitted || isOverdue)) return false;
       if (statusFilter === 'submitted' && !isSubmitted) return false;
+      if (statusFilter === 'graded' && !isGradgraded) return false;
       if (statusFilter === 'graded' && !isGraded) return false;
       if (statusFilter === 'overdue' && !isOverdue) return false;
 
-      // ៣. ច្រោះតាមពាក្យស្វែងរក
       if (!q) return true;
       const titleMatch = (assign.title || '').toLowerCase().includes(q);
       const descMatch = (assign.description || '').toLowerCase().includes(q);
@@ -944,7 +913,6 @@ const StudentAssignments = () => {
     return t('គ្រប់ស្ថានភាព', 'All Homework');
   };
 
-  // ទិន្នន័យកាតស្ថានភាពទាំង ៤ នៅក្នុងប្រអប់ខាងស្ដាំ
   const statusSelectorItems = [
     {
       id: 'pending',
@@ -992,7 +960,7 @@ const StudentAssignments = () => {
     <div className="std-asg-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
       {/* ================================================================== */}
-      {/* 📌 1. MODERN BENTO HERO SECTION                                    */}
+      {/* 1. MODERN BENTO HERO SECTION                                       */}
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
         
@@ -1005,7 +973,6 @@ const StudentAssignments = () => {
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
           <div className="relative z-10 space-y-3.5">
-            {/* ផ្លាកខាងលើទាំង ២ (ដេប៉ាតឺម៉ង់ • វេនសិក្សា) */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
@@ -1028,7 +995,6 @@ const StudentAssignments = () => {
               </span>
             </div>
 
-            {/* ចំណងជើងធំ និងអត្ថបទពិពណ៌នា */}
             <div className="space-y-2 pt-1">
               <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
                 <span>{t('កិច្ចការ និងលំហាត់,', 'Assignments,')}</span>
@@ -1047,7 +1013,6 @@ const StudentAssignments = () => {
             </div>
           </div>
 
-          {/* ប្រអប់តូចៗទាំង ២ នៅជួរខាងក្រោម */}
           <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-6 pt-5 border-t border-white/15">
             <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-emerald-500/25 border border-emerald-300/30 flex items-center justify-center text-emerald-300 shrink-0">
@@ -1081,7 +1046,7 @@ const StudentAssignments = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns - សង្ខេបកិច្ចការតាមស្ថានភាពទាំង ៤) */}
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
         <div className="lg:col-span-4 std-asg-surface bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -1186,7 +1151,7 @@ const StudentAssignments = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. SEARCH & COURSE FILTER BAR                                   */}
+      {/* 2. SEARCH & COURSE FILTER BAR                                      */}
       {/* ================================================================== */}
       <div className="std-asg-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-3.5 items-center justify-between">
         <div className="relative w-full sm:max-w-md flex-1">
@@ -1246,7 +1211,7 @@ const StudentAssignments = () => {
           <h3 className="std-asg-text-primary text-lg font-extrabold text-gray-800">
             {searchQuery || selectedCourse !== 'all' || statusFilter !== 'all'
               ? t(
-                  'មិនឃើញមានកិច្ចការតាមការស្វែងរកនេះទេ',
+                  'មិនឃើញមានកិច្ចការតាមการស្វែងរកនេះទេ',
                   'No matching assignments found'
                 )
               : t('មិនទាន់មានកិច្ចការនៅឡើយទេ', 'No assignments available yet')}
@@ -1263,7 +1228,7 @@ const StudentAssignments = () => {
           {filteredAssignments.map((assign) => {
             const submission = assign.resolvedSubmission;
             const isSubmitted = Boolean(submission);
-            const isGraded =
+            const isGradgraded =
               isSubmitted &&
               submission?.score !== null &&
               submission?.score !== undefined &&
@@ -1287,7 +1252,6 @@ const StudentAssignments = () => {
                 className="std-asg-card bg-white border border-gray-200/80 hover:border-indigo-400 rounded-[1.5rem] p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6 shadow-2xs hover:shadow-lg transition-all duration-300"
               >
                 <div className="space-y-3 flex-1 min-w-0">
-                  {/* ផ្លាកព័ត៌មានខាងលើ */}
                   <div className="flex flex-wrap items-center gap-2">
                     {assign.course?.course_code && (
                       <span className="std-asg-code-pill text-xs font-extrabold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100 uppercase">
@@ -1304,7 +1268,7 @@ const StudentAssignments = () => {
 
                     <span
                       className={`text-xs font-extrabold inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border ${
-                        isGraded
+                        isGradgraded
                           ? 'std-asg-badge-indigo bg-indigo-50 text-indigo-700 border-indigo-200'
                           : isSubmitted
                           ? 'std-asg-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -1313,7 +1277,7 @@ const StudentAssignments = () => {
                           : 'std-asg-badge-amber bg-amber-50 text-amber-700 border-amber-200'
                       }`}
                     >
-                      {isGraded ? (
+                      {isGradgraded ? (
                         <>
                           <CheckBadgeIcon className="h-4 w-4" />
                           <span>{t('ដាក់ពិន្ទុរួច', 'Graded')}</span>
@@ -1337,7 +1301,6 @@ const StudentAssignments = () => {
                     </span>
                   </div>
 
-                  {/* ចំណងជើង និងការពិពណ៌នា */}
                   <div>
                     <h3 className="std-asg-text-primary text-lg sm:text-xl font-black text-gray-900 leading-snug">
                       {assign.title}
@@ -1349,7 +1312,6 @@ const StudentAssignments = () => {
                     )}
                   </div>
 
-                  {/* ថ្ងៃកំណត់ និងពិន្ទុអតិបរមា */}
                   <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
                     <span
                       className={`std-asg-subbox inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold ${
@@ -1374,7 +1336,6 @@ const StudentAssignments = () => {
                   </div>
                 </div>
 
-                {/* ផ្នែកខាងស្ដាំ៖ លទ្ធផលការប្រគល់ ឬ ប៊ូតុងប្រគល់កិច្ចការ */}
                 <div className="std-asg-divider lg:w-80 shrink-0 flex flex-col items-stretch lg:items-end justify-center border-t lg:border-t-0 pt-4 lg:pt-0 border-gray-100">
                   {isSubmitted ? (
                     <div className="std-asg-subbox bg-gray-50/90 border border-gray-200/80 p-4 rounded-2xl w-full space-y-2.5 text-xs">
@@ -1394,7 +1355,7 @@ const StudentAssignments = () => {
                         <span className="std-asg-text-secondary font-bold text-gray-600">
                           {t('ពិន្ទុទទួលបាន៖', 'Score Earned:')}
                         </span>
-                        {isGraded ? (
+                        {isGradgraded ? (
                           <span className="std-asg-badge-emerald px-2.5 py-1 rounded-lg font-black text-emerald-700 bg-emerald-50 border border-emerald-200 text-sm">
                             {formatCleanScore(submission.score)} / {maxScore}
                           </span>
@@ -1639,7 +1600,7 @@ const StudentAssignments = () => {
         )}
 
       {/* ================================================================== */}
-      {/* 📌 6. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
+      {/* 6. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
       {/* ================================================================== */}
       <style>{`
         .std-asg-grid-pattern {

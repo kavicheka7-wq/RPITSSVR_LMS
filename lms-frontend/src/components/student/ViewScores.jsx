@@ -24,10 +24,10 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Instant Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
-const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v1';
-const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v5';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v2';
+const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v14';
 
-const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v14_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
 
 // ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
@@ -48,7 +48,7 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ អានតារាងរូបថតគ្រូបង្រៀនពី RAM ភ្លាមៗក្នុង 0ms (គ្មានការប្រើ Canvas ឱ្យទាក់អេក្រង់ឡើយ)
+// ✅ អានតារាងរូបថតគ្រូបង្រៀនពី RAM ភ្លាមៗក្នុង 0ms
 const getTeacherAvatarMapSync = () => {
   if (
     STUDENT_SCORES_MEM_CACHE.teacherAvatarMap &&
@@ -56,13 +56,72 @@ const getTeacherAvatarMapSync = () => {
   ) {
     return STUDENT_SCORES_MEM_CACHE.teacherAvatarMap;
   }
-  const stored = readStorageJson(CACHE_KEY_TEACHER_AVATARS, {});
+  const stored =
+    readStorageJson(CACHE_KEY_TEACHER_AVATARS, null) ||
+    readStorageJson('cached_student_teacher_avatars_v1', {});
   STUDENT_SCORES_MEM_CACHE.teacherAvatarMap =
     stored && typeof stored === 'object' ? stored : {};
   return STUDENT_SCORES_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ រក្សាទុកបញ្ជីពិន្ទុ និងរូបថតគ្រូដោយលឿនបំផុត (0ms Synchronous Slim Save គ្មាន Canvas)
+// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដើម្បីកុំឱ្យពេញ localStorage (QuotaExceededError)
+const compressTeacherAvatar = (dataUrl, callback) => {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
+    callback(dataUrl);
+    return;
+  }
+  if (dataUrl.length < 18000) {
+    callback(dataUrl);
+    return;
+  }
+  try {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 96;
+        let width = img.width || maxSize;
+        let height = img.height || maxSize;
+        if (width > height) {
+          if (width > maxSize) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/webp', 0.78);
+        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+      } catch {
+        callback(dataUrl);
+      }
+    };
+    img.onerror = () => callback(dataUrl);
+    img.src = dataUrl;
+  } catch {
+    callback(dataUrl);
+  }
+};
+
+let teacherAvatarSaveTimer = null;
+const schedulePersistTeacherAvatars = () => {
+  if (teacherAvatarSaveTimer) clearTimeout(teacherAvatarSaveTimer);
+  teacherAvatarSaveTimer = setTimeout(() => {
+    try {
+      const map = getTeacherAvatarMapSync();
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(map));
+    } catch {}
+  }, 150);
+};
+
+// ✅ រក្សាទុកបញ្ជីពិន្ទុ និងរូបថតគ្រូដោយលឿនបំផុត (0ms)
 const persistStudentScoresFast = (uid, scoresList) => {
   if (!Array.isArray(scoresList)) return;
   const avatarMap = getTeacherAvatarMapSync();
@@ -73,39 +132,67 @@ const persistStudentScoresFast = (uid, scoresList) => {
     const rawImg =
       person.profile_image_url ||
       person.profile_image ||
+      person.avatar ||
       person.user?.profile_image_url ||
       person.user?.profile_image ||
       null;
 
     const tchId = String(person.id || person.user_id || '');
     const cid = String(courseIdFallback || '');
+    const nameKey =
+      person.name || person.full_name
+        ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
+        : '';
 
     if (rawImg && typeof rawImg === 'string') {
-      if (cid && avatarMap[`crs_${cid}`] !== rawImg) {
+      if (cid && !avatarMap[`crs_${cid}`]) {
         avatarMap[`crs_${cid}`] = rawImg;
         avatarMapUpdated = true;
       }
-      if (tchId && avatarMap[`tch_${tchId}`] !== rawImg) {
+      if (tchId && !avatarMap[`tch_${tchId}`]) {
         avatarMap[`tch_${tchId}`] = rawImg;
         avatarMapUpdated = true;
       }
+      if (nameKey && !avatarMap[nameKey]) {
+        avatarMap[nameKey] = rawImg;
+        avatarMapUpdated = true;
+      }
+
+      compressTeacherAvatar(rawImg, (tinyImg) => {
+        if (tinyImg) {
+          if (cid) avatarMap[`crs_${cid}`] = tinyImg;
+          if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
+          if (nameKey) avatarMap[nameKey] = tinyImg;
+          schedulePersistTeacherAvatars();
+        }
+      });
     }
 
     const isHeavyBase64 =
       typeof rawImg === 'string' &&
       rawImg.startsWith('data:') &&
-      rawImg.length > 2000;
+      rawImg.length > 25000;
 
     const copy = { ...person };
     if (isHeavyBase64) {
-      delete copy.profile_image;
-      delete copy.profile_image_url;
+      const cachedTiny =
+        (cid && avatarMap[`crs_${cid}`]) ||
+        (tchId && avatarMap[`tch_${tchId}`]) ||
+        null;
+      if (cachedTiny && cachedTiny.length < 25000) {
+        copy.profile_image = cachedTiny;
+        copy.profile_image_url = cachedTiny;
+      } else {
+        delete copy.profile_image;
+        delete copy.profile_image_url;
+      }
     }
     if (copy.user && typeof copy.user === 'object') {
       const uCopy = { ...copy.user };
       if (
         typeof uCopy.profile_image === 'string' &&
-        uCopy.profile_image.startsWith('data:')
+        uCopy.profile_image.startsWith('data:') &&
+        uCopy.profile_image.length > 25000
       ) {
         delete uCopy.profile_image;
         delete uCopy.profile_image_url;
@@ -140,11 +227,7 @@ const persistStudentScoresFast = (uid, scoresList) => {
     return copy;
   });
 
-  if (avatarMapUpdated) {
-    try {
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(avatarMap));
-    } catch {}
-  }
+  schedulePersistTeacherAvatars();
 
   try {
     const listStr = JSON.stringify(slimList);
@@ -223,6 +306,7 @@ const normalizeShiftKey = (shiftVal) => {
   return 'Monday-Friday';
 };
 
+// ✅ គាំទ្រការទាញយក Array ពីគ្រប់ទម្រង់រចនាសម្ព័ន្ធ JSON របស់ Backend Controller
 const extractValidScoresArray = (resData) => {
   if (!resData) return [];
   if (Array.isArray(resData)) return resData;
@@ -232,6 +316,8 @@ const extractValidScoresArray = (resData) => {
   if (resData.data && Array.isArray(resData.data.data)) return resData.data.data;
   if (resData.data && Array.isArray(resData.data.scores))
     return resData.data.scores;
+  if (resData.data && Array.isArray(resData.data.grades))
+    return resData.data.grades;
   return [];
 };
 
@@ -253,7 +339,7 @@ const toWeightedComponentPoints = (rawPercentageScore, maxWeightPoints) => {
   return Math.min(maxWeightPoints, Math.max(0, Math.round(scaled * 100) / 100));
 };
 
-// ✅ អនុគមន៍គណនា និងស្រង់ទិន្នន័យពិន្ទុនិស្សិតឱ្យត្រូវគ្នា ១០០% ជាមួយ TeacherManageGrades.jsx
+// ✅ អនុគមន៍គណនា និងស្រង់ទិន្នន័យពិន្ទុនិស្សិតឱ្យត្រូវគ្នា ១០០%
 const enrichGradeRow = (row, idx) => {
   const scoreObj = row?.score || row?.pivot || row || {};
   const courseObj = row?.course || (row?.course_name ? row : {}) || {};
@@ -436,12 +522,29 @@ const ViewScores = () => {
       readStorageJson(getScoresCacheKey(currentStudentId), null) ||
       readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, null) ||
       readStorageJson(CACHE_KEY_SHARED_SCORES, []);
-    STUDENT_SCORES_MEM_CACHE.grades = cached;
-    return cached;
+    STUDENT_SCORES_MEM_CACHE.grades = Array.isArray(cached) ? cached : [];
+    return STUDENT_SCORES_MEM_CACHE.grades;
   });
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('all');
+
+  // ✅ ទាញបញ្ជីមុខវិជ្ជាដែលមានក្នុង Cache មកទុកជាជំនួយសម្រាប់ផ្គូផ្គងរូបថត និងឈ្មោះគ្រូបង្រៀន
+  const cachedCatalogCoursesById = useMemo(() => {
+    const map = new Map();
+    const list1 = readStorageJson(`cached_student_dept_courses_v14_${currentStudentId}`, []);
+    const list2 = readStorageJson(getEnrollmentsCacheKey(currentStudentId), []);
+    [...(Array.isArray(list1) ? list1 : []), ...(Array.isArray(list2) ? list2 : [])].forEach(
+      (c) => {
+        const itemCourse = c?.course || c;
+        const cid = itemCourse?.id || c?.course_id || c?.id;
+        if (cid && !map.has(String(cid))) {
+          map.set(String(cid), itemCourse);
+        }
+      }
+    );
+    return map;
+  }, [currentStudentId]);
 
   // ============================================================================
   // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី `/student/scores` ដោយមិនរាំងស្ទះ UI (0ms Sync)
@@ -449,12 +552,16 @@ const ViewScores = () => {
   useEffect(() => {
     let isMounted = true;
 
-    const cachedList =
-      readStorageJson(getScoresCacheKey(currentStudentId), null) ||
-      readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, null);
-    if (Array.isArray(cachedList)) {
-      setGrades(cachedList);
-      STUDENT_SCORES_MEM_CACHE.grades = cachedList;
+    if (page === 1) {
+      const cachedList =
+        readStorageJson(getScoresCacheKey(currentStudentId), null) ||
+        readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, null) ||
+        readStorageJson(CACHE_KEY_SHARED_SCORES, null);
+
+      if (Array.isArray(cachedList) && cachedList.length > 0) {
+        setGrades(cachedList);
+        STUDENT_SCORES_MEM_CACHE.grades = cachedList;
+      }
     }
 
     const now = Date.now();
@@ -462,7 +569,7 @@ const ViewScores = () => {
       STUDENT_SCORES_MEM_CACHE.uid === currentStudentId &&
       Array.isArray(STUDENT_SCORES_MEM_CACHE.grades) &&
       STUDENT_SCORES_MEM_CACHE.grades.length > 0 &&
-      now - STUDENT_SCORES_MEM_CACHE.lastSyncedAt < 25000
+      now - STUDENT_SCORES_MEM_CACHE.lastSyncedAt < 5000
     ) {
       return;
     }
@@ -593,15 +700,25 @@ const ViewScores = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ ទាញយកឈ្មោះ និងរូបថតគ្រូបង្រៀនពី RAM Dictionary ក្នុងល្បឿន 0ms
+  // ✅ ទាញយកឈ្មោះ និងរូបថតគ្រូបង្រៀនពី RAM Dictionary និង Catalog Fallback ក្នុងល្បឿន 0ms
   const resolveGradeTeacherMeta = useCallback(
     (gradeRow) => {
       const course = gradeRow?.course || {};
       const cid = String(course.id || gradeRow?.course_id || '');
-      const tchProfile = course.teacher_profile || course.teacherProfile;
-      const tch = course.teacher || gradeRow?.teacher;
+      const catalogCourse = cid ? cachedCatalogCoursesById.get(cid) : null;
+
+      const tchProfile =
+        course.teacher_profile ||
+        course.teacherProfile ||
+        catalogCourse?.teacher_profile ||
+        catalogCourse?.teacherProfile;
+      const tch = course.teacher || catalogCourse?.teacher || gradeRow?.teacher;
       const tchId = String(
-        course.teacher_id || tch?.id || tchProfile?.id || ''
+        course.teacher_id ||
+          catalogCourse?.teacher_id ||
+          tch?.id ||
+          tchProfile?.id ||
+          ''
       );
 
       let fullName = '';
@@ -634,7 +751,7 @@ const ViewScores = () => {
       if (!fullName) {
         fullName =
           course.teacher_name ||
-          gradeRow?.teacher_name ||
+          catalogCourse?.teacher_name ||
           t('គ្រូបង្រៀន', 'Instructor');
       }
 
@@ -647,28 +764,38 @@ const ViewScores = () => {
           : (fullName.charAt(0) || 'T').toUpperCase();
 
       const avatarMap = getTeacherAvatarMapSync();
-      const rawImg =
+      const nameLookupKey =
+        fullName && fullName !== 'គ្រូបង្រៀន' && fullName !== 'Instructor'
+          ? `name_${fullName.toLowerCase().trim()}`
+          : '';
+
+      const rawImage =
         tchProfile?.profile_image_url ||
         tchProfile?.profile_image ||
+        tchProfile?.avatar ||
+        tchProfile?.user?.profile_image_url ||
         tchProfile?.user?.profile_image ||
         tch?.profile_image_url ||
         tch?.profile_image ||
+        tch?.avatar ||
         tch?.user?.profile_image_url ||
         tch?.user?.profile_image ||
         course?.teacher_image ||
+        catalogCourse?.teacher_image ||
         gradeRow?.teacher_image ||
         (cid && avatarMap[`crs_${cid}`]) ||
-        (tchId && avatarMap[`tch_${tchId}`]);
+        (tchId && avatarMap[`tch_${tchId}`]) ||
+        (nameLookupKey && avatarMap[nameLookupKey]);
 
       return {
         name: fullName,
         initials,
-        image: getProfileImageUrl(rawImg),
+        image: getProfileImageUrl(rawImage),
         specialization:
           tchProfile?.specialization || tch?.specialization || null,
       };
     },
-    [t, getProfileImageUrl]
+    [t, cachedCatalogCoursesById, getProfileImageUrl]
   );
 
   const availableCourses = useMemo(() => {
@@ -855,7 +982,7 @@ const ViewScores = () => {
     <div className="std-scr-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
       {/* ================================================================== */}
-      {/* 📌 1. MODERN BENTO HERO SECTION                                    */}
+      {/* 1. MODERN BENTO HERO SECTION                                       */}
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
         
@@ -1023,7 +1150,7 @@ const ViewScores = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. SEARCH & COURSE FILTER BAR                                   */}
+      {/* 2. SEARCH & COURSE FILTER BAR                                      */}
       {/* ================================================================== */}
       <div className="std-scr-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-3.5 items-center justify-between">
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto flex-1">
@@ -1072,7 +1199,7 @@ const ViewScores = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. DETAILED SCORES TABLE                                        */}
+      {/* 3. DETAILED SCORES TABLE                                           */}
       {/* ================================================================== */}
       <div className="std-scr-surface bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
         <div className="std-scr-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
@@ -1323,7 +1450,7 @@ const ViewScores = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 4. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
+      {/* 4. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
       {/* ================================================================== */}
       <style>{`
         .std-scr-grid-pattern {
