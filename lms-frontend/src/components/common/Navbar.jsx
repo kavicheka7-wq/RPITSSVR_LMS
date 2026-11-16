@@ -921,7 +921,6 @@ const Navbar = () => {
         profile_image: dataUrl,
       }));
 
-      // រក្សាទុកចូលក្នុង State និង LocalStorage ភ្លាមៗក្នុង 0ms
       const optimisticUser = { ...user, profile_image: dataUrl };
       let optimisticTeacher = teacherData ? { ...teacherData } : null;
       if (optimisticUser.teacher) {
@@ -1107,35 +1106,36 @@ const Navbar = () => {
             : 'bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 border-blue-800/40'
         }`}
       >
-        <div className="px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
+        <div className="px-3 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16 gap-2">
+            {/* ✅ ផ្នែកខាងឆ្វេង៖ ដាក់ min-w-0 flex-1 ការពារកុំឱ្យអក្សរ LMS RPITSSVR លោតទៅជាន់រូបកណ្ដឹងលើទូរស័ព្ទ */}
+            <div className="flex items-center min-w-0 flex-1">
               <Link
                 to={dashboardPath}
-                className="shrink-0 flex items-center gap-3 group"
+                className="flex items-center gap-2 sm:gap-3 group min-w-0"
               >
                 {!logoError ? (
                   <img
                     src={logo}
                     alt="RPITSSVR Logo"
-                    className="h-10 w-auto object-contain drop-shadow-lg"
+                    className="h-8 sm:h-10 w-auto object-contain drop-shadow-lg shrink-0"
                     onError={() => setLogoError(true)}
                   />
                 ) : (
                   <div
-                    className={`h-10 w-10 rounded-full flex items-center justify-center shadow-lg ring-2 ring-yellow-400/50 ${
+                    className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center shadow-lg ring-2 ring-yellow-400/50 shrink-0 ${
                       isStudent ? 'bg-indigo-700' : 'bg-blue-700'
                     }`}
                   >
-                    <AcademicCapIcon className="h-5 w-5 text-yellow-300" />
+                    <AcademicCapIcon className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-300" />
                   </div>
                 )}
-                <div>
-                  <h1 className="text-lg sm:text-xl font-black text-white tracking-wide drop-shadow-sm leading-tight">
+                <div className="min-w-0">
+                  <h1 className="text-[15px] sm:text-xl font-black text-white tracking-wide drop-shadow-sm leading-tight whitespace-nowrap truncate">
                     LMS RPITSSVR
                   </h1>
                   <p
-                    className={`hidden sm:block text-[10px] font-semibold tracking-wider ${
+                    className={`hidden sm:block text-[10px] font-semibold tracking-wider truncate ${
                       isStudent ? 'text-indigo-200/85' : 'text-blue-200/80'
                     }`}
                   >
@@ -1148,7 +1148,7 @@ const Navbar = () => {
               </Link>
             </div>
 
-            <div className="hidden md:flex md:items-center space-x-3">
+            <div className="hidden md:flex md:items-center space-x-3 shrink-0">
               {!isMobileViewport && <NotificationBell />}
 
               <button
@@ -1194,7 +1194,6 @@ const Navbar = () => {
                 </span>
               </button>
 
-              {/* ✅ ទម្រង់ដើម៖ បង្ហាញតែរូបតំណាងមូល (Circular Avatar Only) ដោយមិនដាក់ប្រអប់វែង ឈ្មោះ ឬតួនាទីឡើយ */}
               <Menu as="div" className="relative ml-1.5">
                 <Menu.Button
                   className="group relative flex items-center justify-center rounded-full focus:outline-none cursor-pointer"
@@ -1299,13 +1298,14 @@ const Navbar = () => {
               </Menu>
             </div>
 
-            <div className="flex items-center md:hidden gap-1.5">
+            {/* ✅ ផ្នែកខាងស្ដាំលើទូរស័ព្ទ៖ ដាក់ shrink-0 និងគម្លាតសមាមាត្រ ការពារកុំឱ្យជាន់គ្នា */}
+            <div className="flex items-center md:hidden gap-1 sm:gap-1.5 shrink-0">
               {isMobileViewport && <NotificationBell isMobile={true} />}
 
               <button
                 type="button"
                 onClick={toggleTheme}
-                className={`p-2 rounded-xl text-yellow-300/80 hover:text-yellow-300 transition-colors cursor-pointer ${
+                className={`p-1.5 sm:p-2 rounded-xl text-yellow-300/80 hover:text-yellow-300 transition-colors cursor-pointer shrink-0 ${
                   isStudent ? 'hover:bg-white/10' : 'hover:bg-blue-800/50'
                 }`}
                 title={isDarkMode ? t('ថ្ងៃ', 'Light') : t('យប់', 'Dark')}
@@ -1320,7 +1320,7 @@ const Navbar = () => {
               <button
                 type="button"
                 onClick={toggleLanguage}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-yellow-300 transition-colors cursor-pointer ${
+                className={`flex items-center gap-1 px-2 py-1.5 rounded-xl border text-yellow-300 transition-colors cursor-pointer shrink-0 ${
                   isStudent
                     ? 'bg-white/10 border-indigo-400/35 hover:bg-white/15'
                     : 'bg-blue-800/40 border-blue-600/30 hover:bg-blue-800/70'
@@ -1336,7 +1336,7 @@ const Navbar = () => {
               <button
                 type="button"
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className={`inline-flex items-center justify-center p-2 rounded-xl text-yellow-300/70 hover:text-yellow-300 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 transition-colors cursor-pointer ${
+                className={`inline-flex items-center justify-center p-1.5 sm:p-2 rounded-xl text-yellow-300/70 hover:text-yellow-300 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 transition-colors cursor-pointer shrink-0 ${
                   isStudent ? 'hover:bg-white/10' : 'hover:bg-blue-800/50'
                 }`}
               >
