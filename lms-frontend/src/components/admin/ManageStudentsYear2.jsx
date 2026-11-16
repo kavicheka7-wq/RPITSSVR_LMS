@@ -2121,10 +2121,14 @@ const ManageStudentsYear2 = () => {
       }
 
       const rawImage =
+        teacherObj?.profile_image_url ||
         teacherObj?.profile_image ||
         teacherObj?.avatar ||
+        teacherObj?.user?.profile_image_url ||
         teacherObj?.user?.profile_image ||
+        c.teacher?.profile_image_url ||
         c.teacher?.profile_image ||
+        cat.teacher?.profile_image_url ||
         cat.teacher?.profile_image ||
         null;
 

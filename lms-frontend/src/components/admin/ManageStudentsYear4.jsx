@@ -55,12 +55,13 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + អានរូបភាពពី localStorage តាំងពីវិនាទីទី 0
+// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សាទុកការចុះឈ្មោះមុខវិជ្ជាក្នុង RAM (0ms)
 const ADMIN_STUDENTS_Y4_MEM_CACHE = {
   uid: null,
   students: null,
   meta: null,
   enrolledDeptsMap: null,
+  enrollmentsByStudentId: {},
   departments: null,
   courses: null,
   studentRoleId: null,
@@ -303,9 +304,12 @@ const formatDateOnly = (dateVal) => {
   return str;
 };
 
+// ✅ បង្ហាញឈ្មោះដើមពី Database ដោយមិនបម្លែងភាសាខ្មែរ-អង់គ្លេស
 const getStudentFullName = (person) => {
   if (!person) return '';
-  return `${person.first_name || ''} ${person.last_name || ''}`.trim();
+  const firstLast = `${person.first_name || ''} ${person.last_name || ''}`.trim();
+  if (firstLast) return firstLast;
+  return person.full_name || person.name || '';
 };
 
 const getDepartmentDisplayName = (deptObjOrName) => {
@@ -490,10 +494,10 @@ const ManageStudentsYear4 = () => {
     ADMIN_STUDENTS_Y4_MEM_CACHE.students = null;
     ADMIN_STUDENTS_Y4_MEM_CACHE.meta = null;
     ADMIN_STUDENTS_Y4_MEM_CACHE.enrolledDeptsMap = null;
+    ADMIN_STUDENTS_Y4_MEM_CACHE.enrollmentsByStudentId = {};
     ADMIN_STUDENTS_Y4_MEM_CACHE.departments = null;
     ADMIN_STUDENTS_Y4_MEM_CACHE.courses = null;
     ADMIN_STUDENTS_Y4_MEM_CACHE.lastSyncedAt = 0;
-    ADMIN_STUDENTS_Y4_MEM_CACHE.avatarMap = {};
   }
   ADMIN_STUDENTS_Y4_MEM_CACHE.uid = currentAdminId;
 
@@ -655,8 +659,34 @@ const ManageStudentsYear4 = () => {
   const [isGraduating, setIsGraduating] = useState(false);
 
   // ============================================================================
-  // 📌 ផ្នែកទី ៣៖ ការច្រោះទិន្នន័យសិស្សកំពុងរៀនឆ្នាំទី៤ និងនិស្សិតបញ្ចប់ការសិក្សា
+  // 📌 ផ្នែកទី ៣៖ ការច្រោះទិន្នន័យល្បឿនលឿន O(1) Map Lookup (មិនរាំងស្ទះទោះមានសិស្ស/គ្រូច្រើន)
   // ============================================================================
+
+  // ✅ បង្កើត Hash Map សម្រាប់មុខវិជ្ជា និងដេប៉ាតឺម៉ង់ ដើម្បីស្វែងរកក្នុងល្បឿន O(1) (0ms)
+  const coursesByIdMap = useMemo(() => {
+    const map = new Map();
+    if (Array.isArray(allCourses)) {
+      allCourses.forEach((c) => {
+        if (c && c.id !== undefined && c.id !== null) {
+          map.set(Number(c.id), c);
+          map.set(String(c.id), c);
+        }
+      });
+    }
+    return map;
+  }, [allCourses]);
+
+  const departmentsByIdMap = useMemo(() => {
+    const map = new Map();
+    if (Array.isArray(departments)) {
+      departments.forEach((d) => {
+        if (d && d.id !== undefined && d.id !== null) {
+          map.set(String(d.id), d);
+        }
+      });
+    }
+    return map;
+  }, [departments]);
 
   const getStudentDepartmentIds = useCallback((student) => {
     if (!student) return [];
@@ -672,8 +702,8 @@ const ManageStudentsYear4 = () => {
         const cDeptId = enr.course?.department_id || enr.course?.department?.id || enr.department_id;
         if (cDeptId !== undefined && cDeptId !== null && cDeptId !== '') {
           deptSet.add(String(cDeptId));
-        } else if (enr.course_id && allCourses.length > 0) {
-          const matchedCourse = allCourses.find((c) => Number(c.id) === Number(enr.course_id));
+        } else if (enr.course_id && coursesByIdMap.size > 0) {
+          const matchedCourse = coursesByIdMap.get(Number(enr.course_id)) || coursesByIdMap.get(String(enr.course_id));
           const mDeptId = matchedCourse?.department_id || matchedCourse?.department?.id;
           if (mDeptId) deptSet.add(String(mDeptId));
         }
@@ -699,15 +729,19 @@ const ManageStudentsYear4 = () => {
     }
 
     return Array.from(deptSet);
-  }, [allCourses, enrolledDeptsMap]);
+  }, [coursesByIdMap, enrolledDeptsMap]);
 
   const syncStudentEnrolledDepts = useCallback((studentId, enrollmentsList, coursesCatalog = allCourses) => {
     if (!studentId) return;
     const deptIds = new Set();
     (enrollmentsList || []).forEach((enr) => {
       let dId = enr.course?.department_id || enr.course?.department?.id;
-      if (!dId && enr.course_id && coursesCatalog.length > 0) {
-        const foundCourse = coursesCatalog.find((c) => Number(c.id) === Number(enr.course_id));
+      if (!dId && enr.course_id) {
+        const foundCourse =
+          coursesByIdMap.get(Number(enr.course_id)) ||
+          (Array.isArray(coursesCatalog)
+            ? coursesCatalog.find((c) => Number(c.id) === Number(enr.course_id))
+            : null);
         dId = foundCourse?.department_id || foundCourse?.department?.id;
       }
       if (dId !== undefined && dId !== null && dId !== '') {
@@ -724,7 +758,7 @@ const ManageStudentsYear4 = () => {
       } catch (e) {}
       return next;
     });
-  }, [allCourses, currentAdminId]);
+  }, [allCourses, coursesByIdMap, currentAdminId]);
 
   const activeYear4StudentsAll = useMemo(() => {
     return (students || []).filter((student) => isYear4Student(student));
@@ -748,11 +782,9 @@ const ManageStudentsYear4 = () => {
     currentModeStudentsAll.forEach((student) => {
       const studentDeptIds = getStudentDepartmentIds(student);
       studentDeptIds.forEach((dId) => {
-        departments.forEach((dept) => {
-          if (String(dept.id) === String(dId)) {
-            counts[dept.id] = (counts[dept.id] || 0) + 1;
-          }
-        });
+        if (counts[dId] !== undefined) {
+          counts[dId] += 1;
+        }
       });
     });
 
@@ -976,8 +1008,8 @@ const ManageStudentsYear4 = () => {
 
   const activeDepartmentObj = useMemo(() => {
     if (selectedDepartment === 'all') return null;
-    return departments.find((d) => String(d.id) === String(selectedDepartment)) || null;
-  }, [selectedDepartment, departments]);
+    return departmentsByIdMap.get(String(selectedDepartment)) || null;
+  }, [selectedDepartment, departmentsByIdMap]);
 
   // ============================================================================
   // 📌 ផ្នែកទី ៦៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
@@ -1029,9 +1061,9 @@ const ManageStudentsYear4 = () => {
     } catch (error) {}
   }, []);
 
-  const fetchCoursesList = useCallback(async () => {
+  const fetchCoursesList = useCallback(async (forceRefresh = false) => {
     try {
-      const coursesData = await getCachedCourses();
+      const coursesData = await getCachedCourses(forceRefresh);
       if (Array.isArray(coursesData)) {
         setAllCourses(coursesData);
         ADMIN_STUDENTS_Y4_MEM_CACHE.courses = coursesData;
@@ -1043,24 +1075,12 @@ const ManageStudentsYear4 = () => {
     } catch (error) {}
   }, [currentAdminId]);
 
-  useEffect(() => {
-    fetchDepartments();
-    fetchStudentRole();
-    fetchCoursesList();
-  }, [fetchDepartments, fetchStudentRole, fetchCoursesList]);
-
   const fetchStudents = useCallback(
     async (forceRefresh = false) => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
         const cachedList = readStorageJson(getStudentsY4CacheKey(currentAdminId), null);
-        if (Array.isArray(cachedList)) {
-          const hydratedCached = cachedList.map((item) => {
-            const memImg = ADMIN_STUDENTS_Y4_MEM_CACHE.avatarMap[item.id];
-            if (memImg && !item.profile_image) {
-              return { ...item, profile_image: memImg };
-            }
-            return item;
-          });
+        if (Array.isArray(cachedList) && cachedList.length > 0) {
+          const hydratedCached = hydrateStudentsWithAvatars(cachedList);
           setStudents(hydratedCached);
           ADMIN_STUDENTS_Y4_MEM_CACHE.students = hydratedCached;
         }
@@ -1091,14 +1111,6 @@ const ManageStudentsYear4 = () => {
         const year4AndGraduatedList = validRaw.filter(
           (student) => isYear4Student(student) || isGraduatedStudent(student)
         );
-
-        // ✅ រក្សាទុករូបភាពសិស្សក្នុង RAM ភ្លាមៗដើម្បីឱ្យការបង្ហាញរូបភាពលឿនបំផុត (0ms)
-        year4AndGraduatedList.forEach((sItem) => {
-          const img = sItem?.profile_image || sItem?.user?.profile_image;
-          if (sItem?.id && img) {
-            ADMIN_STUDENTS_Y4_MEM_CACHE.avatarMap[sItem.id] = img;
-          }
-        });
 
         const studentMeta = {
           ...(response.data?.meta || { current_page: 1, last_page: 1, per_page: perPage }),
@@ -1138,7 +1150,13 @@ const ManageStudentsYear4 = () => {
   useEffect(() => {
     fetchStudents(false);
     setSelectedStudents([]);
-  }, [fetchStudents]);
+    const timer = setTimeout(() => {
+      fetchDepartments();
+      fetchStudentRole();
+      fetchCoursesList(false);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [fetchStudents, fetchDepartments, fetchStudentRole, fetchCoursesList]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -1359,7 +1377,7 @@ const ManageStudentsYear4 = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី ៧៖ មុខងារចុះឈ្មោះមុខវិជ្ជាឱ្យសិស្ស (SINGLE MULTI-SELECT & BULK ENROLLMENT)
+  // 📌 ផ្នែកទី ៧៖ មុខងារចុះឈ្មោះមុខវិជ្ជាល្បឿន 0ms (Optimistic UI & Instant Cache)
   // ============================================================================
 
   const openEnrollmentModal = async (student) => {
@@ -1368,26 +1386,55 @@ const ManageStudentsYear4 = () => {
     setEnrollCourseSearch('');
     const studentDeptId = student.department_id || student.department?.id;
     setEnrollDeptFilter(studentDeptId ? 'student_dept' : 'all');
+
+    // ✅ ១. បង្ហាញទិន្នន័យពី RAM Cache ភ្លាមៗក្នុង 0ms បើធ្លាប់បើកមើលសិស្សនេះម្ដងហើយ
+    const cachedEnr = ADMIN_STUDENTS_Y4_MEM_CACHE.enrollmentsByStudentId[student.id];
+    if (Array.isArray(cachedEnr)) {
+      setStudentEnrollments(cachedEnr);
+    } else if (Array.isArray(student.enrollments) && student.enrollments.length > 0) {
+      setStudentEnrollments(student.enrollments);
+    } else {
+      setStudentEnrollments([]);
+    }
+
     setShowEnrollmentModal(true);
+
     try {
-      const [enrollmentsRes, coursesData] = await Promise.all([
-        api.get(`/admin/students/${student.id}/enrollments`),
-        getCachedCourses()
-      ]);
-      const fetchedEnrollments = enrollmentsRes.data.data || [];
-      const fetchedCourses = coursesData || [];
+      const requests = [api.get(`/admin/students/${student.id}/enrollments`)];
+      if (!allCourses || allCourses.length === 0) {
+        requests.push(getCachedCourses());
+      }
+      const [enrollmentsRes, coursesData] = await Promise.all(requests);
+      const fetchedEnrollments = enrollmentsRes.data?.data || [];
+      const fetchedCourses =
+        Array.isArray(coursesData) && coursesData.length > 0 ? coursesData : allCourses;
+
+      ADMIN_STUDENTS_Y4_MEM_CACHE.enrollmentsByStudentId[student.id] = fetchedEnrollments;
       setStudentEnrollments(fetchedEnrollments);
-      setAllCourses(fetchedCourses);
+
+      if (Array.isArray(coursesData) && coursesData.length > 0) {
+        setAllCourses(coursesData);
+        ADMIN_STUDENTS_Y4_MEM_CACHE.courses = coursesData;
+      }
       syncStudentEnrolledDepts(student.id, fetchedEnrollments, fetchedCourses);
     } catch (error) {
       console.error('Cannot fetch enrollment details:', error);
     }
   };
 
+  const enrolledCourseIdSet = useMemo(() => {
+    const set = new Set();
+    studentEnrollments.forEach((e) => {
+      const cid = e?.course_id ?? e?.course?.id;
+      if (cid !== undefined && cid !== null) set.add(Number(cid));
+    });
+    return set;
+  }, [studentEnrollments]);
+
   const availableCoursesForSingleStudent = useMemo(() => {
     if (!selectedStudent) return [];
     const unenrolled = allCourses.filter(
-      (c) => !studentEnrollments.some((e) => Number(e.course_id) === Number(c.id))
+      (c) => !enrolledCourseIdSet.has(Number(c.id))
     );
     const studentDeptId = selectedStudent.department_id || selectedStudent.department?.id;
 
@@ -1407,7 +1454,7 @@ const ManageStudentsYear4 = () => {
         c.course_name?.toLowerCase().includes(q) ||
         c.course_code?.toLowerCase().includes(q)
     );
-  }, [allCourses, studentEnrollments, selectedStudent, enrollDeptFilter, enrollCourseSearch]);
+  }, [allCourses, enrolledCourseIdSet, selectedStudent, enrollDeptFilter, enrollCourseSearch]);
 
   const toggleCourseInSingleModal = (courseId) => {
     const idNum = Number(courseId);
@@ -1426,36 +1473,78 @@ const ManageStudentsYear4 = () => {
     }
   };
 
-  const handleEnrollSelectedCourses = async (e) => {
-    if (e) e.preventDefault();
-    if (!selectedStudent || selectedCoursesToEnroll.length === 0) return;
+  // ✅ ២. ចុចចុះឈ្មោះភ្លាម បង្ហាញក្នុងបញ្ជីខាងក្រោមភ្លាមៗក្នុង 0ms (Optimistic UI Update)
+  const executeInstantEnrollment = async (courseIdsToEnroll, isDeptBulk = false) => {
+    if (!selectedStudent || courseIdsToEnroll.length === 0) return;
+
+    const prevEnrollments = [...studentEnrollments];
+    const studentName = getStudentFullName(selectedStudent);
+
+    const optimisticNewItems = courseIdsToEnroll.map((cid) => {
+      const matchedCourse =
+        coursesByIdMap.get(Number(cid)) || coursesByIdMap.get(String(cid)) || {};
+      return {
+        id: `temp_${cid}_${Date.now()}`,
+        student_id: selectedStudent.user_id || selectedStudent.id,
+        course_id: Number(cid),
+        status: 'active',
+        course: matchedCourse,
+      };
+    });
+
+    const nextOptimisticList = [...prevEnrollments, ...optimisticNewItems];
+    setStudentEnrollments(nextOptimisticList);
+    ADMIN_STUDENTS_Y4_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = nextOptimisticList;
+    syncStudentEnrolledDepts(selectedStudent.id, nextOptimisticList, allCourses);
+    setSelectedCoursesToEnroll([]);
+
     setIsEnrollingCourses(true);
     try {
-      const countToEnroll = selectedCoursesToEnroll.length;
-      const studentName = getStudentFullName(selectedStudent);
-
-      await api.post(`/admin/students/${selectedStudent.id}/enrollments`, {
-        course_ids: selectedCoursesToEnroll,
+      const res = await api.post(`/admin/students/${selectedStudent.id}/enrollments`, {
+        course_ids: courseIdsToEnroll,
       });
-      const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
-      const updatedEnrollments = enrollmentsRes.data.data || [];
-      setStudentEnrollments(updatedEnrollments);
-      syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
-      setSelectedCoursesToEnroll([]);
+
+      const returnedList = res.data?.data;
+      if (Array.isArray(returnedList) && returnedList.length > 0) {
+        const mergedMap = new Map();
+        prevEnrollments.forEach((item) => {
+          const cid = Number(item.course_id ?? item.course?.id);
+          if (cid) mergedMap.set(cid, item);
+        });
+        returnedList.forEach((item) => {
+          const cid = Number(item.course_id ?? item.course?.id);
+          if (cid) mergedMap.set(cid, item);
+        });
+        const finalMerged = Array.from(mergedMap.values());
+        setStudentEnrollments(finalMerged);
+        ADMIN_STUDENTS_Y4_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = finalMerged;
+        syncStudentEnrolledDepts(selectedStudent.id, finalMerged, allCourses);
+      }
 
       pushLocalNotification({
-        titleKm: 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្ស',
-        titleEn: 'Student Courses Enrolled',
-        descKm: `បានចុះឈ្មោះមុខវិជ្ជាចំនួន ${countToEnroll} មុខវិជ្ជាជូនសិស្ស «${studentName}» ដោយជោគជ័យ។`,
-        descEn: `Enrolled "${studentName}" in ${countToEnroll} courses successfully.`,
+        titleKm: isDeptBulk
+          ? 'បានដាក់បញ្ចូលគ្រប់មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់'
+          : 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្ស',
+        titleEn: isDeptBulk
+          ? 'Enrolled All Department Courses'
+          : 'Student Courses Enrolled',
+        descKm: `បានចុះឈ្មោះមុខវិជ្ជាចំនួន ${courseIdsToEnroll.length} មុខវិជ្ជាជូនសិស្ស «${studentName}» ដោយជោគជ័យ។`,
+        descEn: `Enrolled "${studentName}" in ${courseIdsToEnroll.length} courses successfully.`,
         category: 'student',
-        link: '/students/year-4'
+        link: '/students/year-4',
       });
     } catch (error) {
       console.error('Failed to enroll courses:', error);
+      setStudentEnrollments(prevEnrollments);
+      ADMIN_STUDENTS_Y4_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = prevEnrollments;
     } finally {
       setIsEnrollingCourses(false);
     }
+  };
+
+  const handleEnrollSelectedCourses = async (e) => {
+    if (e) e.preventDefault();
+    await executeInstantEnrollment(selectedCoursesToEnroll, false);
   };
 
   const handleQuickEnrollAllDeptCourses = async () => {
@@ -1464,38 +1553,15 @@ const ManageStudentsYear4 = () => {
     const deptUnenrolled = allCourses.filter(
       (c) =>
         (!studentDeptId || String(c.department_id || c.department?.id) === String(studentDeptId)) &&
-        !studentEnrollments.some((e) => Number(e.course_id) === Number(c.id))
+        !enrolledCourseIdSet.has(Number(c.id))
     );
 
     if (deptUnenrolled.length === 0) {
       return;
     }
 
-    setIsEnrollingCourses(true);
-    try {
-      const courseIds = deptUnenrolled.map((c) => Number(c.id));
-      const studentName = getStudentFullName(selectedStudent);
-
-      await api.post(`/admin/students/${selectedStudent.id}/enrollments`, { course_ids: courseIds });
-      const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
-      const updatedEnrollments = enrollmentsRes.data.data || [];
-      setStudentEnrollments(updatedEnrollments);
-      syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
-      setSelectedCoursesToEnroll([]);
-
-      pushLocalNotification({
-        titleKm: 'បានដាក់បញ្ចូលគ្រប់មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់',
-        titleEn: 'Enrolled All Department Courses',
-        descKm: `បានដាក់បញ្ចូលមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់ទាំង ${courseIds.length} មុខវិជ្ជាជូនសិស្ស «${studentName}» ជោគជ័យ។`,
-        descEn: `Enrolled all ${courseIds.length} department courses for "${studentName}".`,
-        category: 'student',
-        link: '/students/year-4'
-      });
-    } catch (error) {
-      console.error('Failed to enroll courses:', error);
-    } finally {
-      setIsEnrollingCourses(false);
-    }
+    const courseIds = deptUnenrolled.map((c) => Number(c.id));
+    await executeInstantEnrollment(courseIds, true);
   };
 
   const handleOpenBulkEnrollModal = async () => {
@@ -1557,49 +1623,57 @@ const ManageStudentsYear4 = () => {
       return;
     }
 
+    const studentsToEnroll = [...selectedStudents];
+    const coursesToEnroll = [...bulkSelectedCourses];
+
+    // ✅ Optimistic UI៖ បិទផ្ទាំង និងធ្វើបច្ចុប្បន្នភាពផ្លាកដេប៉ាតឺម៉ង់ភ្លាមៗក្នុង 0ms
+    const newlyAddedDeptIds = allCourses
+      .filter((c) => coursesToEnroll.includes(Number(c.id)))
+      .map((c) => String(c.department_id || c.department?.id || ''))
+      .filter(Boolean);
+
+    if (newlyAddedDeptIds.length > 0) {
+      setEnrolledDeptsMap((prev) => {
+        const next = { ...prev };
+        studentsToEnroll.forEach((studentId) => {
+          const existing = Array.isArray(next[studentId]) ? next[studentId] : [];
+          next[studentId] = Array.from(new Set([...existing, ...newlyAddedDeptIds]));
+        });
+        ADMIN_STUDENTS_Y4_MEM_CACHE.enrolledDeptsMap = next;
+        try {
+          localStorage.setItem(getEnrolledDeptsMapKey(currentAdminId), JSON.stringify(next));
+          localStorage.setItem(CACHE_KEY_LEGACY_ENROLLED_MAP, JSON.stringify(next));
+        } catch (e) {}
+        return next;
+      });
+    }
+
+    studentsToEnroll.forEach((studentId) => {
+      delete ADMIN_STUDENTS_Y4_MEM_CACHE.enrollmentsByStudentId[studentId];
+    });
+
+    setShowBulkEnrollModal(false);
+    setBulkSelectedCourses([]);
+    setSelectedStudents([]);
+
     setIsBulkEnrolling(true);
     try {
       await Promise.allSettled(
-        selectedStudents.map((studentId) =>
+        studentsToEnroll.map((studentId) =>
           api.post(`/admin/students/${studentId}/enrollments`, {
-            course_ids: bulkSelectedCourses,
+            course_ids: coursesToEnroll,
           })
         )
       );
 
-      const newlyAddedDeptIds = allCourses
-        .filter((c) => bulkSelectedCourses.includes(Number(c.id)))
-        .map((c) => String(c.department_id || c.department?.id || ''))
-        .filter(Boolean);
-
-      if (newlyAddedDeptIds.length > 0) {
-        setEnrolledDeptsMap((prev) => {
-          const next = { ...prev };
-          selectedStudents.forEach((studentId) => {
-            const existing = Array.isArray(next[studentId]) ? next[studentId] : [];
-            next[studentId] = Array.from(new Set([...existing, ...newlyAddedDeptIds]));
-          });
-          ADMIN_STUDENTS_Y4_MEM_CACHE.enrolledDeptsMap = next;
-          try {
-            localStorage.setItem(getEnrolledDeptsMapKey(currentAdminId), JSON.stringify(next));
-            localStorage.setItem(CACHE_KEY_LEGACY_ENROLLED_MAP, JSON.stringify(next));
-          } catch (e) {}
-          return next;
-        });
-      }
-
       pushLocalNotification({
         titleKm: 'បានចុះឈ្មោះមុខវិជ្ជាជាក្រុមជោគជ័យ',
         titleEn: 'Bulk Course Enrollment Completed',
-        descKm: `បានដាក់មុខវិជ្ជាចំនួន ${bulkSelectedCourses.length} ជូនសិស្សឆ្នាំទី៤ ចំនួន ${selectedStudents.length} នាក់។`,
-        descEn: `Assigned ${bulkSelectedCourses.length} courses to ${selectedStudents.length} Year 4 students.`,
+        descKm: `បានដាក់មុខវិជ្ជាចំនួន ${coursesToEnroll.length} ជូនសិស្សឆ្នាំទី៤ ចំនួន ${studentsToEnroll.length} នាក់។`,
+        descEn: `Assigned ${coursesToEnroll.length} courses to ${studentsToEnroll.length} Year 4 students.`,
         category: 'student',
         link: '/students/year-4',
       });
-
-      setShowBulkEnrollModal(false);
-      setBulkSelectedCourses([]);
-      setSelectedStudents([]);
     } catch (error) {
       console.error('Failed to bulk enroll courses:', error);
     } finally {
@@ -1607,18 +1681,26 @@ const ManageStudentsYear4 = () => {
     }
   };
 
+  // ✅ ៣. ចុចលុបមុខវិជ្ជាភ្លាម ដកចេញពីអេក្រង់ភ្លាមៗក្នុង 0ms (Optimistic Unenroll)
   const confirmUnenrollCourse = async () => {
-    if (!unenrollTarget) return;
+    if (!unenrollTarget || !selectedStudent) return;
+    const targetCourseId = Number(unenrollTarget);
+    const prevEnrollments = [...studentEnrollments];
+
+    setUnenrollTarget(null);
+    const updatedList = prevEnrollments.filter(
+      (e) => Number(e.course_id ?? e.course?.id) !== targetCourseId
+    );
+    setStudentEnrollments(updatedList);
+    ADMIN_STUDENTS_Y4_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = updatedList;
+    syncStudentEnrolledDepts(selectedStudent.id, updatedList, allCourses);
+
     try {
-      await api.delete(`/admin/students/${selectedStudent.id}/enrollments/${unenrollTarget}`);
-      const enrollmentsRes = await api.get(`/admin/students/${selectedStudent.id}/enrollments`);
-      const updatedEnrollments = enrollmentsRes.data.data || [];
-      setStudentEnrollments(updatedEnrollments);
-      syncStudentEnrolledDepts(selectedStudent.id, updatedEnrollments, allCourses);
+      await api.delete(`/admin/students/${selectedStudent.id}/enrollments/${targetCourseId}`);
     } catch (error) {
       console.error('Failed to unenroll:', error);
-    } finally {
-      setUnenrollTarget(null);
+      setStudentEnrollments(prevEnrollments);
+      ADMIN_STUDENTS_Y4_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = prevEnrollments;
     }
   };
 
@@ -1695,7 +1777,7 @@ const ManageStudentsYear4 = () => {
     const exportData = sortedStudentsForExport.map((s, idx) => {
       const allDeptNames = getStudentDepartmentIds(s)
         .map((dId) => {
-          const dObj = departments.find((d) => String(d.id) === String(dId));
+          const dObj = departmentsByIdMap.get(String(dId));
           return dObj ? getDepartmentDisplayName(dObj) : null;
         })
         .filter(Boolean);
@@ -2047,6 +2129,72 @@ const ManageStudentsYear4 = () => {
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
+
+  // ✅ អនុគមន៍ឆ្លាតវៃចាប់យកឈ្មោះ និងរូបថតគ្រូក្នុងល្បឿន O(1) ពីគ្រប់ទម្រង់ទិន្នន័យ + ផ្គូផ្គងពី coursesByIdMap
+  const resolveCourseTeacherInfo = useCallback(
+    (courseObj, fallbackCourseId = null) => {
+      const cid = courseObj?.id ?? fallbackCourseId;
+      const matchedFromCatalog =
+        cid !== undefined && cid !== null
+          ? coursesByIdMap.get(Number(cid)) || coursesByIdMap.get(String(cid))
+          : null;
+
+      const c = courseObj || matchedFromCatalog || {};
+      const cat = matchedFromCatalog || {};
+
+      const teacherObj =
+        c.teacher_profile ||
+        c.teacherProfile ||
+        c.teacher ||
+        cat.teacher_profile ||
+        cat.teacherProfile ||
+        cat.teacher ||
+        null;
+
+      let fullName = '';
+      if (teacherObj) {
+        fullName =
+          `${teacherObj.first_name || ''} ${teacherObj.last_name || ''}`.trim() ||
+          teacherObj.full_name ||
+          teacherObj.name ||
+          (teacherObj.user
+            ? `${teacherObj.user.first_name || ''} ${teacherObj.user.last_name || ''}`.trim() ||
+              teacherObj.user.name
+            : '');
+      }
+
+      if (!fullName) {
+        fullName = c.teacher_name || cat.teacher_name || '';
+      }
+
+      const rawImage =
+        teacherObj?.profile_image_url ||
+        teacherObj?.profile_image ||
+        teacherObj?.avatar ||
+        teacherObj?.user?.profile_image_url ||
+        teacherObj?.user?.profile_image ||
+        c.teacher?.profile_image_url ||
+        c.teacher?.profile_image ||
+        cat.teacher?.profile_image_url ||
+        cat.teacher?.profile_image ||
+        null;
+
+      const nameParts = fullName.trim().split(/\s+/).filter(Boolean);
+      const initials =
+        nameParts.length >= 2
+          ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`.toUpperCase()
+          : nameParts.length === 1
+          ? nameParts[0][0].toUpperCase()
+          : 'T';
+
+      return {
+        name: fullName || '—',
+        avatarUrl: getProfileImageUrl(rawImage),
+        initials,
+      };
+    },
+    [coursesByIdMap, getProfileImageUrl]
+  );
 
   // ============================================================================
   // 📌 ផ្នែកទី ៩៖ ការបង្ហាញទម្រង់ផ្ទៃមុខកម្មវិធី (JSX UI RENDERING)
@@ -2474,11 +2622,11 @@ const ManageStudentsYear4 = () => {
                 ) : (
                   displayedStudents.map((student) => {
                     const primaryDeptId = student.department_id || student.department?.id;
-                    const matchedDeptObj = student.department || departments.find(d => String(d.id) === String(primaryDeptId));
+                    const matchedDeptObj = student.department || departmentsByIdMap.get(String(primaryDeptId));
                     const extraDeptNames = getStudentDepartmentIds(student)
                       .filter((dId) => String(dId) !== String(primaryDeptId))
                       .map((dId) => {
-                        const dObj = departments.find((d) => String(d.id) === String(dId));
+                        const dObj = departmentsByIdMap.get(String(dId));
                         return dObj ? getDepartmentDisplayName(dObj) : null;
                       })
                       .filter(Boolean);
@@ -3099,6 +3247,7 @@ const ManageStudentsYear4 = () => {
                     <div className="max-h-44 overflow-y-auto space-y-2 pr-1">
                       {availableCoursesForSingleStudent.map((course) => {
                         const isChecked = selectedCoursesToEnroll.includes(Number(course.id));
+                        const teacherInfo = resolveCourseTeacherInfo(course, course.id);
                         return (
                           <div
                             key={course.id}
@@ -3121,7 +3270,9 @@ const ManageStudentsYear4 = () => {
                                   {course.course_code} - {course.course_name}
                                 </p>
                                 <p className="std-text-secondary text-[11px] text-gray-500 font-medium">
-                                  {course.credit || 3} {t('ក្រេឌីត', 'Credits')}
+                                  {t('គ្រូ៖', 'Teacher:')}{' '}
+                                  <span className="std-text-primary font-bold">{teacherInfo.name}</span>{' '}
+                                  &bull; {course.credit || 3} {t('ក្រេឌីត', 'Credits')}
                                 </p>
                               </div>
                             </div>
@@ -3165,12 +3316,25 @@ const ManageStudentsYear4 = () => {
                 ) : (
                   <div className="space-y-2.5 max-h-52 overflow-y-auto pr-1">
                     {studentEnrollments.map((enrollment) => {
-                      const teacher = enrollment.course?.teacher;
-                      const teacherImage = teacher?.profile_image || teacher?.avatar || teacher?.user?.profile_image;
-                      const teacherAvatarUrl = getProfileImageUrl(teacherImage);
+                      const matchedCatalogCourse =
+                        coursesByIdMap.get(Number(enrollment.course_id)) ||
+                        coursesByIdMap.get(String(enrollment.course_id));
+                      const teacherInfo = resolveCourseTeacherInfo(
+                        enrollment.course,
+                        enrollment.course_id
+                      );
                       const teacherAvatarKey = `enr_t_${enrollment.id}`;
-                      const hasTeacherAvatar = Boolean(teacherAvatarUrl && !failedAvatars[teacherAvatarKey]);
-                      const teacherInitials = teacher ? `${teacher.first_name?.charAt(0) || ''}${teacher.last_name?.charAt(0) || ''}` : 'T';
+                      const hasTeacherAvatar = Boolean(
+                        teacherInfo.avatarUrl && !failedAvatars[teacherAvatarKey]
+                      );
+                      const courseTitle =
+                        enrollment.course?.course_name ||
+                        matchedCatalogCourse?.course_name ||
+                        t('ឈ្មោះមុខវិជ្ជា', 'Course Name');
+                      const courseCredit =
+                        enrollment.course?.credit ??
+                        matchedCatalogCourse?.credit ??
+                        3;
 
                       return (
                         <div key={enrollment.id} className="std-enroll-item flex items-center justify-between p-3.5 bg-white border border-gray-200 rounded-2xl hover:border-indigo-300 transition-all shadow-sm">
@@ -3178,8 +3342,8 @@ const ManageStudentsYear4 = () => {
                             <div className="h-9 w-9 rounded-full bg-indigo-500 text-white flex items-center justify-center shrink-0 font-extrabold text-xs overflow-hidden shadow-sm">
                               {hasTeacherAvatar ? (
                                 <img
-                                  src={teacherAvatarUrl}
-                                  alt="Teacher"
+                                  src={teacherInfo.avatarUrl}
+                                  alt={teacherInfo.name}
                                   loading="eager"
                                   decoding="async"
                                   className="h-full w-full object-cover rounded-full"
@@ -3191,19 +3355,19 @@ const ManageStudentsYear4 = () => {
                                   }
                                 />
                               ) : (
-                                <span>{teacherInitials}</span>
+                                <span>{teacherInfo.initials}</span>
                               )}
                             </div>
                             <div>
                               <h4 className="std-text-primary text-xs font-extrabold text-gray-900 leading-snug">
-                                {enrollment.course?.course_name || t('ឈ្មោះមុខវិជ្ជា', 'Course Name')}
+                                {courseTitle}
                               </h4>
                               <p className="std-text-secondary text-[11px] font-medium text-gray-500 mt-0.5">
                                 {t('គ្រូ៖', 'Teacher:')}{' '}
                                 <span className="std-text-primary text-gray-700 font-bold">
-                                  {teacher ? getStudentFullName(teacher) : '—'}
+                                  {teacherInfo.name}
                                 </span>{' '}
-                                &bull; {enrollment.course?.credit || 3} {t('ក្រេឌីត', 'Credits')}
+                                &bull; {courseCredit} {t('ក្រេឌីត', 'Credits')}
                               </p>
                             </div>
                           </div>
@@ -3324,7 +3488,7 @@ const ManageStudentsYear4 = () => {
                 <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                   {filteredBulkCourses.map((course) => {
                     const isChecked = bulkSelectedCourses.includes(Number(course.id));
-                    const teacher = course.teacher;
+                    const teacherInfo = resolveCourseTeacherInfo(course, course.id);
                     return (
                       <div
                         key={course.id}
@@ -3347,7 +3511,7 @@ const ManageStudentsYear4 = () => {
                               {course.course_code} - {course.course_name}
                             </p>
                             <p className="std-text-secondary text-xs text-gray-500 font-medium mt-0.5">
-                              {t('គ្រូ៖', 'Teacher:')} <span className="font-bold">{teacher ? getStudentFullName(teacher) : '—'}</span> &bull; {course.credit || 3} {t('ក្រេឌីត', 'Credits')}
+                              {t('គ្រូ៖', 'Teacher:')} <span className="font-bold">{teacherInfo.name}</span> &bull; {course.credit || 3} {t('ក្រេឌីត', 'Credits')}
                             </p>
                           </div>
                         </div>
@@ -3700,7 +3864,6 @@ const ManageStudentsYear4 = () => {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
         .std-table-row + .std-table-row > td {
           border-top: 1px solid #f1f5f9;
         }
@@ -3730,7 +3893,6 @@ const ManageStudentsYear4 = () => {
           color: #cbd5e1 !important;
         }
 
-        /* របារប្តូរ Tab (កំពុងសិក្សា / បញ្ចប់ការសិក្សា) និង វេនសិក្សា ក្នុងទម្រង់យប់ */
         html.dark .std-mode-tabs,
         html.dark .std-shift-tabs {
           background-color: #0f172a !important;
@@ -3750,7 +3912,6 @@ const ManageStudentsYear4 = () => {
           color: #cbd5e1 !important;
         }
 
-        /* ប៊ូតុងព្រួញអូសកាតដេប៉ាតឺម៉ង់ */
         html.dark .std-scroll-arrow {
           background-color: rgba(30, 41, 59, 0.9) !important;
           border-color: #475569 !important;
@@ -3762,7 +3923,6 @@ const ManageStudentsYear4 = () => {
           color: #ffffff !important;
         }
 
-        /* ប្រអប់ Icon លើកាតដេប៉ាតឺម៉ង់ក្នុងទម្រង់យប់ */
         html.dark .std-dept-blue { background-color: rgba(59, 130, 246, 0.15) !important; color: #60a5fa !important; border-color: rgba(59, 130, 246, 0.3) !important; }
         html.dark .std-dept-emerald { background-color: rgba(16, 185, 129, 0.15) !important; color: #34d399 !important; border-color: rgba(16, 185, 129, 0.3) !important; }
         html.dark .std-dept-indigo { background-color: rgba(99, 102, 241, 0.15) !important; color: #818cf8 !important; border-color: rgba(99, 102, 241, 0.3) !important; }
@@ -3771,7 +3931,6 @@ const ManageStudentsYear4 = () => {
         html.dark .std-dept-purple { background-color: rgba(168, 85, 247, 0.15) !important; color: #c084fc !important; border-color: rgba(168, 85, 247, 0.3) !important; }
         html.dark .std-dept-cyan { background-color: rgba(6, 182, 212, 0.15) !important; color: #22d3ee !important; border-color: rgba(6, 182, 212, 0.3) !important; }
 
-        /* ប្រអប់ Input, Select, Textarea និង Checkbox */
         html.dark .std-input {
           background-color: #0f172a !important;
           border-color: #334155 !important;
@@ -3798,7 +3957,6 @@ const ManageStudentsYear4 = () => {
           background-color: #334155 !important;
         }
 
-        /* ✅ តារាងសិស្ស និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         html.dark .std-table-head {
           background-color: #0f172a !important;
           border-color: rgba(51, 65, 85, 0.7) !important;
@@ -3817,7 +3975,6 @@ const ManageStudentsYear4 = () => {
           background-color: rgba(59, 130, 246, 0.08) !important;
         }
 
-        /* ផ្លាកសញ្ញា (Badges) ក្នុងទម្រង់យប់ */
         html.dark .std-badge-blue {
           background-color: rgba(59, 130, 246, 0.15) !important;
           color: #60a5fa !important;
@@ -3854,7 +4011,6 @@ const ManageStudentsYear4 = () => {
           color: #fb7185 !important;
         }
 
-        /* ប៊ូតុងសកម្មភាព និង Pagination */
         html.dark .std-action-enroll {
           color: #34d399 !important;
         }
@@ -3893,7 +4049,6 @@ const ManageStudentsYear4 = () => {
           color: #ffffff !important;
         }
 
-        /* ផ្ទាំង Modal ទាំងអស់ */
         html.dark .std-modal-card {
           background-color: #1e293b !important;
           border-color: #334155 !important;
@@ -3914,7 +4069,6 @@ const ManageStudentsYear4 = () => {
           color: #ffffff !important;
         }
 
-        /* ផ្ទាំងចុះឈ្មោះមុខវិជ្ជា (Enrollment Modal) */
         html.dark .std-enroll-box {
           background-color: rgba(15, 23, 42, 0.6) !important;
           border-color: #334155 !important;
@@ -3927,7 +4081,6 @@ const ManageStudentsYear4 = () => {
           border-color: #10b981 !important;
         }
 
-        /* ផ្ទាំង Import Excel */
         html.dark .std-import-info {
           background-color: rgba(16, 185, 129, 0.1) !important;
           border-color: rgba(16, 185, 129, 0.25) !important;
@@ -3955,7 +4108,6 @@ const ManageStudentsYear4 = () => {
           border-color: #10b981 !important;
         }
 
-        /* ផ្ទាំងលុប និងបញ្ចប់ការសិក្សា */
         html.dark .std-delete-title {
           color: #fb7185 !important;
         }
