@@ -92,9 +92,9 @@ class StudentController extends Controller
         return Enrollment::whereIn('student_id', $studentIds)
             ->where('course_id', $courseId)
             ->where(function ($q) {
-                // កែសម្រួលឱ្យទូលាយ មិនឱ្យបាត់ទិន្នន័យពេល Status សរសេរខុស
                 $q->whereNull('status')
-                  ->orWhereNotIn(DB::raw('LOWER(status)'), ['dropped', 'suspended', 'inactive']);
+                  ->orWhere('status', 'active')
+                  ->orWhere('status', '');
             })
             ->first();
     }
@@ -148,7 +148,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយមិនប្រើ Teacher::all() ដាច់ខាត
+     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយមិនប្រើ Teacher::all() ដាច់ខាត (ការពារកុំឱ្យពេញ RAM Server ពេលសិស្សច្រើន Login)
      */
     private function formatTeacherData($course, bool $includeAvatar = true)
     {
@@ -221,7 +221,8 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ គណនាឆ្នាំសិក្សា (1, 2, 3, 4) សម្រាប់មុខវិជ្ជានីមួយៗ
+     * ✅ គណនាឆ្នាំសិក្សា (1, 2, 3, 4) សម្រាប់មុខវិជ្ជានីមួយៗ ដោយប្រើ Server Cache ១០ នាទី
+     * ទោះសិស្ស ១,០០០ នាក់បើកទំព័រមេរៀនដំណាលគ្នា ក៏គណនាតែ ១ ដងគត់!
      */
     private function buildCourseYearsMap($deptCourses)
     {
@@ -238,7 +239,8 @@ class StudentController extends Controller
             $enrollmentsInDept = Enrollment::whereIn('course_id', $deptCourseIds)
                 ->where(function ($q) {
                     $q->whereNull('status')
-                      ->orWhereNotIn(DB::raw('LOWER(status)'), ['dropped', 'suspended', 'inactive']);
+                      ->orWhere('status', 'active')
+                      ->orWhere('status', '');
                 })
                 ->get(['course_id', 'student_id']);
 
@@ -254,6 +256,7 @@ class StudentController extends Controller
                 ->values()
                 ->all();
 
+            // ទាញតែសិស្សណាដែលពាក់ព័ន្ធនឹងមុខវិជ្ជានេះប៉ុណ្ណោះ (មិនប្រើ Student::all() ឡើយ)
             $matchedStudents = !empty($rawStudentIds)
                 ? Student::select('id', 'user_id', 'batch_year', 'student_code', 'email', 'department_id')
                     ->whereIn('id', $rawStudentIds)
@@ -354,7 +357,8 @@ class StudentController extends Controller
                 }])
                 ->where(function ($q) {
                     $q->whereNull('status')
-                      ->orWhereNotIn(DB::raw('LOWER(status)'), ['dropped', 'suspended', 'inactive']);
+                      ->orWhere('status', 'active')
+                      ->orWhere('status', '');
                 })
                 ->get();
 
@@ -401,6 +405,7 @@ class StudentController extends Controller
     {
         $ids = is_array($studentIds) ? $studentIds : [$studentIds];
 
+        // ✅ មិនទាញជួរឈរ file_data (Base64 រាប់មេកាបៃ) ដាច់ខាត!
         $submissions = AssignmentSubmission::select([
             'id', 'assignment_id', 'student_id', 'file_path', 'submitted_at', 'score', 'feedback', 'created_at', 'updated_at',
         ])
@@ -434,26 +439,13 @@ class StudentController extends Controller
         $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
             ->where(function ($q) {
                 $q->whereNull('status')
-                  ->orWhereNotIn(DB::raw('LOWER(status)'), ['dropped', 'suspended', 'inactive']);
+                  ->orWhere('status', 'active')
+                  ->orWhere('status', '');
             })
             ->pluck('course_id')
             ->toArray();
 
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
-
-        // កំណត់ឆ្នាំសិក្សារបស់សិស្ស
-        $studentYear = $this->parseAcademicYearNumber(
-            ($studentProfile->year ?? '') . ' ' .
-            ($studentProfile->academic_year ?? '') . ' ' .
-            ($studentProfile->batch_year ?? '') . ' ' .
-            ($student->year ?? '') . ' ' .
-            ($student->batch_year ?? '') . ' ' .
-            ($student->name ?? ''),
-            ($studentProfile->student_code ?? '') . ' ' .
-            ($student->student_code ?? '') . ' ' .
-            ($student->email ?? '') . ' ' .
-            ($studentProfile->email ?? '')
-        );
 
         $query = Course::with([
             'teacher:id,first_name,last_name,email,profile_image',
@@ -461,25 +453,11 @@ class StudentController extends Controller
             'department:id,department_name,department_code',
         ])->withCount(['lessons', 'assignments', 'quizzes']);
 
-        $query->where(function ($q) use ($enrolledCourseIds, $deptId, $studentYear) {
-            if (!empty($enrolledCourseIds)) {
-                $q->orWhereIn('id', $enrolledCourseIds);
-            }
-            if ($deptId) {
-                $q->orWhere('department_id', $deptId);
-            }
-            if (empty($enrolledCourseIds) && !$deptId && $studentYear) {
-                $q->orWhere('course_name', 'like', "%ឆ្នាំទី {$studentYear}%")
-                  ->orWhere('course_name', 'like', "%Year {$studentYear}%")
-                  ->orWhere('course_name', 'like', "%Y{$studentYear}%")
-                  ->orWhere('description', 'like', "%ឆ្នាំទី {$studentYear}%")
-                  ->orWhere('description', 'like', "%Year {$studentYear}%")
-                  ->orWhere('course_code', 'like', "%Y{$studentYear}%");
-            }
-            if (empty($enrolledCourseIds) && !$deptId && !$studentYear) {
-                $q->orWhereNotNull('id'); 
-            }
-        });
+        if (!empty($enrolledCourseIds)) {
+            $query->whereIn('id', $enrolledCourseIds);
+        } elseif ($deptId) {
+            $query->where('department_id', $deptId);
+        }
 
         $includeAvatar = !$request->boolean('all');
 
@@ -630,7 +608,8 @@ class StudentController extends Controller
         $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
             ->where(function ($q) {
                 $q->whereNull('status')
-                  ->orWhereNotIn(DB::raw('LOWER(status)'), ['dropped', 'suspended', 'inactive']);
+                  ->orWhere('status', 'active')
+                  ->orWhere('status', '');
             })
             ->pluck('course_id');
 
@@ -810,6 +789,7 @@ class StudentController extends Controller
         return response()->json($grade);
     }
 
+    // ✅ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សា (ឆ្នាំទី ១-៤) ក្នុងដេប៉ាតឺម៉ង់របស់សិស្ស (លឿនបំផុត មិនស្ទួនទិន្នន័យ)
     public function getAllLessons(Request $request)
     {
         $student = auth()->user();
@@ -819,7 +799,9 @@ class StudentController extends Controller
         $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
             ->where(function ($q) {
                 $q->whereNull('status')
-                  ->orWhereNotIn(DB::raw('LOWER(status)'), ['dropped', 'suspended', 'inactive']);
+                  ->orWhere('status', 'active')
+                  ->orWhere('status', 'completed')
+                  ->orWhere('status', '');
             })
             ->pluck('course_id')
             ->map(fn ($id) => (int) $id)
@@ -846,8 +828,6 @@ class StudentController extends Controller
             });
         } elseif (!empty($enrolledCourseIds)) {
             $coursesQuery->whereIn('id', $enrolledCourseIds);
-        } else {
-            $coursesQuery->whereNotNull('id');
         }
 
         $deptCourses = $coursesQuery->get()->keyBy('id');
@@ -1018,6 +998,7 @@ class StudentController extends Controller
         ]);
     }
 
+    // ✅ អានឯកសារមេរៀនជា Base64
     public function readLessonFile(Request $request)
     {
         $path = trim((string) $request->query('path', ''));
@@ -1077,6 +1058,7 @@ class StudentController extends Controller
         return response()->json(['message' => 'រកមិនឃើញឯកសារមេរៀននេះទេ'], 404);
     }
 
+    // View Lessons by Course
     public function getCourseLessons($courseId)
     {
         $course = Course::with([
@@ -1122,6 +1104,7 @@ class StudentController extends Controller
         return response()->json($lessons);
     }
 
+    // Upload Assignment
     public function uploadAssignment(Request $request)
     {
         $request->validate([
@@ -1174,6 +1157,7 @@ class StudentController extends Controller
         ], 201);
     }
 
+    // Upload Homework/File
     public function uploadHomework(Request $request)
     {
         $request->validate([
@@ -1198,6 +1182,7 @@ class StudentController extends Controller
         ]);
     }
 
+    // Upload Video
     public function uploadVideo(Request $request)
     {
         $request->validate([
@@ -1222,7 +1207,7 @@ class StudentController extends Controller
         ]);
     }
 
-    // ✅ កម្រងសំណួរ (Quiz) ជាមួយមុខងាររក្សាទុក និងបង្ហាញចម្លើយ Essay ឡើងវិញ
+    // Quiz/Exam: ចាប់ផ្តើម ឬបន្តការធ្វើតេស្ត
     public function getQuiz($quizId)
     {
         $student = auth()->user();
@@ -1235,10 +1220,7 @@ class StudentController extends Controller
             ->first();
 
         if ($attempt && $attempt->submitted_at) {
-            return response()->json([
-                'message' => 'អ្នកបានបញ្ចប់ការប្រឡងកម្រងសំណួរនេះរួចរាល់ហើយ',
-                'attempt' => $attempt
-            ], 400);
+            return response()->json(['message' => 'អ្នកបានបញ្ចប់ការប្រឡងកម្រងសំណួរនេះរួចរាល់ហើយ'], 400);
         }
 
         $durationInSeconds = max(1, (int) ($quiz->duration ?? 30)) * 60;
@@ -1272,10 +1254,6 @@ class StudentController extends Controller
             $timeLeft = $durationInSeconds;
         }
 
-        if ($attempt && isset($attempt->answers)) {
-            $attempt->answers = is_string($attempt->answers) ? json_decode($attempt->answers, true) : $attempt->answers;
-        }
-
         return response()->json([
             'quiz' => $quiz,
             'attempt' => $attempt,
@@ -1283,12 +1261,13 @@ class StudentController extends Controller
         ]);
     }
 
-    // ✅ បញ្ជូនចម្លើយប្រឡង និងគណនាពិន្ទុដោយស្វ័យប្រវត្តិ (គាំទ្រសំណួរសរសេរ Essay)
+    // បញ្ជូនចម្លើយប្រឡង និងគណនាពិន្ទុដោយស្វ័យប្រវត្តិ
     public function submitQuiz(Request $request, $quizId)
     {
         $request->validate([
             'answers' => 'nullable|array',
             'answers.*.question_id' => 'required|exists:questions,id',
+            'answers.*.selected_option' => 'required|integer',
         ]);
 
         $student = auth()->user();
@@ -1319,14 +1298,12 @@ class StudentController extends Controller
                 continue;
             }
 
-            if ($question->question_type === 'MCQ' || $question->question_type === 'TrueFalse') {
-                $correctOption = $question->options->first(function ($opt) {
-                    return (bool) $opt->is_correct === true || (int) $opt->is_correct === 1;
-                });
+            $correctOption = $question->options->first(function ($opt) {
+                return (bool) $opt->is_correct === true || (int) $opt->is_correct === 1;
+            });
 
-                if (isset($studentAnswer['selected_option']) && $correctOption && (int) $correctOption->id === (int) $studentAnswer['selected_option']) {
-                    $score += $qMark;
-                }
+            if ($correctOption && (int) $correctOption->id === (int) $studentAnswer['selected_option']) {
+                $score += $qMark;
             }
         }
 
@@ -1334,16 +1311,10 @@ class StudentController extends Controller
             ? $calculatedTotalMarks
             : (float) ($quiz->total_mark ?? 20);
 
-        $updatePayload = [
+        $attempt->update([
             'score' => $score,
             'submitted_at' => now(),
-        ];
-        
-        if (Schema::hasColumn('quiz_attempts', 'answers')) {
-            $updatePayload['answers'] = json_encode($answers, JSON_UNESCAPED_UNICODE);
-        }
-
-        $attempt->update($updatePayload);
+        ]);
 
         if ($finalTotalMarks > 0 && $quiz->course_id) {
             $quizPercent = round(($score / $finalTotalMarks) * 100, 2);
@@ -1368,6 +1339,7 @@ class StudentController extends Controller
         ]);
     }
 
+    // ទាញយកកិច្ចការសិស្ស
     public function getAllAssignments(Request $request)
     {
         $student = auth()->user();
@@ -1378,25 +1350,13 @@ class StudentController extends Controller
         $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
             ->where(function ($q) {
                 $q->whereNull('status')
-                  ->orWhereNotIn(DB::raw('LOWER(status)'), ['dropped', 'suspended', 'inactive']);
+                  ->orWhere('status', 'active')
+                  ->orWhere('status', '');
             })
             ->pluck('course_id')
             ->toArray();
 
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
-        
-        $studentYear = $this->parseAcademicYearNumber(
-            ($studentProfile->year ?? '') . ' ' .
-            ($studentProfile->academic_year ?? '') . ' ' .
-            ($studentProfile->batch_year ?? '') . ' ' .
-            ($student->year ?? '') . ' ' .
-            ($student->batch_year ?? '') . ' ' .
-            ($student->name ?? ''),
-            ($studentProfile->student_code ?? '') . ' ' .
-            ($student->student_code ?? '') . ' ' .
-            ($student->email ?? '') . ' ' .
-            ($studentProfile->email ?? '')
-        );
 
         $query = Assignment::with([
             'course.teacher:id,first_name,last_name,email',
@@ -1406,23 +1366,11 @@ class StudentController extends Controller
 
         if ($request->filled('course_id') && $request->course_id !== 'all') {
             $query->where('course_id', $request->course_id);
-        } else {
-            $query->whereHas('course', function ($q) use ($enrolledCourseIds, $deptId, $studentYear) {
-                if (!empty($enrolledCourseIds)) {
-                    $q->orWhereIn('id', $enrolledCourseIds);
-                }
-                if ($deptId) {
-                    $q->orWhere('department_id', $deptId);
-                }
-                if (empty($enrolledCourseIds) && !$deptId && $studentYear) {
-                    $q->orWhere('course_name', 'like', "%ឆ្នាំទី {$studentYear}%")
-                      ->orWhere('course_name', 'like', "%Year {$studentYear}%")
-                      ->orWhere('course_name', 'like', "%Y{$studentYear}%")
-                      ->orWhere('description', 'like', "%ឆ្នាំទី {$studentYear}%");
-                }
-                if (empty($enrolledCourseIds) && !$deptId && !$studentYear) {
-                    $q->orWhereNotNull('id');
-                }
+        } elseif (!empty($enrolledCourseIds)) {
+            $query->whereIn('course_id', $enrolledCourseIds);
+        } elseif ($deptId) {
+            $query->whereHas('course', function ($q) use ($deptId) {
+                $q->where('department_id', $deptId);
             });
         }
 
@@ -1480,6 +1428,7 @@ class StudentController extends Controller
         ]);
     }
 
+    // ទាញយកកម្រងសំណួរប្រឡង
     public function getAllQuizzes(Request $request)
     {
         $student = auth()->user();
@@ -1490,25 +1439,13 @@ class StudentController extends Controller
         $enrolledCourseIds = Enrollment::whereIn('student_id', $studentIds)
             ->where(function ($q) {
                 $q->whereNull('status')
-                  ->orWhereNotIn(DB::raw('LOWER(status)'), ['dropped', 'suspended', 'inactive']);
+                  ->orWhere('status', 'active')
+                  ->orWhere('status', '');
             })
             ->pluck('course_id')
             ->toArray();
 
         $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
-        
-        $studentYear = $this->parseAcademicYearNumber(
-            ($studentProfile->year ?? '') . ' ' .
-            ($studentProfile->academic_year ?? '') . ' ' .
-            ($studentProfile->batch_year ?? '') . ' ' .
-            ($student->year ?? '') . ' ' .
-            ($student->batch_year ?? '') . ' ' .
-            ($student->name ?? ''),
-            ($studentProfile->student_code ?? '') . ' ' .
-            ($student->student_code ?? '') . ' ' .
-            ($student->email ?? '') . ' ' .
-            ($studentProfile->email ?? '')
-        );
 
         $query = Quiz::with([
             'course.teacher:id,first_name,last_name,email',
@@ -1520,23 +1457,11 @@ class StudentController extends Controller
 
         if ($request->filled('course_id') && $request->course_id !== 'all') {
             $query->where('course_id', $request->course_id);
-        } else {
-            $query->whereHas('course', function ($q) use ($enrolledCourseIds, $deptId, $studentYear) {
-                if (!empty($enrolledCourseIds)) {
-                    $q->orWhereIn('id', $enrolledCourseIds);
-                }
-                if ($deptId) {
-                    $q->orWhere('department_id', $deptId);
-                }
-                if (empty($enrolledCourseIds) && !$deptId && $studentYear) {
-                    $q->orWhere('course_name', 'like', "%ឆ្នាំទី {$studentYear}%")
-                      ->orWhere('course_name', 'like', "%Year {$studentYear}%")
-                      ->orWhere('course_name', 'like', "%Y{$studentYear}%")
-                      ->orWhere('description', 'like', "%ឆ្នាំទី {$studentYear}%");
-                }
-                if (empty($enrolledCourseIds) && !$deptId && !$studentYear) {
-                    $q->orWhereNotNull('id');
-                }
+        } elseif (!empty($enrolledCourseIds)) {
+            $query->whereIn('course_id', $enrolledCourseIds);
+        } elseif ($deptId) {
+            $query->whereHas('course', function ($q) use ($deptId) {
+                $q->where('department_id', $deptId);
             });
         }
 
