@@ -34,7 +34,7 @@ const TEACHER_COURSES_MEM_CACHE = {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
@@ -53,7 +53,12 @@ const resolveTeacherUid = (contextUser) => {
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user') ||
+      sessionStorage.getItem('teacher') ||
+      localStorage.getItem('teacher');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -154,11 +159,14 @@ const CARD_THEMES = [
 
 const TeacherManageCourses = () => {
   const { t } = useLanguage();
-  const { user } = useAuth();
+  const { user, teacher } = useAuth();
   const abortControllerRef = useRef(null);
 
   // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
-  const currentTeacherId = useMemo(() => resolveTeacherUid(user), [user]);
+  const currentTeacherId = useMemo(
+    () => resolveTeacherUid(user || teacher),
+    [user, teacher]
+  );
 
   // បើប្ដូរគណនីគ្រូ ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
   if (
@@ -252,18 +260,13 @@ const TeacherManageCourses = () => {
       TEACHER_COURSES_MEM_CACHE.lastSyncedAt = Date.now();
 
       try {
-        localStorage.setItem(
-          getTeacherCoursesCacheKey(currentTeacherId),
-          JSON.stringify(coursesData)
-        );
-        localStorage.setItem(
-          CACHE_KEY_SHARED_COURSES,
-          JSON.stringify(coursesData)
-        );
-        localStorage.setItem(
-          'cached_teacher_courses_list',
-          JSON.stringify(coursesData)
-        );
+        const str = JSON.stringify(coursesData);
+        try {
+          sessionStorage.setItem(getTeacherCoursesCacheKey(currentTeacherId), str);
+        } catch {}
+        localStorage.setItem(getTeacherCoursesCacheKey(currentTeacherId), str);
+        localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
+        localStorage.setItem('cached_teacher_courses_list', str);
       } catch (e) {
         console.warn('Failed to cache teacher courses:', e);
       }
@@ -435,22 +438,22 @@ const TeacherManageCourses = () => {
   };
 
   return (
-    <div className="tc-page-bg p-4 sm:p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-6 animate-fadeIn pb-28 lg:pb-10">
+    <div className="tc-page-bg px-3 py-4 sm:p-5 lg:p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-5 sm:space-y-6 animate-fadeIn pb-28 md:pb-12">
       
       {/* ================================================================== */}
-      {/* 📌 1. HEADER BANNER                                                */}
+      {/* 📌 1. HEADER BANNER (Adaptive Phone / Tablet / iPad / Desktop)      */}
       {/* ================================================================== */}
-      <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 sm:p-8 shadow-xl border border-blue-900">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
         <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
         
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-3">
-            <h1 className="text-2xl sm:text-[28px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
-                <BookOpenIcon className="h-7 w-7 sm:h-8 sm:w-8 text-yellow-400" />
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
+          <div className="space-y-2 sm:space-y-3 min-w-0">
+            <h1 className="text-xl sm:text-2xl md:text-[26px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
+              <div className="p-2.5 sm:p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+                <BookOpenIcon className="h-6 w-6 sm:h-7 sm:w-7 lg:h-8 lg:w-8 text-yellow-400" />
               </div>
-              <span>{t('បញ្ជីមុខវិជ្ជាបង្រៀន', 'Teaching Courses List')}</span>
+              <span className="truncate">{t('បញ្ជីមុខវិជ្ជាបង្រៀន', 'Teaching Courses List')}</span>
             </h1>
             <p className="text-blue-200/80 text-xs sm:text-sm max-w-2xl font-medium leading-relaxed">
               {t(
@@ -460,9 +463,9 @@ const TeacherManageCourses = () => {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
-            <span className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-white/10 backdrop-blur-md border border-white/15 text-xs sm:text-sm font-extrabold text-yellow-300">
-              <AcademicCapIcon className="h-5 w-5 shrink-0" />
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0">
+            <span className="inline-flex items-center gap-2 px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl bg-white/10 backdrop-blur-md border border-white/15 text-xs sm:text-sm font-extrabold text-yellow-300">
+              <AcademicCapIcon className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
               <span>
                 {courses.length} {t('មុខវិជ្ជាសរុប', 'Total Courses')}
               </span>
@@ -472,10 +475,10 @@ const TeacherManageCourses = () => {
               <button
                 type="button"
                 onClick={handleExportExcel}
-                className="inline-flex items-center justify-center px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
+                className="inline-flex items-center justify-center px-4 py-2.5 sm:px-5 sm:py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
               >
-                <DocumentIcon className="h-5 w-5 mr-2" />
-                {t('នាំចេញ Excel', 'Export Excel')}
+                <DocumentIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
+                <span>{t('នាំចេញ Excel', 'Export Excel')}</span>
               </button>
             )}
           </div>
@@ -485,20 +488,17 @@ const TeacherManageCourses = () => {
       {/* ================================================================== */}
       {/* 📌 2. SEARCH BAR, DEPARTMENT PILLS & VIEW SWITCHER                 */}
       {/* ================================================================== */}
-      <div className="tc-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-4">
-        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+      <div className="tc-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-3.5 sm:p-4 space-y-3.5 sm:space-y-4">
+        <div className="flex flex-col md:flex-row gap-3.5 sm:gap-4 items-center justify-between">
           {/* Search Input */}
           <div className="relative w-full md:max-w-md">
-            <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <MagnifyingGlassIcon className="absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder={t(
-                'ស្វែងរកឈ្មោះមុខវិជ្ជា ឬកូដមុខវិជ្ជា...',
-                'Search course name or code...'
-              )}
+              placeholder=""
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="tc-input w-full pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
+              className="tc-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
             />
             {searchTerm && (
               <button
@@ -531,7 +531,7 @@ const TeacherManageCourses = () => {
                 }`}
               >
                 <Squares2X2Icon className="h-4 w-4" />
-                <span className="hidden sm:inline">{t('កាត', 'Cards')}</span>
+                <span>{t('កាត', 'Cards')}</span>
               </button>
               <button
                 type="button"
@@ -543,7 +543,7 @@ const TeacherManageCourses = () => {
                 }`}
               >
                 <ListBulletIcon className="h-4 w-4" />
-                <span className="hidden sm:inline">{t('តារាង', 'Table')}</span>
+                <span>{t('តារាង', 'Table')}</span>
               </button>
             </div>
           </div>
@@ -603,7 +603,7 @@ const TeacherManageCourses = () => {
       {/* 📌 3. MAIN CONTENT AREA (Empty State / Cards / Table)              */}
       {/* ================================================================== */}
       {filteredCourses.length === 0 ? (
-        <div className="tc-surface-card bg-white rounded-[1.5rem] lg:rounded-3xl border border-gray-200 shadow-sm px-6 py-16 text-center">
+        <div className="tc-surface-card bg-white rounded-2xl sm:rounded-3xl border border-gray-200 shadow-sm px-6 py-16 text-center">
           <div className="flex flex-col items-center">
             <BookOpenIcon className="h-16 w-16 text-gray-300 mb-3" />
             <p className="tc-text-primary font-extrabold text-gray-700 text-base">
@@ -626,9 +626,10 @@ const TeacherManageCourses = () => {
         </div>
       ) : viewMode === 'grid' ? (
         /* ==============================================================
-           OPTION A: MODERN COURSE CARDS GRID (ទម្រង់កាតមុខវិជ្ជាទំនើប)
+           OPTION A: MODERN COURSE CARDS GRID
+           (1 Col on Phone, 2 Cols on Tablet/iPad, 3 Cols on Laptop/Desktop)
         =============================================================== */
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5 lg:gap-6">
           {filteredCourses.map((course, index) => {
             const theme = CARD_THEMES[index % CARD_THEMES.length];
             const deptName =
@@ -643,25 +644,25 @@ const TeacherManageCourses = () => {
               >
                 <div>
                   <div
-                    className={`h-1.5 sm:h-2 w-full bg-gradient-to-r ${theme.bar}`}
+                    className={`h-2 w-full bg-gradient-to-r ${theme.bar}`}
                   />
 
-                  <div className="p-3.5 sm:p-6">
+                  <div className="p-4 sm:p-5 lg:p-6">
                     {/* Top Row: Icon + Course Code & Credit Badge */}
-                    <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-2.5 sm:gap-3 mb-3 sm:mb-4">
+                    <div className="flex items-center justify-between gap-3 mb-3.5 sm:mb-4">
                       <div
-                        className={`course-icon-box ${theme.iconClass} h-10 w-10 sm:h-12 sm:w-12 rounded-[10px] sm:rounded-2xl border flex items-center justify-center shrink-0 shadow-2xs`}
+                        className={`course-icon-box ${theme.iconClass} h-11 w-11 sm:h-12 sm:w-12 rounded-2xl border flex items-center justify-center shrink-0 shadow-2xs`}
                       >
                         <BookOpenIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                       </div>
 
-                      <div className="flex flex-wrap items-center justify-start xl:justify-end gap-1.5 sm:gap-2">
-                        <span className="course-code-badge text-[9px] sm:text-xs font-extrabold px-2 py-1 sm:px-3 sm:py-1.5 rounded-md sm:rounded-lg border">
+                      <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+                        <span className="course-code-badge text-xs font-extrabold px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg border">
                           {course.course_code}
                         </span>
-                        <span className="course-credit-badge inline-flex items-center px-2 py-1 sm:px-3 sm:py-1.5 rounded-md sm:rounded-lg text-[9px] sm:text-xs font-extrabold border">
+                        <span className="course-credit-badge inline-flex items-center px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs font-extrabold border">
                           {course.credit}{' '}
-                          <span className="hidden sm:inline ml-1">
+                          <span className="ml-1">
                             {t('ក្រេឌីត', 'Credits')}
                           </span>
                         </span>
@@ -669,18 +670,18 @@ const TeacherManageCourses = () => {
                     </div>
 
                     {/* Course Title & Description */}
-                    <h3 className="tc-text-primary text-[13px] sm:text-lg font-extrabold text-gray-900 group-hover:text-blue-500 transition-colors line-clamp-2 sm:line-clamp-1 leading-snug">
+                    <h3 className="tc-text-primary text-base sm:text-lg font-extrabold text-gray-900 group-hover:text-blue-500 transition-colors line-clamp-1 leading-snug">
                       {course.course_name}
                     </h3>
-                    <p className="tc-text-secondary text-[10px] sm:text-xs font-medium text-gray-500 mt-1 sm:mt-1.5 line-clamp-2 min-h-[30px] sm:min-h-[34px] leading-relaxed">
+                    <p className="tc-text-secondary text-xs font-medium text-gray-500 mt-1.5 line-clamp-2 min-h-[34px] leading-relaxed">
                       {course.description ||
                         t('គ្មានការពិពណ៌នា', 'No description')}
                     </p>
 
                     {/* Department Tag */}
-                    <div className="tc-divider mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-gray-100 flex items-center gap-1.5 sm:gap-2">
-                      <BuildingLibraryIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-400 shrink-0" />
-                      <span className="tc-text-secondary text-[10px] sm:text-xs font-bold text-gray-700 truncate">
+                    <div className="tc-divider mt-3.5 sm:mt-4 pt-3.5 sm:pt-4 border-t border-gray-100 flex items-center gap-2">
+                      <BuildingLibraryIcon className="h-4 w-4 text-gray-400 shrink-0" />
+                      <span className="tc-text-secondary text-xs font-bold text-gray-700 truncate">
                         {deptName}
                       </span>
                     </div>
@@ -688,16 +689,16 @@ const TeacherManageCourses = () => {
                 </div>
 
                 {/* ✅ Card Footer: បង្ហាញផ្លាកធម្មតា មិនឱ្យចុចបាន (Static Badges) */}
-                <div className="course-card-footer px-2 sm:px-6 py-2.5 sm:py-4 bg-gray-50/50 border-t border-gray-100 grid grid-cols-3 gap-1 sm:gap-2.5">
-                  <span className="course-static-badge flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-1.5 sm:py-2 px-1 sm:px-2 rounded-lg sm:rounded-xl bg-white text-gray-700 border border-gray-200/80 text-[9px] sm:text-[11px] font-extrabold shadow-2xs cursor-default select-none">
+                <div className="course-card-footer px-4 sm:px-5 lg:px-6 py-3 sm:py-4 bg-gray-50/50 border-t border-gray-100 grid grid-cols-3 gap-2 sm:gap-2.5">
+                  <span className="course-static-badge flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-white text-gray-700 border border-gray-200/80 text-[11px] font-extrabold shadow-2xs cursor-default select-none">
                     <FolderIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-500 shrink-0" />
                     <span className="truncate">{t('មេរៀន', 'Lessons')}</span>
                   </span>
-                  <span className="course-static-badge flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-1.5 sm:py-2 px-1 sm:px-2 rounded-lg sm:rounded-xl bg-white text-gray-700 border border-gray-200/80 text-[9px] sm:text-[11px] font-extrabold shadow-2xs cursor-default select-none">
+                  <span className="course-static-badge flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-white text-gray-700 border border-gray-200/80 text-[11px] font-extrabold shadow-2xs cursor-default select-none">
                     <ClipboardDocumentListIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-500 shrink-0" />
                     <span className="truncate">{t('វត្តមាន', 'Attendance')}</span>
                   </span>
-                  <span className="course-static-badge flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 py-1.5 sm:py-2 px-1 sm:px-2 rounded-lg sm:rounded-xl bg-white text-gray-700 border border-gray-200/80 text-[9px] sm:text-[11px] font-extrabold shadow-2xs cursor-default select-none">
+                  <span className="course-static-badge flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-white text-gray-700 border border-gray-200/80 text-[11px] font-extrabold shadow-2xs cursor-default select-none">
                     <ChartBarIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-purple-500 shrink-0" />
                     <span className="truncate">{t('ពិន្ទុ', 'Grades')}</span>
                   </span>
@@ -708,109 +709,152 @@ const TeacherManageCourses = () => {
         </div>
       ) : (
         /* ==============================================================
-           OPTION B: CLEAN TABLE VIEW (ទម្រង់តារាងសម្រាប់អ្នកចូលចិត្តមើលជាបញ្ជី)
+           OPTION B: CLEAN TABLE VIEW (Table on iPad/Laptop/Desktop, Compact List on Phone)
         =============================================================== */
-        <div className="tc-surface-card bg-white rounded-[1.5rem] lg:rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto hide-scrollbar">
-            <table className="min-w-full border-collapse">
-              <thead className="tc-table-head bg-gray-50 border-b border-gray-100">
-                <tr>
-                  <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider w-16 whitespace-nowrap">
-                    {t('ល.រ', 'No')}
-                  </th>
-                  <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                    {t('មុខវិជ្ជា', 'Course')}
-                  </th>
-                  <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                    {t('កូដមុខវិជ្ជា', 'Course Code')}
-                  </th>
-                  <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                    {t('ដេប៉ាតឺម៉ង់', 'Department')}
-                  </th>
-                  <th className="px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                    {t('ក្រេឌីត', 'Credits')}
-                  </th>
-                  <th className="px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                    {t('ផ្នែកគ្រប់គ្រង', 'Modules')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="tc-table-body bg-white">
-                {filteredCourses.map((course, index) => {
-                  const theme = CARD_THEMES[index % CARD_THEMES.length];
-                  return (
-                    <tr
-                      key={course.id}
-                      className="tc-table-row hover:bg-blue-50/30 transition-colors group"
-                    >
-                      <td className="tc-text-secondary px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-400">
-                        {index + 1}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-4">
-                          <div
-                            className={`course-icon-box ${theme.iconClass} h-10 w-10 rounded-xl flex items-center justify-center font-medium text-sm border shadow-2xs shrink-0 transition-colors`}
-                          >
-                            <BookOpenIcon className="h-5 w-5" />
-                          </div>
-                          <div>
-                            <div className="tc-text-primary text-sm font-extrabold text-gray-900 group-hover:text-blue-500 transition-colors">
-                              {course.course_name}
+        <>
+          {/* 💻 iPad, Laptop & Desktop Table (`hidden md:block`) */}
+          <div className="tc-surface-card hidden md:block bg-white rounded-[1.5rem] lg:rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto hide-scrollbar">
+              <table className="min-w-full border-collapse">
+                <thead className="tc-table-head bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="px-5 lg:px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider w-14 whitespace-nowrap">
+                      {t('ល.រ', 'No')}
+                    </th>
+                    <th className="px-5 lg:px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap sticky left-0 bg-inherit z-10">
+                      {t('មុខវិជ្ជា', 'Course')}
+                    </th>
+                    <th className="px-5 lg:px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      {t('កូដមុខវិជ្ជា', 'Course Code')}
+                    </th>
+                    <th className="px-5 lg:px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      {t('ដេប៉ាតឺម៉ង់', 'Department')}
+                    </th>
+                    <th className="px-5 lg:px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      {t('ក្រេឌីត', 'Credits')}
+                    </th>
+                    <th className="px-5 lg:px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      {t('ផ្នែកគ្រប់គ្រង', 'Modules')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="tc-table-body bg-white">
+                  {filteredCourses.map((course, index) => {
+                    const theme = CARD_THEMES[index % CARD_THEMES.length];
+                    return (
+                      <tr
+                        key={course.id}
+                        className="tc-table-row hover:bg-blue-50/30 transition-colors group"
+                      >
+                        <td className="tc-text-secondary px-5 lg:px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-400">
+                          {index + 1}
+                        </td>
+                        <td className="px-5 lg:px-6 py-4 sticky left-0 bg-inherit z-10">
+                          <div className="flex items-center gap-3.5">
+                            <div
+                              className={`course-icon-box ${theme.iconClass} h-10 w-10 rounded-xl flex items-center justify-center font-medium text-sm border shadow-2xs shrink-0 transition-colors`}
+                            >
+                              <BookOpenIcon className="h-5 w-5" />
                             </div>
-                            <div className="tc-text-secondary text-[11px] font-medium text-gray-400 mt-0.5 line-clamp-1 max-w-md">
-                              {course.description ||
-                                t(
-                                  'គ្មានការពិពណ៌នា',
-                                  'No description available'
-                                )}
+                            <div className="min-w-0">
+                              <div className="tc-text-primary text-sm font-extrabold text-gray-900 group-hover:text-blue-500 transition-colors">
+                                {course.course_name}
+                              </div>
+                              <div className="tc-text-secondary text-[11px] font-medium text-gray-400 mt-0.5 line-clamp-1 max-w-xs lg:max-w-md">
+                                {course.description ||
+                                  t(
+                                    'គ្មានការពិពណ៌នា',
+                                    'No description available'
+                                  )}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="course-code-badge text-xs font-extrabold px-3 py-1.5 rounded-lg border">
-                          {course.course_code}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <BuildingLibraryIcon className="h-4 w-4 text-gray-400" />
-                          <span className="tc-text-secondary text-sm font-bold text-gray-700">
-                            {course.department?.department_name ||
-                              course.department?.name ||
-                              '—'}
+                        </td>
+                        <td className="px-5 lg:px-6 py-4 whitespace-nowrap">
+                          <span className="course-code-badge text-xs font-extrabold px-3 py-1.5 rounded-lg border">
+                            {course.course_code}
                           </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <span className="course-credit-badge inline-flex items-center px-3.5 py-1.5 rounded-xl text-xs font-extrabold border">
-                          {course.credit} {t('ក្រេឌីត', 'Credits')}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center">
-                        {/* ✅ បង្ហាញផ្លាកធម្មតាក្នុងតារាង មិនឱ្យចុចបាន */}
-                        <div className="inline-flex items-center gap-2">
-                          <span className="course-static-badge inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-gray-700 text-xs font-bold border border-gray-200 cursor-default select-none">
-                            <FolderIcon className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                            {t('មេរៀន', 'Lessons')}
+                        </td>
+                        <td className="px-5 lg:px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <BuildingLibraryIcon className="h-4 w-4 text-gray-400 shrink-0" />
+                            <span className="tc-text-secondary text-sm font-bold text-gray-700">
+                              {course.department?.department_name ||
+                                course.department?.name ||
+                                '—'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-5 lg:px-6 py-4 whitespace-nowrap text-center">
+                          <span className="course-credit-badge inline-flex items-center px-3.5 py-1.5 rounded-xl text-xs font-extrabold border">
+                            {course.credit} {t('ក្រេឌីត', 'Credits')}
                           </span>
-                          <span className="course-static-badge inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-gray-700 text-xs font-bold border border-gray-200 cursor-default select-none">
-                            <ClipboardDocumentListIcon className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                            {t('វត្តមាន', 'Attendance')}
-                          </span>
-                          <span className="course-static-badge inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-gray-700 text-xs font-bold border border-gray-200 cursor-default select-none">
-                            <ChartBarIcon className="h-3.5 w-3.5 text-purple-500 shrink-0" />
-                            {t('ពិន្ទុ', 'Grades')}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td className="px-5 lg:px-6 py-4 whitespace-nowrap text-center">
+                          <div className="inline-flex items-center gap-2">
+                            <span className="course-static-badge inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-gray-700 text-xs font-bold border border-gray-200 cursor-default select-none">
+                              <FolderIcon className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                              {t('មេរៀន', 'Lessons')}
+                            </span>
+                            <span className="course-static-badge inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-gray-700 text-xs font-bold border border-gray-200 cursor-default select-none">
+                              <ClipboardDocumentListIcon className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                              {t('វត្តមាន', 'Attendance')}
+                            </span>
+                            <span className="course-static-badge inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-gray-700 text-xs font-bold border border-gray-200 cursor-default select-none">
+                              <ChartBarIcon className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+                              {t('ពិន្ទុ', 'Grades')}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          {/* 📱 Mobile Compact List View (`md:hidden`) */}
+          <div className="md:hidden space-y-2.5">
+            {filteredCourses.map((course, index) => {
+              const theme = CARD_THEMES[index % CARD_THEMES.length];
+              const deptName =
+                course.department?.department_name ||
+                course.department?.name ||
+                '—';
+              return (
+                <div
+                  key={`mob-list-${course.id}`}
+                  className="tc-surface-card bg-white rounded-2xl border border-gray-200/80 p-3.5 shadow-xs flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div
+                      className={`course-icon-box ${theme.iconClass} h-10 w-10 rounded-xl flex items-center justify-center border shrink-0`}
+                    >
+                      <BookOpenIcon className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="tc-text-primary text-sm font-extrabold text-gray-900 truncate">
+                        {course.course_name}
+                      </h4>
+                      <p className="tc-text-secondary text-[11px] font-bold text-gray-500 truncate mt-0.5">
+                        {deptName}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className="course-code-badge text-[10px] font-extrabold px-2 py-0.5 rounded-md border">
+                      {course.course_code}
+                    </span>
+                    <span className="course-credit-badge text-[10px] font-extrabold px-2 py-0.5 rounded-md border">
+                      {course.credit} {t('ក្រេឌីត', 'Cr')}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {/* ================================================================== */}
