@@ -1,4 +1,5 @@
 <?php
+// app/Http/Controllers/Api/AdminStudentController.php
 
 namespace App\Http\Controllers\Api;
 
@@ -148,6 +149,111 @@ class AdminStudentController extends Controller
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /**
+     * ✅ អនុគមន៍ល្បឿនលឿន O(1) ភ្ជាប់ឈ្មោះ និងរូបភាពគ្រូបង្រៀនទៅឱ្យបញ្ជី Enrollments
+     * គាំទ្រទាំងករណី courses.teacher_id ជា teachers.id ឬជា users.id ដោយមិនបង្កើត N+1 Query
+     */
+    private function attachTeacherToEnrollments($enrollments)
+    {
+        $collection = collect($enrollments);
+        if ($collection->isEmpty()) {
+            return $enrollments;
+        }
+
+        $teacherIds = $collection
+            ->map(fn ($e) => $e->course?->teacher_id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($teacherIds)) {
+            return $enrollments;
+        }
+
+        $teacherRecords = DB::table('teachers')
+            ->whereIn('id', $teacherIds)
+            ->orWhereIn('user_id', $teacherIds)
+            ->select([
+                'id',
+                'user_id',
+                'teacher_code',
+                'first_name',
+                'last_name',
+                'email',
+                'phone',
+                'specialization',
+                'profile_image',
+            ])
+            ->get();
+
+        $byTeacherId = $teacherRecords->keyBy('id');
+        $byUserId = $teacherRecords->whereNotNull('user_id')->keyBy('user_id');
+
+        $allUserIds = $teacherRecords
+            ->pluck('user_id')
+            ->merge($teacherIds)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $userRecords = !empty($allUserIds)
+            ? DB::table('users')
+                ->whereIn('id', $allUserIds)
+                ->select(['id', 'first_name', 'last_name', 'email', 'phone', 'profile_image'])
+                ->get()
+                ->keyBy('id')
+            : collect();
+
+        foreach ($collection as $enrollment) {
+            $course = $enrollment->course;
+            if (!$course) {
+                continue;
+            }
+
+            $tid = $course->teacher_id;
+            $tRec = $byTeacherId->get($tid) ?? $byUserId->get($tid);
+            $uRec = $userRecords->get($tRec->user_id ?? $tid);
+
+            if (!$tRec && !$uRec) {
+                continue;
+            }
+
+            $firstName = trim((string) ($tRec->first_name ?? $uRec->first_name ?? ''));
+            $lastName = trim((string) ($tRec->last_name ?? $uRec->last_name ?? ''));
+            $fullName = trim($firstName . ' ' . $lastName);
+
+            if ($fullName === '') {
+                $fullName = $tRec->email ?? $uRec->email ?? '';
+            }
+
+            $avatar = !empty($tRec?->profile_image)
+                ? $tRec->profile_image
+                : ($uRec->profile_image ?? null);
+
+            $teacherPayload = [
+                'id' => $tRec->id ?? $uRec->id ?? $tid,
+                'user_id' => $uRec->id ?? $tRec->user_id ?? $tid,
+                'teacher_code' => $tRec->teacher_code ?? null,
+                'first_name' => $firstName,
+                'last_name' => $lastName,
+                'name' => $fullName,
+                'full_name' => $fullName,
+                'email' => $tRec->email ?? $uRec->email ?? '',
+                'phone' => $tRec->phone ?? $uRec->phone ?? null,
+                'specialization' => $tRec->specialization ?? null,
+                'profile_image' => $avatar,
+            ];
+
+            $course->setRelation('teacher', (object) $teacherPayload);
+            $course->setAttribute('teacher_profile', $teacherPayload);
+            $course->setAttribute('teacher_name', $fullName);
+        }
+
+        return $enrollments;
     }
 
     public function index(Request $request)
@@ -442,48 +548,22 @@ class AdminStudentController extends Controller
         ]);
     }
 
+    /**
+     * ✅ ទាញយកបញ្ជីមុខវិជ្ជាដែលសិស្សបានចុះឈ្មោះ (គាំទ្រទាំង student->user_id និង student->id)
+     */
     public function getEnrollments(Student $student)
     {
         try {
-            $enrollments = Enrollment::with('course.teacher')
-                ->where('student_id', $student->user_id)
+            $studentIds = array_values(array_unique(array_filter([
+                $student->user_id,
+                $student->id,
+            ])));
+
+            $enrollments = Enrollment::with(['course.department:id,department_name'])
+                ->whereIn('student_id', $studentIds)
                 ->get();
 
-            // ✅ ទាញយករូបភាពគ្រូពីតារាង teachers ក្នុង Query តែម្តង (បំបាត់បញ្ហា N+1 Query)
-            $teacherUserIds = [];
-            $teacherEmails = [];
-            foreach ($enrollments as $enrollment) {
-                $teacher = $enrollment->course?->teacher;
-                if ($teacher && empty($teacher->profile_image)) {
-                    if (!empty($teacher->id)) {
-                        $teacherUserIds[] = $teacher->id;
-                    }
-                    if (!empty($teacher->email)) {
-                        $teacherEmails[] = $teacher->email;
-                    }
-                }
-            }
-
-            if (!empty($teacherUserIds) || !empty($teacherEmails)) {
-                $teacherRecords = DB::table('teachers')
-                    ->whereIn('user_id', array_unique($teacherUserIds))
-                    ->orWhereIn('email', array_unique($teacherEmails))
-                    ->select(['user_id', 'email', 'profile_image'])
-                    ->get();
-
-                $byUserId = $teacherRecords->keyBy('user_id');
-                $byEmail = $teacherRecords->keyBy('email');
-
-                $enrollments->each(function ($enrollment) use ($byUserId, $byEmail) {
-                    $teacher = $enrollment->course?->teacher;
-                    if ($teacher && empty($teacher->profile_image)) {
-                        $matched = $byUserId->get($teacher->id) ?? $byEmail->get($teacher->email);
-                        if ($matched && !empty($matched->profile_image)) {
-                            $teacher->profile_image = $matched->profile_image;
-                        }
-                    }
-                });
-            }
+            $this->attachTeacherToEnrollments($enrollments);
 
             return response()->json([
                 'data' => $enrollments,
@@ -497,6 +577,9 @@ class AdminStudentController extends Controller
         }
     }
 
+    /**
+     * ✅ ចុះឈ្មោះមុខវិជ្ជាជូនសិស្ស និងភ្ជាប់ឈ្មោះគ្រូបង្រៀនត្រឡប់ទៅវិញភ្លាមៗ
+     */
     public function enrollStudent(Request $request, Student $student)
     {
         try {
@@ -505,39 +588,32 @@ class AdminStudentController extends Controller
                 'course_ids.*' => 'required|exists:courses,id',
             ]);
 
+            $studentIds = array_values(array_unique(array_filter([
+                $student->user_id,
+                $student->id,
+            ])));
+            $targetStudentId = $student->user_id ?: $student->id;
+
             $enrolledCourses = [];
             foreach ($validated['course_ids'] as $courseId) {
-                $exists = Enrollment::where('student_id', $student->user_id)
+                $exists = Enrollment::whereIn('student_id', $studentIds)
                     ->where('course_id', $courseId)
                     ->exists();
 
                 if (!$exists) {
                     $enrollment = Enrollment::create([
-                        'student_id' => $student->user_id,
+                        'student_id' => $targetStudentId,
                         'course_id' => $courseId,
                         'enrolled_date' => now(),
                         'status' => 'active',
                     ]);
 
-                    $loadedEnrollment = $enrollment->load('course.teacher');
-
-                    // ✅ ភ្ជាប់រូបភាពគ្រូពីតារាង teachers ពេលចុះឈ្មោះមុខវិជ្ជាថ្មី
-                    $teacher = $loadedEnrollment->course?->teacher;
-                    if ($teacher && empty($teacher->profile_image)) {
-                        $teacherRecord = DB::table('teachers')
-                            ->where('user_id', $teacher->id)
-                            ->orWhere('email', $teacher->email)
-                            ->select(['profile_image'])
-                            ->first();
-
-                        if ($teacherRecord && !empty($teacherRecord->profile_image)) {
-                            $teacher->profile_image = $teacherRecord->profile_image;
-                        }
-                    }
-
+                    $loadedEnrollment = $enrollment->load(['course.department:id,department_name']);
                     $enrolledCourses[] = $loadedEnrollment;
                 }
             }
+
+            $this->attachTeacherToEnrollments($enrolledCourses);
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
@@ -835,7 +911,12 @@ class AdminStudentController extends Controller
     public function unenrollStudent(Student $student, $courseId)
     {
         try {
-            $enrollment = Enrollment::where('student_id', $student->user_id)
+            $studentIds = array_values(array_unique(array_filter([
+                $student->user_id,
+                $student->id,
+            ])));
+
+            $enrollment = Enrollment::whereIn('student_id', $studentIds)
                 ->where('course_id', $courseId)
                 ->first();
 
