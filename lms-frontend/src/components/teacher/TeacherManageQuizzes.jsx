@@ -530,6 +530,9 @@ export default function TeacherManageQuizzes() {
   const [submissionSearch, setSubmissionSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // all, passed, failed
   const [submissionShiftFilter, setSubmissionShiftFilter] = useState('all');
+  const [editingAttemptId, setEditingAttemptId] = useState(null);
+  const [manualAttemptScore, setManualAttemptScore] = useState('');
+  const [savingAttemptScoreId, setSavingAttemptScoreId] = useState(null);
 
   // Form states for creating/editing a Quiz (កំណត់ពិន្ទុសរុបលំនាំដើមស្មើ 20 ពិន្ទុ ឱ្យត្រូវតាមសំណួរខ្លី 20%)
   const [formData, setFormData] = useState({
@@ -545,6 +548,8 @@ export default function TeacherManageQuizzes() {
   const [questionText, setQuestionText] = useState('');
   const [questionType, setQuestionType] = useState('MCQ'); // MCQ, TrueFalse, Essay
   const [questionMark, setQuestionMark] = useState(2);
+  const [essayModelAnswer, setEssayModelAnswer] = useState('');
+  const [questionFormError, setQuestionFormError] = useState('');
   const [mcqOptions, setMcqOptions] = useState([
     { option_text: '', is_correct: false },
     { option_text: '', is_correct: false },
@@ -558,6 +563,8 @@ export default function TeacherManageQuizzes() {
       const next = prev === quizId ? null : quizId;
       setQuestionText('');
       setQuestionMark(2);
+      setEssayModelAnswer('');
+      setQuestionFormError('');
       setMcqOptions([
         { option_text: '', is_correct: false },
         { option_text: '', is_correct: false },
@@ -695,7 +702,7 @@ export default function TeacherManageQuizzes() {
       })
       .catch(() => {});
 
-    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ (សម្អាតទិន្នន័យធ្ងន់មុនពេល Save ចូល localStorage)
+    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ
     if (
       !Array.isArray(QUIZZES_MEM_CACHE.allStudents) ||
       QUIZZES_MEM_CACHE.allStudents.length === 0
@@ -1178,7 +1185,7 @@ export default function TeacherManageQuizzes() {
   const getQuestionTypeBadgeLabel = (type) => {
     if (type === 'MCQ') return t('ពហុជ្រើសរើស (MCQ)', 'MCQ');
     if (type === 'TrueFalse') return t('ពិត / មិនពិត', 'True / False');
-    if (type === 'Essay') return t('សរសេររៀបរាប់', 'Essay');
+    if (type === 'Essay') return t('សរសេររៀបរាប់ (គ្រូពិនិត្យដាក់ពិន្ទុ)', 'Essay (Teacher Graded)');
     return type;
   };
 
@@ -1429,8 +1436,13 @@ export default function TeacherManageQuizzes() {
     }
   };
 
+  // ✅ មុខងារបន្ថែមសំណួរថ្មី (គាំទ្រទាំង MCQ, TrueFalse និងសំណួរសរសេររៀបរាប់ Essay ១០០%)
   const handleAddQuestion = async (quizId) => {
+    setQuestionFormError('');
     if (!questionText.trim()) {
+      setQuestionFormError(
+        t('សូមបញ្ចូលខ្លឹមសារសំណួរជាមុនសិន!', 'Please enter question content!')
+      );
       return;
     }
 
@@ -1440,10 +1452,22 @@ export default function TeacherManageQuizzes() {
         (opt) => opt.option_text.trim() !== ''
       );
       if (filledOptions.length < 2) {
+        setQuestionFormError(
+          t(
+            'សូមបញ្ចូលជម្រើសចម្លើយយ៉ាងតិច ២ សម្រាប់សំណួរពហុជ្រើសរើស!',
+            'Please provide at least 2 options for MCQ!'
+          )
+        );
         return;
       }
       const hasCorrect = filledOptions.some((opt) => opt.is_correct);
       if (!hasCorrect) {
+        setQuestionFormError(
+          t(
+            'សូមចុចជ្រើសរើសចម្លើយដែលត្រឹមត្រូវ ១ នៅខាងស្ដាំជម្រើស!',
+            'Please mark one correct answer!'
+          )
+        );
         return;
       }
       options = filledOptions;
@@ -1457,17 +1481,32 @@ export default function TeacherManageQuizzes() {
       ];
     }
 
+    const cleanModelAnswer = essayModelAnswer.trim();
+
+    // ✅ សម្រាប់សំណួរ Essay៖ មិនបញ្ជូន options ជា Array ទទេទៅឱ្យជាប់ Laravel min:2 ទៀតទេ!
     const payload = {
       question_text: questionText.trim(),
       question_type: questionType,
       mark: parseFloat(questionMark) || 2,
-      options: questionType === 'Essay' ? [] : options,
+      ...(questionType === 'Essay'
+        ? cleanModelAnswer
+          ? { model_answer: cleanModelAnswer }
+          : {}
+        : { options }),
     };
 
     const tempId = `temp_q_${Date.now()}`;
     const optimisticQuestion = {
       id: tempId,
-      ...payload,
+      question_text: payload.question_text,
+      question_type: payload.question_type,
+      mark: payload.mark,
+      options:
+        questionType === 'Essay'
+          ? cleanModelAnswer
+            ? [{ id: `opt_${Date.now()}`, option_text: cleanModelAnswer, is_correct: true }]
+            : []
+          : options,
     };
 
     const previousQuizzes = [...quizzes];
@@ -1498,6 +1537,7 @@ export default function TeacherManageQuizzes() {
 
     setQuestionText('');
     setQuestionMark(2);
+    setEssayModelAnswer('');
     setMcqOptions([
       { option_text: '', is_correct: false },
       { option_text: '', is_correct: false },
@@ -1545,6 +1585,63 @@ export default function TeacherManageQuizzes() {
       console.error('Add question error:', error);
       setQuizzes(previousQuizzes);
       QUIZZES_MEM_CACHE.quizzes = previousQuizzes;
+      setQuestionFormError(
+        error.response?.data?.message ||
+          t('មិនអាចបន្ថែមសំណួរបានទេ សូមពិនិត្យម្ដងទៀត!', 'Failed to add question!')
+      );
+    }
+  };
+
+  // ✅ មុខងារសម្រាប់ឱ្យគ្រូកែប្រែ/ផ្ដល់ពិន្ទុដោយផ្ទាល់ (Manual Essay Score Update) នៅក្នុង Modal លទ្ធផលសិស្ស
+  const handleSaveManualAttemptScore = async (attempt) => {
+    if (!viewingQuiz || !attempt || savingAttemptScoreId) return;
+    const rawTotalVal = parseFloat(viewingQuiz.total_mark) || 20;
+    const enteredWeighted20 = parseFloat(manualAttemptScore);
+    if (isNaN(enteredWeighted20) || enteredWeighted20 < 0 || enteredWeighted20 > 20) {
+      return;
+    }
+
+    // បម្លែងពីពិន្ទុលើមាត្រដ្ឋាន 20 ទៅជាពិន្ទុពិតប្រាកដក្នុងកម្រងសំណួរ
+    const newRawScore =
+      rawTotalVal === 20
+        ? enteredWeighted20
+        : Math.round(((enteredWeighted20 / 20) * rawTotalVal) * 100) / 100;
+
+    setSavingAttemptScoreId(attempt.id);
+    try {
+      const response = await api.get(`/teacher/quizzes/${viewingQuiz.id}/results`, {
+        params: {
+          attempt_id: attempt.id,
+          manual_score: newRawScore,
+        },
+      });
+      const attemptsData =
+        response.data?.attempts || response.data?.data || response.data || [];
+      if (Array.isArray(attemptsData) && attemptsData.length > 0) {
+        setSubmissions(attemptsData);
+        QUIZZES_MEM_CACHE.resultsByQuiz[viewingQuiz.id] = attemptsData;
+      } else {
+        setSubmissions((prev) =>
+          prev.map((item) =>
+            item.id === attempt.id ? { ...item, score: newRawScore } : item
+          )
+        );
+      }
+      setEditingAttemptId(null);
+      setManualAttemptScore('');
+
+      pushLocalNotification({
+        titleKm: 'បានរក្សាទុកពិន្ទុកម្រងសំណួរ',
+        titleEn: 'Quiz Score Updated',
+        descKm: `បានកែប្រែពិន្ទុប្រឡងរបស់សិស្សទៅជា ${enteredWeighted20} / 20 ពិន្ទុ។`,
+        descEn: `Updated student quiz score to ${enteredWeighted20} / 20 pts.`,
+        category: 'quiz',
+        link: '/quizzes',
+      });
+    } catch (error) {
+      console.error('Error saving manual quiz score:', error);
+    } finally {
+      setSavingAttemptScoreId(null);
     }
   };
 
@@ -1741,6 +1838,8 @@ export default function TeacherManageQuizzes() {
     setShowSubmissionsModal(true);
     setSubmissionSearch('');
     setStatusFilter('all');
+    setEditingAttemptId(null);
+    setManualAttemptScore('');
     setSubmissionShiftFilter(selectedShift !== 'all' ? selectedShift : 'all');
 
     const memRes = QUIZZES_MEM_CACHE.resultsByQuiz[quiz.id];
@@ -1775,7 +1874,6 @@ export default function TeacherManageQuizzes() {
       setSubmissions(validAttempts);
       QUIZZES_MEM_CACHE.resultsByQuiz[quiz.id] = validAttempts;
 
-      // ✅ សម្អាតទិន្នន័យរូបភាពធំៗមុនពេល Save ចូល Storage ការពារពេញ localStorage
       try {
         const slimAttemptsStr = JSON.stringify(
           stripHeavyQuizAttemptsForCache(validAttempts)
@@ -2145,7 +2243,6 @@ export default function TeacherManageQuizzes() {
               </button>
             )}
 
-            {/* ✅ បង្ហាញប៊ូតុង «នាំចូលកម្រងសំណួរ» និង «បន្ថែមកម្រងសំណួរថ្មី» តែនៅពេលចុចលើកាតឆ្នាំណាមួយ (ឆ្នាំទី១-៤) ប៉ុណ្ណោះ */}
             {selectedYear !== 'all' && (
               <>
                 <button
@@ -2255,7 +2352,6 @@ export default function TeacherManageQuizzes() {
       {/* 3. SEARCH, COURSE FILTER & STUDY SHIFT TABS                        */}
       {/* ================================================================== */}
       <div className="quz-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col xl:flex-row gap-4 items-center justify-between">
-        {/* ផ្នែកខាងឆ្វេង៖ Search Input + ប្រអប់ជ្រើសរើសមុខវិជ្ជា */}
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full xl:w-auto flex-1">
           <div className="relative w-full sm:max-w-xs lg:max-w-sm flex-1">
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
@@ -2280,7 +2376,6 @@ export default function TeacherManageQuizzes() {
             )}
           </div>
 
-          {/* ✅ ជ្រើសរើសមុខវិជ្ជា (បង្ហាញតែពេលចុចលើកាតឆ្នាំ ១-៤ និងប្រើ font-medium មិនឱ្យដិតពេក) */}
           {selectedYear !== 'all' && visibleCoursesForSelectedYear.length > 0 && (
             <div className="relative w-full sm:w-64 lg:w-72 shrink-0 animate-fadeIn">
               <BookOpenIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -2304,7 +2399,6 @@ export default function TeacherManageQuizzes() {
           )}
         </div>
 
-        {/* ✅ ផ្នែកខាងស្ដាំ៖ ប៊ូតុងវេនសិក្សាទាំង ៣ (គ្រប់វេនសិក្សា, ចន្ទ-សុក្រ, សៅរ៍-អាទិត្យ) */}
         <div className="quz-shift-tabs flex flex-wrap items-center gap-1.5 bg-gray-100/80 p-1.5 rounded-xl border border-gray-200/60 w-full xl:w-auto justify-center sm:justify-start shrink-0">
           <button
             type="button"
@@ -2532,7 +2626,6 @@ export default function TeacherManageQuizzes() {
                               matchedCourse?.course_name ||
                               t('គ្មានមុខវិជ្ជា', 'No course')}
                           </div>
-                          {/* ✅ បង្ហាញផ្លាកវេនសិក្សាតែនៅពេលស្ថិតក្នុង «គ្រប់វេនសិក្សា» ប៉ុណ្ណោះ */}
                           {!isSpecificShiftSelected && (
                             <div className="flex flex-wrap gap-1 mt-1">
                               {courseShifts.map((shKey) => {
@@ -2692,12 +2785,19 @@ export default function TeacherManageQuizzes() {
                                             className="quz-subbox bg-gray-50/70 p-5 rounded-2xl border border-gray-200/90 shadow-2xs transition relative"
                                           >
                                             <div className="flex justify-between items-start mb-3">
-                                              <div className="quz-text-primary text-sm font-extrabold text-gray-900 flex items-center gap-2">
+                                              <div className="quz-text-primary text-sm font-extrabold text-gray-900 flex flex-wrap items-center gap-2">
                                                 <span>
                                                   {t('សំណួរទី', 'Question')}{' '}
                                                   {qIdx + 1}
                                                 </span>
-                                                <span className="quz-pill-blue font-extrabold text-[11px] text-blue-600 bg-blue-50 border border-blue-100 px-2.5 py-0.5 rounded-lg">
+                                                <span
+                                                  className={`font-extrabold text-[11px] px-2.5 py-0.5 rounded-lg border ${
+                                                    question.question_type ===
+                                                    'Essay'
+                                                      ? 'quz-pill-amber bg-amber-50 text-amber-700 border-amber-200'
+                                                      : 'quz-pill-blue bg-blue-50 text-blue-600 border-blue-100'
+                                                  }`}
+                                                >
                                                   {getQuestionTypeBadgeLabel(
                                                     question.question_type
                                                   )}
@@ -2799,6 +2899,37 @@ export default function TeacherManageQuizzes() {
                                                   )}
                                               </div>
                                             )}
+
+                                            {/* ✅ Display Essay Question Info (គ្រូពិនិត្យដាក់ពិន្ទុតាមខ្លឹមសារសិស្សសរសេរ) */}
+                                            {question.question_type ===
+                                              'Essay' && (
+                                              <div className="space-y-2">
+                                                <div className="quz-surface-card px-3.5 py-2.5 rounded-xl border border-amber-200/80 bg-amber-50/40 text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                                                  <PencilSquareIcon className="h-4 w-4 text-amber-600 shrink-0" />
+                                                  <span>
+                                                    {t(
+                                                      'សិស្សអាចសរសេររៀបរាប់ចម្លើយតាមការយល់ឃើញ និងអត្ថន័យគ្រប់គ្រាន់ ហើយគ្រូជាអ្នកពិនិត្យដាក់ពិន្ទុ។',
+                                                      'Students write open-ended responses; graded manually by the instructor based on meaning.'
+                                                    )}
+                                                  </span>
+                                                </div>
+                                                {Array.isArray(question.options) &&
+                                                  question.options.length > 0 &&
+                                                  question.options[0]?.option_text && (
+                                                    <div className="quz-surface-card px-3.5 py-2 rounded-xl border border-gray-200 bg-white text-xs">
+                                                      <span className="font-extrabold text-indigo-600 dark:text-indigo-400">
+                                                        {t(
+                                                          'គោលការណ៍កែ / ចម្លើយគំរូ៖ ',
+                                                          'Model Answer / Rubric: '
+                                                        )}
+                                                      </span>
+                                                      <span className="quz-text-secondary font-medium text-gray-700">
+                                                        {question.options[0].option_text}
+                                                      </span>
+                                                    </div>
+                                                  )}
+                                              </div>
+                                            )}
                                           </div>
                                         ))
                                       )}
@@ -2814,6 +2945,12 @@ export default function TeacherManageQuizzes() {
                                       {t('បន្ថែមសំណួរថ្មី', 'Add New Question')}
                                     </h4>
 
+                                    {questionFormError && (
+                                      <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-xs font-bold">
+                                        {questionFormError}
+                                      </div>
+                                    )}
+
                                     <div>
                                       <label className="quz-label block text-xs font-bold text-gray-700 mb-1.5">
                                         {t('ខ្លឹមសារសំណួរ', 'Question Content')}{' '}
@@ -2826,9 +2963,11 @@ export default function TeacherManageQuizzes() {
                                           'Enter question content...'
                                         )}
                                         value={questionText}
-                                        onChange={(e) =>
-                                          setQuestionText(e.target.value)
-                                        }
+                                        onChange={(e) => {
+                                          if (questionFormError)
+                                            setQuestionFormError('');
+                                          setQuestionText(e.target.value);
+                                        }}
                                         className="quz-input w-full px-3.5 py-2.5 text-sm font-medium border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 focus:bg-white resize-none transition-all shadow-2xs"
                                       />
                                     </div>
@@ -2840,9 +2979,10 @@ export default function TeacherManageQuizzes() {
                                         </label>
                                         <select
                                           value={questionType}
-                                          onChange={(e) =>
-                                            setQuestionType(e.target.value)
-                                          }
+                                          onChange={(e) => {
+                                            setQuestionFormError('');
+                                            setQuestionType(e.target.value);
+                                          }}
                                           className="quz-input w-full px-3 py-2.5 text-xs font-bold border border-gray-200 rounded-xl bg-gray-50/60 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 shadow-2xs cursor-pointer"
                                         >
                                           <option value="MCQ">
@@ -3003,6 +3143,38 @@ export default function TeacherManageQuizzes() {
                                             />
                                             {t('មិនពិត (False)', 'False')}
                                           </button>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* ✅ ប្រអប់សម្រាប់សំណួរសរសេររៀបរាប់ (Essay) */}
+                                    {questionType === 'Essay' && (
+                                      <div className="quz-subbox bg-amber-50/50 dark:bg-slate-900/60 p-3.5 rounded-2xl border border-amber-200/80 space-y-2.5">
+                                        <p className="text-[11px] font-bold text-amber-800 dark:text-amber-300 leading-relaxed">
+                                          {t(
+                                            '💡 សំណួរសរសេររៀបរាប់៖ សិស្សអាចសរសេរតាមគំនិតខ្លួនឯង (មិនតម្រូវឱ្យដូចអក្សរគំរូ ១០០% ទេ) ហើយលោកគ្រូ/អ្នកគ្រូអាចពិនិត្យដាក់ពិន្ទុតាមអត្ថន័យជាក់ស្ដែង។',
+                                            '💡 Essay Question: Students write in their own words and are graded manually by the teacher.'
+                                          )}
+                                        </p>
+                                        <div>
+                                          <label className="quz-label block text-[11px] font-bold text-gray-600 mb-1">
+                                            {t(
+                                              'ចម្លើយគំរូ / គោលការណ៍កែ (ដាក់ក៏បាន មិនដាក់ក៏បាន)',
+                                              'Model Answer / Grading Notes (Optional)'
+                                            )}
+                                          </label>
+                                          <textarea
+                                            rows={2}
+                                            placeholder={t(
+                                              'កត់ត្រាចំណុចសំខាន់ៗសម្រាប់ផ្ទៀងផ្ទាត់ពេលដាក់ពិន្ទុ...',
+                                              'Optional key points for grading reference...'
+                                            )}
+                                            value={essayModelAnswer}
+                                            onChange={(e) =>
+                                              setEssayModelAnswer(e.target.value)
+                                            }
+                                            className="quz-input w-full px-3 py-2 text-xs font-medium border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none"
+                                          />
                                         </div>
                                       </div>
                                     )}
@@ -3375,7 +3547,7 @@ export default function TeacherManageQuizzes() {
       )}
 
       {/* ================================================================== */}
-      {/* MODAL - 3: View Student Quiz Results & Export Excel                */}
+      {/* MODAL - 3: View Student Quiz Results & Manual Grading              */}
       {/* ================================================================== */}
       {showSubmissionsModal &&
         viewingQuiz &&
@@ -3547,7 +3719,6 @@ export default function TeacherManageQuizzes() {
                         )}
                       </div>
 
-                      {/* ប្រអប់ច្រោះតាមវេនសិក្សាក្នុង Modal */}
                       <select
                         value={submissionShiftFilter}
                         onChange={(e) =>
@@ -3686,6 +3857,8 @@ export default function TeacherManageQuizzes() {
                               const isFemale = isFemaleGender(stdGender);
                               const stdShift = resolveAttemptStudentShift(attempt);
                               const isWeekend = stdShift === 'Saturday-Sunday';
+                              const isEditingThisScore =
+                                editingAttemptId === attempt.id;
 
                               return (
                                 <tr
@@ -3759,9 +3932,65 @@ export default function TeacherManageQuizzes() {
                                     {formatDate(attempt.submitted_at)}
                                   </td>
                                   <td className="px-4 py-3.5 text-center whitespace-nowrap">
-                                    <span className="quz-pill-indigo inline-block px-3 py-1.5 rounded-xl text-sm font-black text-indigo-700 bg-indigo-50 border border-indigo-200/80">
-                                      {weighted20} {t('ពិន្ទុ', 'pts')}
-                                    </span>
+                                    {isEditingThisScore ? (
+                                      <div className="inline-flex items-center gap-1.5">
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="20"
+                                          step="0.5"
+                                          value={manualAttemptScore}
+                                          onChange={(e) =>
+                                            setManualAttemptScore(e.target.value)
+                                          }
+                                          className="quz-input w-20 px-2.5 py-1 text-xs font-black text-center border border-indigo-400 rounded-lg focus:outline-none"
+                                        />
+                                        <button
+                                          type="button"
+                                          disabled={
+                                            savingAttemptScoreId === attempt.id
+                                          }
+                                          onClick={() =>
+                                            handleSaveManualAttemptScore(attempt)
+                                          }
+                                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer"
+                                        >
+                                          {t('រក្សាទុក', 'Save')}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingAttemptId(null);
+                                            setManualAttemptScore('');
+                                          }}
+                                          className="p-1 text-gray-400 hover:text-gray-600 cursor-pointer"
+                                        >
+                                          <XMarkIcon className="h-4 w-4" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="inline-flex items-center gap-1.5">
+                                        <span className="quz-pill-indigo inline-block px-3 py-1.5 rounded-xl text-sm font-black text-indigo-700 bg-indigo-50 border border-indigo-200/80">
+                                          {weighted20} {t('ពិន្ទុ', 'pts')}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingAttemptId(attempt.id);
+                                            setManualAttemptScore(
+                                              String(weighted20)
+                                            );
+                                          }}
+                                          className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition cursor-pointer"
+                                          title={t(
+                                            'កែប្រែពិន្ទុដោយផ្ទាល់ (សម្រាប់សំណួរសរសេរ)',
+                                            'Adjust score manually (Essay Grading)'
+                                          )}
+                                        >
+                                          <PencilSquareIcon className="h-4 w-4" />
+                                        </button>
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="px-4 py-3.5 text-center">
                                     <span
@@ -3917,7 +4146,6 @@ export default function TeacherManageQuizzes() {
       {/* 📌 7. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
       {/* ================================================================== */}
       <style>{`
-        /* Light mode subtle row dividers */
         .quz-table-row + .quz-table-row > td {
           border-top: 1px solid #f1f5f9;
         }

@@ -1781,50 +1781,93 @@ class TeacherController extends Controller
         }
     }
 
-    public function addQuestion(Request $request, $quizId)
+public function addQuestion(Request $request, $quizId)
     {
-        $validated = $request->validate([
-            'question_text' => 'required|string',
-            'question_type' => 'required|in:MCQ,TrueFalse,Essay',
-            'mark' => 'required|numeric|min:0',
-            'options' => 'required_if:question_type,MCQ|array|min:2',
-            'options.*.option_text' => 'required|string',
-            'options.*.is_correct' => 'required|boolean',
-        ]);
-
-        $teacherIds = $this->getTeacherCourseIds();
-        Quiz::whereHas('course', function ($query) use ($teacherIds) {
-            $query->whereIn('teacher_id', $teacherIds);
-        })->findOrFail($quizId);
-
-        $question = DB::transaction(function () use ($validated, $quizId) {
-            $q = Question::create([
-                'quiz_id' => $quizId,
-                'question_text' => $validated['question_text'],
-                'question_type' => $validated['question_type'],
-                'mark' => $validated['mark'],
+        try {
+            $validated = $request->validate([
+                'question_text' => 'required|string',
+                'question_type' => 'required|in:MCQ,TrueFalse,Essay',
+                'mark' => 'required|numeric|min:0',
+                'model_answer' => 'nullable|string',
+                'options' => 'nullable|array',
+                'options.*.option_text' => 'required_with:options|string',
+                'options.*.is_correct' => 'required_with:options|boolean',
             ]);
 
-            if (isset($validated['options']) && in_array($validated['question_type'], ['MCQ', 'TrueFalse'])) {
-                foreach ($validated['options'] as $option) {
-                    QuestionOption::create([
-                        'question_id' => $q->id,
-                        'option_text' => $option['option_text'],
-                        'is_correct' => $option['is_correct'],
-                    ]);
+            // ✅ បែងចែកការត្រួតពិនិត្យ៖ សំណួរ MCQ និង TrueFalse ត្រូវការជម្រើសចម្លើយយ៉ាងតិច ២ តែសំណួរ Essay មិនត្រូវការជម្រើសចម្លើយទេ!
+            if (in_array($validated['question_type'], ['MCQ', 'TrueFalse'])) {
+                $optionsList = $validated['options'] ?? [];
+                if (!is_array($optionsList) || count($optionsList) < 2) {
+                    return response()->json([
+                        'message' => 'សូមបញ្ចូលជម្រើសចម្លើយយ៉ាងតិច ២ សម្រាប់សំណួរជ្រើសរើស!',
+                    ], 422);
                 }
             }
 
-            return $q;
-        });
+            $teacherIds = $this->getTeacherCourseIds();
+            Quiz::whereHas('course', function ($query) use ($teacherIds) {
+                $query->whereIn('teacher_id', $teacherIds);
+            })->findOrFail($quizId);
 
-        return response()->json([
-            'question' => $question->load('options'),
-            'message' => 'Question added successfully',
-        ], 201);
+            $question = DB::transaction(function () use ($validated, $quizId) {
+                try {
+                    $q = Question::create([
+                        'quiz_id' => $quizId,
+                        'question_text' => trim($validated['question_text']),
+                        'question_type' => $validated['question_type'],
+                        'mark' => $validated['mark'],
+                    ]);
+                } catch (\Illuminate\Database\QueryException $qe) {
+                    // ការពារករណីជួរឈរ question_type ក្នុង Database ជា ENUM ចាស់ដែលមិនទាន់មានពាក្យ 'Essay'
+                    DB::statement("ALTER TABLE questions MODIFY COLUMN question_type VARCHAR(50) NOT NULL DEFAULT 'MCQ'");
+                    $q = Question::create([
+                        'quiz_id' => $quizId,
+                        'question_text' => trim($validated['question_text']),
+                        'question_type' => $validated['question_type'],
+                        'mark' => $validated['mark'],
+                    ]);
+                }
+
+                if (in_array($validated['question_type'], ['MCQ', 'TrueFalse']) && !empty($validated['options'])) {
+                    foreach ($validated['options'] as $option) {
+                        QuestionOption::create([
+                            'question_id' => $q->id,
+                            'option_text' => $option['option_text'],
+                            'is_correct' => filter_var($option['is_correct'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                        ]);
+                    }
+                } elseif ($validated['question_type'] === 'Essay' && !empty($validated['model_answer'])) {
+                    // រក្សាទុកចម្លើយគំរូ/គោលការណ៍កែរបស់គ្រូ (បើគ្រូបានដាក់) សម្រាប់ទុកជាแนวทางពេលគ្រូពិនិត្យដាក់ពិន្ទុ
+                    QuestionOption::create([
+                        'question_id' => $q->id,
+                        'option_text' => trim($validated['model_answer']),
+                        'is_correct' => true,
+                    ]);
+                }
+
+                return $q;
+            });
+
+            $this->clearTeacherDashboardCache();
+
+            return response()->json([
+                'question' => $question->load('options'),
+                'message' => 'បានបន្ថែមសំណួរដោយជោគជ័យ',
+            ], 201);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'សូមពិនិត្យទិន្នន័យសំណួរដែលបានបញ្ចូល',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Teacher addQuestion error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'មានបញ្ហាក្នុងការបន្ថែមសំណួរ: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
-    public function deleteQuestion($id)
+   public function deleteQuestion($id)
     {
         try {
             $question = Question::findOrFail($id);
@@ -1856,7 +1899,7 @@ class TeacherController extends Controller
         }
     }
 
-    // --- Online Exam ---
+   // --- Online Exam ---
     public function getQuizzes($courseId)
     {
         $this->teacherCourseQuery()->findOrFail($courseId);
@@ -1868,17 +1911,35 @@ class TeacherController extends Controller
         return response()->json($quizzes);
     }
 
-    public function getQuizResults($quizId)
+    public function getQuizResults(Request $request, $quizId)
     {
         try {
             $teacherIds = $this->getTeacherCourseIds();
-            $quiz = Quiz::with('course:id,course_code,course_name,teacher_id')
+            $quiz = Quiz::with([
+                'course:id,course_code,course_name,teacher_id',
+                'questions.options',
+            ])
                 ->whereHas('course', function ($query) use ($teacherIds) {
                     $query->whereIn('teacher_id', $teacherIds);
                 })->findOrFail($quizId);
 
+            // ✅ គាំទ្រការកែប្រែ/ផ្ដល់ពិន្ទុដោយផ្ទាល់ពីគ្រូបង្រៀន (សម្រាប់សំណួរសរសេររៀបរាប់ Essay)
+            if ($request->filled('attempt_id') && $request->has('manual_score')) {
+                $attemptToUpdate = QuizAttempt::where('quiz_id', $quiz->id)
+                    ->findOrFail($request->input('attempt_id'));
+                $maxMark = (float) ($quiz->total_mark ?? 20);
+                $newScore = max(0, min($maxMark, (float) $request->input('manual_score')));
+                $attemptToUpdate->update(['score' => $newScore]);
+                $this->clearTeacherDashboardCache();
+            }
+
+            $attemptColumns = ['id', 'quiz_id', 'student_id', 'score', 'started_at', 'submitted_at', 'created_at', 'updated_at'];
+            if (Schema::hasColumn('quiz_attempts', 'answers')) {
+                $attemptColumns[] = 'answers';
+            }
+
             $rawAttempts = $quiz->attempts()
-                ->select('id', 'quiz_id', 'student_id', 'score', 'started_at', 'submitted_at', 'created_at', 'updated_at')
+                ->select($attemptColumns)
                 ->with(['student:id,first_name,last_name,email,gender'])
                 ->orderBy('submitted_at', 'desc')
                 ->get();
@@ -1905,6 +1966,13 @@ class TeacherController extends Controller
                     $studentObj['student_code'] = $stuProfile->student_code ?? '';
                 }
 
+                $parsedAnswers = null;
+                if (isset($attempt->answers)) {
+                    $parsedAnswers = is_string($attempt->answers)
+                        ? json_decode($attempt->answers, true)
+                        : $attempt->answers;
+                }
+
                 return [
                     'id' => $attempt->id,
                     'quiz_id' => $attempt->quiz_id,
@@ -1912,6 +1980,7 @@ class TeacherController extends Controller
                     'study_shift' => $studentObj['study_shift'] ?? 'Monday-Friday',
                     'student' => $studentObj,
                     'score' => $attempt->score,
+                    'answers' => $parsedAnswers,
                     'started_at' => $attempt->started_at,
                     'submitted_at' => $attempt->submitted_at,
                     'created_at' => $attempt->created_at,
