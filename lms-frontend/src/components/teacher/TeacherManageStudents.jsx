@@ -1188,13 +1188,28 @@ const TeacherManageStudents = () => {
     (selectedYear !== 'all' || selectedCourse !== '') &&
     filteredStudents.length > 0;
 
+  // ✅ អត្ថបទ "គ្មានទិន្នន័យ" ប្រើរួមគ្នាទាំងតារាង (Desktop/iPad) និងកាត (Phone)
+  const emptyMessage = selectedCourse
+    ? t(
+        `មិនទាន់មានសិស្សចុះឈ្មោះក្នុងមុខវិជ្ជា «${activeCourseObj?.course_name || ''}» នៅឡើយទេ`,
+        'No students enrolled in this course yet'
+      )
+    : selectedYear !== 'all'
+    ? t(
+        `មិនទាន់មាននិស្សិតក្នុង ${getYearTextLabel(selectedYear)} នៅឡើយទេ`,
+        `No students found in ${getYearTextLabel(selectedYear)}`
+      )
+    : searchTerm || isSpecificShiftSelected
+    ? t('មិនឃើញមានសិស្សតាមការស្វែងរកនេះទេ', 'No matching students found')
+    : t('មិនទាន់មានសិស្សនៅឡើយទេ', 'No students available yet');
+
   return (
-    <div className="tstd-page-bg p-4 sm:p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-6 pb-28 lg:pb-10">
+    <div className="tstd-page-bg px-3 py-3 sm:p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-6 pb-28 lg:pb-10">
       
       {/* ------------------------------------------------------------------ */}
       {/* 1. Header Banner                                                   */}
       {/* ------------------------------------------------------------------ */}
-      <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 sm:p-8 shadow-xl border border-blue-900">
+      <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-8 shadow-xl border border-blue-900">
         <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
@@ -1219,12 +1234,12 @@ const TeacherManageStudents = () => {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-3 shrink-0 w-full md:w-auto">
             {canShowExportExcel && (
               <button
                 type="button"
                 onClick={handleExportExcel}
-                className="inline-flex items-center justify-center px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer animate-fadeIn"
+                className="w-full md:w-auto inline-flex items-center justify-center px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer animate-fadeIn"
                 title={t('នាំចេញបញ្ជីសិស្សជា Excel', 'Export students list to Excel')}
               >
                 <DocumentIcon className="h-5 w-5 mr-2" />
@@ -1333,7 +1348,7 @@ const TeacherManageStudents = () => {
               <button
                 type="button"
                 onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-blue-600 p-1 rounded-lg transition-colors cursor-pointer"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-blue-600 p-2 sm:p-1 rounded-lg transition-colors cursor-pointer"
               >
                 <XMarkIcon className="h-4 w-4" />
               </button>
@@ -1374,7 +1389,7 @@ const TeacherManageStudents = () => {
           <button
             type="button"
             onClick={() => handleSelectShiftTab('all')}
-            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-none justify-center inline-flex items-center gap-2 px-3.5 py-2.5 sm:py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
               !isSpecificShiftSelected
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'tstd-shift-btn text-gray-600 hover:text-gray-900 hover:bg-white/60'
@@ -1396,7 +1411,7 @@ const TeacherManageStudents = () => {
           <button
             type="button"
             onClick={() => handleSelectShiftTab('Monday-Friday')}
-            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-none justify-center inline-flex items-center gap-2 px-3.5 py-2.5 sm:py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
               selectedShift === 'Monday-Friday'
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : 'tstd-shift-btn text-gray-600 hover:text-gray-900 hover:bg-white/60'
@@ -1418,7 +1433,7 @@ const TeacherManageStudents = () => {
           <button
             type="button"
             onClick={() => handleSelectShiftTab('Saturday-Sunday')}
-            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-none justify-center inline-flex items-center gap-2 px-3.5 py-2.5 sm:py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
               selectedShift === 'Saturday-Sunday'
                 ? 'bg-amber-500 text-white shadow-xs'
                 : 'tstd-shift-btn text-gray-600 hover:text-gray-900 hover:bg-white/60'
@@ -1444,9 +1459,9 @@ const TeacherManageStudents = () => {
       {/* ------------------------------------------------------------------ */}
       <div className="w-full">
         <div className="tstd-surface-card bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
-          <div className="tstd-table-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-4">
+          <div className="tstd-table-bar px-4 py-4 sm:px-6 sm:py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="tstd-text-primary text-[18px] font-extrabold text-gray-900">
+              <h2 className="tstd-text-primary text-base sm:text-[18px] font-extrabold text-gray-900">
                 {activeCourseObj
                   ? `${t('បញ្ជីសិស្ស', 'Students List')} - ${activeCourseObj.course_name}`
                   : selectedCourse === 'not_enrolled'
@@ -1467,7 +1482,7 @@ const TeacherManageStudents = () => {
                 <button
                   type="button"
                   onClick={() => handleSelectShiftTab('all')}
-                  className="tstd-badge-indigo text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+                  className="tstd-badge-indigo text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-2.5 sm:py-1.5 rounded-lg transition-all cursor-pointer"
                 >
                   {t('បង្ហាញគ្រប់វេនវិញ', 'Show All Shifts')}
                 </button>
@@ -1488,7 +1503,7 @@ const TeacherManageStudents = () => {
                       sessionStorage.removeItem(getSelectedShiftKey(currentTeacherId));
                     } catch {}
                   }}
-                  className="tstd-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+                  className="tstd-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3.5 py-2.5 sm:py-2 rounded-xl transition-all cursor-pointer"
                 >
                   {t('សម្អាតតម្រងស្វែងរក', 'Reset Filters')}
                 </button>
@@ -1496,14 +1511,14 @@ const TeacherManageStudents = () => {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="hidden md:block overflow-x-auto">
             <table className="min-w-full border-collapse">
               <thead className="tstd-table-head bg-gray-50 border-b border-gray-100">
                 <tr>
                   <th className="px-4 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider w-14 whitespace-nowrap">
                     {t('ល.រ', 'No')}
                   </th>
-                  <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  <th className="tstd-sticky-cell sticky left-0 z-20 bg-gray-50 px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                     {t('សិស្ស', 'Student')}
                   </th>
                   <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
@@ -1523,7 +1538,7 @@ const TeacherManageStudents = () => {
                       {t('វេនសិក្សា', 'Shift')}
                     </th>
                   )}
-                  <th className="px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  <th className="tstd-sticky-cell sticky right-0 z-20 bg-gray-50 px-6 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                     {t('ស្ថានភាព', 'Status')}
                   </th>
                 </tr>
@@ -1538,25 +1553,7 @@ const TeacherManageStudents = () => {
                       <div className="flex flex-col items-center">
                         <UserGroupIcon className="h-16 w-16 text-gray-300 mb-4" />
                         <p className="tstd-text-primary font-extrabold text-gray-800 text-base">
-                          {selectedCourse
-                            ? t(
-                                `មិនទាន់មានសិស្សចុះឈ្មោះក្នុងមុខវិជ្ជា «${activeCourseObj?.course_name || ''}» នៅឡើយទេ`,
-                                'No students enrolled in this course yet'
-                              )
-                            : selectedYear !== 'all'
-                            ? t(
-                                `មិនទាន់មាននិស្សិតក្នុង ${getYearTextLabel(selectedYear)} នៅឡើយទេ`,
-                                `No students found in ${getYearTextLabel(selectedYear)}`
-                              )
-                            : searchTerm || isSpecificShiftSelected
-                            ? t(
-                                'មិនឃើញមានសិស្សតាមការស្វែងរកនេះទេ',
-                                'No matching students found'
-                              )
-                            : t(
-                                'មិនទាន់មានសិស្សនៅឡើយទេ',
-                                'No students available yet'
-                              )}
+                          {emptyMessage}
                         </p>
                       </div>
                     </td>
@@ -1602,7 +1599,7 @@ const TeacherManageStudents = () => {
                         <td className="tstd-text-secondary px-4 py-4 whitespace-nowrap text-center text-sm font-bold text-gray-500">
                           {idx + 1}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="tstd-sticky-cell sticky left-0 z-10 bg-white px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-3.5">
                             <div className="tstd-avatar h-10 w-10 rounded-full bg-indigo-500 text-white flex items-center justify-center font-extrabold text-sm shadow-sm shrink-0 overflow-hidden">
                               {hasAvatar ? (
@@ -1718,7 +1715,7 @@ const TeacherManageStudents = () => {
                             </span>
                           </td>
                         )}
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <td className="tstd-sticky-cell sticky right-0 z-10 bg-white px-6 py-4 whitespace-nowrap text-center">
                           <span
                             className={`px-3 py-1 text-[11px] font-extrabold rounded-lg shadow-2xs border ${
                               isActive
@@ -1737,6 +1734,182 @@ const TeacherManageStudents = () => {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* ================================================================ */}
+          {/* 📱 Phone (< md): បង្ហាញជាកាតទំនើបជំនួសតារាង                        */}
+          {/* ================================================================ */}
+          <div className="md:hidden px-3 py-3 space-y-3">
+            {filteredStudents.length === 0 ? (
+              <div className="flex flex-col items-center text-center px-4 py-12">
+                <UserGroupIcon className="h-14 w-14 text-gray-300 mb-3" />
+                <p className="tstd-text-primary font-extrabold text-gray-800 text-sm leading-relaxed">
+                  {emptyMessage}
+                </p>
+              </div>
+            ) : (
+              filteredStudents.map((student, idx) => {
+                const initials = `${student.first_name?.charAt(0) || ''}${
+                  student.last_name?.charAt(0) || ''
+                }`.toUpperCase();
+                const isFemale = isFemaleGender(student.gender);
+                const isActive =
+                  (student.user?.status || student.status || 'active') === 'active';
+                const isWeekend =
+                  normalizeShiftKey(student.study_shift) === 'Saturday-Sunday';
+                const extraDeptNames = getStudentExtraDepartmentNames(student);
+                const isEnrolledWithMe = hasStudentEnrolledAnyTeacherCourse(
+                  student,
+                  courses,
+                  courseMap
+                );
+                const avatarMap = getAvatarMapSync();
+                const rawAvatar =
+                  avatarMap[student.id] ||
+                  student.profile_image ||
+                  student.user?.profile_image ||
+                  avatarMap[student.user_id];
+                const avatarUrl = getProfileImageUrl(rawAvatar);
+                const avatarKey = `tstd_${student.id}`;
+                const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
+
+                return (
+                  <div
+                    key={student.id}
+                    className="tstd-mobile-card rounded-2xl border border-gray-200 bg-white p-4 shadow-xs"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="tstd-avatar h-12 w-12 rounded-full bg-indigo-500 text-white flex items-center justify-center font-extrabold text-sm shadow-sm shrink-0 overflow-hidden">
+                        {hasAvatar ? (
+                          <img
+                            src={avatarUrl}
+                            alt={`${student.first_name || ''} ${student.last_name || ''}`}
+                            loading={idx < 8 ? 'eager' : 'lazy'}
+                            decoding="async"
+                            className="h-full w-full object-cover rounded-full"
+                            onError={() =>
+                              setFailedAvatars((prev) => ({
+                                ...prev,
+                                [avatarKey]: true,
+                              }))
+                            }
+                          />
+                        ) : (
+                          <span>{initials || 'ST'}</span>
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="tstd-text-primary text-sm font-extrabold text-gray-900 break-words leading-snug">
+                          {student.first_name} {student.last_name}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
+                              isFemale
+                                ? 'tstd-badge-rose bg-rose-50 text-rose-600 border-rose-200'
+                                : 'tstd-badge-blue bg-blue-50 text-blue-600 border-blue-200'
+                            }`}
+                          >
+                            {getGenderLabel(student.gender)}
+                          </span>
+                          <span className="tstd-text-secondary text-xs font-medium text-gray-500">
+                            {student.batch_year || t('មិនទាន់កំណត់ឆ្នាំ', 'No Year')}
+                          </span>
+                          <span className="tstd-code-pill text-[11px] font-bold text-gray-700 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-200">
+                            {student.student_code || '—'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`shrink-0 px-2.5 py-1 text-[10px] font-extrabold rounded-lg border ${
+                          isActive
+                            ? 'tstd-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'tstd-badge-rose bg-rose-50 text-rose-700 border-rose-200'
+                        }`}
+                      >
+                        {isActive ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
+                      </span>
+                    </div>
+
+                    {!isEnrolledWithMe && (
+                      <div className="mt-3">
+                        <span className="tstd-badge-unassigned inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-50/90 text-amber-700 border border-dashed border-amber-300">
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+                          {t('មិនទាន់ចុះឈ្មោះមុខវិជ្ជា', 'Not enrolled in course')}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="tstd-mobile-divider mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-x-3 gap-y-3">
+                      <div className="min-w-0">
+                        <p className="tstd-text-secondary text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                          {t('កម្រិតសិក្សា', 'Degree Level')}
+                        </p>
+                        <span className="tstd-badge-emerald mt-1 inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                          {getDegreeLevelLabel(student.degree_level)}
+                        </span>
+                      </div>
+
+                      {!isSpecificShiftSelected && (
+                        <div className="min-w-0">
+                          <p className="tstd-text-secondary text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                            {t('វេនសិក្សា', 'Shift')}
+                          </p>
+                          <span
+                            className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-extrabold border ${
+                              isWeekend
+                                ? 'tstd-badge-amber bg-amber-50 text-amber-700 border-amber-200'
+                                : 'tstd-badge-indigo bg-indigo-50 text-indigo-700 border-indigo-100'
+                            }`}
+                          >
+                            {getStudyShiftLabel(student.study_shift)}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="col-span-2 min-w-0">
+                        <p className="tstd-text-secondary text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                          {t('អ៊ីមែល / ទូរស័ព្ទ', 'Email / Phone')}
+                        </p>
+                        <p className="tstd-text-secondary text-sm text-gray-600 font-medium break-all mt-0.5">
+                          {student.email || '—'}
+                        </p>
+                        {student.phone && (
+                          <p className="tstd-text-secondary text-xs text-gray-400 font-medium mt-0.5">
+                            {student.phone}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="col-span-2 min-w-0">
+                        <p className="tstd-text-secondary text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                          {t('ដេប៉ាតឺម៉ង់', 'Department')}
+                        </p>
+                        <p className="tstd-text-secondary text-sm text-gray-600 font-medium mt-0.5">
+                          {student.department?.department_name ||
+                            student.department?.name ||
+                            '—'}
+                        </p>
+                        {extraDeptNames.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {extraDeptNames.map((dName, dIdx) => (
+                              <span
+                                key={dIdx}
+                                className="tstd-badge-indigo inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-indigo-50 text-indigo-600 border border-indigo-200"
+                              >
+                                + {dName}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -1836,6 +2009,19 @@ const TeacherManageStudents = () => {
           background-color: rgba(244, 63, 94, 0.15) !important;
           color: #fb7185 !important;
           border-color: rgba(244, 63, 94, 0.3) !important;
+        }
+        html.dark .tstd-sticky-cell {
+          background-color: #1e293b !important;
+        }
+        html.dark .tstd-table-head .tstd-sticky-cell {
+          background-color: #0f172a !important;
+        }
+        html.dark .tstd-mobile-card {
+          background-color: #0f172a !important;
+          border-color: #334155 !important;
+        }
+        html.dark .tstd-mobile-divider {
+          border-color: rgba(51, 65, 85, 0.7) !important;
         }
       `}</style>
     </div>
