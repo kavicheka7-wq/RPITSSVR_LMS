@@ -1,5 +1,4 @@
 <?php
-// app/Http/Controllers/Api/AdminStudentController.php
 
 namespace App\Http\Controllers\Api;
 
@@ -96,7 +95,7 @@ class AdminStudentController extends Controller
     }
 
     /**
-     * បម្លែងគ្រប់ទម្រង់ថ្ងៃខែឆ្នាំកំណើត ទៅជា YYYY-MM-DD សម្រាប់ MySQL
+     * បម្លែងគ្រប់ទម្រង់ថ្ងៃខែឆ្នាំកំណើត (30-04-2005, 30/04/2005, លេខខ្មែរ, ឬលេខ Excel) ទៅជា YYYY-MM-DD សម្រាប់ MySQL
      */
     private function normalizeDateOfBirth($value): ?string
     {
@@ -113,16 +112,19 @@ class AdminStudentController extends Controller
             return null;
         }
 
+        // បម្លែងលេខខ្មែរ (០-៩) ទៅជាលេខសากล (0-9)
         $str = str_replace(
             ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'],
             ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
             $str
         );
 
+        // 1. ករណីជាលេខ Serial Date របស់ Excel (ឧទាហរណ៍ 38472)
         if (is_numeric($str) && (float) $str > 1000 && (float) $str < 100000) {
             return gmdate('Y-m-d', ((int) round((float) $str) - 25569) * 86400);
         }
 
+        // 2. ករណីទម្រង់ DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (ឧទាហរណ៍ 30-04-2005)
         if (preg_match('/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/', $str, $m)) {
             $first = (int) $m[1];
             $second = (int) $m[2];
@@ -134,6 +136,7 @@ class AdminStudentController extends Controller
             }
         }
 
+        // 3. ករណីទម្រង់ YYYY-MM-DD ឬ YYYY/MM/DD
         if (preg_match('/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})/', $str, $m)) {
             if (checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
                 return sprintf('%04d-%02d-%02d', (int) $m[1], (int) $m[2], (int) $m[3]);
@@ -152,6 +155,7 @@ class AdminStudentController extends Controller
         $perPage = max(1, min(500, (int) $request->input('per_page', 15)));
         $search = trim((string) $request->input('search', ''));
 
+        // ✅ select columns ចាំបាច់ និងប្រើ with() ត្រឹមត្រូវ
         $query = Student::with([
             'department:id,department_name',
             'user:id,status,email,profile_image',
@@ -172,6 +176,7 @@ class AdminStudentController extends Controller
             $query->where('study_shift', $request->input('study_shift'));
         }
 
+        // ✅ ច្រោះតាមឆ្នាំសិក្សា (ដាក់មុន paginate ដើម្បីឱ្យដំណើរការត្រឹមត្រូវ)
         if ($request->filled('year')) {
             $y = trim((string) $request->input('year'));
             if (preg_match('/([1-4])/', $y, $m)) {
@@ -205,6 +210,7 @@ class AdminStudentController extends Controller
 
         $students = $query->orderBy('id', 'desc')->paginate($perPage);
 
+        // ✅ ភ្ជាប់រូបភាព និងលុបរូបភាពស្ទួនក្នុង user ចេញ ដើម្បីឱ្យទាញទិន្នន័យលឿនបំផុត
         $items = collect($students->items())->map(function ($student) {
             return $this->deduplicateStudentAvatar($student);
         })->all();
@@ -292,6 +298,7 @@ class AdminStudentController extends Controller
             return $this->deduplicateStudentAvatar($loaded);
         });
 
+        // ✅ លុប Cache ពេលបង្កើតសិស្សថ្មី
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
@@ -426,6 +433,7 @@ class AdminStudentController extends Controller
             }
         });
 
+        // ✅ លុប Cache ពេលលុបសិស្ស
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
@@ -434,39 +442,48 @@ class AdminStudentController extends Controller
         ]);
     }
 
-    // =========================================================================
-    // 📌 ជួសជុលបញ្ហាមិនចេញឈ្មោះគ្រូ៖ បន្ថែមការ Load Relation ឱ្យបានត្រឹមត្រូវ
-    // =========================================================================
     public function getEnrollments(Student $student)
     {
         try {
-            // ✅ ១. ទាញយកព័ត៌មាន course ព្រមទាំង teacher និង teacherProfile ឱ្យបានពេញលេញ
-            $enrollments = Enrollment::with([
-                'course.department:id,department_name',
-                'course.teacher:id,first_name,last_name,email,profile_image',
-                'course.teacherProfile:id,user_id,first_name,last_name,email,profile_image'
-            ])
+            $enrollments = Enrollment::with('course.teacher')
                 ->where('student_id', $student->user_id)
                 ->get();
 
-            // ✅ ២. រៀបចំឈ្មោះគ្រូបញ្ជូនទៅឱ្យ Frontend បង្ហាញ
-            $enrollments->each(function ($enrollment) {
-                if ($enrollment->course) {
-                    $tch = $enrollment->course->teacher;
-                    $tchProfile = $enrollment->course->teacherProfile;
-
-                    $firstName = $tchProfile->first_name ?? $tch->first_name ?? '';
-                    $lastName = $tchProfile->last_name ?? $tch->last_name ?? '';
-                    $teacherName = trim($firstName . ' ' . $lastName);
-
-                    if (empty($teacherName)) {
-                        $teacherName = $tchProfile->name ?? $tch->name ?? $tchProfile->email ?? $tch->email ?? '';
+            // ✅ ទាញយករូបភាពគ្រូពីតារាង teachers ក្នុង Query តែម្តង (បំបាត់បញ្ហា N+1 Query)
+            $teacherUserIds = [];
+            $teacherEmails = [];
+            foreach ($enrollments as $enrollment) {
+                $teacher = $enrollment->course?->teacher;
+                if ($teacher && empty($teacher->profile_image)) {
+                    if (!empty($teacher->id)) {
+                        $teacherUserIds[] = $teacher->id;
                     }
-
-                    // បញ្ចូលឈ្មោះគ្រូទៅក្នុង Object Course ដើម្បីឱ្យ React ចាប់យកបាន
-                    $enrollment->course->teacher_name = $teacherName;
+                    if (!empty($teacher->email)) {
+                        $teacherEmails[] = $teacher->email;
+                    }
                 }
-            });
+            }
+
+            if (!empty($teacherUserIds) || !empty($teacherEmails)) {
+                $teacherRecords = DB::table('teachers')
+                    ->whereIn('user_id', array_unique($teacherUserIds))
+                    ->orWhereIn('email', array_unique($teacherEmails))
+                    ->select(['user_id', 'email', 'profile_image'])
+                    ->get();
+
+                $byUserId = $teacherRecords->keyBy('user_id');
+                $byEmail = $teacherRecords->keyBy('email');
+
+                $enrollments->each(function ($enrollment) use ($byUserId, $byEmail) {
+                    $teacher = $enrollment->course?->teacher;
+                    if ($teacher && empty($teacher->profile_image)) {
+                        $matched = $byUserId->get($teacher->id) ?? $byEmail->get($teacher->email);
+                        if ($matched && !empty($matched->profile_image)) {
+                            $teacher->profile_image = $matched->profile_image;
+                        }
+                    }
+                });
+            }
 
             return response()->json([
                 'data' => $enrollments,
@@ -502,25 +519,20 @@ class AdminStudentController extends Controller
                         'status' => 'active',
                     ]);
 
-                    // ✅ ៣. Load ព័ត៌មានគ្រូ ពេលចុះឈ្មោះភ្លាមៗ
-                    $loadedEnrollment = $enrollment->load([
-                        'course.department:id,department_name',
-                        'course.teacher:id,first_name,last_name,email,profile_image',
-                        'course.teacherProfile:id,user_id,first_name,last_name,email,profile_image'
-                    ]);
+                    $loadedEnrollment = $enrollment->load('course.teacher');
 
-                    if ($loadedEnrollment->course) {
-                        $tch = $loadedEnrollment->course->teacher;
-                        $tchProfile = $loadedEnrollment->course->teacherProfile;
+                    // ✅ ភ្ជាប់រូបភាពគ្រូពីតារាង teachers ពេលចុះឈ្មោះមុខវិជ្ជាថ្មី
+                    $teacher = $loadedEnrollment->course?->teacher;
+                    if ($teacher && empty($teacher->profile_image)) {
+                        $teacherRecord = DB::table('teachers')
+                            ->where('user_id', $teacher->id)
+                            ->orWhere('email', $teacher->email)
+                            ->select(['profile_image'])
+                            ->first();
 
-                        $firstName = $tchProfile->first_name ?? $tch->first_name ?? '';
-                        $lastName = $tchProfile->last_name ?? $tch->last_name ?? '';
-                        $teacherName = trim($firstName . ' ' . $lastName);
-
-                        if (empty($teacherName)) {
-                            $teacherName = $tchProfile->name ?? $tch->name ?? $tchProfile->email ?? $tch->email ?? '';
+                        if ($teacherRecord && !empty($teacherRecord->profile_image)) {
+                            $teacher->profile_image = $teacherRecord->profile_image;
                         }
-                        $loadedEnrollment->course->teacher_name = $teacherName;
                     }
 
                     $enrolledCourses[] = $loadedEnrollment;
