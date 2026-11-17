@@ -5,10 +5,10 @@ import { getCachedDepartments, clearCoursesCache } from '../../services/metadata
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import XLSX from 'xlsx-js-style';
-import { 
-  PencilSquareIcon, 
-  TrashIcon, 
-  PlusIcon, 
+import {
+  PencilSquareIcon,
+  TrashIcon,
+  PlusIcon,
   BookOpenIcon,
   XMarkIcon,
   MagnifyingGlassIcon,
@@ -21,7 +21,9 @@ import {
   DocumentTextIcon,
   CheckCircleIcon,
   ExclamationCircleIcon,
-  ArrowPathIcon
+  ArrowPathIcon,
+  BuildingLibraryIcon,
+  UserIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -51,7 +53,8 @@ const ADMIN_COURSES_MEM_CACHE = {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
@@ -69,13 +72,19 @@ const stripHeavyImages = (list) => {
     }
     if (copy.teacher && typeof copy.teacher === 'object') {
       copy.teacher = { ...copy.teacher };
-      if (copy.teacher.profile_image && String(copy.teacher.profile_image).startsWith('data:')) {
+      if (
+        copy.teacher.profile_image &&
+        String(copy.teacher.profile_image).startsWith('data:')
+      ) {
         delete copy.teacher.profile_image;
       }
     }
     if (copy.teacher_profile && typeof copy.teacher_profile === 'object') {
       copy.teacher_profile = { ...copy.teacher_profile };
-      if (copy.teacher_profile.profile_image && String(copy.teacher_profile.profile_image).startsWith('data:')) {
+      if (
+        copy.teacher_profile.profile_image &&
+        String(copy.teacher_profile.profile_image).startsWith('data:')
+      ) {
         delete copy.teacher_profile.profile_image;
       }
     }
@@ -86,7 +95,11 @@ const stripHeavyImages = (list) => {
 const safeWriteStorage = (key, value) => {
   try {
     const cleanVal = Array.isArray(value) ? stripHeavyImages(value) : value;
-    localStorage.setItem(key, JSON.stringify(cleanVal));
+    const str = JSON.stringify(cleanVal);
+    try {
+      sessionStorage.setItem(key, str);
+    } catch {}
+    localStorage.setItem(key, str);
   } catch {}
 };
 
@@ -102,7 +115,10 @@ const resolveAdminUid = (contextUser) => {
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -114,19 +130,50 @@ const resolveAdminUid = (contextUser) => {
 };
 
 const DEPT_CARD_THEMES = [
-  { bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-100', darkClass: 'crs-dept-emerald' },
-  { bg: 'bg-indigo-50', text: 'text-indigo-600', border: 'border-indigo-100', darkClass: 'crs-dept-indigo' },
-  { bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-100', darkClass: 'crs-dept-amber' },
-  { bg: 'bg-rose-50', text: 'text-rose-600', border: 'border-rose-100', darkClass: 'crs-dept-rose' },
-  { bg: 'bg-purple-50', text: 'text-purple-600', border: 'border-purple-100', darkClass: 'crs-dept-purple' },
-  { bg: 'bg-cyan-50', text: 'text-cyan-600', border: 'border-cyan-100', darkClass: 'crs-dept-cyan' },
+  {
+    bg: 'bg-emerald-50',
+    text: 'text-emerald-600',
+    border: 'border-emerald-100',
+    darkClass: 'crs-dept-emerald',
+  },
+  {
+    bg: 'bg-indigo-50',
+    text: 'text-indigo-600',
+    border: 'border-indigo-100',
+    darkClass: 'crs-dept-indigo',
+  },
+  {
+    bg: 'bg-amber-50',
+    text: 'text-amber-600',
+    border: 'border-amber-100',
+    darkClass: 'crs-dept-amber',
+  },
+  {
+    bg: 'bg-rose-50',
+    text: 'text-rose-600',
+    border: 'border-rose-100',
+    darkClass: 'crs-dept-rose',
+  },
+  {
+    bg: 'bg-purple-50',
+    text: 'text-purple-600',
+    border: 'border-purple-100',
+    darkClass: 'crs-dept-purple',
+  },
+  {
+    bg: 'bg-cyan-50',
+    text: 'text-cyan-600',
+    border: 'border-cyan-100',
+    darkClass: 'crs-dept-cyan',
+  },
 ];
 
 const getDepartmentDisplayName = (deptObjOrName) => {
   if (!deptObjOrName) return '—';
-  const rawName = typeof deptObjOrName === 'string'
-    ? deptObjOrName
-    : (deptObjOrName.department_name || deptObjOrName.name || '');
+  const rawName =
+    typeof deptObjOrName === 'string'
+      ? deptObjOrName
+      : deptObjOrName.department_name || deptObjOrName.name || '';
   return rawName || '—';
 };
 
@@ -138,13 +185,20 @@ const getTeacherFullName = (teacher) => {
 // ✅ ផ្គូផ្គងគ្រូបង្រៀនពីមុខវិជ្ជា ទោះបីជា course.teacher_id រក្សាទុកជា teachers.id ឬ users.id ក៏ដោយ
 const resolveCourseTeacher = (course, teachersList = []) => {
   if (!course) return null;
-  if (course.teacher_profile && (course.teacher_profile.first_name || course.teacher_profile.last_name)) {
+  if (
+    course.teacher_profile &&
+    (course.teacher_profile.first_name || course.teacher_profile.last_name)
+  ) {
     return course.teacher_profile;
   }
-  if (course.teacher && (course.teacher.first_name || course.teacher.last_name)) {
+  if (
+    course.teacher &&
+    (course.teacher.first_name || course.teacher.last_name)
+  ) {
     return course.teacher;
   }
-  const rawTid = course.teacher_id || course.teacher?.id || course.teacher?.user_id;
+  const rawTid =
+    course.teacher_id || course.teacher?.id || course.teacher?.user_id;
   if (rawTid && Array.isArray(teachersList) && teachersList.length > 0) {
     const found = teachersList.find(
       (tItem) =>
@@ -163,7 +217,10 @@ const sortCoursesOldestFirst = (list) => {
     const codeA = (a.course_code || '').toString().trim();
     const codeB = (b.course_code || '').toString().trim();
     if (codeA && codeB && codeA !== codeB) {
-      return codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+      return codeA.localeCompare(codeB, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
     }
     return (Number(a.id) || 0) - (Number(b.id) || 0);
   });
@@ -172,7 +229,8 @@ const sortCoursesOldestFirst = (list) => {
 // ✅ អនុគមន៍សម្រាប់បញ្ជូនសារជូនដំណឹងចូលទៅកាន់រូបកណ្ដឹង (NotificationBell) នៅលើ Navbar
 const pushLocalNotification = (notif) => {
   try {
-    const userObjStr = localStorage.getItem('auth_user') || localStorage.getItem('user');
+    const userObjStr =
+      localStorage.getItem('auth_user') || localStorage.getItem('user');
     let uid = 'default';
     let role = 'admin';
     if (userObjStr) {
@@ -196,7 +254,7 @@ const pushLocalNotification = (notif) => {
       id: `local_act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       time: new Date().toISOString(),
       read: false,
-      ...notif
+      ...notif,
     };
 
     keysToUpdate.forEach((key) => {
@@ -219,7 +277,6 @@ const ManageCourses = () => {
   const { t } = useLanguage();
   const { user } = useAuth();
 
-  // ✅ កំណត់អត្តសញ្ញាណ Admin បច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
 
   if (
@@ -299,7 +356,7 @@ const ManageCourses = () => {
   const [editingCourse, setEditingCourse] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  
+
   const abortControllerRef = useRef(null);
 
   const [page, setPage] = useState(1);
@@ -320,7 +377,7 @@ const ManageCourses = () => {
       per_page: 200,
     };
   });
-  
+
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [courseToDelete, setCourseToDelete] = useState(null);
 
@@ -330,7 +387,6 @@ const ManageCourses = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState('');
 
-  // ✅ កំណត់ credit: '' នៅពេលដំបូង ដើម្បីឱ្យលោតពាក្យ «ជ្រើសរើសក្រេឌីត»
   const [formData, setFormData] = useState({
     course_code: '',
     course_name: '',
@@ -343,7 +399,6 @@ const ManageCourses = () => {
   // ============================================================================
   // 📌 ផ្នែកទី ៣៖ ការគណនាចំនួនមុខវិជ្ជាតាមដេប៉ាតឺម៉ង់ និងការច្រោះទិន្នន័យ
   // ============================================================================
-
   const departmentCounts = useMemo(() => {
     if (debouncedSearch.trim() !== '') {
       return prevCountsRef.current;
@@ -351,7 +406,9 @@ const ManageCourses = () => {
 
     const list = Array.isArray(courses) ? courses : [];
     const counts = { all: list.length };
-    departments.forEach((dept) => { counts[dept.id] = 0; });
+    departments.forEach((dept) => {
+      counts[dept.id] = 0;
+    });
     list.forEach((course) => {
       const deptId = course.department_id || course.department?.id;
       if (deptId !== undefined && deptId !== null) {
@@ -364,19 +421,28 @@ const ManageCourses = () => {
   }, [courses, departments, debouncedSearch]);
 
   const displayedCourses = useMemo(() => {
-    const filteredByDept = selectedDepartment === 'all'
-      ? (courses || [])
-      : (courses || []).filter((course) => String(course.department_id || course.department?.id) === String(selectedDepartment));
+    const filteredByDept =
+      selectedDepartment === 'all'
+        ? courses || []
+        : (courses || []).filter(
+            (course) =>
+              String(course.department_id || course.department?.id) ===
+              String(selectedDepartment)
+          );
 
     if (!searchTerm.trim()) return filteredByDept;
     const q = searchTerm.toLowerCase().trim();
     return filteredByDept.filter((course) => {
       const courseName = course.course_name?.toLowerCase() || '';
       const courseCode = course.course_code?.toLowerCase() || '';
-      const matchedDeptObj = course.department || departments.find(d => String(d.id) === String(course.department_id));
+      const matchedDeptObj =
+        course.department ||
+        departments.find((d) => String(d.id) === String(course.department_id));
       const deptName = getDepartmentDisplayName(matchedDeptObj).toLowerCase();
       const matchedTeacher = resolveCourseTeacher(course, teachers);
-      const teacherName = matchedTeacher ? getTeacherFullName(matchedTeacher).toLowerCase() : '';
+      const teacherName = matchedTeacher
+        ? getTeacherFullName(matchedTeacher).toLowerCase()
+        : '';
 
       return (
         courseName.includes(q) ||
@@ -389,10 +455,12 @@ const ManageCourses = () => {
 
   const activeDepartmentObj = useMemo(() => {
     if (selectedDepartment === 'all') return null;
-    return departments.find((d) => String(d.id) === String(selectedDepartment)) || null;
+    return (
+      departments.find((d) => String(d.id) === String(selectedDepartment)) ||
+      null
+    );
   }, [selectedDepartment, departments]);
 
-  // ✅ ច្រោះគ្រូបង្រៀនតាមដេប៉ាតឺម៉ង់ និងរក្សាទុកគ្រូបច្ចុប្បន្នជានិច្ចពេលកែប្រែ (Edit Mode)
   const availableTeachersForModal = useMemo(() => {
     if (!formData.department_id) return teachers;
     const deptTeachers = teachers.filter(
@@ -401,12 +469,12 @@ const ManageCourses = () => {
           String(formData.department_id) ||
         (formData.teacher_id &&
           (String(tItem.id) === String(formData.teacher_id) ||
-            (tItem.user_id && String(tItem.user_id) === String(formData.teacher_id))))
+            (tItem.user_id &&
+              String(tItem.user_id) === String(formData.teacher_id))))
     );
     return deptTeachers.length > 0 ? deptTeachers : teachers;
   }, [teachers, formData.department_id, formData.teacher_id]);
 
-  // ✅ គណនាលេខទំព័រសម្រាប់ Sliding Window Pagination
   const paginationPages = useMemo(() => {
     const current = Number(meta.current_page || 1);
     const last = Number(meta.last_page || 1);
@@ -426,7 +494,6 @@ const ManageCourses = () => {
   // ============================================================================
   // 📌 ផ្នែកទី ៤៖ មុខងារត្រួតពិនិត្យប៊ូតុងព្រួញអូសឆ្វេង-ស្ដាំលើកាតដេប៉ាតឺម៉ង់
   // ============================================================================
-
   const checkCardsScroll = useCallback(() => {
     const el = cardsScrollRef.current;
     if (!el) return;
@@ -445,7 +512,7 @@ const ManageCourses = () => {
     const scrollAmount = 480;
     cardsScrollRef.current.scrollBy({
       left: direction === 'left' ? -scrollAmount : scrollAmount,
-      behavior: 'smooth'
+      behavior: 'smooth',
     });
   };
 
@@ -481,7 +548,6 @@ const ManageCourses = () => {
   // ============================================================================
   // 📌 ផ្នែកទី ៥៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
   // ============================================================================
-
   useEffect(() => {
     if (!searchTerm.trim()) {
       setDebouncedSearch('');
@@ -516,37 +582,48 @@ const ManageCourses = () => {
     }
   }, [currentAdminId]);
 
-  const fetchTeachers = useCallback(async (force = false) => {
-    const now = Date.now();
-    if (
-      !force &&
-      Array.isArray(ADMIN_COURSES_MEM_CACHE.teachers) &&
-      ADMIN_COURSES_MEM_CACHE.teachers.length > 0 &&
-      now - ADMIN_COURSES_MEM_CACHE.lastTeachersSyncedAt < 60000
-    ) {
-      return;
-    }
-
-    try {
-      const response = await api.get('/admin/teachers', { params: { per_page: 200 } });
-      const teachersData = response.data?.data?.data || response.data?.data || response.data || [];
-      if (Array.isArray(teachersData)) {
-        const lightTeachers = stripHeavyImages(teachersData);
-        setTeachers(lightTeachers);
-        ADMIN_COURSES_MEM_CACHE.teachers = lightTeachers;
-        ADMIN_COURSES_MEM_CACHE.lastTeachersSyncedAt = Date.now();
-        safeWriteStorage(getTeachersCacheKey(currentAdminId), lightTeachers);
-        safeWriteStorage(CACHE_KEY_SHARED_TEACHERS, lightTeachers);
+  const fetchTeachers = useCallback(
+    async (force = false) => {
+      const now = Date.now();
+      if (
+        !force &&
+        Array.isArray(ADMIN_COURSES_MEM_CACHE.teachers) &&
+        ADMIN_COURSES_MEM_CACHE.teachers.length > 0 &&
+        now - ADMIN_COURSES_MEM_CACHE.lastTeachersSyncedAt < 60000
+      ) {
+        return;
       }
-    } catch (error) {
-      console.error('Error fetching teachers:', error);
-    }
-  }, [currentAdminId]);
+
+      try {
+        const response = await api.get('/admin/teachers', {
+          params: { per_page: 200 },
+        });
+        const teachersData =
+          response.data?.data?.data ||
+          response.data?.data ||
+          response.data ||
+          [];
+        if (Array.isArray(teachersData)) {
+          const lightTeachers = stripHeavyImages(teachersData);
+          setTeachers(lightTeachers);
+          ADMIN_COURSES_MEM_CACHE.teachers = lightTeachers;
+          ADMIN_COURSES_MEM_CACHE.lastTeachersSyncedAt = Date.now();
+          safeWriteStorage(getTeachersCacheKey(currentAdminId), lightTeachers);
+          safeWriteStorage(CACHE_KEY_SHARED_TEACHERS, lightTeachers);
+        }
+      } catch (error) {
+        console.error('Error fetching teachers:', error);
+      }
+    },
+    [currentAdminId]
+  );
 
   useEffect(() => {
     fetchDepartments();
-    // ✅ ប្រសិនបើមានបញ្ជីគ្រូបង្រៀនក្នុង Cache រួចហើយ ពន្យារពេល 300ms សិន ដើម្បីទុកផ្លូវឱ្យ API /admin/courses ទាញមកដល់មុនក្នុង 0ms!
-    if (Array.isArray(ADMIN_COURSES_MEM_CACHE.teachers) && ADMIN_COURSES_MEM_CACHE.teachers.length > 0) {
+    if (
+      Array.isArray(ADMIN_COURSES_MEM_CACHE.teachers) &&
+      ADMIN_COURSES_MEM_CACHE.teachers.length > 0
+    ) {
       const t = setTimeout(() => fetchTeachers(false), 300);
       return () => clearTimeout(t);
     } else {
@@ -557,7 +634,10 @@ const ManageCourses = () => {
   const fetchCourses = useCallback(
     async (forceRefresh = false) => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
-        const cachedList = readStorageJson(getCoursesCacheKey(currentAdminId), null);
+        const cachedList = readStorageJson(
+          getCoursesCacheKey(currentAdminId),
+          null
+        );
         if (Array.isArray(cachedList) && cachedList.length > 0) {
           setCourses(cachedList);
           ADMIN_COURSES_MEM_CACHE.courses = cachedList;
@@ -591,7 +671,12 @@ const ManageCourses = () => {
         const data = response.data?.data || response.data || [];
 
         let fetchedCourses = [];
-        let newMeta = { current_page: 1, last_page: 1, total: 0, per_page: perPage };
+        let newMeta = {
+          current_page: 1,
+          last_page: 1,
+          total: 0,
+          per_page: perPage,
+        };
 
         if (data.data && Array.isArray(data.data)) {
           fetchedCourses = data.data;
@@ -643,24 +728,28 @@ const ManageCourses = () => {
     };
   }, [fetchCourses]);
 
-  // ✅ ប្រសិនបើប្តូរដេប៉ាតឺម៉ង់ក្នុង Modal ឱ្យសម្អាត teacher_id ចាស់ចេញដើម្បីជ្រើសរើសគ្រូថ្មីឱ្យត្រូវតាមដេប៉ាតឺម៉ង់
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     if (formError) setFormError('');
     if (name === 'department_id') {
-      setFormData(prev => ({ ...prev, department_id: value, teacher_id: '' }));
+      setFormData((prev) => ({
+        ...prev,
+        department_id: value,
+        teacher_id: '',
+      }));
     } else {
-      setFormData(prev => ({ ...prev, [name]: value }));
+      setFormData((prev) => ({ ...prev, [name]: value }));
     }
   };
 
-  // បង្កើត ឬកែប្រែមុខវិជ្ជា ព្រមទាំងបញ្ជូនសារចូលកណ្ដឹងស្វ័យប្រវត្តិ
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSubmitting) return;
     setFormError('');
 
-    const finalDepartmentId = formData.department_id || (selectedDepartment !== 'all' ? selectedDepartment : '');
+    const finalDepartmentId =
+      formData.department_id ||
+      (selectedDepartment !== 'all' ? selectedDepartment : '');
     const payload = {
       ...formData,
       course_code: formData.course_code.trim(),
@@ -670,34 +759,54 @@ const ManageCourses = () => {
       description: formData.description ? formData.description.trim() : '',
     };
 
-    if (!payload.course_name || !payload.course_code || !payload.department_id || !payload.teacher_id) {
-      setFormError(t('សូមបំពេញព័ត៌មានចាំបាច់ទាំងអស់ឱ្យបានគ្រប់គ្រាន់!', 'Please fill in all required fields!'));
+    if (
+      !payload.course_name ||
+      !payload.course_code ||
+      !payload.department_id ||
+      !payload.teacher_id
+    ) {
+      setFormError(
+        t(
+          'សូមបំពេញព័ត៌មានចាំបាច់ទាំងអស់ឱ្យបានគ្រប់គ្រាន់!',
+          'Please fill in all required fields!'
+        )
+      );
       return;
     }
 
-    const matchedDept = departments.find(d => String(d.id) === String(payload.department_id));
+    const matchedDept = departments.find(
+      (d) => String(d.id) === String(payload.department_id)
+    );
     const matchedTeacher = teachers.find(
       (tItem) =>
         String(tItem.id) === String(payload.teacher_id) ||
-        (tItem.user_id && String(tItem.user_id) === String(payload.teacher_id))
+        (tItem.user_id &&
+          String(tItem.user_id) === String(payload.teacher_id))
     );
 
     setIsSubmitting(true);
     try {
       if (editingCourse) {
-        const response = await api.put(`/admin/courses/${editingCourse.id}`, payload);
+        const response = await api.put(
+          `/admin/courses/${editingCourse.id}`,
+          payload
+        );
         const serverData = response.data?.data || response.data;
 
         const updatedCourse = {
           ...editingCourse,
           ...payload,
           ...(serverData && typeof serverData === 'object' ? serverData : {}),
-          department: serverData?.department || matchedDept || editingCourse.department,
-          teacher: serverData?.teacher || matchedTeacher || editingCourse.teacher,
+          department:
+            serverData?.department || matchedDept || editingCourse.department,
+          teacher:
+            serverData?.teacher || matchedTeacher || editingCourse.teacher,
         };
 
-        setCourses(prev => {
-          const newList = prev.map(c => c.id === editingCourse.id ? updatedCourse : c);
+        setCourses((prev) => {
+          const newList = prev.map((c) =>
+            c.id === editingCourse.id ? updatedCourse : c
+          );
           if (page === 1 && !debouncedSearch) {
             ADMIN_COURSES_MEM_CACHE.courses = newList;
             safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
@@ -712,7 +821,7 @@ const ManageCourses = () => {
           descKm: `មុខវិជ្ជា «${payload.course_name}» ត្រូវបានធ្វើបច្ចុប្បន្នភាព។`,
           descEn: `Course "${payload.course_name}" has been updated.`,
           category: 'course',
-          link: '/courses'
+          link: '/courses',
         });
       } else {
         const response = await api.post('/admin/courses', payload);
@@ -720,12 +829,14 @@ const ManageCourses = () => {
 
         const newCourse = {
           ...payload,
-          ...(serverData && typeof serverData === 'object' ? serverData : { id: Date.now() }),
+          ...(serverData && typeof serverData === 'object'
+            ? serverData
+            : { id: Date.now() }),
           department: serverData?.department || matchedDept || null,
           teacher: serverData?.teacher || matchedTeacher || null,
         };
 
-        setCourses(prev => {
+        setCourses((prev) => {
           const newList = [newCourse, ...prev].slice(0, perPage);
           if (page === 1 && !debouncedSearch) {
             ADMIN_COURSES_MEM_CACHE.courses = newList;
@@ -734,7 +845,7 @@ const ManageCourses = () => {
           }
           return newList;
         });
-        setMeta(prev => {
+        setMeta((prev) => {
           const newMeta = { ...prev, total: (prev.total || 0) + 1 };
           ADMIN_COURSES_MEM_CACHE.meta = newMeta;
           safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
@@ -747,10 +858,10 @@ const ManageCourses = () => {
           descKm: `មុខវិជ្ជា «${payload.course_name} (${payload.course_code})» ត្រូវបានបង្កើតថ្មី។`,
           descEn: `Course "${payload.course_name} (${payload.course_code})" was created.`,
           category: 'course',
-          link: '/courses'
+          link: '/courses',
         });
       }
-      
+
       clearCoursesCache();
       setShowModal(false);
       resetForm();
@@ -779,7 +890,6 @@ const ManageCourses = () => {
     setShowDeleteModal(true);
   };
 
-  // លុបមុខវិជ្ជា ព្រមទាំងបញ្ជូនសារចូលកណ្ដឹងស្វ័យប្រវត្តិ
   const confirmDelete = async () => {
     if (!courseToDelete || isDeleting) return;
 
@@ -792,8 +902,8 @@ const ManageCourses = () => {
     setShowDeleteModal(false);
     setCourseToDelete(null);
 
-    setCourses(prev => {
-      const newList = prev.filter(c => c.id !== deletedId);
+    setCourses((prev) => {
+      const newList = prev.filter((c) => c.id !== deletedId);
       if (page === 1 && !debouncedSearch) {
         ADMIN_COURSES_MEM_CACHE.courses = newList;
         safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
@@ -801,7 +911,7 @@ const ManageCourses = () => {
       }
       return newList;
     });
-    setMeta(prev => {
+    setMeta((prev) => {
       const newMeta = { ...prev, total: Math.max(0, (prev.total || 1) - 1) };
       ADMIN_COURSES_MEM_CACHE.meta = newMeta;
       safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
@@ -817,7 +927,7 @@ const ManageCourses = () => {
         descKm: `មុខវិជ្ជា «${deletedName}» ត្រូវបានលុបចេញពីប្រព័ន្ធ។`,
         descEn: `Course "${deletedName}" was deleted from the system.`,
         category: 'course',
-        link: '/courses'
+        link: '/courses',
       });
     } catch (error) {
       console.error('Delete course error:', error);
@@ -836,7 +946,8 @@ const ManageCourses = () => {
       course_name: '',
       credit: '',
       description: '',
-      department_id: selectedDepartment !== 'all' ? String(selectedDepartment) : '',
+      department_id:
+        selectedDepartment !== 'all' ? String(selectedDepartment) : '',
       teacher_id: '',
     });
     setEditingCourse(null);
@@ -851,7 +962,6 @@ const ManageCourses = () => {
     setShowModal(true);
   };
 
-  // ✅ ផ្គូផ្គងគ្រូបង្រៀនឱ្យត្រូវជាមួយ teacher.id នៅក្នុង Dropdown ទោះបីជា course.teacher_id ជា user_id ក៏ដោយ
   const openEditModal = (course) => {
     setFormError('');
     setEditingCourse(course);
@@ -876,8 +986,11 @@ const ManageCourses = () => {
   // ============================================================================
   // 📌 ផ្នែកទី ៦៖ មុខងារនាំចេញ និងនាំចូលមុខវិជ្ជាតាមរយៈឯកសារ EXCEL (.XLSX)
   // ============================================================================
-
-  const applyExcelStyling = (worksheet, colWidths = [], textColumnIndices = []) => {
+  const applyExcelStyling = (
+    worksheet,
+    colWidths = [],
+    textColumnIndices = []
+  ) => {
     if (!worksheet || !worksheet['!ref']) return;
     const range = XLSX.utils.decode_range(worksheet['!ref']);
 
@@ -894,7 +1007,10 @@ const ManageCourses = () => {
         if (isTextCol) {
           worksheet[cellAddress].t = 's';
           worksheet[cellAddress].z = '@';
-          if (worksheet[cellAddress].v !== undefined && worksheet[cellAddress].v !== null) {
+          if (
+            worksheet[cellAddress].v !== undefined &&
+            worksheet[cellAddress].v !== null
+          ) {
             worksheet[cellAddress].v = String(worksheet[cellAddress].v);
           }
         }
@@ -907,7 +1023,9 @@ const ManageCourses = () => {
             color: { rgb: isHeader ? 'FFFFFF' : '1E293B' },
           },
           fill: {
-            fgColor: { rgb: isHeader ? '1E3A8A' : (R % 2 === 1 ? 'FFFFFF' : 'F8FAFC') },
+            fgColor: {
+              rgb: isHeader ? '1E3A8A' : R % 2 === 1 ? 'FFFFFF' : 'F8FAFC',
+            },
           },
           alignment: {
             vertical: 'center',
@@ -936,17 +1054,21 @@ const ManageCourses = () => {
     worksheet['!rows'] = rows;
   };
 
-  // ✅ នាំចេញបញ្ជីមុខវិជ្ជាតាមដេប៉ាតឺម៉ង់ ដោយតម្រៀបមុខវិជ្ជាដែលមានឈ្មោះមុនឱ្យនៅខាងលើគេដេញចុះមកក្រោម
   const handleExportExcel = () => {
     if (!displayedCourses || displayedCourses.length === 0) {
       return;
     }
 
-    const currentDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
+    const currentDeptName = activeDepartmentObj
+      ? getDepartmentDisplayName(activeDepartmentObj)
+      : '';
     const sortedCoursesForExport = sortCoursesOldestFirst(displayedCourses);
 
     const exportData = sortedCoursesForExport.map((c, idx) => {
-      const matchedDeptObj = c.department || departments.find(d => String(d.id) === String(c.department_id)) || activeDepartmentObj;
+      const matchedDeptObj =
+        c.department ||
+        departments.find((d) => String(d.id) === String(c.department_id)) ||
+        activeDepartmentObj;
       const matchedTeacher = resolveCourseTeacher(c, teachers);
       return {
         'ល.រ': idx + 1,
@@ -954,21 +1076,34 @@ const ManageCourses = () => {
         'ឈ្មោះមុខវិជ្ជា': c.course_name || '',
         'ក្រេឌីត': c.credit ?? 3,
         'ដេប៉ាតឺម៉ង់': getDepartmentDisplayName(matchedDeptObj),
-        'គ្រូបង្រៀនទទួលបន្ទុក': matchedTeacher ? getTeacherFullName(matchedTeacher) : '—',
+        'គ្រូបង្រៀនទទួលបន្ទុក': matchedTeacher
+          ? getTeacherFullName(matchedTeacher)
+          : '—',
         'ការពិពណ៌នា': c.description || '',
       };
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const colWidths = [
-      { wch: 8 }, { wch: 16 }, { wch: 32 }, { wch: 12 }, { wch: 26 }, { wch: 24 }, { wch: 36 }
+      { wch: 8 },
+      { wch: 16 },
+      { wch: 32 },
+      { wch: 12 },
+      { wch: 26 },
+      { wch: 24 },
+      { wch: 36 },
     ];
     applyExcelStyling(worksheet, colWidths, [1]);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Courses_List');
-    const safeDeptSuffix = currentDeptName ? `_${currentDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}` : '';
-    XLSX.writeFile(workbook, `Courses_List${safeDeptSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const safeDeptSuffix = currentDeptName
+      ? `_${currentDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}`
+      : '';
+    XLSX.writeFile(
+      workbook,
+      `Courses_List${safeDeptSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
 
     pushLocalNotification({
       titleKm: 'បាននាំចេញបញ្ជីមុខវិជ្ជាទៅ Excel',
@@ -976,54 +1111,63 @@ const ManageCourses = () => {
       descKm: `បញ្ជីមុខវិជ្ជា (${currentDeptName || 'ទាំងអស់'}) ចំនួន ${sortedCoursesForExport.length} ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: `${sortedCoursesForExport.length} courses were successfully exported to Excel.`,
       category: 'export',
-      link: '/courses'
+      link: '/courses',
     });
   };
 
-  // ✅ ទាញយកទម្រង់គំរូ Excel ដោយដាក់ជួរទំនេរចំនួន ៥០ ជួរ (ការពារកំហុសស្ទួនកូដមុខវិជ្ជាចាស់ៗពេល Import)
   const handleDownloadTemplate = () => {
-    const defaultDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
+    const defaultDeptName = activeDepartmentObj
+      ? getDepartmentDisplayName(activeDepartmentObj)
+      : '';
 
     const blankRow = () => ({
-      'course_code': '',
-      'course_name': '',
-      'credit': '3',
-      'department': defaultDeptName,
-      'teacher': '',
-      'description': ''
+      course_code: '',
+      course_name: '',
+      credit: '3',
+      department: defaultDeptName,
+      teacher: '',
+      description: '',
     });
 
     const templateData = Array.from({ length: 50 }, () => blankRow());
 
     const worksheet = XLSX.utils.json_to_sheet(templateData);
     const colWidths = [
-      { wch: 16 }, { wch: 30 }, { wch: 10 }, { wch: 26 }, { wch: 24 }, { wch: 35 }
+      { wch: 16 },
+      { wch: 30 },
+      { wch: 10 },
+      { wch: 26 },
+      { wch: 24 },
+      { wch: 35 },
     ];
     applyExcelStyling(worksheet, colWidths, [0, 2]);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
-    const safeDeptSuffix = defaultDeptName ? `_${defaultDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}` : '';
+    const safeDeptSuffix = defaultDeptName
+      ? `_${defaultDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}`
+      : '';
     XLSX.writeFile(workbook, `course_import_template${safeDeptSuffix}.xlsx`);
 
     pushLocalNotification({
       titleKm: 'បានទាញយកទម្រង់គំរូ Excel មុខវិជ្ជា',
       titleEn: 'Course Excel Template Downloaded',
-      descKm: 'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យមុខវិជ្ជាត្រូវបានទាញយកជោគជ័យ។',
-      descEn: 'The Excel template for course import was downloaded successfully.',
+      descKm:
+        'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យមុខវិជ្ជាត្រូវបានទាញយកជោគជ័យ។',
+      descEn:
+        'The Excel template for course import was downloaded successfully.',
       category: 'download',
-      link: '/courses'
+      link: '/courses',
     });
   };
 
-  // ✅ ប្រសិនបើយើងបានចុចចូលកាតដេប៉ាតឺម៉ង់ណាមួយហើយ ពេលនាំចូល Excel វានឹងចាប់យកដេប៉ាតឺម៉ង់នោះឱ្យមុខវិជ្ជាទាំងអស់ដោយស្វ័យប្រវត្តិ
   const findDepartmentId = (deptNameOrCode) => {
     if (selectedDepartment !== 'all') {
       return selectedDepartment;
     }
     if (!deptNameOrCode) return null;
     const search = deptNameOrCode.toString().trim().toLowerCase();
-    const found = departments.find(d => {
+    const found = departments.find((d) => {
       const rawName = (d.department_name || d.name || '').toLowerCase();
       return (
         rawName === search ||
@@ -1034,13 +1178,17 @@ const ManageCourses = () => {
     return found ? found.id : null;
   };
 
-  // ✅ ផ្ទៀងផ្ទាត់ឈ្មោះគ្រូបង្រៀនពេល Import Excel
   const findTeacherId = (teacherNameOrEmail) => {
-    if (!teacherNameOrEmail || !teacherNameOrEmail.toString().trim()) return null;
+    if (!teacherNameOrEmail || !teacherNameOrEmail.toString().trim())
+      return null;
     const search = teacherNameOrEmail.toString().trim().toLowerCase();
-    const found = teachers.find(tItem => {
-      const fullName = `${tItem.first_name || ''} ${tItem.last_name || ''}`.trim().toLowerCase();
-      const reverseName = `${tItem.last_name || ''} ${tItem.first_name || ''}`.trim().toLowerCase();
+    const found = teachers.find((tItem) => {
+      const fullName = `${tItem.first_name || ''} ${tItem.last_name || ''}`
+        .trim()
+        .toLowerCase();
+      const reverseName = `${tItem.last_name || ''} ${tItem.first_name || ''}`
+        .trim()
+        .toLowerCase();
       return (
         fullName === search ||
         reverseName === search ||
@@ -1056,9 +1204,20 @@ const ManageCourses = () => {
   const normalizeCourseHeader = (key) => {
     const k = key.toString().trim().toLowerCase();
     if (k.includes('code') || k.includes('កូដ')) return 'course_code';
-    if (k.includes('name') || k.includes('ឈ្មោះ') || k.includes('មុខវិជ្ជា')) return 'course_name';
+    if (
+      k.includes('name') ||
+      k.includes('ឈ្មោះ') ||
+      k.includes('មុខវិជ្ជា')
+    )
+      return 'course_name';
     if (k.includes('credit') || k.includes('ក្រេឌីត')) return 'credit';
-    if (k.includes('dept') || k.includes('department') || k.includes('ដេប៉ាតឺម៉ង់') || k.includes('ជំនាញ')) return 'department';
+    if (
+      k.includes('dept') ||
+      k.includes('department') ||
+      k.includes('ដេប៉ាតឺម៉ង់') ||
+      k.includes('ជំនាញ')
+    )
+      return 'department';
     if (k.includes('teacher') || k.includes('គ្រូ')) return 'teacher';
     if (k.includes('desc') || k.includes('ពិពណ៌នា')) return 'description';
     return key;
@@ -1077,7 +1236,10 @@ const ManageCourses = () => {
           const data = evt.target.result;
           const workbook = XLSX.read(data, { type: 'array' });
           const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-          const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
+          const rawJson = XLSX.utils.sheet_to_json(worksheet, {
+            defval: '',
+            raw: false,
+          });
 
           const nonEmptyRows = rawJson
             .map((row, index) => ({ row, excelRowNumber: index + 2 }))
@@ -1091,39 +1253,67 @@ const ManageCourses = () => {
 
           if (nonEmptyRows.length === 0) {
             setImportPreview([]);
-            setImportError(t('រកមិនឃើញទិន្នន័យមុខវិជ្ជាក្នុងឯកសារនេះទេ!', 'No course data found in this file!'));
+            setImportError(
+              t(
+                'រកមិនឃើញទិន្នន័យមុខវិជ្ជាក្នុងឯកសារនេះទេ!',
+                'No course data found in this file!'
+              )
+            );
             return;
           }
 
-          const existingCodes = new Set(courses.map(c => (c.course_code || '').toLowerCase()));
+          const existingCodes = new Set(
+            courses.map((c) => (c.course_code || '').toLowerCase())
+          );
           const fileCodes = new Set();
 
           const parsedRows = nonEmptyRows.map(({ row, excelRowNumber }) => {
             const item = {};
-            Object.keys(row).forEach(k => { item[normalizeCourseHeader(k)] = row[k]?.toString().trim(); });
+            Object.keys(row).forEach((k) => {
+              item[normalizeCourseHeader(k)] = row[k]?.toString().trim();
+            });
 
-            const cleanCode = (item.course_code || '').replace(/^'+/, '').trim();
+            const cleanCode = (item.course_code || '')
+              .replace(/^'+/, '')
+              .trim();
             const errors = [];
 
             if (!cleanCode) {
               errors.push(t('ខ្វះកូដមុខវិជ្ជា', 'Missing Course Code'));
             } else if (existingCodes.has(cleanCode.toLowerCase())) {
-              errors.push(t('កូដមុខវិជ្ជានេះមានក្នុងប្រព័ន្ធរួចហើយ', 'Course code already exists'));
+              errors.push(
+                t(
+                  'កូដមុខវិជ្ជានេះមានក្នុងប្រព័ន្ធរួចហើយ',
+                  'Course code already exists'
+                )
+              );
             } else if (fileCodes.has(cleanCode.toLowerCase())) {
-              errors.push(t('កូដមុខវិជ្ជាស្ទួនក្នុងឯកសារនេះ', 'Duplicate course code in file'));
+              errors.push(
+                t(
+                  'កូដមុខវិជ្ជាស្ទួនក្នុងឯកសារនេះ',
+                  'Duplicate course code in file'
+                )
+              );
             } else {
               fileCodes.add(cleanCode.toLowerCase());
             }
 
-            if (!item.course_name) errors.push(t('ខ្វះឈ្មោះមុខវិជ្ជា', 'Missing Course Name'));
+            if (!item.course_name)
+              errors.push(t('ខ្វះឈ្មោះមុខវិជ្ជា', 'Missing Course Name'));
 
             const deptId = findDepartmentId(item.department);
             const teacherId = findTeacherId(item.teacher);
-            if (!deptId) errors.push(t('រកមិនឃើញដេប៉ាតឺម៉ង់', 'Department not found'));
+            if (!deptId)
+              errors.push(t('រកមិនឃើញដេប៉ាតឺម៉ង់', 'Department not found'));
             if (!item.teacher) {
               errors.push(t('ខ្វះឈ្មោះគ្រូបង្រៀន', 'Missing Teacher Name'));
             } else if (!teacherId) {
-              errors.push(t('រកមិនឃើញឈ្មោះគ្រូបង្រៀននេះក្នុងប្រព័ន្ធ', 'Teacher not found in system'));
+              errors.push(
+                t(
+                  'រកមិនឃើញឈ្មោះគ្រូបង្រៀននេះក្នុងប្រព័ន្ធ',
+                  'Teacher not found in system'
+                )
+              );
             }
 
             return {
@@ -1134,17 +1324,19 @@ const ManageCourses = () => {
                 credit: Number(item.credit) || 3,
                 department_id: deptId,
                 teacher_id: teacherId,
-                description: item.description || ''
+                description: item.description || '',
               },
               isValid: errors.length === 0,
-              errors
+              errors,
             };
           });
 
           setImportPreview(parsedRows);
         } catch (err) {
           console.error('Course Excel parse error:', err);
-          setImportError(t('មិនអាចអានឯកសារ Excel នេះបានទេ!', 'Failed to read Excel file!'));
+          setImportError(
+            t('មិនអាចអានឯកសារ Excel នេះបានទេ!', 'Failed to read Excel file!')
+          );
         } finally {
           e.target.value = null;
         }
@@ -1155,7 +1347,9 @@ const ManageCourses = () => {
 
   const handleConfirmImport = async () => {
     if (isImporting) return;
-    const validItems = importPreview.filter(r => r.isValid).map(r => r.data);
+    const validItems = importPreview
+      .filter((r) => r.isValid)
+      .map((r) => r.data);
     if (validItems.length === 0) {
       return;
     }
@@ -1164,12 +1358,17 @@ const ManageCourses = () => {
     setImportError('');
     try {
       const results = await Promise.allSettled(
-        validItems.map((coursePayload) => api.post('/admin/courses', coursePayload))
+        validItems.map((coursePayload) =>
+          api.post('/admin/courses', coursePayload)
+        )
       );
-      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      const successCount = results.filter(
+        (r) => r.status === 'fulfilled'
+      ).length;
 
       clearCoursesCache();
       try {
+        sessionStorage.removeItem(getCoursesCacheKey(currentAdminId));
         localStorage.removeItem(getCoursesCacheKey(currentAdminId));
         localStorage.removeItem(getCoursesMetaCacheKey(currentAdminId));
         localStorage.removeItem(CACHE_KEY_SHARED_COURSES);
@@ -1184,7 +1383,7 @@ const ManageCourses = () => {
           descKm: `មុខវិជ្ជាចំនួន ${successCount} ត្រូវបាននាំចូលទៅក្នុងប្រព័ន្ធជោគជ័យ។`,
           descEn: `${successCount} courses were imported successfully.`,
           category: 'import',
-          link: '/courses'
+          link: '/courses',
         });
       }
 
@@ -1194,7 +1393,9 @@ const ManageCourses = () => {
       fetchCourses(true);
     } catch (error) {
       console.error('Import courses error:', error);
-      setImportError(t('មានបញ្ហាក្នុងការនាំចូលមុខវិជ្ជា!', 'Error importing courses!'));
+      setImportError(
+        t('មានបញ្ហាក្នុងការនាំចូលមុខវិជ្ជា!', 'Error importing courses!')
+      );
     } finally {
       setIsImporting(false);
     }
@@ -1204,54 +1405,78 @@ const ManageCourses = () => {
   // 📌 ផ្នែកទី ៧៖ ការបង្ហាញទម្រង់ផ្ទៃមុខកម្មវិធី (JSX UI RENDERING)
   // ============================================================================
   return (
-    <div className="crs-page-bg p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-6 animate-fadeIn">
+    <div className="crs-page-bg px-3 py-4 sm:p-5 lg:p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-5 sm:space-y-6 pb-28 md:pb-12 animate-fadeIn">
       
       {/* ------------------------------------------------------------------ */}
       {/* 7.1. ផ្ទាំងក្បាលខាងលើ (Header Banner) និងប៊ូតុងសកម្មភាពគោល           */}
       {/* ------------------------------------------------------------------ */}
-      <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-8 shadow-xl border border-blue-900">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
         <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
-        
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-3">
-            <h1 className="text-[28px] sm:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20">
-                <BookOpenIcon className="h-8 w-8 text-yellow-400" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
+          <div className="space-y-2 sm:space-y-3 min-w-0">
+            <h1 className="text-xl sm:text-2xl md:text-[26px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
+              <div className="p-2.5 sm:p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+                <BookOpenIcon className="h-6 w-6 sm:h-7 sm:w-7 lg:h-8 lg:w-8 text-yellow-400" />
               </div>
-              {t('គ្រប់គ្រងមុខវិជ្ជា', 'Manage Courses')}
+              <span className="truncate">{t('គ្រប់គ្រងមុខវិជ្ជា', 'Manage Courses')}</span>
             </h1>
-            <p className={`text-blue-200/80 text-sm font-medium ${selectedDepartment === 'all' ? 'max-w-none' : 'max-w-xl'}`}>
+            <p
+              className={`text-blue-200/80 text-xs sm:text-sm font-medium leading-relaxed ${
+                selectedDepartment === 'all' ? 'max-w-2xl' : 'max-w-xl'
+              }`}
+            >
               {selectedDepartment === 'all'
-                ? t('សូមចុចជ្រើសរើសកាតដេប៉ាតឺម៉ង់ខាងក្រោម ដើម្បីបន្ថែមមុខវិជ្ជាថ្មី នាំចូល ឬនាំចេញទិន្នន័យ Excel តាមដេប៉ាតឺម៉ង់។', 'Please select a department card below to add courses, import, or export Excel data by department.')
-                : t('បង្កើត កែប្រែ និងលុបមុខវិជ្ជាតាមដេប៉ាតឺម៉ង់ រួមជាមួយការចាត់តាំងគ្រូបង្រៀន ឬនាំចូលពី Excel ។', 'Create, edit, and manage courses by department along with teacher assignments or Excel import.')}
+                ? t(
+                    'សូមចុចជ្រើសរើសកាតដេប៉ាតឺម៉ង់ខាងក្រោម ដើម្បីបន្ថែមមុខវិជ្ជាថ្មី នាំចូល ឬនាំចេញទិន្នន័យ Excel តាមដេប៉ាតឺម៉ង់។',
+                    'Please select a department card below to add courses, import, or export Excel data by department.'
+                  )
+                : t(
+                    'បង្កើត កែប្រែ និងលុបមុខវិជ្ជាតាមដេប៉ាតឺម៉ង់ រួមជាមួយការចាត់តាំងគ្រូបង្រៀន ឬនាំចូលពី Excel ។',
+                    'Create, edit, and manage courses by department along with teacher assignments or Excel import.'
+                  )}
             </p>
           </div>
 
           {selectedDepartment !== 'all' && (
-            <div className="flex flex-wrap items-center gap-3 shrink-0 animate-fadeIn">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 shrink-0 animate-fadeIn">
               <button
+                type="button"
                 onClick={handleExportExcel}
-                className="inline-flex items-center justify-center px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
-                title={t('នាំចេញបញ្ជីមុខវិជ្ជាជា Excel', 'Export course list to Excel')}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 sm:px-4 sm:py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
+                title={t(
+                  'នាំចេញបញ្ជីមុខវិជ្ជាជា Excel',
+                  'Export course list to Excel'
+                )}
               >
-                <DocumentIcon className="h-5 w-5 mr-2" />
-                {t('នាំចេញ Excel', 'Export Excel')}
+                <DocumentIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
+                <span>{t('នាំចេញ Excel', 'Export Excel')}</span>
               </button>
               <button
-                onClick={() => { setImportPreview([]); setSelectedFileName(''); setImportError(''); setShowImportModal(true); }}
-                className="inline-flex items-center justify-center px-4 py-3 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
-                title={t('នាំចូលទិន្នន័យមុខវិជ្ជាពី Excel', 'Import course data from Excel')}
+                type="button"
+                onClick={() => {
+                  setImportPreview([]);
+                  setSelectedFileName('');
+                  setImportError('');
+                  setShowImportModal(true);
+                }}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 sm:px-4 sm:py-3 bg-emerald-500 hover:bg-emerald-400 text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
+                title={t(
+                  'នាំចូលទិន្នន័យមុខវិជ្ជាពី Excel',
+                  'Import course data from Excel'
+                )}
               >
-                <DocumentIcon className="h-5 w-5 mr-2" />
-                {t('នាំចូល Excel', 'Import Excel')}
+                <DocumentIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
+                <span>{t('នាំចូល Excel', 'Import Excel')}</span>
               </button>
               <button
+                type="button"
                 onClick={openCreateModal}
-                className="inline-flex items-center justify-center px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
+                className="w-full sm:w-auto inline-flex items-center justify-center px-5 py-2.5 sm:px-6 sm:py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
               >
-                <PlusIcon className="h-5 w-5 mr-2" />
-                {t('បន្ថែមមុខវិជ្ជា', 'Add Course')}
+                <PlusIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
+                <span>{t('បន្ថែមមុខវិជ្ជា', 'Add Course')}</span>
               </button>
             </div>
           )}
@@ -1266,7 +1491,7 @@ const ManageCourses = () => {
           <button
             type="button"
             onClick={() => scrollDepartmentCards('left')}
-            className="crs-scroll-arrow absolute -left-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] flex items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
+            className="crs-scroll-arrow hidden sm:flex absolute -left-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
             title={t('អូសទៅឆ្វេង', 'Scroll Left')}
           >
             <ChevronLeftIcon className="h-4 w-4 stroke-[2.5]" />
@@ -1280,28 +1505,58 @@ const ManageCourses = () => {
           onMouseMove={handleCardsMouseMove}
           onMouseUp={handleCardsMouseUpOrLeave}
           onMouseLeave={handleCardsMouseUpOrLeave}
-          className={`hide-scrollbar flex items-stretch gap-4 overflow-x-auto py-1 px-1 w-full select-none ${isDraggingCards ? 'cursor-grabbing' : 'cursor-grab scroll-smooth'}`}
+          className={`hide-scrollbar flex items-stretch gap-3 sm:gap-4 overflow-x-auto py-1 px-1 w-full select-none ${
+            isDraggingCards ? 'cursor-grabbing' : 'cursor-grab scroll-smooth'
+          }`}
         >
           <button
             type="button"
             onClick={() => handleSelectDepartmentCard('all')}
-            className={`shrink-0 w-[220px] sm:w-[235px] text-left p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between min-h-[125px] ${isDraggingCards ? 'cursor-grabbing' : 'cursor-pointer'} ${
-              selectedDepartment === 'all' ? 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white border-blue-800 shadow-lg -translate-y-0.5' : 'crs-dept-card bg-white text-gray-900 border-gray-100 hover:border-blue-200 hover:shadow-md shadow-sm'
+            className={`shrink-0 w-[195px] sm:w-[235px] text-left p-4 sm:p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between min-h-[115px] sm:min-h-[125px] ${
+              isDraggingCards ? 'cursor-grabbing' : 'cursor-pointer'
+            } ${
+              selectedDepartment === 'all'
+                ? 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white border-blue-800 shadow-lg -translate-y-0.5'
+                : 'crs-dept-card bg-white text-gray-900 border-gray-100 hover:border-blue-200 hover:shadow-md shadow-sm'
             }`}
           >
             <div className="flex items-start justify-between w-full">
-              <div className={`h-10 w-10 rounded-xl flex items-center justify-center border ${selectedDepartment === 'all' ? 'bg-white/15 text-white border-white/20' : 'crs-dept-blue bg-blue-50 text-blue-600 border-blue-100'}`}>
-                <Squares2X2Icon className="h-5 w-5" />
+              <div
+                className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center border ${
+                  selectedDepartment === 'all'
+                    ? 'bg-white/15 text-white border-white/20'
+                    : 'crs-dept-blue bg-blue-50 text-blue-600 border-blue-100'
+                }`}
+              >
+                <Squares2X2Icon className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
-              <span className={`text-2xl font-extrabold ${selectedDepartment === 'all' ? 'text-white' : 'crs-text-primary text-gray-900'}`}>
+              <span
+                className={`text-xl sm:text-2xl font-extrabold ${
+                  selectedDepartment === 'all'
+                    ? 'text-white'
+                    : 'crs-text-primary text-gray-900'
+                }`}
+              >
                 {departmentCounts.all || 0}
               </span>
             </div>
-            <div className="mt-4">
-              <p className={`text-sm font-extrabold truncate ${selectedDepartment === 'all' ? 'text-white' : 'crs-text-primary text-gray-900'}`}>
+            <div className="mt-3 sm:mt-4">
+              <p
+                className={`text-xs sm:text-sm font-extrabold truncate ${
+                  selectedDepartment === 'all'
+                    ? 'text-white'
+                    : 'crs-text-primary text-gray-900'
+                }`}
+              >
                 {t('មុខវិជ្ជាទាំងអស់', 'All Courses')}
               </p>
-              <p className={`text-xs font-medium mt-0.5 truncate ${selectedDepartment === 'all' ? 'text-blue-200/80' : 'crs-text-secondary text-gray-500'}`}>
+              <p
+                className={`text-[11px] sm:text-xs font-medium mt-0.5 truncate ${
+                  selectedDepartment === 'all'
+                    ? 'text-blue-200/80'
+                    : 'crs-text-secondary text-gray-500'
+                }`}
+              >
                 {t('គ្រប់ដេប៉ាតឺម៉ង់', 'All Departments')}
               </p>
             </div>
@@ -1317,23 +1572,52 @@ const ManageCourses = () => {
                 key={dept.id}
                 type="button"
                 onClick={() => handleSelectDepartmentCard(dept.id)}
-                className={`shrink-0 w-[220px] sm:w-[235px] text-left p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between min-h-[125px] ${isDraggingCards ? 'cursor-grabbing' : 'cursor-pointer'} ${
-                  isSelected ? 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white border-blue-800 shadow-lg -translate-y-0.5' : 'crs-dept-card bg-white text-gray-900 border-gray-100 hover:border-blue-200 hover:shadow-md shadow-sm'
+                className={`shrink-0 w-[195px] sm:w-[235px] text-left p-4 sm:p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between min-h-[115px] sm:min-h-[125px] ${
+                  isDraggingCards ? 'cursor-grabbing' : 'cursor-pointer'
+                } ${
+                  isSelected
+                    ? 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white border-blue-800 shadow-lg -translate-y-0.5'
+                    : 'crs-dept-card bg-white text-gray-900 border-gray-100 hover:border-blue-200 hover:shadow-md shadow-sm'
                 }`}
               >
                 <div className="flex items-start justify-between w-full">
-                  <div className={`h-10 w-10 rounded-xl flex items-center justify-center border ${isSelected ? 'bg-white/15 text-white border-white/20' : `${theme.darkClass} ${theme.bg} ${theme.text} ${theme.border}`}`}>
-                    <AcademicCapIcon className="h-5 w-5" />
+                  <div
+                    className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center border ${
+                      isSelected
+                        ? 'bg-white/15 text-white border-white/20'
+                        : `${theme.darkClass} ${theme.bg} ${theme.text} ${theme.border}`
+                    }`}
+                  >
+                    <AcademicCapIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
-                  <span className={`text-2xl font-extrabold ${isSelected ? 'text-white' : 'crs-text-primary text-gray-900'}`}>
+                  <span
+                    className={`text-xl sm:text-2xl font-extrabold ${
+                      isSelected
+                        ? 'text-white'
+                        : 'crs-text-primary text-gray-900'
+                    }`}
+                  >
                     {count}
                   </span>
                 </div>
-                <div className="mt-4">
-                  <p className={`text-sm font-extrabold truncate ${isSelected ? 'text-white' : 'crs-text-primary text-gray-900'}`} title={deptName}>
+                <div className="mt-3 sm:mt-4">
+                  <p
+                    className={`text-xs sm:text-sm font-extrabold truncate ${
+                      isSelected
+                        ? 'text-white'
+                        : 'crs-text-primary text-gray-900'
+                    }`}
+                    title={deptName}
+                  >
                     {deptName}
                   </p>
-                  <p className={`text-xs font-medium mt-0.5 truncate ${isSelected ? 'text-blue-200/80' : 'crs-text-secondary text-gray-500'}`}>
+                  <p
+                    className={`text-[11px] sm:text-xs font-medium mt-0.5 truncate ${
+                      isSelected
+                        ? 'text-blue-200/80'
+                        : 'crs-text-secondary text-gray-500'
+                    }`}
+                  >
                     {t('មុខវិជ្ជាសិក្សា', 'Department Courses')}
                   </p>
                 </div>
@@ -1346,7 +1630,7 @@ const ManageCourses = () => {
           <button
             type="button"
             onClick={() => scrollDepartmentCards('right')}
-            className="crs-scroll-arrow absolute -right-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] flex items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
+            className="crs-scroll-arrow hidden sm:flex absolute -right-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
             title={t('អូសទៅស្ដាំ', 'Scroll Right')}
           >
             <ChevronRightIcon className="h-4 w-4 stroke-[2.5]" />
@@ -1357,34 +1641,48 @@ const ManageCourses = () => {
       {/* ------------------------------------------------------------------ */}
       {/* 7.3. ប្រអប់ស្វែងរកមុខវិជ្ជា (Search Box)                              */}
       {/* ------------------------------------------------------------------ */}
-      <div className="crs-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
+      <div className="crs-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-3.5 sm:p-4 flex flex-col md:flex-row gap-3.5 sm:gap-4 items-center justify-between">
         <div className="relative w-full md:max-w-md shrink-0">
-          <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+          <MagnifyingGlassIcon className="absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder=""
+            placeholder={t(
+              'ស្វែងរកឈ្មោះមុខវិជ្ជា, កូដ, ដេប៉ាតឺម៉ង់ ឬគ្រូបង្រៀន...',
+              'Search course name, code, department, or teacher...'
+            )}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="crs-input w-full pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
+            className="crs-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
           />
           {searchTerm && (
             <button
+              type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-3.5 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer p-1"
             >
               <XMarkIcon className="h-4 w-4" />
             </button>
           )}
         </div>
+
+        <div className="flex items-center justify-end w-full md:w-auto">
+          <span className="crs-text-secondary text-xs font-bold text-gray-500">
+            {t('បង្ហាញ៖', 'Showing:')}{' '}
+            <strong className="text-blue-600 dark:text-blue-400">
+              {displayedCourses.length}
+            </strong>{' '}
+            {t('មុខវិជ្ជា', 'Courses')}
+          </span>
+        </div>
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 7.4. តារាងបង្ហាញបញ្ជីមុខវិជ្ជា (Main Table - បន្ទាត់ស្រទន់ស្អាតភ្នែក)    */}
+      {/* 7.4. តារាងបង្ហាញបញ្ជីមុខវិជ្ជា (Table on iPad/Desktop, Cards on Phone) */}
       {/* ------------------------------------------------------------------ */}
-      <div className="crs-surface-card bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
-        <div className="crs-table-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <h2 className="crs-text-primary text-[18px] font-extrabold text-gray-900">
+      <div className="crs-surface-card bg-white rounded-2xl sm:rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
+        <div className="crs-table-bar px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <h2 className="crs-text-primary text-base sm:text-[18px] font-extrabold text-gray-900 truncate">
               {activeDepartmentObj
                 ? `${t('បញ្ជីមុខវិជ្ជា', 'Courses List')} - ${getDepartmentDisplayName(activeDepartmentObj)}`
                 : t('បញ្ជីមុខវិជ្ជាទាំងអស់', 'All Courses List')}
@@ -1394,18 +1692,19 @@ const ManageCourses = () => {
             <button
               type="button"
               onClick={() => setSelectedDepartment('all')}
-              className="crs-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+              className="crs-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer shrink-0"
             >
               {t('បង្ហាញគ្រប់ដេប៉ាតឺម៉ង់វិញ', 'Show All Departments')}
             </button>
           )}
         </div>
 
-        <div className="overflow-x-auto">
+        {/* 💻 iPad, Laptop & Desktop Table View (`hidden md:block`) */}
+        <div className="hidden md:block overflow-x-auto hide-scrollbar">
           <table className="min-w-full border-collapse">
             <thead className="crs-table-head bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="px-4 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                <th className="px-5 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap sticky left-0 bg-inherit z-10">
                   {t('មុខវិជ្ជា', 'Course')}
                 </th>
                 <th className="px-4 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
@@ -1420,7 +1719,7 @@ const ManageCourses = () => {
                 <th className="px-4 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('ក្រេឌីត', 'Credit')}
                 </th>
-                <th className="px-4 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                <th className="px-5 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('សកម្មភាព', 'Actions')}
                 </th>
               </tr>
@@ -1435,7 +1734,10 @@ const ManageCourses = () => {
                         {searchTerm
                           ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found')
                           : activeDepartmentObj
-                          ? t(`មិនទាន់មានមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» នៅឡើយទេ`, 'No courses in this department yet')
+                          ? t(
+                              `មិនទាន់មានមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» នៅឡើយទេ`,
+                              'No courses in this department yet'
+                            )
                           : t('មិនទាន់មានមុខវិជ្ជានៅឡើយទេ', 'No courses available yet')}
                       </p>
                     </div>
@@ -1443,12 +1745,19 @@ const ManageCourses = () => {
                 </tr>
               ) : (
                 displayedCourses.map((course) => {
-                  const matchedDeptObj = course.department || departments.find(d => String(d.id) === String(course.department_id));
+                  const matchedDeptObj =
+                    course.department ||
+                    departments.find(
+                      (d) => String(d.id) === String(course.department_id)
+                    );
                   const teacher = resolveCourseTeacher(course, teachers);
 
                   return (
-                    <tr key={course.id} className="crs-table-row hover:bg-blue-50/30 transition-colors">
-                      <td className="px-4 py-4 whitespace-nowrap">
+                    <tr
+                      key={course.id}
+                      className="crs-table-row hover:bg-blue-50/30 transition-colors"
+                    >
+                      <td className="px-5 py-4 whitespace-nowrap sticky left-0 bg-inherit z-10">
                         <div className="flex items-center">
                           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center text-white font-medium text-sm shadow-sm shrink-0">
                             <BookOpenIcon className="h-5 w-5" />
@@ -1458,7 +1767,8 @@ const ManageCourses = () => {
                               {course.course_name}
                             </div>
                             <div className="crs-text-secondary text-xs text-gray-500 font-medium line-clamp-1 max-w-xs">
-                              {course.description || t('គ្មានការពិពណ៌នា', 'No description')}
+                              {course.description ||
+                                t('គ្មានការពិពណ៌នា', 'No description')}
                             </div>
                           </div>
                         </div>
@@ -1477,7 +1787,9 @@ const ManageCourses = () => {
                             {getTeacherFullName(teacher)}
                           </span>
                         ) : (
-                          <span className="crs-text-secondary text-gray-400 font-medium">—</span>
+                          <span className="crs-text-secondary text-gray-400 font-medium">
+                            —
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap">
@@ -1485,9 +1797,10 @@ const ManageCourses = () => {
                           {course.credit} {t('ក្រេឌីត', 'Credits')}
                         </span>
                       </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-center">
+                      <td className="px-5 py-4 whitespace-nowrap text-center">
                         <div className="flex items-center justify-center space-x-1.5">
                           <button
+                            type="button"
                             onClick={() => openEditModal(course)}
                             className="crs-action-edit p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 border border-transparent hover:border-indigo-100 rounded-xl transition-all cursor-pointer"
                             title={t('កែប្រែ', 'Edit')}
@@ -1495,6 +1808,7 @@ const ManageCourses = () => {
                             <PencilSquareIcon className="h-5 w-5" />
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleDeleteClick(course)}
                             className="crs-action-delete p-2 text-rose-600 hover:text-rose-900 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl transition-all cursor-pointer"
                             title={t('លុប', 'Delete')}
@@ -1511,25 +1825,127 @@ const ManageCourses = () => {
           </table>
         </div>
 
+        {/* 📱 Mobile App-Like Course Cards View (`md:hidden`) */}
+        <div className="md:hidden p-3.5 space-y-3 bg-gray-50/40">
+          {displayedCourses.length === 0 ? (
+            <div className="crs-dept-card py-12 px-4 text-center bg-white rounded-2xl border border-dashed border-gray-200">
+              <BookOpenIcon className="h-14 w-14 text-gray-300 mx-auto mb-2.5" />
+              <p className="crs-text-primary font-extrabold text-gray-700 text-sm">
+                {searchTerm
+                  ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found')
+                  : activeDepartmentObj
+                  ? t(
+                      `មិនទាន់មានមុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» នៅឡើយទេ`,
+                      'No courses in this department yet'
+                    )
+                  : t('មិនទាន់មានមុខវិជ្ជានៅឡើយទេ', 'No courses available yet')}
+              </p>
+            </div>
+          ) : (
+            displayedCourses.map((course) => {
+              const matchedDeptObj =
+                course.department ||
+                departments.find(
+                  (d) => String(d.id) === String(course.department_id)
+                );
+              const teacher = resolveCourseTeacher(course, teachers);
+
+              return (
+                <div
+                  key={`mob-crs-${course.id}`}
+                  className="crs-dept-card bg-white rounded-2xl border border-gray-200/80 p-3.5 shadow-2xs space-y-3"
+                >
+                  {/* Top Row: Course Title + Action Buttons */}
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center text-white shadow-2xs shrink-0 mt-0.5">
+                        <BookOpenIcon className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="crs-text-primary text-sm font-extrabold text-gray-900 leading-snug line-clamp-2">
+                          {course.course_name}
+                        </h3>
+                        <p className="crs-text-secondary text-xs text-gray-500 font-medium line-clamp-1 mt-0.5">
+                          {course.description ||
+                            t('គ្មានការពិពណ៌នា', 'No description')}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(course)}
+                        className="crs-action-edit p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer"
+                        title={t('កែប្រែ', 'Edit')}
+                      >
+                        <PencilSquareIcon className="h-5 w-5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteClick(course)}
+                        className="crs-action-delete p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                        title={t('លុប', 'Delete')}
+                      >
+                        <TrashIcon className="h-5 w-5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Middle Row: Code & Credit Badges */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="crs-code-pill px-2.5 py-1 text-[11px] font-bold font-mono bg-gray-100 border border-gray-200 text-gray-700 rounded-lg">
+                      {course.course_code}
+                    </span>
+                    <span className="crs-badge-amber px-2.5 py-1 text-[11px] font-bold rounded-lg border bg-amber-50 text-amber-700 border-amber-200">
+                      {course.credit} {t('ក្រេឌីត', 'Credits')}
+                    </span>
+                  </div>
+
+                  {/* Bottom Row: Department & Teacher */}
+                  <div className="pt-2.5 border-t border-gray-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="crs-text-secondary inline-flex items-center gap-1.5 font-semibold text-gray-600 truncate max-w-[55%]">
+                      <BuildingLibraryIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                      <span className="truncate">
+                        {getDepartmentDisplayName(matchedDeptObj)}
+                      </span>
+                    </span>
+
+                    <span className="crs-text-primary inline-flex items-center gap-1 font-bold text-gray-800 truncate max-w-[42%]">
+                      <UserIcon className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                      <span className="truncate">
+                        {teacher ? getTeacherFullName(teacher) : '—'}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
         {/* ---------------------------------------------------------------- */}
         {/* 7.5. របារប្តូរទំព័រ (Sliding Window Pagination)                   */}
         {/* ---------------------------------------------------------------- */}
         {meta.last_page > 1 && (
-          <div className="crs-pagination-bar px-6 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-gray-50/50">
+          <div className="crs-pagination-bar px-4 sm:px-6 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-gray-50/50">
             <p className="crs-text-secondary text-xs font-bold text-gray-600">
-              {t('ទំព័រ', 'Page')} {meta.current_page} / {meta.last_page} ({displayedCourses.length} {t('មុខវិជ្ជា', 'total')})
+              {t('ទំព័រ', 'Page')} {meta.current_page} / {meta.last_page} (
+              {displayedCourses.length} {t('មុខវិជ្ជា', 'total')})
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={meta.current_page === 1}
-                className="crs-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="crs-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('មុន', 'Previous')}
               </button>
               {paginationPages.map((pageNum) => (
                 <button
                   key={pageNum}
+                  type="button"
                   onClick={() => setPage(pageNum)}
                   className={`px-3 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                     meta.current_page === pageNum
@@ -1541,9 +1957,10 @@ const ManageCourses = () => {
                 </button>
               ))}
               <button
-                onClick={() => setPage(p => Math.min(meta.last_page, p + 1))}
+                type="button"
+                onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
                 disabled={meta.current_page === meta.last_page}
-                className="crs-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="crs-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('បន្ទាប់', 'Next')}
               </button>
@@ -1553,21 +1970,23 @@ const ManageCourses = () => {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 7.6. ផ្ទាំង Modal បង្កើត ឬកែប្រែមុខវិជ្ជា                              */}
+      {/* 7.6. ផ្ទាំង Modal បង្កើត ឬកែប្រែមុខវិជ្ជា (Bottom Sheet on Phone)      */}
       {/* ------------------------------------------------------------------ */}
       {showModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="crs-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
-            <div className="crs-modal-bar flex justify-between items-center p-6 sm:p-8 border-b border-gray-100">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="crs-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
+            <div className="crs-modal-bar flex justify-between items-center p-5 sm:p-7 border-b border-gray-100">
               <div>
-                <h2 className="crs-text-primary text-xl font-extrabold text-gray-900 flex items-center gap-2">
-                  <span className="crs-badge-indigo bg-indigo-100 text-indigo-600 p-2.5 rounded-xl border border-indigo-200">
-                    <BookOpenIcon className="h-6 w-6" />
+                <h2 className="crs-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
+                  <span className="crs-badge-indigo bg-indigo-100 text-indigo-600 p-2 sm:p-2.5 rounded-xl border border-indigo-200">
+                    <BookOpenIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                   </span>
-                  {editingCourse ? t('កែប្រែមុខវិជ្ជា', 'Edit Course') : t('បន្ថែមមុខវិជ្ជាថ្មី', 'Add New Course')}
+                  {editingCourse
+                    ? t('កែប្រែមុខវិជ្ជា', 'Edit Course')
+                    : t('បន្ថែមមុខវិជ្ជាថ្មី', 'Add New Course')}
                 </h2>
                 {!editingCourse && activeDepartmentObj && (
-                  <p className="crs-text-secondary text-xs text-gray-500 font-bold mt-1 ml-12">
+                  <p className="crs-text-secondary text-xs text-gray-500 font-bold mt-1 ml-11 sm:ml-12">
                     {t('ដេប៉ាតឺម៉ង់៖', 'Department:')}{' '}
                     <span className="text-indigo-600 dark:text-indigo-400">
                       {getDepartmentDisplayName(activeDepartmentObj)}
@@ -1576,25 +1995,36 @@ const ManageCourses = () => {
                 )}
               </div>
               <button
-                onClick={() => { setShowModal(false); setFormError(''); }}
+                type="button"
+                onClick={() => {
+                  setShowModal(false);
+                  setFormError('');
+                }}
                 className="crs-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
             </div>
-            
-            <div className="p-6 sm:p-8 overflow-y-auto flex-1">
-              <form id="courseForm" onSubmit={handleSubmit} className="space-y-5">
+
+            <div className="p-5 sm:p-7 overflow-y-auto flex-1">
+              <form
+                id="courseForm"
+                onSubmit={handleSubmit}
+                className="space-y-4 sm:space-y-5"
+              >
                 {formError && (
                   <div className="crs-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
                     <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
-                    <p className="text-xs font-bold leading-relaxed">{formError}</p>
+                    <p className="text-xs font-bold leading-relaxed">
+                      {formError}
+                    </p>
                   </div>
                 )}
 
                 <div>
                   <label className="crs-label block text-sm font-bold text-gray-700 mb-1.5">
-                    {t('ឈ្មោះមុខវិជ្ជា', 'Course Name')} <span className="text-rose-500">*</span>
+                    {t('ឈ្មោះមុខវិជ្ជា', 'Course Name')}{' '}
+                    <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -1607,10 +2037,11 @@ const ManageCourses = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                   <div>
                     <label className="crs-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('កូដមុខវិជ្ជា', 'Course Code')} <span className="text-rose-500">*</span>
+                      {t('កូដមុខវិជ្ជា', 'Course Code')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
@@ -1624,7 +2055,8 @@ const ManageCourses = () => {
                   </div>
                   <div>
                     <label className="crs-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('ក្រេឌីត', 'Credit')} <span className="text-rose-500">*</span>
+                      {t('ក្រេឌីត', 'Credit')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <select
                       name="credit"
@@ -1633,7 +2065,9 @@ const ManageCourses = () => {
                       onChange={handleInputChange}
                       className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all bg-white shadow-sm"
                     >
-                      <option value="" disabled>{t('ជ្រើសរើសក្រេឌីត', 'Select Credit')}</option>
+                      <option value="" disabled>
+                        {t('ជ្រើសរើសក្រេឌីត', 'Select Credit')}
+                      </option>
                       {[1, 2, 3, 4, 5, 6].map((cr) => (
                         <option key={cr} value={cr}>
                           {cr} {t('ក្រេឌីត', 'Credits')}
@@ -1644,19 +2078,26 @@ const ManageCourses = () => {
 
                   <div>
                     <label className="crs-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('ដេប៉ាតឺម៉ង់', 'Department')} <span className="text-rose-500">*</span>
+                      {t('ដេប៉ាតឺម៉ង់', 'Department')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <select
                       name="department_id"
                       required
-                      disabled={Boolean(editingCourse) || selectedDepartment !== 'all'}
+                      disabled={
+                        Boolean(editingCourse) || selectedDepartment !== 'all'
+                      }
                       value={formData.department_id}
                       onChange={handleInputChange}
                       className={`crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all bg-white shadow-sm ${
-                        Boolean(editingCourse) || selectedDepartment !== 'all' ? 'opacity-80 cursor-not-allowed bg-gray-100 font-bold text-indigo-900' : ''
+                        Boolean(editingCourse) || selectedDepartment !== 'all'
+                          ? 'opacity-80 cursor-not-allowed bg-gray-100 font-bold text-indigo-900'
+                          : ''
                       }`}
                     >
-                      <option value="" disabled>{t('ជ្រើសរើសដេប៉ាតឺម៉ង់', 'Select Department')}</option>
+                      <option value="" disabled>
+                        {t('ជ្រើសរើសដេប៉ាតឺម៉ង់', 'Select Department')}
+                      </option>
                       {departments.map((dept) => (
                         <option key={dept.id} value={dept.id}>
                           {getDepartmentDisplayName(dept)}
@@ -1667,7 +2108,8 @@ const ManageCourses = () => {
 
                   <div>
                     <label className="crs-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('គ្រូបង្រៀនទទួលបន្ទុក', 'Assigned Teacher')} <span className="text-rose-500">*</span>
+                      {t('គ្រូបង្រៀនទទួលបន្ទុក', 'Assigned Teacher')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <select
                       name="teacher_id"
@@ -1676,7 +2118,9 @@ const ManageCourses = () => {
                       onChange={handleInputChange}
                       className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all bg-white shadow-sm"
                     >
-                      <option value="" disabled>{t('ជ្រើសរើសគ្រូបង្រៀន', 'Select Teacher')}</option>
+                      <option value="" disabled>
+                        {t('ជ្រើសរើសគ្រូបង្រៀន', 'Select Teacher')}
+                      </option>
                       {availableTeachersForModal.map((teacher) => (
                         <option key={teacher.id} value={teacher.id}>
                           {getTeacherFullName(teacher)}
@@ -1696,17 +2140,23 @@ const ManageCourses = () => {
                     value={formData.description}
                     onChange={handleInputChange}
                     className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all resize-none shadow-sm"
-                    placeholder={t('ពិពណ៌នាអំពីមុខវិជ្ជា...', 'Describe the course...')}
+                    placeholder={t(
+                      'ពិពណ៌នាអំពីមុខវិជ្ជា...',
+                      'Describe the course...'
+                    )}
                   />
                 </div>
               </form>
             </div>
 
-            <div className="crs-modal-bar p-6 sm:p-8 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
+            <div className="crs-modal-bar p-5 sm:p-7 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
-                onClick={() => { setShowModal(false); setFormError(''); }}
-                className="crs-cancel-btn px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                onClick={() => {
+                  setShowModal(false);
+                  setFormError('');
+                }}
+                className="crs-cancel-btn px-5 sm:px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
@@ -1714,14 +2164,16 @@ const ManageCourses = () => {
                 type="submit"
                 form="courseForm"
                 disabled={isSubmitting}
-                className="px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                className="px-5 sm:px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
               >
                 {isSubmitting ? (
                   <ArrowPathIcon className="h-5 w-5 animate-spin" />
                 ) : (
                   <BookOpenIcon className="h-5 w-5" />
                 )}
-                {editingCourse ? t('រក្សាទុកការកែប្រែ', 'Save Changes') : t('បង្កើតមុខវិជ្ជា', 'Create Course')}
+                {editingCourse
+                  ? t('រក្សាទុកការកែប្រែ', 'Save Changes')
+                  : t('បង្កើតមុខវិជ្ជា', 'Create Course')}
               </button>
             </div>
           </div>
@@ -1729,14 +2181,14 @@ const ManageCourses = () => {
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* 7.7. ផ្ទាំង Modal សម្រាប់នាំចូលមុខវិជ្ជាពី Excel                        */}
+      {/* 7.7. ផ្ទាំង Modal សម្រាប់នាំចូលមុខវិជ្ជាពី Excel (Bottom Sheet on Phone) */}
       {/* ------------------------------------------------------------------ */}
       {showImportModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="crs-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="crs-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
             <div className="crs-modal-bar flex justify-between items-center p-5 border-b border-gray-100">
               <div>
-                <h2 className="crs-text-primary text-lg font-extrabold text-gray-900 flex items-center gap-2">
+                <h2 className="crs-text-primary text-base sm:text-lg font-extrabold text-gray-900 flex items-center gap-2">
                   <span className="crs-badge-emerald bg-emerald-100 text-emerald-600 p-2 rounded-xl border border-emerald-200">
                     <DocumentIcon className="h-5 w-5" />
                   </span>
@@ -1752,7 +2204,13 @@ const ManageCourses = () => {
                 )}
               </div>
               <button
-                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); setImportError(''); }}
+                type="button"
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportPreview([]);
+                  setSelectedFileName('');
+                  setImportError('');
+                }}
                 className="crs-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 <XMarkIcon className="h-5 w-5" />
@@ -1763,7 +2221,9 @@ const ManageCourses = () => {
               {importError && (
                 <div className="crs-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
                   <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
-                  <p className="text-xs font-bold leading-relaxed">{importError}</p>
+                  <p className="text-xs font-bold leading-relaxed">
+                    {importError}
+                  </p>
                 </div>
               )}
 
@@ -1774,8 +2234,14 @@ const ManageCourses = () => {
                   </h4>
                   <p className="crs-import-desc text-xs font-medium text-emerald-700 mt-1">
                     {activeDepartmentObj
-                      ? t(`មុខវិជ្ជាទាំងអស់ក្នុងឯកសារនេះ នឹងត្រូវដាក់បញ្ចូលទៅក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» ដោយស្វ័យប្រវត្តិ។`, `All courses in this file will be automatically assigned to "${getDepartmentDisplayName(activeDepartmentObj)}".`)
-                      : t('សូមទាញយកទម្រង់គំរូ Excel ហើយបំពេញកូដ ឈ្មោះមុខវិជ្ជា ដេប៉ាតឺម៉ង់ និងឈ្មោះគ្រូបង្រៀនឱ្យបានត្រឹមត្រូវ។', 'Please download the template and fill in course code, name, department, and teacher.')}
+                      ? t(
+                          `មុខវិជ្ជាទាំងអស់ក្នុងឯកសារនេះ នឹងត្រូវដាក់បញ្ចូលទៅក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» ដោយស្វ័យប្រវត្តិ។`,
+                          `All courses in this file will be automatically assigned to "${getDepartmentDisplayName(activeDepartmentObj)}".`
+                        )
+                      : t(
+                          'សូមទាញយកទម្រង់គំរូ Excel ហើយបំពេញកូដ ឈ្មោះមុខវិជ្ជា ដេប៉ាតឺម៉ង់ និងឈ្មោះគ្រូបង្រៀនឱ្យបានត្រឹមត្រូវ។',
+                          'Please download the template and fill in course code, name, department, and teacher.'
+                        )}
                   </p>
                 </div>
                 <button
@@ -1790,7 +2256,10 @@ const ManageCourses = () => {
 
               <div>
                 <label className="crs-label block text-sm font-bold text-gray-700 mb-2">
-                  {t('ជ្រើសរើស ឬទម្លាក់ឯកសារ Excel (.xlsx, .xls)', 'Select or drop Excel file')}
+                  {t(
+                    'ជ្រើសរើស ឬទម្លាក់ឯកសារ Excel (.xlsx, .xls)',
+                    'Select or drop Excel file'
+                  )}
                 </label>
                 <div className="relative group">
                   <input
@@ -1798,15 +2267,24 @@ const ManageCourses = () => {
                     accept=".xlsx, .xls, .csv"
                     onChange={handleFileUpload}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                    title={t('ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ', 'Click here to select file')}
+                    title={t(
+                      'ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ',
+                      'Click here to select file'
+                    )}
                   />
-                  <div className={`crs-dropzone border-2 border-dashed rounded-xl py-6 px-4 flex flex-col items-center justify-center text-center transition-all duration-300 shadow-sm ${selectedFileName ? 'border-emerald-500 bg-emerald-50' : 'border-emerald-300 bg-emerald-50/40 group-hover:bg-emerald-50 group-hover:border-emerald-500 group-hover:shadow-md'}`}>
+                  <div
+                    className={`crs-dropzone border-2 border-dashed rounded-xl py-6 px-4 flex flex-col items-center justify-center text-center transition-all duration-300 shadow-sm ${
+                      selectedFileName
+                        ? 'border-emerald-500 bg-emerald-50'
+                        : 'border-emerald-300 bg-emerald-50/40 group-hover:bg-emerald-50 group-hover:border-emerald-500 group-hover:shadow-md'
+                    }`}
+                  >
                     {selectedFileName ? (
                       <>
                         <div className="p-2.5 bg-emerald-500 rounded-full mb-3 shadow-sm border border-emerald-600">
                           <DocumentTextIcon className="h-6 w-6 text-white" />
                         </div>
-                        <h3 className="crs-import-title text-sm font-extrabold text-emerald-900 mb-1.5">
+                        <h3 className="crs-import-title text-sm font-extrabold text-emerald-900 mb-1.5 break-all">
                           {selectedFileName}
                         </h3>
                         <p className="crs-import-desc text-xs text-emerald-600 font-medium">
@@ -1819,7 +2297,10 @@ const ManageCourses = () => {
                           <DocumentIcon className="h-6 w-6 text-emerald-600" />
                         </div>
                         <h3 className="crs-import-title text-sm font-extrabold text-emerald-900 mb-1.5">
-                          {t('ចុចទីនេះ ឬទាញឯកសារទម្លាក់ទីនេះ', 'Click to upload or drag and drop')}
+                          {t(
+                            'ចុចទីនេះ ឬទាញឯកសារទម្លាក់ទីនេះ',
+                            'Click to upload or drag and drop'
+                          )}
                         </h3>
                       </>
                     )}
@@ -1827,44 +2308,61 @@ const ManageCourses = () => {
                 </div>
               </div>
 
-              {importPreview.length > 0 && importPreview.some(r => !r.isValid) && (
-                <div className="crs-warning-box mt-4 p-4 bg-rose-50/50 border border-rose-200 rounded-xl flex items-center justify-between gap-4 animate-fadeIn">
-                  <div>
-                    <p className="crs-text-primary text-sm font-bold text-gray-800">
-                      {t('មានទិន្នន័យខុសក្នុងបញ្ជី', 'Errors in Parsed Data')}
-                    </p>
-                    <p className="crs-text-secondary text-xs text-gray-500">
-                      {importPreview.length} {t('ជួរ', 'rows')}
-                    </p>
+              {importPreview.length > 0 &&
+                importPreview.some((r) => !r.isValid) && (
+                  <div className="crs-warning-box mt-4 p-4 bg-rose-50/50 border border-rose-200 rounded-xl flex flex-wrap items-center justify-between gap-4 animate-fadeIn">
+                    <div>
+                      <p className="crs-text-primary text-sm font-bold text-gray-800">
+                        {t(
+                          'មានទិន្នន័យខុសក្នុងបញ្ជី',
+                          'Errors in Parsed Data'
+                        )}
+                      </p>
+                      <p className="crs-text-secondary text-xs text-gray-500">
+                        {importPreview.length} {t('ជួរ', 'rows')}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="crs-badge-emerald bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-transparent">
+                        <CheckCircleIcon className="h-4 w-4" />
+                        {importPreview.filter((r) => r.isValid).length}{' '}
+                        {t('ត្រឹមត្រូវ', 'Valid')}
+                      </span>
+                      <span
+                        className="crs-badge-rose bg-rose-100 text-rose-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-transparent"
+                        title={importPreview
+                          .filter((r) => !r.isValid)
+                          .map((r) => `ជួរទី ${r.rowIndex}: ${r.errors[0]}`)
+                          .join('\n')}
+                      >
+                        <ExclamationCircleIcon className="h-4 w-4" />
+                        {importPreview.filter((r) => !r.isValid).length}{' '}
+                        {t('មានកំហុស', 'Error')}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <span className="crs-badge-emerald bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-transparent">
-                      <CheckCircleIcon className="h-4 w-4" />
-                      {importPreview.filter(r => r.isValid).length} {t('ត្រឹមត្រូវ', 'Valid')}
-                    </span>
-                    <span
-                      className="crs-badge-rose bg-rose-100 text-rose-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-transparent"
-                      title={importPreview.filter(r => !r.isValid).map(r => `ជួរទី ${r.rowIndex}: ${r.errors[0]}`).join('\n')}
-                    >
-                      <ExclamationCircleIcon className="h-4 w-4" />
-                      {importPreview.filter(r => !r.isValid).length} {t('មានកំហុស', 'Error')}
-                    </span>
-                  </div>
-                </div>
-              )}
+                )}
             </div>
 
             <div className="crs-modal-bar p-5 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
-                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); setImportError(''); }}
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportPreview([]);
+                  setSelectedFileName('');
+                  setImportError('');
+                }}
                 className="crs-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 type="button"
-                disabled={isImporting || importPreview.filter(r => r.isValid).length === 0}
+                disabled={
+                  isImporting ||
+                  importPreview.filter((r) => r.isValid).length === 0
+                }
                 onClick={handleConfirmImport}
                 className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
               >
@@ -1875,7 +2373,7 @@ const ManageCourses = () => {
                 )}
                 {isImporting
                   ? t('កំពុងនាំចូល...', 'Importing...')
-                  : `${t('នាំចូលទិន្នន័យ', 'Import Data')} (${importPreview.filter(r => r.isValid).length})`}
+                  : `${t('នាំចូលទិន្នន័យ', 'Import Data')} (${importPreview.filter((r) => r.isValid).length})`}
               </button>
             </div>
           </div>
@@ -1883,37 +2381,52 @@ const ManageCourses = () => {
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* 7.8. ផ្ទាំង Modal បញ្ជាក់ការលុបមុខវិជ្ជា                               */}
+      {/* 7.8. ផ្ទាំង Modal បញ្ជាក់ការលុបមុខវិជ្ជា (Bottom Sheet on Phone)     */}
       {/* ------------------------------------------------------------------ */}
       {showDeleteModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="crs-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-fadeIn border border-transparent">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="crs-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="crs-delete-title flex items-center text-rose-600 mb-5">
               <div className="crs-badge-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
                 <ExclamationTriangleIcon className="h-6 w-6" />
               </div>
-              <h3 className="text-xl font-extrabold">{t('បញ្ជាក់ការលុប', 'Confirm Deletion')}</h3>
+              <h3 className="text-xl font-extrabold">
+                {t('បញ្ជាក់ការលុប', 'Confirm Deletion')}
+              </h3>
             </div>
             <p className="crs-text-secondary text-sm font-medium text-gray-600 mb-6 leading-relaxed">
-              {t('តើលោកអ្នកប្រាកដជាចង់លុបមុខវិជ្ជា', 'Are you sure you want to delete course')} «
+              {t(
+                'តើលោកអ្នកប្រាកដជាចង់លុបមុខវិជ្ជា',
+                'Are you sure you want to delete course'
+              )}{' '}
+              «
               <span className="crs-text-primary font-extrabold text-gray-900">
                 {courseToDelete?.course_name}
               </span>
               » {t('នេះមែនទេ?', 'this course?')}
-              <br /><br />
+              <br />
+              <br />
               <span className="crs-warning-box text-rose-500 text-xs font-bold bg-rose-50 p-3 rounded-lg border border-rose-100 block">
-                {t('* ទិន្នន័យ និងមេរៀនទាំងអស់ដែលជាប់ទាក់ទងនឹងមុខវិជ្ជានេះអាចនឹងបាត់បង់។', '* Data and all lessons related to this course may be lost.')}
+                {t(
+                  '* ទិន្នន័យ និងមេរៀនទាំងអស់ដែលជាប់ទាក់ទងនឹងមុខវិជ្ជានេះអាចនឹងបាត់បង់។',
+                  '* Data and all lessons related to this course may be lost.'
+                )}
               </span>
             </p>
             <div className="flex justify-end space-x-3">
               <button
-                onClick={() => { setShowDeleteModal(false); setCourseToDelete(null); }}
+                type="button"
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setCourseToDelete(null);
+                }}
                 disabled={isDeleting}
                 className="crs-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
+                type="button"
                 onClick={confirmDelete}
                 disabled={isDeleting}
                 className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer disabled:opacity-50"

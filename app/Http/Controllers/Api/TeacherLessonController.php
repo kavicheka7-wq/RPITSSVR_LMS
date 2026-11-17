@@ -40,7 +40,7 @@ class TeacherLessonController extends Controller
     }
 
     /**
-     * ✅ HELPER: សម្អាត Cache ស្ថិតិរបស់គ្រូ និង Admin ពេលមានការបន្ថែម/កែ/លុបមេរៀន
+     * ✅ HELPER: សម្អាត Cache ស្ថិតិរបស់គ្រូ Admin និងសិស្សទាំងអស់ ពេលមានការបន្ថែម/កែ/លុបមេរៀន ឬផ្ទុកឯកសារឡើង
      */
     private function clearRelatedCaches(): void
     {
@@ -50,6 +50,14 @@ class TeacherLessonController extends Controller
         }
         Cache::forget('admin_overview_report');
         Cache::forget('admin_dashboard_stats');
+        
+        // សម្អាត Cache បញ្ជីមេរៀន និង Dashboard របស់សិស្សទាំងអស់ ដើម្បីឱ្យមេរៀនថ្មីលោតចូលភ្លាមៗ
+        DB::table('users')->where('role_id', '!=', 1)->pluck('id')->each(function ($studentId) {
+            Cache::forget("student_dashboard_fast_v3_{$studentId}");
+            Cache::forget("student_dashboard_fast_v4_{$studentId}");
+            Cache::forget("student_dashboard_fast_v5_{$studentId}");
+            Cache::forget("dept_courses_years_map_v5_" . md5($studentId)); 
+        });
     }
 
     /**
@@ -622,6 +630,8 @@ class TeacherLessonController extends Controller
                     $lesson->update(['lesson_order' => $item['order']]);
                 }
             });
+            
+            $this->clearRelatedCaches();
 
             return response()->json([
                 'message' => 'បានរៀបចំលំដាប់មេរៀនដោយជោគជ័យ',

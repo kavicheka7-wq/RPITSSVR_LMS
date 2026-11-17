@@ -4,11 +4,11 @@ import api from '../../services/api';
 import { getCachedDepartments, getCachedRoles, getCachedCourses } from '../../services/metadataService';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import XLSX from 'xlsx-js-style'; 
-import { 
-  PencilSquareIcon, 
-  TrashIcon, 
-  PlusIcon, 
+import XLSX from 'xlsx-js-style';
+import {
+  PencilSquareIcon,
+  TrashIcon,
+  PlusIcon,
   UserGroupIcon,
   XMarkIcon,
   MagnifyingGlassIcon,
@@ -25,7 +25,9 @@ import {
   ArrowPathIcon,
   DocumentTextIcon,
   SparklesIcon,
-  CalendarDaysIcon
+  CalendarDaysIcon,
+  BuildingLibraryIcon,
+  PhoneIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
@@ -48,7 +50,8 @@ const getAllStudentsCacheKey = (uid) => `cached_admin_students_list_v8_${uid}`;
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
@@ -74,10 +77,12 @@ const scheduleAvatarY2MapPersist = (uid) => {
   if (avatarY2PersistTimer) clearTimeout(avatarY2PersistTimer);
   avatarY2PersistTimer = setTimeout(() => {
     try {
-      localStorage.setItem(
-        AVATAR_STUDENT_Y2_STORAGE_KEY,
-        JSON.stringify(ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap)
-      );
+      const avStr = JSON.stringify(ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap);
+      try {
+        sessionStorage.setItem(AVATAR_STUDENT_Y2_STORAGE_KEY, avStr);
+      } catch {}
+      localStorage.setItem(AVATAR_STUDENT_Y2_STORAGE_KEY, avStr);
+
       if (uid && Array.isArray(ADMIN_STUDENTS_Y2_MEM_CACHE.students)) {
         const updatedCompact = ADMIN_STUDENTS_Y2_MEM_CACHE.students.map((item) => {
           const tiny = ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[item.id];
@@ -98,8 +103,12 @@ const scheduleAvatarY2MapPersist = (uid) => {
               : item.user,
           };
         });
-        localStorage.setItem(getStudentsY2CacheKey(uid), JSON.stringify(updatedCompact));
-        localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, JSON.stringify(updatedCompact));
+        const listStr = JSON.stringify(updatedCompact);
+        try {
+          sessionStorage.setItem(getStudentsY2CacheKey(uid), listStr);
+        } catch {}
+        localStorage.setItem(getStudentsY2CacheKey(uid), listStr);
+        localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, listStr);
       }
     } catch {}
   }, 120);
@@ -197,7 +206,11 @@ const safeWriteStudentsStorage = (key, list, uid = null) => {
   });
 
   try {
-    localStorage.setItem(key, JSON.stringify(compactList));
+    const str = JSON.stringify(compactList);
+    try {
+      sessionStorage.setItem(key, str);
+    } catch {}
+    localStorage.setItem(key, str);
   } catch {}
 };
 
@@ -238,7 +251,10 @@ const resolveAdminUid = (contextUser) => {
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -314,9 +330,10 @@ const getStudentFullName = (person) => {
 
 const getDepartmentDisplayName = (deptObjOrName) => {
   if (!deptObjOrName) return '—';
-  const rawName = typeof deptObjOrName === 'string'
-    ? deptObjOrName
-    : (deptObjOrName.department_name || deptObjOrName.name || '');
+  const rawName =
+    typeof deptObjOrName === 'string'
+      ? deptObjOrName
+      : deptObjOrName.department_name || deptObjOrName.name || '';
   return rawName || '—';
 };
 
@@ -366,7 +383,7 @@ const isYear2Student = (student) => {
   if (!student) return false;
   const rawVal = student.batch_year ?? student.year ?? student.academic_year ?? '';
   const raw = rawVal.toString().toLowerCase().trim();
-  
+
   return (
     raw === '2' ||
     raw === '២' ||
@@ -382,13 +399,13 @@ const isYear2Student = (student) => {
 
 // អនុគមន៍គណនាដំឡើងឆ្នាំសិក្សាដោយស្វ័យប្រវត្តិ (ពី ឆ្នាំទី២ -> ឆ្នាំទី៣) ដោយរក្សាឈ្មោះជំនាន់នៅដដែល
 const calculateNextBatchYear = (currentVal) => {
-  if (!currentVal) return 'ជំនាន់ទី..., ឆ្នាំទី៣'; 
+  if (!currentVal) return 'ជំនាន់ទី..., ឆ្នាំទី៣';
   let nextVal = currentVal.toString().trim();
-  
+
   if (/ឆ្នាំទី\s*២/i.test(nextVal)) return nextVal.replace(/ឆ្នាំទី\s*២/i, 'ឆ្នាំទី៣');
   if (/ឆ្នាំទី\s*2/i.test(nextVal)) return nextVal.replace(/ឆ្នាំទី\s*2/i, 'ឆ្នាំទី3');
-  if (/year\s*2/i.test(nextVal)) return nextVal.replace(/year\s*2/ig, 'Year 3');
-  if (/y2/i.test(nextVal)) return nextVal.replace(/y2/ig, 'Y3');
+  if (/year\s*2/i.test(nextVal)) return nextVal.replace(/year\s*2/gi, 'Year 3');
+  if (/y2/i.test(nextVal)) return nextVal.replace(/y2/gi, 'Y3');
 
   if (nextVal === '2') return '3';
   if (nextVal === '២') return '៣';
@@ -407,7 +424,10 @@ const sortStudentsOldestFirst = (list) => {
     const codeA = (a.student_code || '').toString().trim();
     const codeB = (b.student_code || '').toString().trim();
     if (codeA && codeB && codeA !== codeB) {
-      return codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+      return codeA.localeCompare(codeB, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
     }
     return (Number(a.id) || 0) - (Number(b.id) || 0);
   });
@@ -416,7 +436,8 @@ const sortStudentsOldestFirst = (list) => {
 // អនុគមន៍សម្រាប់បញ្ជូនសារជូនដំណឹងចូលទៅកាន់រូបកណ្ដឹង (NotificationBell) នៅលើ Navbar
 const pushLocalNotification = (notif) => {
   try {
-    const userObjStr = localStorage.getItem('auth_user') || localStorage.getItem('user');
+    const userObjStr =
+      localStorage.getItem('auth_user') || localStorage.getItem('user');
     let uid = 'default';
     let role = 'admin';
     if (userObjStr) {
@@ -440,7 +461,7 @@ const pushLocalNotification = (notif) => {
       id: `local_act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       time: new Date().toISOString(),
       read: false,
-      ...notif
+      ...notif,
     };
 
     keysToUpdate.forEach((key) => {
@@ -497,7 +518,9 @@ const ManageStudentsYear2 = () => {
       readStorageJson(getAllStudentsCacheKey(currentAdminId), null) ||
       readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
     if (Array.isArray(allPrefetched)) {
-      const filtered = hydrateStudentsWithAvatars(allPrefetched.filter((s) => isYear2Student(s)));
+      const filtered = hydrateStudentsWithAvatars(
+        allPrefetched.filter((s) => isYear2Student(s))
+      );
       ADMIN_STUDENTS_Y2_MEM_CACHE.students = filtered;
       return filtered;
     }
@@ -570,7 +593,7 @@ const ManageStudentsYear2 = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const abortControllerRef = useRef(null);
-  
+
   const [page, setPage] = useState(1);
   const [perPage] = useState(200);
   const [meta, setMeta] = useState(() => {
@@ -589,7 +612,7 @@ const ManageStudentsYear2 = () => {
       per_page: 200,
     };
   });
-  
+
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState(null);
   const [unenrollTarget, setUnenrollTarget] = useState(null);
@@ -597,8 +620,8 @@ const ManageStudentsYear2 = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importPreview, setImportPreview] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
-  const [selectedFileName, setSelectedFileName] = useState(''); 
-  
+  const [selectedFileName, setSelectedFileName] = useState('');
+
   const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentEnrollments, setStudentEnrollments] = useState([]);
@@ -612,7 +635,7 @@ const ManageStudentsYear2 = () => {
   const [bulkCourseSearch, setBulkCourseSearch] = useState('');
   const [bulkCourseDeptFilter, setBulkCourseDeptFilter] = useState('all');
   const [isBulkEnrolling, setIsBulkEnrolling] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -632,14 +655,12 @@ const ManageStudentsYear2 = () => {
 
   const [selectedStudents, setSelectedStudents] = useState([]);
   const [showPromoteModal, setShowPromoteModal] = useState(false);
-  const [promoteTargetYear, setPromoteTargetYear] = useState(''); 
+  const [promoteTargetYear, setPromoteTargetYear] = useState('');
   const [isPromoting, setIsPromoting] = useState(false);
 
   // ============================================================================
-  // 📌 ផ្នែកទី ៣៖ ការច្រោះទិន្នន័យល្បឿនលឿន O(1) Map Lookup (មិនរាំងស្ទះទោះមានសិស្ស/គ្រូច្រើន)
+  // 📌 ផ្នែកទី ៣៖ ការច្រោះទិន្នន័យល្បឿនលឿន O(1) Map Lookup
   // ============================================================================
-
-  // ✅ បង្កើត Hash Map សម្រាប់មុខវិជ្ជា និងដេប៉ាតឺម៉ង់ ដើម្បីស្វែងរកក្នុងល្បឿន O(1) (0ms)
   const coursesByIdMap = useMemo(() => {
     const map = new Map();
     if (Array.isArray(allCourses)) {
@@ -665,77 +686,101 @@ const ManageStudentsYear2 = () => {
     return map;
   }, [departments]);
 
-  const getStudentDepartmentIds = useCallback((student) => {
-    if (!student) return [];
-    const deptSet = new Set();
+  const getStudentDepartmentIds = useCallback(
+    (student) => {
+      if (!student) return [];
+      const deptSet = new Set();
 
-    const primaryDeptId = student.department_id || student.department?.id;
-    if (primaryDeptId !== undefined && primaryDeptId !== null && primaryDeptId !== '') {
-      deptSet.add(String(primaryDeptId));
-    }
+      const primaryDeptId = student.department_id || student.department?.id;
+      if (
+        primaryDeptId !== undefined &&
+        primaryDeptId !== null &&
+        primaryDeptId !== ''
+      ) {
+        deptSet.add(String(primaryDeptId));
+      }
 
-    if (Array.isArray(student.enrollments)) {
-      student.enrollments.forEach((enr) => {
-        const cDeptId = enr.course?.department_id || enr.course?.department?.id || enr.department_id;
-        if (cDeptId !== undefined && cDeptId !== null && cDeptId !== '') {
-          deptSet.add(String(cDeptId));
-        } else if (enr.course_id && coursesByIdMap.size > 0) {
-          const matchedCourse = coursesByIdMap.get(Number(enr.course_id)) || coursesByIdMap.get(String(enr.course_id));
-          const mDeptId = matchedCourse?.department_id || matchedCourse?.department?.id;
-          if (mDeptId) deptSet.add(String(mDeptId));
+      if (Array.isArray(student.enrollments)) {
+        student.enrollments.forEach((enr) => {
+          const cDeptId =
+            enr.course?.department_id ||
+            enr.course?.department?.id ||
+            enr.department_id;
+          if (cDeptId !== undefined && cDeptId !== null && cDeptId !== '') {
+            deptSet.add(String(cDeptId));
+          } else if (enr.course_id && coursesByIdMap.size > 0) {
+            const matchedCourse =
+              coursesByIdMap.get(Number(enr.course_id)) ||
+              coursesByIdMap.get(String(enr.course_id));
+            const mDeptId =
+              matchedCourse?.department_id || matchedCourse?.department?.id;
+            if (mDeptId) deptSet.add(String(mDeptId));
+          }
+        });
+      }
+
+      if (Array.isArray(student.courses)) {
+        student.courses.forEach((c) => {
+          const cDeptId = c.department_id || c.department?.id;
+          if (cDeptId !== undefined && cDeptId !== null && cDeptId !== '') {
+            deptSet.add(String(cDeptId));
+          }
+        });
+      }
+
+      const mappedDepts = enrolledDeptsMap[student.id];
+      if (Array.isArray(mappedDepts)) {
+        mappedDepts.forEach((dId) => {
+          if (dId !== undefined && dId !== null && dId !== '') {
+            deptSet.add(String(dId));
+          }
+        });
+      }
+
+      return Array.from(deptSet);
+    },
+    [coursesByIdMap, enrolledDeptsMap]
+  );
+
+  const syncStudentEnrolledDepts = useCallback(
+    (studentId, enrollmentsList, coursesCatalog = allCourses) => {
+      if (!studentId) return;
+      const deptIds = new Set();
+      (enrollmentsList || []).forEach((enr) => {
+        let dId = enr.course?.department_id || enr.course?.department?.id;
+        if (!dId && enr.course_id) {
+          const foundCourse =
+            coursesByIdMap.get(Number(enr.course_id)) ||
+            (Array.isArray(coursesCatalog)
+              ? coursesCatalog.find(
+                  (c) => Number(c.id) === Number(enr.course_id)
+                )
+              : null);
+          dId = foundCourse?.department_id || foundCourse?.department?.id;
         }
-      });
-    }
-
-    if (Array.isArray(student.courses)) {
-      student.courses.forEach((c) => {
-        const cDeptId = c.department_id || c.department?.id;
-        if (cDeptId !== undefined && cDeptId !== null && cDeptId !== '') {
-          deptSet.add(String(cDeptId));
-        }
-      });
-    }
-
-    const mappedDepts = enrolledDeptsMap[student.id];
-    if (Array.isArray(mappedDepts)) {
-      mappedDepts.forEach((dId) => {
         if (dId !== undefined && dId !== null && dId !== '') {
-          deptSet.add(String(dId));
+          deptIds.add(String(dId));
         }
       });
-    }
 
-    return Array.from(deptSet);
-  }, [coursesByIdMap, enrolledDeptsMap]);
-
-  const syncStudentEnrolledDepts = useCallback((studentId, enrollmentsList, coursesCatalog = allCourses) => {
-    if (!studentId) return;
-    const deptIds = new Set();
-    (enrollmentsList || []).forEach((enr) => {
-      let dId = enr.course?.department_id || enr.course?.department?.id;
-      if (!dId && enr.course_id) {
-        const foundCourse =
-          coursesByIdMap.get(Number(enr.course_id)) ||
-          (Array.isArray(coursesCatalog)
-            ? coursesCatalog.find((c) => Number(c.id) === Number(enr.course_id))
-            : null);
-        dId = foundCourse?.department_id || foundCourse?.department?.id;
-      }
-      if (dId !== undefined && dId !== null && dId !== '') {
-        deptIds.add(String(dId));
-      }
-    });
-
-    setEnrolledDeptsMap((prev) => {
-      const next = { ...prev, [studentId]: Array.from(deptIds) };
-      ADMIN_STUDENTS_Y2_MEM_CACHE.enrolledDeptsMap = next;
-      try {
-        localStorage.setItem(getEnrolledDeptsMapKey(currentAdminId), JSON.stringify(next));
-        localStorage.setItem(CACHE_KEY_LEGACY_ENROLLED_MAP, JSON.stringify(next));
-      } catch (e) {}
-      return next;
-    });
-  }, [allCourses, coursesByIdMap, currentAdminId]);
+      setEnrolledDeptsMap((prev) => {
+        const next = { ...prev, [studentId]: Array.from(deptIds) };
+        ADMIN_STUDENTS_Y2_MEM_CACHE.enrolledDeptsMap = next;
+        try {
+          localStorage.setItem(
+            getEnrolledDeptsMapKey(currentAdminId),
+            JSON.stringify(next)
+          );
+          localStorage.setItem(
+            CACHE_KEY_LEGACY_ENROLLED_MAP,
+            JSON.stringify(next)
+          );
+        } catch (e) {}
+        return next;
+      });
+    },
+    [allCourses, coursesByIdMap, currentAdminId]
+  );
 
   const year2StudentsAll = useMemo(() => {
     return (students || []).filter((student) => isYear2Student(student));
@@ -747,7 +792,9 @@ const ManageStudentsYear2 = () => {
     }
 
     const counts = { all: year2StudentsAll.length };
-    departments.forEach((dept) => { counts[dept.id] = 0; });
+    departments.forEach((dept) => {
+      counts[dept.id] = 0;
+    });
     year2StudentsAll.forEach((student) => {
       const studentDeptIds = getStudentDepartmentIds(student);
       studentDeptIds.forEach((dId) => {
@@ -762,9 +809,14 @@ const ManageStudentsYear2 = () => {
   }, [year2StudentsAll, departments, debouncedSearch, getStudentDepartmentIds]);
 
   const shiftCounts = useMemo(() => {
-    const baseList = selectedDepartment === 'all'
-      ? year2StudentsAll
-      : year2StudentsAll.filter((student) => getStudentDepartmentIds(student).includes(String(selectedDepartment)));
+    const baseList =
+      selectedDepartment === 'all'
+        ? year2StudentsAll
+        : year2StudentsAll.filter((student) =>
+            getStudentDepartmentIds(student).includes(
+              String(selectedDepartment)
+            )
+          );
 
     let monFri = 0;
     let satSun = 0;
@@ -782,13 +834,22 @@ const ManageStudentsYear2 = () => {
   }, [year2StudentsAll, selectedDepartment, getStudentDepartmentIds]);
 
   const displayedStudents = useMemo(() => {
-    const filteredByDept = selectedDepartment === 'all'
-      ? year2StudentsAll
-      : year2StudentsAll.filter((student) => getStudentDepartmentIds(student).includes(String(selectedDepartment)));
+    const filteredByDept =
+      selectedDepartment === 'all'
+        ? year2StudentsAll
+        : year2StudentsAll.filter((student) =>
+            getStudentDepartmentIds(student).includes(
+              String(selectedDepartment)
+            )
+          );
 
-    const filteredByShift = selectedShift === 'all'
-      ? filteredByDept
-      : filteredByDept.filter((student) => normalizeShiftKey(student.study_shift) === selectedShift);
+    const filteredByShift =
+      selectedShift === 'all'
+        ? filteredByDept
+        : filteredByDept.filter(
+            (student) =>
+              normalizeShiftKey(student.study_shift) === selectedShift
+          );
 
     if (!searchTerm.trim()) return filteredByShift;
     const q = searchTerm.toLowerCase().trim();
@@ -807,7 +868,13 @@ const ManageStudentsYear2 = () => {
         student.batch_year?.toLowerCase().includes(q)
       );
     });
-  }, [year2StudentsAll, selectedDepartment, selectedShift, searchTerm, getStudentDepartmentIds]);
+  }, [
+    year2StudentsAll,
+    selectedDepartment,
+    selectedShift,
+    searchTerm,
+    getStudentDepartmentIds,
+  ]);
 
   const paginationPages = useMemo(() => {
     const current = Number(meta.current_page || 1);
@@ -828,7 +895,6 @@ const ManageStudentsYear2 = () => {
   // ============================================================================
   // 📌 ផ្នែកទី ៤៖ មុខងារត្រួតពិនិត្យប៊ូតុងព្រួញអូសឆ្វេង-ស្ដាំ (SCROLL BUTTONS LOGIC)
   // ============================================================================
-
   const checkCardsScroll = useCallback(() => {
     const el = cardsScrollRef.current;
     if (!el) return;
@@ -847,7 +913,7 @@ const ManageStudentsYear2 = () => {
     const scrollAmount = 480;
     cardsScrollRef.current.scrollBy({
       left: direction === 'left' ? -scrollAmount : scrollAmount,
-      behavior: 'smooth'
+      behavior: 'smooth',
     });
   };
 
@@ -884,24 +950,25 @@ const ManageStudentsYear2 = () => {
   // ============================================================================
   // 📌 ផ្នែកទី ៥៖ មុខងារជ្រើសរើសសិស្ស និងដំឡើងឆ្នាំសិក្សា (PROMOTE STUDENTS)
   // ============================================================================
-
   const handleSelectAll = (e) => {
     if (e.target.checked) {
-      setSelectedStudents(displayedStudents.map(s => s.id));
+      setSelectedStudents(displayedStudents.map((s) => s.id));
     } else {
       setSelectedStudents([]);
     }
   };
 
   const handleSelectStudent = (id) => {
-    setSelectedStudents(prev => 
-      prev.includes(id) ? prev.filter(studentId => studentId !== id) : [...prev, id]
+    setSelectedStudents((prev) =>
+      prev.includes(id)
+        ? prev.filter((studentId) => studentId !== id)
+        : [...prev, id]
     );
   };
 
   const handleOpenPromoteModal = () => {
     if (selectedStudents.length > 0) {
-      const firstStudent = students.find(s => s.id === selectedStudents[0]);
+      const firstStudent = students.find((s) => s.id === selectedStudents[0]);
       if (firstStudent && firstStudent.batch_year) {
         const nextYear = calculateNextBatchYear(firstStudent.batch_year);
         setPromoteTargetYear(nextYear);
@@ -925,20 +992,35 @@ const ManageStudentsYear2 = () => {
 
       await api.post('/admin/students/promote', {
         student_ids: selectedStudents,
-        target_year: targetStr
+        target_year: targetStr,
       });
 
-      setStudents(prev => {
-        const newList = prev.filter(s => !selectedStudents.includes(s.id));
+      setStudents((prev) => {
+        const newList = prev.filter((s) => !selectedStudents.includes(s.id));
         ADMIN_STUDENTS_Y2_MEM_CACHE.students = newList;
-        safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList, currentAdminId);
-        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList, currentAdminId);
+        safeWriteStudentsStorage(
+          getStudentsY2CacheKey(currentAdminId),
+          newList,
+          currentAdminId
+        );
+        safeWriteStudentsStorage(
+          CACHE_KEY_LEGACY_STUDENTS,
+          newList,
+          currentAdminId
+        );
         return newList;
       });
 
       try {
-        localStorage.removeItem(`cached_admin_students_year3_v8_${currentAdminId}`);
-        localStorage.removeItem(`cached_admin_students_year3_meta_v8_${currentAdminId}`);
+        sessionStorage.removeItem(
+          `cached_admin_students_year3_v8_${currentAdminId}`
+        );
+        localStorage.removeItem(
+          `cached_admin_students_year3_v8_${currentAdminId}`
+        );
+        localStorage.removeItem(
+          `cached_admin_students_year3_meta_v8_${currentAdminId}`
+        );
         localStorage.removeItem('cached_admin_students_year3_only');
         localStorage.removeItem('cached_admin_students_year3_only_meta');
         localStorage.removeItem(getAllStudentsCacheKey(currentAdminId));
@@ -951,7 +1033,7 @@ const ManageStudentsYear2 = () => {
         descKm: `សិស្សចំនួន ${countPromoted} នាក់ ត្រូវបានផ្លាស់ប្តូរទៅកាន់ «${targetStr}» ដោយជោគជ័យ។`,
         descEn: `${countPromoted} students have been successfully promoted to "${targetStr}".`,
         category: 'student',
-        link: '/students/year-3'
+        link: '/students/year-3',
       });
 
       setSelectedStudents([]);
@@ -972,13 +1054,14 @@ const ManageStudentsYear2 = () => {
   // ============================================================================
   // 📌 ផ្នែកទី ៦៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
   // ============================================================================
-
   useEffect(() => {
     if (!searchTerm.trim()) {
       setDebouncedSearch('');
       setPage(1);
       if (Array.isArray(ADMIN_STUDENTS_Y2_MEM_CACHE.students)) {
-        setStudents(hydrateStudentsWithAvatars(ADMIN_STUDENTS_Y2_MEM_CACHE.students));
+        setStudents(
+          hydrateStudentsWithAvatars(ADMIN_STUDENTS_Y2_MEM_CACHE.students)
+        );
         if (ADMIN_STUDENTS_Y2_MEM_CACHE.meta) {
           setMeta(ADMIN_STUDENTS_Y2_MEM_CACHE.meta);
         }
@@ -999,8 +1082,10 @@ const ManageStudentsYear2 = () => {
         setDepartments(data);
         ADMIN_STUDENTS_Y2_MEM_CACHE.departments = data;
         try {
-          localStorage.setItem(getDeptsCacheKey(currentAdminId), JSON.stringify(data));
-          localStorage.setItem(CACHE_KEY_SHARED_DEPTS, JSON.stringify(data));
+          const str = JSON.stringify(data);
+          sessionStorage.setItem(getDeptsCacheKey(currentAdminId), str);
+          localStorage.setItem(getDeptsCacheKey(currentAdminId), str);
+          localStorage.setItem(CACHE_KEY_SHARED_DEPTS, str);
         } catch {}
       }
     } catch (error) {}
@@ -1019,24 +1104,32 @@ const ManageStudentsYear2 = () => {
     } catch (error) {}
   }, []);
 
-  const fetchCoursesList = useCallback(async (forceRefresh = false) => {
-    try {
-      const coursesData = await getCachedCourses(forceRefresh);
-      if (Array.isArray(coursesData)) {
-        setAllCourses(coursesData);
-        ADMIN_STUDENTS_Y2_MEM_CACHE.courses = coursesData;
-        try {
-          localStorage.setItem(getCoursesCacheKey(currentAdminId), JSON.stringify(coursesData));
-          localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(coursesData));
-        } catch {}
-      }
-    } catch (error) {}
-  }, [currentAdminId]);
+  const fetchCoursesList = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        const coursesData = await getCachedCourses(forceRefresh);
+        if (Array.isArray(coursesData)) {
+          setAllCourses(coursesData);
+          ADMIN_STUDENTS_Y2_MEM_CACHE.courses = coursesData;
+          try {
+            const str = JSON.stringify(coursesData);
+            sessionStorage.setItem(getCoursesCacheKey(currentAdminId), str);
+            localStorage.setItem(getCoursesCacheKey(currentAdminId), str);
+            localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
+          } catch {}
+        }
+      } catch (error) {}
+    },
+    [currentAdminId]
+  );
 
   const fetchStudents = useCallback(
     async (forceRefresh = false) => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
-        const cachedList = readStorageJson(getStudentsY2CacheKey(currentAdminId), null);
+        const cachedList = readStorageJson(
+          getStudentsY2CacheKey(currentAdminId),
+          null
+        );
         if (Array.isArray(cachedList) && cachedList.length > 0) {
           const hydratedCached = hydrateStudentsWithAvatars(cachedList);
           setStudents(hydratedCached);
@@ -1059,17 +1152,28 @@ const ManageStudentsYear2 = () => {
 
       try {
         const response = await api.get('/admin/students', {
-          params: { page, per_page: perPage, search: debouncedSearch, year: '2' },
+          params: {
+            page,
+            per_page: perPage,
+            search: debouncedSearch,
+            year: '2',
+          },
           signal: controller.signal,
         });
         const rawList = Array.isArray(response.data?.data)
           ? response.data.data
           : response.data?.data?.data || response.data || [];
         const validRaw = Array.isArray(rawList) ? rawList : [];
-        const year2StudentList = validRaw.filter((student) => isYear2Student(student));
+        const year2StudentList = validRaw.filter((student) =>
+          isYear2Student(student)
+        );
 
         const studentMeta = {
-          ...(response.data?.meta || { current_page: 1, last_page: 1, per_page: perPage }),
+          ...(response.data?.meta || {
+            current_page: 1,
+            last_page: 1,
+            per_page: perPage,
+          }),
           total: year2StudentList.length,
         };
 
@@ -1082,8 +1186,16 @@ const ManageStudentsYear2 = () => {
           ADMIN_STUDENTS_Y2_MEM_CACHE.students = hydratedList;
           ADMIN_STUDENTS_Y2_MEM_CACHE.meta = studentMeta;
           ADMIN_STUDENTS_Y2_MEM_CACHE.lastSyncedAt = Date.now();
-          safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), hydratedList, currentAdminId);
-          safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, hydratedList, currentAdminId);
+          safeWriteStudentsStorage(
+            getStudentsY2CacheKey(currentAdminId),
+            hydratedList,
+            currentAdminId
+          );
+          safeWriteStudentsStorage(
+            CACHE_KEY_LEGACY_STUDENTS,
+            hydratedList,
+            currentAdminId
+          );
           try {
             localStorage.setItem(
               getStudentsY2MetaCacheKey(currentAdminId),
@@ -1096,7 +1208,8 @@ const ManageStudentsYear2 = () => {
           } catch (e) {}
         }
       } catch (error) {
-        if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return;
+        if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED')
+          return;
         console.error(error);
       }
     },
@@ -1111,7 +1224,12 @@ const ManageStudentsYear2 = () => {
       fetchStudentRole();
       fetchCoursesList(false);
     }, 150);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [fetchStudents, fetchDepartments, fetchStudentRole, fetchCoursesList]);
 
   const handleInputChange = (e) => {
@@ -1126,7 +1244,9 @@ const ManageStudentsYear2 = () => {
     setFormError('');
 
     const effectiveRoleId = studentRoleId || 3;
-    const finalDepartmentId = formData.department_id || (selectedDepartment !== 'all' ? selectedDepartment : '');
+    const finalDepartmentId =
+      formData.department_id ||
+      (selectedDepartment !== 'all' ? selectedDepartment : '');
     const fullName = `${formData.first_name || ''} ${formData.last_name || ''}`.trim();
 
     setIsSubmitting(true);
@@ -1144,14 +1264,21 @@ const ManageStudentsYear2 = () => {
           department_id: finalDepartmentId,
         };
         Object.keys(dataToUpdate).forEach((key) => {
-          if (dataToUpdate[key] !== null && dataToUpdate[key] !== undefined && dataToUpdate[key] !== '') {
+          if (
+            dataToUpdate[key] !== null &&
+            dataToUpdate[key] !== undefined &&
+            dataToUpdate[key] !== ''
+          ) {
             payload[key] = dataToUpdate[key];
           }
         });
         payload.role_id = effectiveRoleId;
         if (!formData.password) delete payload.password;
 
-        const response = await api.put(`/admin/students/${editingStudent.id}`, payload);
+        const response = await api.put(
+          `/admin/students/${editingStudent.id}`,
+          payload
+        );
         const serverData = response.data?.data || response.data;
         const updatedStudent = {
           ...editingStudent,
@@ -1163,14 +1290,24 @@ const ManageStudentsYear2 = () => {
             ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[editingStudent.id],
         };
 
-        setStudents(prev => {
+        setStudents((prev) => {
           const newList = isYear2Student(updatedStudent)
-            ? prev.map(s => s.id === editingStudent.id ? updatedStudent : s)
-            : prev.filter(s => s.id !== editingStudent.id);
+            ? prev.map((s) =>
+                s.id === editingStudent.id ? updatedStudent : s
+              )
+            : prev.filter((s) => s.id !== editingStudent.id);
           if (page === 1 && !debouncedSearch) {
             ADMIN_STUDENTS_Y2_MEM_CACHE.students = newList;
-            safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList, currentAdminId);
-            safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList, currentAdminId);
+            safeWriteStudentsStorage(
+              getStudentsY2CacheKey(currentAdminId),
+              newList,
+              currentAdminId
+            );
+            safeWriteStudentsStorage(
+              CACHE_KEY_LEGACY_STUDENTS,
+              newList,
+              currentAdminId
+            );
           }
           return newList;
         });
@@ -1181,17 +1318,21 @@ const ManageStudentsYear2 = () => {
           descKm: `ព័ត៌មានរបស់សិស្ស «${fullName}» ត្រូវបានកែប្រែដោយជោគជ័យ។`,
           descEn: `Student "${fullName}" has been updated successfully.`,
           category: 'student',
-          link: '/students/year-2'
+          link: '/students/year-2',
         });
       } else {
         const payload = {};
         const dataWithYear2 = {
           ...formData,
           department_id: finalDepartmentId,
-          batch_year: formData.batch_year || 'ឆ្នាំទី2'
+          batch_year: formData.batch_year || 'ឆ្នាំទី2',
         };
         Object.keys(dataWithYear2).forEach((key) => {
-          if (dataWithYear2[key] !== null && dataWithYear2[key] !== undefined && dataWithYear2[key] !== '') {
+          if (
+            dataWithYear2[key] !== null &&
+            dataWithYear2[key] !== undefined &&
+            dataWithYear2[key] !== ''
+          ) {
             payload[key] = dataWithYear2[key];
           }
         });
@@ -1201,12 +1342,20 @@ const ManageStudentsYear2 = () => {
         const newStudent = response.data?.data || response.data;
 
         if (isYear2Student(newStudent)) {
-          setStudents(prev => {
+          setStudents((prev) => {
             const newList = [newStudent, ...prev].slice(0, perPage);
             if (page === 1 && !debouncedSearch) {
               ADMIN_STUDENTS_Y2_MEM_CACHE.students = newList;
-              safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList, currentAdminId);
-              safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList, currentAdminId);
+              safeWriteStudentsStorage(
+                getStudentsY2CacheKey(currentAdminId),
+                newList,
+                currentAdminId
+              );
+              safeWriteStudentsStorage(
+                CACHE_KEY_LEGACY_STUDENTS,
+                newList,
+                currentAdminId
+              );
             }
             return newList;
           });
@@ -1218,7 +1367,7 @@ const ManageStudentsYear2 = () => {
           descKm: `គណនីសិស្សឆ្នាំទី២ «${fullName}» ត្រូវបានបង្កើតចូលក្នុងប្រព័ន្ធជោគជ័យ។`,
           descEn: `Year 2 student "${fullName}" has been created successfully.`,
           category: 'student',
-          link: '/students/year-2'
+          link: '/students/year-2',
         });
       }
       setShowModal(false);
@@ -1227,11 +1376,16 @@ const ManageStudentsYear2 = () => {
     } catch (error) {
       console.error('Submit student error:', error);
       const apiErrors = error.response?.data?.errors;
-      const firstValidationMsg = apiErrors ? Object.values(apiErrors).flat()[0] : null;
+      const firstValidationMsg = apiErrors
+        ? Object.values(apiErrors).flat()[0]
+        : null;
       const errMsg =
         firstValidationMsg ||
         error.response?.data?.message ||
-        t('មិនអាចរក្សាទុកទិន្នន័យសិស្សបានទេ (អ៊ីមែល ឬអត្តលេខអាចស្ទួន)!', 'Could not save student data (email or student code may already exist)!');
+        t(
+          'មិនអាចរក្សាទុកទិន្នន័យសិស្សបានទេ (អ៊ីមែល ឬអត្តលេខអាចស្ទួន)!',
+          'Could not save student data (email or student code may already exist)!'
+        );
       setFormError(String(errMsg));
     } finally {
       setIsSubmitting(false);
@@ -1254,12 +1408,20 @@ const ManageStudentsYear2 = () => {
     setShowDeleteModal(false);
     setStudentToDelete(null);
 
-    setStudents(prev => {
-      const newList = prev.filter(s => s.id !== deletedId);
+    setStudents((prev) => {
+      const newList = prev.filter((s) => s.id !== deletedId);
       if (page === 1 && !debouncedSearch) {
         ADMIN_STUDENTS_Y2_MEM_CACHE.students = newList;
-        safeWriteStudentsStorage(getStudentsY2CacheKey(currentAdminId), newList, currentAdminId);
-        safeWriteStudentsStorage(CACHE_KEY_LEGACY_STUDENTS, newList, currentAdminId);
+        safeWriteStudentsStorage(
+          getStudentsY2CacheKey(currentAdminId),
+          newList,
+          currentAdminId
+        );
+        safeWriteStudentsStorage(
+          CACHE_KEY_LEGACY_STUDENTS,
+          newList,
+          currentAdminId
+        );
       }
       return newList;
     });
@@ -1273,7 +1435,7 @@ const ManageStudentsYear2 = () => {
         descKm: `គណនីសិស្ស «${deletedName}» ត្រូវបានលុបចេញពីប្រព័ន្ធរួចរាល់។`,
         descEn: `Student "${deletedName}" has been removed.`,
         category: 'student',
-        link: '/students/year-2'
+        link: '/students/year-2',
       });
     } catch (error) {
       console.error('Failed to delete student:', error);
@@ -1296,7 +1458,8 @@ const ManageStudentsYear2 = () => {
       gender: '',
       phone: '',
       student_code: '',
-      department_id: selectedDepartment !== 'all' ? String(selectedDepartment) : '',
+      department_id:
+        selectedDepartment !== 'all' ? String(selectedDepartment) : '',
       batch_year: '',
       degree_level: '',
       study_shift: selectedShift !== 'all' ? selectedShift : '',
@@ -1335,9 +1498,8 @@ const ManageStudentsYear2 = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី ៧៖ មុខងារចុះឈ្មោះមុខវិជ្ជាល្បឿន 0ms (Optimistic UI & Instant Cache)
+  // 📌 ផ្នែកទី ៧៖ មុខងារចុះឈ្មោះមុខវិជ្ជាល្បឿន 0ms
   // ============================================================================
-
   const openEnrollmentModal = async (student) => {
     setSelectedStudent(student);
     setSelectedCoursesToEnroll([]);
@@ -1345,11 +1507,14 @@ const ManageStudentsYear2 = () => {
     const studentDeptId = student.department_id || student.department?.id;
     setEnrollDeptFilter(studentDeptId ? 'student_dept' : 'all');
 
-    // ✅ ១. បង្ហាញទិន្នន័យពី RAM Cache ភ្លាមៗក្នុង 0ms បើធ្លាប់បើកមើលសិស្សនេះម្ដងហើយ
-    const cachedEnr = ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[student.id];
+    const cachedEnr =
+      ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[student.id];
     if (Array.isArray(cachedEnr)) {
       setStudentEnrollments(cachedEnr);
-    } else if (Array.isArray(student.enrollments) && student.enrollments.length > 0) {
+    } else if (
+      Array.isArray(student.enrollments) &&
+      student.enrollments.length > 0
+    ) {
       setStudentEnrollments(student.enrollments);
     } else {
       setStudentEnrollments([]);
@@ -1358,22 +1523,32 @@ const ManageStudentsYear2 = () => {
     setShowEnrollmentModal(true);
 
     try {
-      const requests = [api.get(`/admin/students/${student.id}/enrollments`)];
+      const requests = [
+        api.get(`/admin/students/${student.id}/enrollments`),
+      ];
       if (!allCourses || allCourses.length === 0) {
         requests.push(getCachedCourses());
       }
       const [enrollmentsRes, coursesData] = await Promise.all(requests);
       const fetchedEnrollments = enrollmentsRes.data?.data || [];
-      const fetchedCourses = Array.isArray(coursesData) && coursesData.length > 0 ? coursesData : allCourses;
+      const fetchedCourses =
+        Array.isArray(coursesData) && coursesData.length > 0
+          ? coursesData
+          : allCourses;
 
-      ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[student.id] = fetchedEnrollments;
+      ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[student.id] =
+        fetchedEnrollments;
       setStudentEnrollments(fetchedEnrollments);
 
       if (Array.isArray(coursesData) && coursesData.length > 0) {
         setAllCourses(coursesData);
         ADMIN_STUDENTS_Y2_MEM_CACHE.courses = coursesData;
       }
-      syncStudentEnrolledDepts(student.id, fetchedEnrollments, fetchedCourses);
+      syncStudentEnrolledDepts(
+        student.id,
+        fetchedEnrollments,
+        fetchedCourses
+      );
     } catch (error) {
       console.error('Cannot fetch enrollment details:', error);
     }
@@ -1393,15 +1568,22 @@ const ManageStudentsYear2 = () => {
     const unenrolled = allCourses.filter(
       (c) => !enrolledCourseIdSet.has(Number(c.id))
     );
-    const studentDeptId = selectedStudent.department_id || selectedStudent.department?.id;
+    const studentDeptId =
+      selectedStudent.department_id || selectedStudent.department?.id;
 
     const filteredByDept = unenrolled.filter((c) => {
       if (enrollDeptFilter === 'all') return true;
       if (enrollDeptFilter === 'student_dept') {
         if (!studentDeptId) return true;
-        return String(c.department_id || c.department?.id) === String(studentDeptId);
+        return (
+          String(c.department_id || c.department?.id) ===
+          String(studentDeptId)
+        );
       }
-      return String(c.department_id || c.department?.id) === String(enrollDeptFilter);
+      return (
+        String(c.department_id || c.department?.id) ===
+        String(enrollDeptFilter)
+      );
     });
 
     if (!enrollCourseSearch.trim()) return filteredByDept;
@@ -1411,27 +1593,45 @@ const ManageStudentsYear2 = () => {
         c.course_name?.toLowerCase().includes(q) ||
         c.course_code?.toLowerCase().includes(q)
     );
-  }, [allCourses, enrolledCourseIdSet, selectedStudent, enrollDeptFilter, enrollCourseSearch]);
+  }, [
+    allCourses,
+    enrolledCourseIdSet,
+    selectedStudent,
+    enrollDeptFilter,
+    enrollCourseSearch,
+  ]);
 
   const toggleCourseInSingleModal = (courseId) => {
     const idNum = Number(courseId);
     setSelectedCoursesToEnroll((prev) =>
-      prev.includes(idNum) ? prev.filter((id) => id !== idNum) : [...prev, idNum]
+      prev.includes(idNum)
+        ? prev.filter((id) => id !== idNum)
+        : [...prev, idNum]
     );
   };
 
   const handleSelectAllAvailableSingle = () => {
-    const visibleIds = availableCoursesForSingleStudent.map((c) => Number(c.id));
-    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedCoursesToEnroll.includes(id));
+    const visibleIds = availableCoursesForSingleStudent.map((c) =>
+      Number(c.id)
+    );
+    const allSelected =
+      visibleIds.length > 0 &&
+      visibleIds.every((id) => selectedCoursesToEnroll.includes(id));
     if (allSelected) {
-      setSelectedCoursesToEnroll((prev) => prev.filter((id) => !visibleIds.includes(id)));
+      setSelectedCoursesToEnroll((prev) =>
+        prev.filter((id) => !visibleIds.includes(id))
+      );
     } else {
-      setSelectedCoursesToEnroll((prev) => Array.from(new Set([...prev, ...visibleIds])));
+      setSelectedCoursesToEnroll((prev) =>
+        Array.from(new Set([...prev, ...visibleIds]))
+      );
     }
   };
 
-  // ✅ ២. ចុចចុះឈ្មោះភ្លាម បង្ហាញក្នុងបញ្ជីខាងក្រោមភ្លាមៗក្នុង 0ms (Optimistic UI Update)
-  const executeInstantEnrollment = async (courseIdsToEnroll, isDeptBulk = false) => {
+  const executeInstantEnrollment = async (
+    courseIdsToEnroll,
+    isDeptBulk = false
+  ) => {
     if (!selectedStudent || courseIdsToEnroll.length === 0) return;
 
     const prevEnrollments = [...studentEnrollments];
@@ -1439,7 +1639,9 @@ const ManageStudentsYear2 = () => {
 
     const optimisticNewItems = courseIdsToEnroll.map((cid) => {
       const matchedCourse =
-        coursesByIdMap.get(Number(cid)) || coursesByIdMap.get(String(cid)) || {};
+        coursesByIdMap.get(Number(cid)) ||
+        coursesByIdMap.get(String(cid)) ||
+        {};
       return {
         id: `temp_${cid}_${Date.now()}`,
         student_id: selectedStudent.user_id || selectedStudent.id,
@@ -1451,15 +1653,23 @@ const ManageStudentsYear2 = () => {
 
     const nextOptimisticList = [...prevEnrollments, ...optimisticNewItems];
     setStudentEnrollments(nextOptimisticList);
-    ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = nextOptimisticList;
-    syncStudentEnrolledDepts(selectedStudent.id, nextOptimisticList, allCourses);
+    ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] =
+      nextOptimisticList;
+    syncStudentEnrolledDepts(
+      selectedStudent.id,
+      nextOptimisticList,
+      allCourses
+    );
     setSelectedCoursesToEnroll([]);
 
     setIsEnrollingCourses(true);
     try {
-      const res = await api.post(`/admin/students/${selectedStudent.id}/enrollments`, {
-        course_ids: courseIdsToEnroll,
-      });
+      const res = await api.post(
+        `/admin/students/${selectedStudent.id}/enrollments`,
+        {
+          course_ids: courseIdsToEnroll,
+        }
+      );
 
       const returnedList = res.data?.data;
       if (Array.isArray(returnedList) && returnedList.length > 0) {
@@ -1474,7 +1684,8 @@ const ManageStudentsYear2 = () => {
         });
         const finalMerged = Array.from(mergedMap.values());
         setStudentEnrollments(finalMerged);
-        ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = finalMerged;
+        ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] =
+          finalMerged;
         syncStudentEnrolledDepts(selectedStudent.id, finalMerged, allCourses);
       }
 
@@ -1493,7 +1704,8 @@ const ManageStudentsYear2 = () => {
     } catch (error) {
       console.error('Failed to enroll courses:', error);
       setStudentEnrollments(prevEnrollments);
-      ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = prevEnrollments;
+      ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] =
+        prevEnrollments;
     } finally {
       setIsEnrollingCourses(false);
     }
@@ -1506,10 +1718,13 @@ const ManageStudentsYear2 = () => {
 
   const handleQuickEnrollAllDeptCourses = async () => {
     if (!selectedStudent) return;
-    const studentDeptId = selectedStudent.department_id || selectedStudent.department?.id;
+    const studentDeptId =
+      selectedStudent.department_id || selectedStudent.department?.id;
     const deptUnenrolled = allCourses.filter(
       (c) =>
-        (!studentDeptId || String(c.department_id || c.department?.id) === String(studentDeptId)) &&
+        (!studentDeptId ||
+          String(c.department_id || c.department?.id) ===
+            String(studentDeptId)) &&
         !enrolledCourseIdSet.has(Number(c.id))
     );
 
@@ -1526,7 +1741,8 @@ const ManageStudentsYear2 = () => {
     setBulkSelectedCourses([]);
     setBulkCourseSearch('');
 
-    let defaultDept = selectedDepartment !== 'all' ? String(selectedDepartment) : 'all';
+    let defaultDept =
+      selectedDepartment !== 'all' ? String(selectedDepartment) : 'all';
     if (defaultDept === 'all') {
       const firstStd = students.find((s) => s.id === selectedStudents[0]);
       const dId = firstStd?.department_id || firstStd?.department?.id;
@@ -1546,7 +1762,10 @@ const ManageStudentsYear2 = () => {
   const filteredBulkCourses = useMemo(() => {
     const byDept = allCourses.filter((c) => {
       if (bulkCourseDeptFilter === 'all') return true;
-      return String(c.department_id || c.department?.id) === String(bulkCourseDeptFilter);
+      return (
+        String(c.department_id || c.department?.id) ===
+        String(bulkCourseDeptFilter)
+      );
     });
     if (!bulkCourseSearch.trim()) return byDept;
     const q = bulkCourseSearch.toLowerCase().trim();
@@ -1560,17 +1779,25 @@ const ManageStudentsYear2 = () => {
   const toggleBulkCourseSelection = (courseId) => {
     const idNum = Number(courseId);
     setBulkSelectedCourses((prev) =>
-      prev.includes(idNum) ? prev.filter((id) => id !== idNum) : [...prev, idNum]
+      prev.includes(idNum)
+        ? prev.filter((id) => id !== idNum)
+        : [...prev, idNum]
     );
   };
 
   const handleSelectAllBulkCourses = () => {
     const visibleIds = filteredBulkCourses.map((c) => Number(c.id));
-    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => bulkSelectedCourses.includes(id));
+    const allSelected =
+      visibleIds.length > 0 &&
+      visibleIds.every((id) => bulkSelectedCourses.includes(id));
     if (allSelected) {
-      setBulkSelectedCourses((prev) => prev.filter((id) => !visibleIds.includes(id)));
+      setBulkSelectedCourses((prev) =>
+        prev.filter((id) => !visibleIds.includes(id))
+      );
     } else {
-      setBulkSelectedCourses((prev) => Array.from(new Set([...prev, ...visibleIds])));
+      setBulkSelectedCourses((prev) =>
+        Array.from(new Set([...prev, ...visibleIds]))
+      );
     }
   };
 
@@ -1583,7 +1810,6 @@ const ManageStudentsYear2 = () => {
     const studentsToEnroll = [...selectedStudents];
     const coursesToEnroll = [...bulkSelectedCourses];
 
-    // ✅ Optimistic UI៖ បិទផ្ទាំង និងធ្វើបច្ចុប្បន្នភាពផ្លាកដេប៉ាតឺម៉ង់ភ្លាមៗក្នុង 0ms
     const newlyAddedDeptIds = allCourses
       .filter((c) => coursesToEnroll.includes(Number(c.id)))
       .map((c) => String(c.department_id || c.department?.id || ''))
@@ -1593,13 +1819,23 @@ const ManageStudentsYear2 = () => {
       setEnrolledDeptsMap((prev) => {
         const next = { ...prev };
         studentsToEnroll.forEach((studentId) => {
-          const existing = Array.isArray(next[studentId]) ? next[studentId] : [];
-          next[studentId] = Array.from(new Set([...existing, ...newlyAddedDeptIds]));
+          const existing = Array.isArray(next[studentId])
+            ? next[studentId]
+            : [];
+          next[studentId] = Array.from(
+            new Set([...existing, ...newlyAddedDeptIds])
+          );
         });
         ADMIN_STUDENTS_Y2_MEM_CACHE.enrolledDeptsMap = next;
         try {
-          localStorage.setItem(getEnrolledDeptsMapKey(currentAdminId), JSON.stringify(next));
-          localStorage.setItem(CACHE_KEY_LEGACY_ENROLLED_MAP, JSON.stringify(next));
+          localStorage.setItem(
+            getEnrolledDeptsMapKey(currentAdminId),
+            JSON.stringify(next)
+          );
+          localStorage.setItem(
+            CACHE_KEY_LEGACY_ENROLLED_MAP,
+            JSON.stringify(next)
+          );
         } catch (e) {}
         return next;
       });
@@ -1638,7 +1874,6 @@ const ManageStudentsYear2 = () => {
     }
   };
 
-  // ✅ ៣. ចុចលុបមុខវិជ្ជាភ្លាម ដកចេញពីអេក្រង់ភ្លាមៗក្នុង 0ms (Optimistic Unenroll)
   const confirmUnenrollCourse = async () => {
     if (!unenrollTarget || !selectedStudent) return;
     const targetCourseId = Number(unenrollTarget);
@@ -1649,23 +1884,30 @@ const ManageStudentsYear2 = () => {
       (e) => Number(e.course_id ?? e.course?.id) !== targetCourseId
     );
     setStudentEnrollments(updatedList);
-    ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = updatedList;
+    ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] =
+      updatedList;
     syncStudentEnrolledDepts(selectedStudent.id, updatedList, allCourses);
 
     try {
-      await api.delete(`/admin/students/${selectedStudent.id}/enrollments/${targetCourseId}`);
+      await api.delete(
+        `/admin/students/${selectedStudent.id}/enrollments/${targetCourseId}`
+      );
     } catch (error) {
       console.error('Failed to unenroll:', error);
       setStudentEnrollments(prevEnrollments);
-      ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] = prevEnrollments;
+      ADMIN_STUDENTS_Y2_MEM_CACHE.enrollmentsByStudentId[selectedStudent.id] =
+        prevEnrollments;
     }
   };
 
   // ============================================================================
   // 📌 ផ្នែកទី ៨៖ មុខងារនាំចេញ និងនាំចូលទិន្នន័យសិស្សតាមរយៈឯកសារ EXCEL (.XLSX)
   // ============================================================================
-
-  const applyExcelStyling = (worksheet, colWidths = [], textColumnIndices = []) => {
+  const applyExcelStyling = (
+    worksheet,
+    colWidths = [],
+    textColumnIndices = []
+  ) => {
     if (!worksheet || !worksheet['!ref']) return;
     const range = XLSX.utils.decode_range(worksheet['!ref']);
 
@@ -1682,7 +1924,10 @@ const ManageStudentsYear2 = () => {
         if (isTextCol) {
           worksheet[cellAddress].t = 's';
           worksheet[cellAddress].z = '@';
-          if (worksheet[cellAddress].v !== undefined && worksheet[cellAddress].v !== null) {
+          if (
+            worksheet[cellAddress].v !== undefined &&
+            worksheet[cellAddress].v !== null
+          ) {
             worksheet[cellAddress].v = String(worksheet[cellAddress].v);
           }
         }
@@ -1695,7 +1940,9 @@ const ManageStudentsYear2 = () => {
             color: { rgb: isHeader ? 'FFFFFF' : '1E293B' },
           },
           fill: {
-            fgColor: { rgb: isHeader ? '1E3A8A' : (R % 2 === 1 ? 'FFFFFF' : 'F8FAFC') },
+            fgColor: {
+              rgb: isHeader ? '1E3A8A' : R % 2 === 1 ? 'FFFFFF' : 'F8FAFC',
+            },
           },
           alignment: {
             vertical: 'center',
@@ -1728,7 +1975,9 @@ const ManageStudentsYear2 = () => {
     if (displayedStudents.length === 0) {
       return;
     }
-    const currentDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
+    const currentDeptName = activeDepartmentObj
+      ? getDepartmentDisplayName(activeDepartmentObj)
+      : '';
     const sortedStudentsForExport = sortStudentsOldestFirst(displayedStudents);
 
     const exportData = sortedStudentsForExport.map((s, idx) => {
@@ -1738,9 +1987,10 @@ const ManageStudentsYear2 = () => {
           return dObj ? getDepartmentDisplayName(dObj) : null;
         })
         .filter(Boolean);
-      const deptDisplay = allDeptNames.length > 0
-        ? allDeptNames.join(' + ')
-        : getDepartmentDisplayName(s.department || activeDepartmentObj);
+      const deptDisplay =
+        allDeptNames.length > 0
+          ? allDeptNames.join(' + ')
+          : getDepartmentDisplayName(s.department || activeDepartmentObj);
 
       return {
         'ល.រ': idx + 1,
@@ -1757,48 +2007,65 @@ const ManageStudentsYear2 = () => {
       };
     });
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    
+
     const colWidths = [
-      { wch: 8 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
-      { wch: 10 }, { wch: 28 }, { wch: 16 }, { wch: 26 },
-      { wch: 22 }, { wch: 20 }, { wch: 18 }
+      { wch: 8 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 10 },
+      { wch: 28 },
+      { wch: 16 },
+      { wch: 26 },
+      { wch: 22 },
+      { wch: 20 },
+      { wch: 18 },
     ];
     applyExcelStyling(worksheet, colWidths, [1, 6]);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Year_2_Students');
-    const safeDeptSuffix = currentDeptName ? `_${currentDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}` : '';
-    const safeShiftSuffix = selectedShift !== 'all' ? `_${selectedShift}` : '';
-    XLSX.writeFile(workbook, `Students_Year2${safeDeptSuffix}${safeShiftSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    
+    const safeDeptSuffix = currentDeptName
+      ? `_${currentDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}`
+      : '';
+    const safeShiftSuffix =
+      selectedShift !== 'all' ? `_${selectedShift}` : '';
+    XLSX.writeFile(
+      workbook,
+      `Students_Year2${safeDeptSuffix}${safeShiftSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+
     pushLocalNotification({
       titleKm: 'បាននាំចេញទិន្នន័យសិស្សទៅ Excel',
       titleEn: 'Students Exported to Excel',
       descKm: `ទិន្នន័យសិស្សឆ្នាំទី២ (${currentDeptName || 'ទាំងអស់'}) ត្រូវបានទាញយកជា Excel ជោគជ័យ។`,
       descEn: 'Year 2 students data was successfully exported to Excel.',
       category: 'export',
-      link: '/students/year-2'
+      link: '/students/year-2',
     });
   };
 
   const handleDownloadTemplate = () => {
-    const defaultDeptName = activeDepartmentObj ? getDepartmentDisplayName(activeDepartmentObj) : '';
-    const defaultShift = selectedShift !== 'all' ? selectedShift : 'Monday-Friday';
+    const defaultDeptName = activeDepartmentObj
+      ? getDepartmentDisplayName(activeDepartmentObj)
+      : '';
+    const defaultShift =
+      selectedShift !== 'all' ? selectedShift : 'Monday-Friday';
 
     const blankRow = () => ({
-      'first_name': '',
-      'last_name': '',
-      'email': '',
-      'phone': '',
-      'gender': '',
-      'student_code': '',
-      'department': defaultDeptName,
-      'batch_year': 'ជំនាន់ទី , ឆ្នាំទី2',
-      'degree_level': 'Bachelor Degree',
-      'study_shift': defaultShift,
-      'address': '',
-      'date_of_birth': '',
-      'password': ''
+      first_name: '',
+      last_name: '',
+      email: '',
+      phone: '',
+      gender: '',
+      student_code: '',
+      department: defaultDeptName,
+      batch_year: 'ជំនាន់ទី , ឆ្នាំទី2',
+      degree_level: 'Bachelor Degree',
+      study_shift: defaultShift,
+      address: '',
+      date_of_birth: '',
+      password: '',
     });
 
     const templateData = Array.from({ length: 50 }, () => blankRow());
@@ -1806,24 +2073,38 @@ const ManageStudentsYear2 = () => {
     const worksheet = XLSX.utils.json_to_sheet(templateData);
 
     const colWidths = [
-      { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 15 }, { wch: 10 },
-      { wch: 18 }, { wch: 25 }, { wch: 24 }, { wch: 20 }, { wch: 18 },
-      { wch: 20 }, { wch: 15 }, { wch: 15 }
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 25 },
+      { wch: 15 },
+      { wch: 10 },
+      { wch: 18 },
+      { wch: 25 },
+      { wch: 24 },
+      { wch: 20 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 15 },
+      { wch: 15 },
     ];
     applyExcelStyling(worksheet, colWidths, [3, 5, 7, 11, 12]);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
-    const safeDeptSuffix = defaultDeptName ? `_${defaultDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}` : '';
+    const safeDeptSuffix = defaultDeptName
+      ? `_${defaultDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}`
+      : '';
     XLSX.writeFile(workbook, `student_year2_template${safeDeptSuffix}.xlsx`);
 
     pushLocalNotification({
       titleKm: 'បានទាញយកទម្រង់គំរូ Excel',
       titleEn: 'Excel Template Downloaded',
-      descKm: 'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យសិស្សត្រូវបានទាញយកជោគជ័យ។',
-      descEn: 'The Excel template for student import was downloaded successfully.',
+      descKm:
+        'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យសិស្សត្រូវបានទាញយកជោគជ័យ។',
+      descEn:
+        'The Excel template for student import was downloaded successfully.',
       category: 'download',
-      link: '/students/year-2'
+      link: '/students/year-2',
     });
   };
 
@@ -1833,7 +2114,7 @@ const ManageStudentsYear2 = () => {
     }
     if (!deptNameOrCode) return null;
     const search = deptNameOrCode.toString().trim().toLowerCase();
-    const found = departments.find(d => {
+    const found = departments.find((d) => {
       const rawName = (d.department_name || d.name || '').toLowerCase();
       return (
         rawName === search ||
@@ -1852,12 +2133,15 @@ const ManageStudentsYear2 = () => {
     if (k.includes('phone') || k.includes('ទូរស័ព្ទ')) return 'phone';
     if (k.includes('code') || k.includes('អត្តលេខ')) return 'student_code';
     if (k.includes('gender') || k.includes('ភេទ')) return 'gender';
-    if (k.includes('department') || k.includes('ដេប៉ាតឺម៉ង់')) return 'department';
-    if (k.includes('batch') || k.includes('ជំនាន់') || k.includes('ឆ្នាំ')) return 'batch_year';
+    if (k.includes('department') || k.includes('ដេប៉ាតឺម៉ង់'))
+      return 'department';
+    if (k.includes('batch') || k.includes('ជំនាន់') || k.includes('ឆ្នាំ'))
+      return 'batch_year';
     if (k.includes('degree') || k.includes('កម្រិត')) return 'degree_level';
     if (k.includes('shift') || k.includes('វេន')) return 'study_shift';
     if (k.includes('address') || k.includes('អាសយដ្ឋាន')) return 'address';
-    if (k.includes('birth') || k.includes('កំណើត') || k.includes('dob')) return 'date_of_birth';
+    if (k.includes('birth') || k.includes('កំណើត') || k.includes('dob'))
+      return 'date_of_birth';
     if (k.includes('password') || k.includes('ពាក្យសម្ងាត់')) return 'password';
     if (k.includes('status') || k.includes('ស្ថានភាព')) return 'status';
     return key;
@@ -1876,7 +2160,10 @@ const ManageStudentsYear2 = () => {
         const data = evt.target.result;
         const workbook = XLSX.read(data, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
+        const rawJson = XLSX.utils.sheet_to_json(worksheet, {
+          defval: '',
+          raw: false,
+        });
 
         const nonEmptyRows = rawJson
           .map((row, index) => ({ row, excelRowNumber: index + 2 }))
@@ -1887,30 +2174,41 @@ const ManageStudentsYear2 = () => {
             });
             return Boolean(
               item.first_name ||
-              item.last_name ||
-              item.email ||
-              item.student_code ||
-              item.phone
+                item.last_name ||
+                item.email ||
+                item.student_code ||
+                item.phone
             );
           });
 
         if (!nonEmptyRows || nonEmptyRows.length === 0) {
           setImportPreview([]);
-          setImportError(t('រកមិនឃើញទិន្នន័យសិស្សក្នុងឯកសារនេះទេ!', 'No student data found in this file!'));
+          setImportError(
+            t(
+              'រកមិនឃើញទិន្នន័យសិស្សក្នុងឯកសារនេះទេ!',
+              'No student data found in this file!'
+            )
+          );
           return;
         }
 
-        const existingEmails = new Set(students.map((sItem) => sItem.email?.toLowerCase()).filter(Boolean));
+        const existingEmails = new Set(
+          students.map((sItem) => sItem.email?.toLowerCase()).filter(Boolean)
+        );
         const fileEmails = new Set();
 
         const parsedRows = nonEmptyRows.map(({ row, excelRowNumber }) => {
           const item = {};
-          Object.keys(row).forEach(k => { item[normalizeHeaderKey(k)] = row[k]?.toString().trim(); });
+          Object.keys(row).forEach((k) => {
+            item[normalizeHeaderKey(k)] = row[k]?.toString().trim();
+          });
 
           const errors = [];
-          if (!item.first_name) errors.push(t('ខ្វះនាមខ្លួន', 'Missing First Name'));
-          if (!item.last_name) errors.push(t('ខ្វះនាមត្រកូល', 'Missing Last Name'));
-          
+          if (!item.first_name)
+            errors.push(t('ខ្វះនាមខ្លួន', 'Missing First Name'));
+          if (!item.last_name)
+            errors.push(t('ខ្វះនាមត្រកូល', 'Missing Last Name'));
+
           if (!item.email) {
             errors.push(t('ត្រូវមានអ៊ីមែល (ចាំបាច់)', 'Email is required'));
           } else {
@@ -1918,22 +2216,34 @@ const ManageStudentsYear2 = () => {
             if (!emailRegex.test(item.email)) {
               errors.push(t('អ៊ីមែលមិនត្រឹមត្រូវ', 'Invalid Email Format'));
             } else if (existingEmails.has(item.email.toLowerCase())) {
-              errors.push(t('អ៊ីមែលនេះមានក្នុងប្រព័ន្ធរួចហើយ', 'Email already exists'));
+              errors.push(
+                t(
+                  'អ៊ីមែលនេះមានក្នុងប្រព័ន្ធរួចហើយ',
+                  'Email already exists'
+                )
+              );
             } else if (fileEmails.has(item.email.toLowerCase())) {
-              errors.push(t('អ៊ីមែលស្ទួនក្នុងឯកសារនេះ', 'Duplicate email in file'));
+              errors.push(
+                t('អ៊ីមែលស្ទួនក្នុងឯកសារនេះ', 'Duplicate email in file')
+              );
             } else {
               fileEmails.add(item.email.toLowerCase());
             }
           }
 
           let gender = item.gender;
-          if (gender === 'ប្រុស' || gender === 'Male' || gender === 'M') gender = 'Male';
-          else if (gender === 'ស្រី' || gender === 'Female' || gender === 'F') gender = 'Female';
-          else if (gender) gender = 'Other'; else gender = 'Male';
+          if (gender === 'ប្រុស' || gender === 'Male' || gender === 'M')
+            gender = 'Male';
+          else if (gender === 'ស្រី' || gender === 'Female' || gender === 'F')
+            gender = 'Female';
+          else if (gender) gender = 'Other';
+          else gender = 'Male';
 
           let studyShift = item.study_shift
             ? normalizeShiftKey(item.study_shift)
-            : (selectedShift !== 'all' ? selectedShift : 'Monday-Friday');
+            : selectedShift !== 'all'
+            ? selectedShift
+            : 'Monday-Friday';
 
           let cleanPhone = (item.phone || '').replace(/^'+/, '').trim();
           if (/^[1-9]\d{7,8}$/.test(cleanPhone)) {
@@ -1946,7 +2256,10 @@ const ManageStudentsYear2 = () => {
           }
 
           let cleanBatchYear = (item.batch_year || '').trim();
-          if (!cleanBatchYear || /^ជំនាន់ទី\s*,\s*ឆ្នាំទី[២2]$/.test(cleanBatchYear)) {
+          if (
+            !cleanBatchYear ||
+            /^ជំនាន់ទី\s*,\s*ឆ្នាំទី[២2]$/.test(cleanBatchYear)
+          ) {
             cleanBatchYear = 'ឆ្នាំទី2';
           }
 
@@ -1961,25 +2274,30 @@ const ManageStudentsYear2 = () => {
               email: item.email || '',
               phone: cleanPhone,
               gender: gender,
-              student_code: (item.student_code || '').replace(/^'+/, '').trim(),
+              student_code: (item.student_code || '')
+                .replace(/^'+/, '')
+                .trim(),
               department_id: findDepartmentId(item.department),
               batch_year: cleanBatchYear,
-              degree_level: normalizeDegreeLevel(item.degree_level) || 'Bachelor Degree',
+              degree_level:
+                normalizeDegreeLevel(item.degree_level) || 'Bachelor Degree',
               study_shift: studyShift,
               address: item.address || '',
               date_of_birth: normalizedDob || null,
               password: cleanPassword,
-              status: item.status || 'active'
+              status: item.status || 'active',
             },
             isValid: errors.length === 0,
-            errors
+            errors,
           };
         });
 
         setImportPreview(parsedRows);
       } catch (err) {
         console.error('File parsing error:', err);
-        setImportError(t('មិនអាចអានឯកសារ Excel នេះបានទេ!', 'Failed to read Excel file!'));
+        setImportError(
+          t('មិនអាចអានឯកសារ Excel នេះបានទេ!', 'Failed to read Excel file!')
+        );
       } finally {
         e.target.value = null;
       }
@@ -1989,7 +2307,9 @@ const ManageStudentsYear2 = () => {
 
   const handleConfirmImport = async () => {
     if (!importPreview || importPreview.length === 0 || isImporting) return;
-    const validItems = importPreview.filter(r => r.isValid).map(r => r.data);
+    const validItems = importPreview
+      .filter((r) => r.isValid)
+      .map((r) => r.data);
     if (validItems.length === 0) {
       return;
     }
@@ -1999,19 +2319,20 @@ const ManageStudentsYear2 = () => {
     try {
       await api.post('/admin/students/import', { students: validItems });
       try {
+        sessionStorage.removeItem(getStudentsY2CacheKey(currentAdminId));
         localStorage.removeItem(getStudentsY2CacheKey(currentAdminId));
         localStorage.removeItem(getStudentsY2MetaCacheKey(currentAdminId));
         localStorage.removeItem(CACHE_KEY_LEGACY_STUDENTS);
         localStorage.removeItem(CACHE_KEY_LEGACY_META);
       } catch (e) {}
-      
+
       pushLocalNotification({
         titleKm: 'បាននាំចូលទិន្នន័យសិស្សពី Excel',
         titleEn: 'Students Imported from Excel',
         descKm: `ទិន្នន័យសិស្សចំនួន ${validItems.length} នាក់ត្រូវបាននាំចូល និងធ្វើបច្ចុប្បន្នភាពរួចរាល់។`,
         descEn: `${validItems.length} students were successfully imported/updated.`,
         category: 'import',
-        link: '/students/year-2'
+        link: '/students/year-2',
       });
 
       setShowImportModal(false);
@@ -2022,7 +2343,10 @@ const ManageStudentsYear2 = () => {
       console.error('Import Error:', error);
       const errMsg =
         error.response?.data?.message ||
-        t('មានបញ្ហាក្នុងការនាំចូលទិន្នន័យសិស្ស!', 'Error importing students!');
+        t(
+          'មានបញ្ហាក្នុងការនាំចូលទិន្នន័យសិស្ស!',
+          'Error importing students!'
+        );
       setImportError(String(errMsg));
     } finally {
       setIsImporting(false);
@@ -2032,7 +2356,10 @@ const ManageStudentsYear2 = () => {
   const getStudyShiftLabel = (shift) => {
     const norm = normalizeShiftKey(shift);
     if (language === 'km') {
-      const shifts = { 'Monday-Friday': 'ចន្ទ-សុក្រ', 'Saturday-Sunday': 'សៅរ៍-អាទិត្យ' };
+      const shifts = {
+        'Monday-Friday': 'ចន្ទ-សុក្រ',
+        'Saturday-Sunday': 'សៅរ៍-អាទិត្យ',
+      };
       return shifts[norm] || shift || '—';
     }
     return norm || shift || '—';
@@ -2041,7 +2368,11 @@ const ManageStudentsYear2 = () => {
   const getDegreeLevelLabel = (level) => {
     const norm = normalizeDegreeLevel(level);
     if (language === 'km') {
-      const levels = { 'Associate Degree': 'បរិញ្ញាបត្ររង', 'Bachelor Degree': 'បរិញ្ញាបត្រ', 'Master Degree': 'បរិញ្ញាបត្រជាន់ខ្ពស់' };
+      const levels = {
+        'Associate Degree': 'បរិញ្ញាបត្ររង',
+        'Bachelor Degree': 'បរិញ្ញាបត្រ',
+        'Master Degree': 'បរិញ្ញាបត្រជាន់ខ្ពស់',
+      };
       return levels[norm] || level || '—';
     }
     return norm || level || '—';
@@ -2083,7 +2414,6 @@ const ManageStudentsYear2 = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ អនុគមន៍ឆ្លាតវៃចាប់យកឈ្មោះ និងរូបថតគ្រូក្នុងល្បឿន O(1) ពីគ្រប់ទម្រង់ទិន្នន័យ + ផ្គូផ្គងពី coursesByIdMap
   const resolveCourseTeacherInfo = useCallback(
     (courseObj, fallbackCourseId = null) => {
       const cid = courseObj?.id ?? fallbackCourseId;
@@ -2153,51 +2483,69 @@ const ManageStudentsYear2 = () => {
   // 📌 ផ្នែកទី ៩៖ ការបង្ហាញទម្រង់ផ្ទៃមុខកម្មវិធី (JSX UI RENDERING)
   // ============================================================================
   return (
-    <div className="std-page-bg p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-6 animate-fadeIn">
+    <div className="std-page-bg px-3 py-4 sm:p-5 lg:p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-5 sm:space-y-6 pb-28 md:pb-12 animate-fadeIn">
       
       {/* ------------------------------------------------------------------ */}
       {/* 9.1. ផ្ទាំងក្បាលខាងលើ (Header Banner) និងប៊ូតុងសកម្មភាពគោល           */}
       {/* ------------------------------------------------------------------ */}
-      <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-8 shadow-xl border border-blue-900">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
         <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-3">
-            <h1 className="text-[28px] sm:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20">
-                <UserGroupIcon className="h-8 w-8 text-yellow-400" />
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
+          <div className="space-y-2 sm:space-y-3 min-w-0">
+            <h1 className="text-xl sm:text-2xl md:text-[26px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
+              <div className="p-2.5 sm:p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+                <UserGroupIcon className="h-6 w-6 sm:h-7 sm:w-7 lg:h-8 lg:w-8 text-yellow-400" />
               </div>
-              {t('គ្រប់គ្រងសិស្ស - ឆ្នាំទី២', 'Manage Students - Year 2')}
+              <span className="truncate">{t('គ្រប់គ្រងសិស្ស - ឆ្នាំទី២', 'Manage Students - Year 2')}</span>
             </h1>
-            <p className={`text-blue-200/80 text-sm font-medium ${selectedDepartment === 'all' ? 'max-w-none' : 'max-w-xl'}`}>
+            <p
+              className={`text-blue-200/80 text-xs sm:text-sm font-medium leading-relaxed ${
+                selectedDepartment === 'all' ? 'max-w-2xl' : 'max-w-xl'
+              }`}
+            >
               {selectedDepartment === 'all'
-                ? t('សូមចុចជ្រើសរើសកាតដេប៉ាតឺម៉ង់ខាងក្រោម ដើម្បីបន្ថែមសិស្សថ្មី នាំចូល ឬនាំចេញទិន្នន័យ Excel តាមដេប៉ាតឺម៉ង់។', 'Please select a department card below to add students, import, or export Excel data by department.')
-                : t('បន្ថែម និងគ្រប់គ្រងគណនីសិស្សឆ្នាំទី២ តាមដេប៉ាតឺម៉ង់ និងវេនសិក្សា លុប កែប្រែ ឬនាំចូលពី Excel ។', 'Add and manage Year 2 student accounts by department and study shift, edit, delete, or import from Excel.')}
+                ? t(
+                    'សូមចុចជ្រើសរើសកាតដេប៉ាតឺម៉ង់ខាងក្រោម ដើម្បីបន្ថែមសិស្សថ្មី នាំចូល ឬនាំចេញទិន្នន័យ Excel តាមដេប៉ាតឺម៉ង់។',
+                    'Please select a department card below to add students, import, or export Excel data by department.'
+                  )
+                : t(
+                    'បន្ថែម និងគ្រប់គ្រងគណនីសិស្សឆ្នាំទី២ តាមដេប៉ាតឺម៉ង់ និងវេនសិក្សា លុប កែប្រែ ឬនាំចូលពី Excel ។',
+                    'Add and manage Year 2 student accounts by department and study shift, edit, delete, or import from Excel.'
+                  )}
             </p>
           </div>
 
           {selectedDepartment !== 'all' && (
-            <div className="flex flex-wrap items-center gap-3 shrink-0 animate-fadeIn">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 shrink-0 animate-fadeIn">
               <button
+                type="button"
                 onClick={handleExportExcel}
-                className="inline-flex items-center justify-center px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 sm:px-4 sm:py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
               >
-                <DocumentIcon className="h-5 w-5 mr-2" />
-                {t('នាំចេញ Excel', 'Export Excel')}
+                <DocumentIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
+                <span>{t('នាំចេញ Excel', 'Export Excel')}</span>
               </button>
               <button
-                onClick={() => { setImportPreview([]); setSelectedFileName(''); setImportError(''); setShowImportModal(true); }}
-                className="inline-flex items-center justify-center px-4 py-3 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
+                type="button"
+                onClick={() => {
+                  setImportPreview([]);
+                  setSelectedFileName('');
+                  setImportError('');
+                  setShowImportModal(true);
+                }}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 sm:px-4 sm:py-3 bg-emerald-500 hover:bg-emerald-400 text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
               >
-                <DocumentIcon className="h-5 w-5 mr-2" />
-                {t('នាំចូល Excel', 'Import Excel')}
+                <DocumentIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
+                <span>{t('នាំចូល Excel', 'Import Excel')}</span>
               </button>
               <button
+                type="button"
                 onClick={openCreateModal}
-                className="inline-flex items-center justify-center px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
+                className="w-full sm:w-auto inline-flex items-center justify-center px-5 py-2.5 sm:px-6 sm:py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer"
               >
-                <PlusIcon className="h-5 w-5 mr-2" />
-                {t('បន្ថែមសិស្ស', 'Add Student')}
+                <PlusIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
+                <span>{t('បន្ថែមសិស្ស', 'Add Student')}</span>
               </button>
             </div>
           )}
@@ -2212,7 +2560,7 @@ const ManageStudentsYear2 = () => {
           <button
             type="button"
             onClick={() => scrollDepartmentCards('left')}
-            className="std-scroll-arrow absolute -left-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] flex items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
+            className="std-scroll-arrow hidden sm:flex absolute -left-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
             title={t('អូសទៅឆ្វេង', 'Scroll Left')}
           >
             <ChevronLeftIcon className="h-4 w-4 stroke-[2.5]" />
@@ -2226,28 +2574,58 @@ const ManageStudentsYear2 = () => {
           onMouseMove={handleCardsMouseMove}
           onMouseUp={handleCardsMouseUpOrLeave}
           onMouseLeave={handleCardsMouseUpOrLeave}
-          className={`hide-scrollbar flex items-stretch gap-4 overflow-x-auto py-1 px-1 w-full select-none ${isDraggingCards ? 'cursor-grabbing' : 'cursor-grab scroll-smooth'}`}
+          className={`hide-scrollbar flex items-stretch gap-3 sm:gap-4 overflow-x-auto py-1 px-1 w-full select-none ${
+            isDraggingCards ? 'cursor-grabbing' : 'cursor-grab scroll-smooth'
+          }`}
         >
           <button
             type="button"
             onClick={() => handleSelectDepartmentCard('all')}
-            className={`shrink-0 w-[220px] sm:w-[235px] text-left p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between min-h-[125px] ${isDraggingCards ? 'cursor-grabbing' : 'cursor-pointer'} ${
-              selectedDepartment === 'all' ? 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white border-blue-800 shadow-lg -translate-y-0.5' : 'std-dept-card bg-white text-gray-900 border-gray-100 hover:border-blue-200 hover:shadow-md shadow-sm'
+            className={`shrink-0 w-[195px] sm:w-[235px] text-left p-4 sm:p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between min-h-[115px] sm:min-h-[125px] ${
+              isDraggingCards ? 'cursor-grabbing' : 'cursor-pointer'
+            } ${
+              selectedDepartment === 'all'
+                ? 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white border-blue-800 shadow-lg -translate-y-0.5'
+                : 'std-dept-card bg-white text-gray-900 border-gray-100 hover:border-blue-200 hover:shadow-md shadow-sm'
             }`}
           >
             <div className="flex items-start justify-between w-full">
-              <div className={`h-10 w-10 rounded-xl flex items-center justify-center border ${selectedDepartment === 'all' ? 'bg-white/15 text-white border-white/20' : 'std-dept-blue bg-blue-50 text-blue-600 border-blue-100'}`}>
-                <Squares2X2Icon className="h-5 w-5" />
+              <div
+                className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center border ${
+                  selectedDepartment === 'all'
+                    ? 'bg-white/15 text-white border-white/20'
+                    : 'std-dept-blue bg-blue-50 text-blue-600 border-blue-100'
+                }`}
+              >
+                <Squares2X2Icon className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
-              <span className={`text-2xl font-extrabold ${selectedDepartment === 'all' ? 'text-white' : 'std-text-primary text-gray-900'}`}>
+              <span
+                className={`text-xl sm:text-2xl font-extrabold ${
+                  selectedDepartment === 'all'
+                    ? 'text-white'
+                    : 'std-text-primary text-gray-900'
+                }`}
+              >
                 {departmentCounts.all || 0}
               </span>
             </div>
-            <div className="mt-4">
-              <p className={`text-sm font-extrabold truncate ${selectedDepartment === 'all' ? 'text-white' : 'std-text-primary text-gray-900'}`}>
+            <div className="mt-3 sm:mt-4">
+              <p
+                className={`text-xs sm:text-sm font-extrabold truncate ${
+                  selectedDepartment === 'all'
+                    ? 'text-white'
+                    : 'std-text-primary text-gray-900'
+                }`}
+              >
                 {t('សិស្សសរុប', 'Total Students')}
               </p>
-              <p className={`text-xs font-medium mt-0.5 truncate ${selectedDepartment === 'all' ? 'text-blue-200/80' : 'std-text-secondary text-gray-500'}`}>
+              <p
+                className={`text-[11px] sm:text-xs font-medium mt-0.5 truncate ${
+                  selectedDepartment === 'all'
+                    ? 'text-blue-200/80'
+                    : 'std-text-secondary text-gray-500'
+                }`}
+              >
                 {t('គ្រប់ដេប៉ាតឺម៉ង់', 'All Departments')}
               </p>
             </div>
@@ -2263,23 +2641,52 @@ const ManageStudentsYear2 = () => {
                 key={dept.id}
                 type="button"
                 onClick={() => handleSelectDepartmentCard(dept.id)}
-                className={`shrink-0 w-[220px] sm:w-[235px] text-left p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between min-h-[125px] ${isDraggingCards ? 'cursor-grabbing' : 'cursor-pointer'} ${
-                  isSelected ? 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white border-blue-800 shadow-lg -translate-y-0.5' : 'std-dept-card bg-white text-gray-900 border-gray-100 hover:border-blue-200 hover:shadow-md shadow-sm'
+                className={`shrink-0 w-[195px] sm:w-[235px] text-left p-4 sm:p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between min-h-[115px] sm:min-h-[125px] ${
+                  isDraggingCards ? 'cursor-grabbing' : 'cursor-pointer'
+                } ${
+                  isSelected
+                    ? 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white border-blue-800 shadow-lg -translate-y-0.5'
+                    : 'std-dept-card bg-white text-gray-900 border-gray-100 hover:border-blue-200 hover:shadow-md shadow-sm'
                 }`}
               >
                 <div className="flex items-start justify-between w-full">
-                  <div className={`h-10 w-10 rounded-xl flex items-center justify-center border ${isSelected ? 'bg-white/15 text-white border-white/20' : `${theme.darkClass} ${theme.bg} ${theme.text} ${theme.border}`}`}>
-                    <AcademicCapIcon className="h-5 w-5" />
+                  <div
+                    className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center border ${
+                      isSelected
+                        ? 'bg-white/15 text-white border-white/20'
+                        : `${theme.darkClass} ${theme.bg} ${theme.text} ${theme.border}`
+                    }`}
+                  >
+                    <AcademicCapIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
-                  <span className={`text-2xl font-extrabold ${isSelected ? 'text-white' : 'std-text-primary text-gray-900'}`}>
+                  <span
+                    className={`text-xl sm:text-2xl font-extrabold ${
+                      isSelected
+                        ? 'text-white'
+                        : 'std-text-primary text-gray-900'
+                    }`}
+                  >
                     {count}
                   </span>
                 </div>
-                <div className="mt-4">
-                  <p className={`text-sm font-extrabold truncate ${isSelected ? 'text-white' : 'std-text-primary text-gray-900'}`} title={deptName}>
+                <div className="mt-3 sm:mt-4">
+                  <p
+                    className={`text-xs sm:text-sm font-extrabold truncate ${
+                      isSelected
+                        ? 'text-white'
+                        : 'std-text-primary text-gray-900'
+                    }`}
+                    title={deptName}
+                  >
                     {deptName}
                   </p>
-                  <p className={`text-xs font-medium mt-0.5 truncate ${isSelected ? 'text-blue-200/80' : 'std-text-secondary text-gray-500'}`}>
+                  <p
+                    className={`text-[11px] sm:text-xs font-medium mt-0.5 truncate ${
+                      isSelected
+                        ? 'text-blue-200/80'
+                        : 'std-text-secondary text-gray-500'
+                    }`}
+                  >
                     {t('និស្សិតឆ្នាំទី២', 'Year 2 Students')}
                   </p>
                 </div>
@@ -2292,7 +2699,7 @@ const ManageStudentsYear2 = () => {
           <button
             type="button"
             onClick={() => scrollDepartmentCards('right')}
-            className="std-scroll-arrow absolute -right-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] flex items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
+            className="std-scroll-arrow hidden sm:flex absolute -right-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
             title={t('អូសទៅស្ដាំ', 'Scroll Right')}
           >
             <ChevronRightIcon className="h-4 w-4 stroke-[2.5]" />
@@ -2301,23 +2708,26 @@ const ManageStudentsYear2 = () => {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 9.3. ប្រអប់ស្វែងរកសិស្ស + ប្តូររវាង «វេនសិក្សា» និង «សកម្មភាពជាក្រុម» ក្នុងជួរតែមួយ */}
+      {/* 9.3. ប្រអប់ស្វែងរកសិស្ស + ប្តូររវាង «វេនសិក្សា» និង «សកម្មភាពជាក្រុម» */}
       {/* ------------------------------------------------------------------ */}
-      <div className="std-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col lg:flex-row gap-4 items-center justify-between">
+      <div className="std-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-3.5 sm:p-4 flex flex-col lg:flex-row gap-3.5 sm:gap-4 items-center justify-between">
         <div className="relative w-full lg:max-w-md shrink-0">
-          <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+          <MagnifyingGlassIcon className="absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder=""
+            placeholder={t(
+              'ស្វែងរកឈ្មោះសិស្ស, អត្តលេខ, អ៊ីមែល ឬលេខទូរស័ព្ទ...',
+              'Search student name, code, email, or phone...'
+            )}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="std-input w-full pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
+            className="std-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
           />
           {searchTerm && (
             <button
               type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer p-1"
             >
               <XMarkIcon className="h-4 w-4" />
             </button>
@@ -2325,23 +2735,33 @@ const ManageStudentsYear2 = () => {
         </div>
 
         {selectedStudents.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-end animate-fadeIn">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full lg:w-auto justify-end animate-fadeIn">
             <button
               type="button"
               onClick={handleOpenBulkEnrollModal}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
             >
-              <BookOpenIcon className="h-5 w-5 mr-2" />
-              {t(`ចុះឈ្មោះមុខវិជ្ជាជាក្រុម (${selectedStudents.length})`, `Bulk Enroll Courses (${selectedStudents.length})`)}
+              <BookOpenIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
+              <span>
+                {t(
+                  `ចុះឈ្មោះមុខវិជ្ជាជាក្រុម (${selectedStudents.length})`,
+                  `Bulk Enroll (${selectedStudents.length})`
+                )}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={handleOpenPromoteModal}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
             >
-              <ChevronDoubleUpIcon className="h-5 w-5 mr-2" />
-              {t(`ដំឡើងឆ្នាំសិក្សាសិស្ស (${selectedStudents.length})`, `Promote Students (${selectedStudents.length})`)}
+              <ChevronDoubleUpIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
+              <span>
+                {t(
+                  `ដំឡើងឆ្នាំសិក្សាសិស្ស (${selectedStudents.length})`,
+                  `Promote (${selectedStudents.length})`
+                )}
+              </span>
             </button>
           </div>
         ) : (
@@ -2349,17 +2769,21 @@ const ManageStudentsYear2 = () => {
             <button
               type="button"
               onClick={() => setSelectedShift('all')}
-              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
                 selectedShift === 'all'
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'std-shift-btn text-gray-600 hover:text-gray-900 hover:bg-white/60'
               }`}
             >
-              <Squares2X2Icon className="h-4 w-4" />
-              <span>{t('គ្រប់វេនសិក្សា', 'All Shifts')}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
-                selectedShift === 'all' ? 'bg-white/20 text-white' : 'std-shift-count bg-gray-200/80 text-gray-700'
-              }`}>
+              <Squares2X2Icon className="h-4 w-4 shrink-0" />
+              <span>{t('គ្រប់វេន', 'All')}</span>
+              <span
+                className={`px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                  selectedShift === 'all'
+                    ? 'bg-white/20 text-white'
+                    : 'std-shift-count bg-gray-200/80 text-gray-700'
+                }`}
+              >
                 {shiftCounts.all}
               </span>
             </button>
@@ -2367,17 +2791,21 @@ const ManageStudentsYear2 = () => {
             <button
               type="button"
               onClick={() => setSelectedShift('Monday-Friday')}
-              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
                 selectedShift === 'Monday-Friday'
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'std-shift-btn text-gray-600 hover:text-gray-900 hover:bg-white/60'
               }`}
             >
-              <CalendarDaysIcon className="h-4 w-4" />
+              <CalendarDaysIcon className="h-4 w-4 shrink-0" />
               <span>{t('ចន្ទ-សុក្រ', 'Mon-Fri')}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
-                selectedShift === 'Monday-Friday' ? 'bg-white/20 text-white' : 'std-shift-count bg-indigo-50 text-indigo-700'
-              }`}>
+              <span
+                className={`px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                  selectedShift === 'Monday-Friday'
+                    ? 'bg-white/20 text-white'
+                    : 'std-shift-count bg-indigo-50 text-indigo-700'
+                }`}
+              >
                 {shiftCounts['Monday-Friday']}
               </span>
             </button>
@@ -2385,17 +2813,21 @@ const ManageStudentsYear2 = () => {
             <button
               type="button"
               onClick={() => setSelectedShift('Saturday-Sunday')}
-              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
                 selectedShift === 'Saturday-Sunday'
                   ? 'bg-amber-500 text-white shadow-xs'
                   : 'std-shift-btn text-gray-600 hover:text-gray-900 hover:bg-white/60'
               }`}
             >
-              <CalendarDaysIcon className="h-4 w-4" />
+              <CalendarDaysIcon className="h-4 w-4 shrink-0" />
               <span>{t('សៅរ៍-អាទិត្យ', 'Sat-Sun')}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
-                selectedShift === 'Saturday-Sunday' ? 'bg-white/20 text-white' : 'std-shift-count bg-amber-50 text-amber-700'
-              }`}>
+              <span
+                className={`px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                  selectedShift === 'Saturday-Sunday'
+                    ? 'bg-white/20 text-white'
+                    : 'std-shift-count bg-amber-50 text-amber-700'
+                }`}
+              >
                 {shiftCounts['Saturday-Sunday']}
               </span>
             </button>
@@ -2404,20 +2836,24 @@ const ManageStudentsYear2 = () => {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 9.4. តារាងបង្ហាញបញ្ជីឈ្មោះសិស្សឆ្នាំទី២ (Students Data Table - គ្មាន Skeleton) */}
+      {/* 9.4. តារាងបង្ហាញបញ្ជីឈ្មោះសិស្សឆ្នាំទី២ (Table on iPad/Desktop, Cards on Phone) */}
       {/* ------------------------------------------------------------------ */}
       <div className="w-full">
-        <div className="std-surface-card bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
-          <div className="std-table-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="std-text-primary text-[18px] font-extrabold text-gray-900">
+        <div className="std-surface-card bg-white rounded-2xl sm:rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
+          <div className="std-table-bar px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+              <h2 className="std-text-primary text-base sm:text-[18px] font-extrabold text-gray-900 truncate">
                 {activeDepartmentObj
                   ? `${t('បញ្ជីសិស្សឆ្នាំទី២', 'Year 2 Students')} - ${getDepartmentDisplayName(activeDepartmentObj)}`
                   : t('បញ្ជីសិស្សឆ្នាំទី២ ទាំងអស់', 'All Year 2 Students List')}
               </h2>
+
+              <span className="std-badge-blue px-3 py-1 rounded-lg text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-100 shrink-0">
+                {displayedStudents.length} {t('នាក់', 'Students')}
+              </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {selectedShift !== 'all' && (
                 <button
                   type="button"
@@ -2439,17 +2875,25 @@ const ManageStudentsYear2 = () => {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-           <table className="min-w-full border-collapse">
+          {/* 💻 iPad, Laptop & Desktop Table View (`hidden md:block`) */}
+          <div className="hidden md:block overflow-x-auto hide-scrollbar">
+            <table className="min-w-full border-collapse">
               <thead className="std-table-head bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="px-4 py-4 text-left whitespace-nowrap">
+                  <th className="px-5 py-4 text-left whitespace-nowrap sticky left-0 bg-inherit z-10">
                     <div className="flex items-center gap-3">
                       {selectedStudents.length > 0 && (
-                        <div title={t('ជ្រើសរើសទាំងអស់', 'Select All')} className="animate-fadeIn flex items-center">
+                        <div
+                          title={t('ជ្រើសរើសទាំងអស់', 'Select All')}
+                          className="animate-fadeIn flex items-center"
+                        >
                           <input
                             type="checkbox"
-                            checked={selectedStudents.length === displayedStudents.length && displayedStudents.length > 0}
+                            checked={
+                              selectedStudents.length ===
+                                displayedStudents.length &&
+                              displayedStudents.length > 0
+                            }
                             onChange={handleSelectAll}
                             className="std-checkbox w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
                           />
@@ -2478,7 +2922,7 @@ const ManageStudentsYear2 = () => {
                   <th className="px-4 py-4 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                     {t('ស្ថានភាព', 'Status')}
                   </th>
-                  <th className="px-4 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  <th className="px-5 py-4 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                     {t('សកម្មភាព', 'Actions')}
                   </th>
                 </tr>
@@ -2486,25 +2930,40 @@ const ManageStudentsYear2 = () => {
               <tbody className="std-table-body bg-white">
                 {displayedStudents.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="px-4 py-16 text-center text-gray-500">
+                    <td
+                      colSpan="8"
+                      className="px-4 py-16 text-center text-gray-500"
+                    >
                       <div className="flex flex-col items-center">
                         <UserGroupIcon className="h-16 w-16 text-gray-300 mb-3" />
                         <p className="std-text-primary font-bold text-gray-600 text-base">
                           {searchTerm
                             ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found')
                             : selectedShift !== 'all'
-                            ? t(`មិនទាន់មានសិស្សឆ្នាំទី២ ក្នុងវេន «${getStudyShiftLabel(selectedShift)}» នៅឡើយទេ`, 'No Year 2 students in this study shift yet')
+                            ? t(
+                                `មិនទាន់មានសិស្សឆ្នាំទី២ ក្នុងវេន «${getStudyShiftLabel(selectedShift)}» នៅឡើយទេ`,
+                                'No Year 2 students in this study shift yet'
+                              )
                             : activeDepartmentObj
-                            ? t(`មិនទាន់មានសិស្សឆ្នាំទី២ ក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» នៅឡើយទេ`, 'No Year 2 students in this department yet')
-                            : t('មិនទាន់មានសិស្សឆ្នាំទី២ នៅឡើយទេ', 'No Year 2 students available yet')}
+                            ? t(
+                                `មិនទាន់មានសិស្សឆ្នាំទី២ ក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» នៅឡើយទេ`,
+                                'No Year 2 students in this department yet'
+                              )
+                            : t(
+                                'មិនទាន់មានសិស្សឆ្នាំទី២ នៅឡើយទេ',
+                                'No Year 2 students available yet'
+                              )}
                         </p>
                       </div>
                     </td>
                   </tr>
                 ) : (
                   displayedStudents.map((student) => {
-                    const primaryDeptId = student.department_id || student.department?.id;
-                    const matchedDeptObj = student.department || departmentsByIdMap.get(String(primaryDeptId));
+                    const primaryDeptId =
+                      student.department_id || student.department?.id;
+                    const matchedDeptObj =
+                      student.department ||
+                      departmentsByIdMap.get(String(primaryDeptId));
                     const extraDeptNames = getStudentDepartmentIds(student)
                       .filter((dId) => String(dId) !== String(primaryDeptId))
                       .map((dId) => {
@@ -2514,32 +2973,47 @@ const ManageStudentsYear2 = () => {
                       .filter(Boolean);
 
                     const isFemale = isFemaleGender(student.gender);
-                    const isWeekend = normalizeShiftKey(student.study_shift) === 'Saturday-Sunday';
+                    const isWeekend =
+                      normalizeShiftKey(student.study_shift) ===
+                      'Saturday-Sunday';
                     const rawAvatar =
                       ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[student.id] ||
                       student.profile_image ||
                       student.user?.profile_image;
                     const avatarUrl = getProfileImageUrl(rawAvatar);
                     const avatarKey = `std_${student.id}`;
-                    const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
-                    const isActive = String(student.user?.status || student.status || 'active').toLowerCase() === 'active';
+                    const hasAvatar = Boolean(
+                      avatarUrl && !failedAvatars[avatarKey]
+                    );
+                    const isActive =
+                      String(
+                        student.user?.status || student.status || 'active'
+                      ).toLowerCase() === 'active';
 
                     return (
-                      <tr key={student.id} className="std-table-row hover:bg-blue-50/30 transition-colors">
-                        <td className="px-4 py-4 whitespace-nowrap">
+                      <tr
+                        key={student.id}
+                        className="std-table-row hover:bg-blue-50/30 transition-colors"
+                      >
+                        <td className="px-5 py-4 whitespace-nowrap sticky left-0 bg-inherit z-10">
                           <div className="flex items-center gap-3.5">
-                            <div 
+                            <div
                               className="relative h-10 w-10 shrink-0 cursor-pointer group/avatar"
                               onClick={() => handleSelectStudent(student.id)}
                             >
-                              <div className={`absolute inset-0 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-opacity duration-200 ${selectedStudents.includes(student.id) ? 'opacity-0' : 'opacity-100 group-hover/avatar:opacity-0'}`}>
+                              <div
+                                className={`absolute inset-0 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold overflow-hidden shadow-sm transition-opacity duration-200 ${
+                                  selectedStudents.includes(student.id)
+                                    ? 'opacity-0'
+                                    : 'opacity-100 group-hover/avatar:opacity-0'
+                                }`}
+                              >
                                 {hasAvatar ? (
                                   <img
                                     src={avatarUrl}
                                     alt={getStudentFullName(student)}
                                     loading="eager"
                                     decoding="async"
-                                    fetchpriority="high"
                                     className="h-full w-full object-cover rounded-full"
                                     onError={() =>
                                       setFailedAvatars((prev) => ({
@@ -2549,16 +3023,27 @@ const ManageStudentsYear2 = () => {
                                     }
                                   />
                                 ) : (
-                                  <span>{student.first_name?.charAt(0) || ''}{student.last_name?.charAt(0) || ''}</span>
+                                  <span>
+                                    {student.first_name?.charAt(0) || ''}
+                                    {student.last_name?.charAt(0) || ''}
+                                  </span>
                                 )}
                               </div>
-                              
-                              <div className={`std-avatar-check absolute inset-0 rounded-full flex items-center justify-center transition-all duration-200 ${selectedStudents.includes(student.id) ? 'opacity-100 bg-blue-100 scale-100' : 'opacity-0 group-hover/avatar:opacity-100 bg-gray-100 scale-95 group-hover/avatar:scale-100'}`}>
-                                <input 
-                                  type="checkbox" 
-                                  checked={selectedStudents.includes(student.id)}
+
+                              <div
+                                className={`std-avatar-check absolute inset-0 rounded-full flex items-center justify-center transition-all duration-200 ${
+                                  selectedStudents.includes(student.id)
+                                    ? 'opacity-100 bg-blue-100 scale-100'
+                                    : 'opacity-0 group-hover/avatar:opacity-100 bg-gray-100 scale-95 group-hover/avatar:scale-100'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedStudents.includes(
+                                    student.id
+                                  )}
                                   readOnly
-                                  className="std-checkbox w-4 h-4 text-blue-600 border-gray-400 rounded focus:ring-blue-500 cursor-pointer pointer-events-none" 
+                                  className="std-checkbox w-4 h-4 text-blue-600 border-gray-400 rounded focus:ring-blue-500 cursor-pointer pointer-events-none"
                                 />
                               </div>
                             </div>
@@ -2576,7 +3061,9 @@ const ManageStudentsYear2 = () => {
                                 >
                                   {getGenderLabel(student.gender)}
                                 </span>
-                                <span className="std-text-secondary text-xs text-gray-400 font-bold">&bull;</span>
+                                <span className="std-text-secondary text-xs text-gray-400 font-bold">
+                                  &bull;
+                                </span>
                                 <span className="std-text-secondary text-xs text-gray-500 font-medium">
                                   {student.batch_year || t('ឆ្នាំទី២', 'Year 2')}
                                 </span>
@@ -2620,22 +3107,33 @@ const ManageStudentsYear2 = () => {
                           )}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-extrabold border ${
-                            isWeekend
-                              ? 'std-badge-amber bg-amber-50 text-amber-700 border-amber-200'
-                              : 'std-badge-indigo bg-indigo-50 text-indigo-700 border-indigo-100'
-                          }`}>
+                          <span
+                            className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-extrabold border ${
+                              isWeekend
+                                ? 'std-badge-amber bg-amber-50 text-amber-700 border-amber-200'
+                                : 'std-badge-indigo bg-indigo-50 text-indigo-700 border-indigo-100'
+                            }`}
+                          >
                             {getStudyShiftLabel(student.study_shift)}
                           </span>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${isActive ? 'std-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-100' : 'std-badge-rose bg-rose-50 text-rose-700 border-rose-100'}`}>
-                            {isActive ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
+                          <span
+                            className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${
+                              isActive
+                                ? 'std-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-100'
+                                : 'std-badge-rose bg-rose-50 text-rose-700 border-rose-100'
+                            }`}
+                          >
+                            {isActive
+                              ? t('សកម្ម', 'Active')
+                              : t('អសកម្ម', 'Inactive')}
                           </span>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-center">
+                        <td className="px-5 py-4 whitespace-nowrap text-center">
                           <div className="flex items-center justify-center space-x-1.5">
                             <button
+                              type="button"
                               onClick={() => openEnrollmentModal(student)}
                               className="std-action-enroll p-2 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-50 border border-transparent hover:border-emerald-100 rounded-xl transition-all cursor-pointer"
                               title={t('ចុះឈ្មោះមុខវិជ្ជា', 'Manage Courses')}
@@ -2643,6 +3141,7 @@ const ManageStudentsYear2 = () => {
                               <BookOpenIcon className="h-5 w-5" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => openEditModal(student)}
                               className="std-action-edit p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 border border-transparent hover:border-indigo-100 rounded-xl transition-all cursor-pointer"
                               title={t('កែប្រែ', 'Edit')}
@@ -2650,6 +3149,7 @@ const ManageStudentsYear2 = () => {
                               <PencilSquareIcon className="h-5 w-5" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleDeleteClick(student)}
                               className="std-action-delete p-2 text-rose-600 hover:text-rose-900 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl transition-all cursor-pointer"
                               title={t('លុប', 'Delete')}
@@ -2665,27 +3165,281 @@ const ManageStudentsYear2 = () => {
               </tbody>
             </table>
           </div>
+
+          {/* 📱 Mobile App-Like Student Cards View (`md:hidden`) */}
+          <div className="md:hidden p-3.5 space-y-3 bg-gray-50/40">
+            {displayedStudents.length > 0 && (
+              <div className="flex items-center justify-between px-1 pb-1">
+                <label className="inline-flex items-center gap-2 text-xs font-extrabold text-gray-600 dark:text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={
+                      selectedStudents.length === displayedStudents.length &&
+                      displayedStudents.length > 0
+                    }
+                    onChange={handleSelectAll}
+                    className="std-checkbox w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>
+                    {t(
+                      'ជ្រើសរើសសិស្សទាំងអស់ក្នុងបញ្ជី',
+                      'Select All Students'
+                    )}
+                  </span>
+                </label>
+                {selectedStudents.length > 0 && (
+                  <span className="text-xs font-black text-blue-600 dark:text-blue-400">
+                    {t('បានធីក៖', 'Selected:')} {selectedStudents.length}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {displayedStudents.length === 0 ? (
+              <div className="std-dept-card py-12 px-4 text-center bg-white rounded-2xl border border-dashed border-gray-200">
+                <UserGroupIcon className="h-14 w-14 text-gray-300 mx-auto mb-2.5" />
+                <p className="std-text-primary font-extrabold text-gray-700 text-sm">
+                  {searchTerm
+                    ? t('មិនឃើញលទ្ធផលស្វែងរក', 'No search results found')
+                    : selectedShift !== 'all'
+                    ? t(
+                        `មិនទាន់មានសិស្សឆ្នាំទី២ ក្នុងវេន «${getStudyShiftLabel(selectedShift)}» នៅឡើយទេ`,
+                        'No Year 2 students in this study shift yet'
+                      )
+                    : activeDepartmentObj
+                    ? t(
+                        `មិនទាន់មានសិស្សឆ្នាំទី២ ក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» នៅឡើយទេ`,
+                        'No Year 2 students in this department yet'
+                      )
+                    : t(
+                        'មិនទាន់មានសិស្សឆ្នាំទី២ នៅឡើយទេ',
+                        'No Year 2 students available yet'
+                      )}
+                </p>
+              </div>
+            ) : (
+              displayedStudents.map((student) => {
+                const primaryDeptId =
+                  student.department_id || student.department?.id;
+                const matchedDeptObj =
+                  student.department ||
+                  departmentsByIdMap.get(String(primaryDeptId));
+                const extraDeptNames = getStudentDepartmentIds(student)
+                  .filter((dId) => String(dId) !== String(primaryDeptId))
+                  .map((dId) => {
+                    const dObj = departmentsByIdMap.get(String(dId));
+                    return dObj ? getDepartmentDisplayName(dObj) : null;
+                  })
+                  .filter(Boolean);
+
+                const isFemale = isFemaleGender(student.gender);
+                const isWeekend =
+                  normalizeShiftKey(student.study_shift) ===
+                  'Saturday-Sunday';
+                const rawAvatar =
+                  ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[student.id] ||
+                  student.profile_image ||
+                  student.user?.profile_image;
+                const avatarUrl = getProfileImageUrl(rawAvatar);
+                const avatarKey = `mob_std_${student.id}`;
+                const hasAvatar = Boolean(
+                  avatarUrl && !failedAvatars[avatarKey]
+                );
+                const isActive =
+                  String(
+                    student.user?.status || student.status || 'active'
+                  ).toLowerCase() === 'active';
+                const isSelectedCard = selectedStudents.includes(student.id);
+
+                return (
+                  <div
+                    key={`mob-std-${student.id}`}
+                    className={`std-dept-card bg-white rounded-2xl border p-3.5 shadow-2xs space-y-3 transition-all ${
+                      isSelectedCard
+                        ? 'border-blue-500 ring-2 ring-blue-500/15'
+                        : 'border-gray-200/80'
+                    }`}
+                  >
+                    {/* Top Row: Avatar/Checkbox + Name + Actions */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div
+                          className="relative h-11 w-11 shrink-0 cursor-pointer"
+                          onClick={() => handleSelectStudent(student.id)}
+                        >
+                          <div
+                            className={`absolute inset-0 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold text-xs overflow-hidden shadow-sm transition-opacity ${
+                              isSelectedCard ? 'opacity-0' : 'opacity-100'
+                            }`}
+                          >
+                            {hasAvatar ? (
+                              <img
+                                src={avatarUrl}
+                                alt={getStudentFullName(student)}
+                                loading="lazy"
+                                className="h-full w-full object-cover rounded-full"
+                                onError={() =>
+                                  setFailedAvatars((prev) => ({
+                                    ...prev,
+                                    [avatarKey]: true,
+                                  }))
+                                }
+                              />
+                            ) : (
+                              <span>
+                                {student.first_name?.charAt(0) || ''}
+                                {student.last_name?.charAt(0) || ''}
+                              </span>
+                            )}
+                          </div>
+
+                          <div
+                            className={`std-avatar-check absolute inset-0 rounded-full flex items-center justify-center transition-all ${
+                              isSelectedCard
+                                ? 'opacity-100 bg-blue-100 scale-100'
+                                : 'opacity-0 pointer-events-none'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelectedCard}
+                              readOnly
+                              className="std-checkbox w-4 h-4 text-blue-600 border-gray-400 rounded pointer-events-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <h3 className="std-text-primary text-sm font-extrabold text-gray-900 truncate">
+                            {getStudentFullName(student)}
+                          </h3>
+                          <p className="std-text-secondary text-xs text-gray-500 font-mono truncate mt-0.5">
+                            {maskEmailAddress(student.email)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openEnrollmentModal(student)}
+                          className="std-action-enroll p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer"
+                          title={t('ចុះឈ្មោះមុខវិជ្ជា', 'Manage Courses')}
+                        >
+                          <BookOpenIcon className="h-5 w-5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(student)}
+                          className="std-action-edit p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer"
+                          title={t('កែប្រែ', 'Edit')}
+                        >
+                          <PencilSquareIcon className="h-5 w-5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteClick(student)}
+                          className="std-action-delete p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                          title={t('លុប', 'Delete')}
+                        >
+                          <TrashIcon className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Middle Badges: Gender, Code, Degree, Shift, Status */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
+                          isFemale
+                            ? 'std-badge-rose bg-rose-50 text-rose-600 border-rose-200'
+                            : 'std-badge-blue bg-blue-50 text-blue-600 border-blue-200'
+                        }`}
+                      >
+                        {getGenderLabel(student.gender)}
+                      </span>
+
+                      {student.student_code && (
+                        <span className="std-page-btn px-2 py-0.5 rounded-md text-[10px] font-bold font-mono bg-gray-100 border border-gray-200 text-gray-700">
+                          {student.student_code}
+                        </span>
+                      )}
+
+                      <span className="std-badge-indigo px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                        {getDegreeLevelLabel(student.degree_level)}
+                      </span>
+
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
+                          isWeekend
+                            ? 'std-badge-amber bg-amber-50 text-amber-700 border-amber-200'
+                            : 'std-badge-indigo bg-indigo-50 text-indigo-700 border-indigo-100'
+                        }`}
+                      >
+                        {getStudyShiftLabel(student.study_shift)}
+                      </span>
+
+                      <span
+                        className={`ml-auto px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
+                          isActive
+                            ? 'std-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'std-badge-rose bg-rose-50 text-rose-700 border-rose-200'
+                        }`}
+                      >
+                        {isActive
+                          ? t('សកម្ម', 'Active')
+                          : t('អសកម្ម', 'Inactive')}
+                      </span>
+                    </div>
+
+                    {/* Bottom Row: Department & Phone */}
+                    <div className="pt-2.5 border-t border-gray-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-1.5 min-w-0 max-w-[65%]">
+                        <BuildingLibraryIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                        <span className="std-text-secondary font-semibold text-gray-600 truncate">
+                          {getDepartmentDisplayName(matchedDeptObj)}
+                          {extraDeptNames.length > 0
+                            ? ` (+${extraDeptNames.length})`
+                            : ''}
+                        </span>
+                      </div>
+
+                      {student.phone && (
+                        <span className="std-text-secondary inline-flex items-center gap-1 font-bold text-gray-500 shrink-0">
+                          <PhoneIcon className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                          <span>{student.phone}</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
 
         {/* ---------------------------------------------------------------- */}
         {/* 9.5. របារប្តូរទំព័រ (Pagination)                                  */}
         {/* ---------------------------------------------------------------- */}
         {meta.last_page > 1 && (
-          <div className="std-pagination-bar px-6 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-gray-50/50 rounded-2xl mt-4">
+          <div className="std-pagination-bar px-4 sm:px-6 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-gray-50/50 rounded-2xl mt-4">
             <p className="std-text-secondary text-xs font-bold text-gray-600">
-              {t('ទំព័រ', 'Page')} {meta.current_page} / {meta.last_page} ({displayedStudents.length} {t('នាក់', 'total')})
+              {t('ទំព័រ', 'Page')} {meta.current_page} / {meta.last_page} (
+              {displayedStudents.length} {t('នាក់', 'total')})
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={meta.current_page === 1}
-                className="std-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="std-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('មុន', 'Previous')}
               </button>
               {paginationPages.map((pageNum) => (
                 <button
                   key={pageNum}
+                  type="button"
                   onClick={() => setPage(pageNum)}
                   className={`px-3 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                     meta.current_page === pageNum
@@ -2697,9 +3451,10 @@ const ManageStudentsYear2 = () => {
                 </button>
               ))}
               <button
-                onClick={() => setPage(p => Math.min(meta.last_page, p + 1))}
+                type="button"
+                onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
                 disabled={meta.current_page === meta.last_page}
-                className="std-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="std-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('បន្ទាប់', 'Next')}
               </button>
@@ -2709,21 +3464,23 @@ const ManageStudentsYear2 = () => {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 9.6. ផ្ទាំង Modal បន្ថែម ឬកែប្រែព័ត៌មានសិស្ស                         */}
+      {/* 9.6. ផ្ទាំង Modal បន្ថែម ឬកែប្រែព័ត៌មានសិស្ស (Bottom Sheet on Phone) */}
       {/* ------------------------------------------------------------------ */}
       {showModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="std-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
-            <div className="std-modal-bar flex justify-between items-center p-6 sm:p-8 border-b border-gray-100">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
+            <div className="std-modal-bar flex justify-between items-center p-5 sm:p-7 border-b border-gray-100">
               <div>
-                <h2 className="std-text-primary text-xl font-extrabold text-gray-900 flex items-center gap-2">
-                  <span className="std-badge-indigo bg-indigo-100 text-indigo-600 p-2.5 rounded-xl border border-indigo-200">
-                    <UserGroupIcon className="h-6 w-6" />
+                <h2 className="std-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
+                  <span className="std-badge-indigo bg-indigo-100 text-indigo-600 p-2 sm:p-2.5 rounded-xl border border-indigo-200">
+                    <UserGroupIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                   </span>
-                  {editingStudent ? t('កែប្រែសិស្សឆ្នាំទី២', 'Edit Year 2 Student') : t('បន្ថែមសិស្សឆ្នាំទី២ ថ្មី', 'Add New Year 2 Student')}
+                  {editingStudent
+                    ? t('កែប្រែសិស្សឆ្នាំទី២', 'Edit Year 2 Student')
+                    : t('បន្ថែមសិស្សឆ្នាំទី២ ថ្មី', 'Add New Year 2 Student')}
                 </h2>
                 {!editingStudent && activeDepartmentObj && (
-                  <p className="std-text-secondary text-xs text-gray-500 font-bold mt-1 ml-12">
+                  <p className="std-text-secondary text-xs text-gray-500 font-bold mt-1 ml-11 sm:ml-12">
                     {t('ដេប៉ាតឺម៉ង់៖', 'Department:')}{' '}
                     <span className="text-indigo-600 dark:text-indigo-400">
                       {getDepartmentDisplayName(activeDepartmentObj)}
@@ -2732,26 +3489,37 @@ const ManageStudentsYear2 = () => {
                 )}
               </div>
               <button
-                onClick={() => { setShowModal(false); setFormError(''); }}
+                type="button"
+                onClick={() => {
+                  setShowModal(false);
+                  setFormError('');
+                }}
                 className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
             </div>
-            
-            <div className="p-6 sm:p-8 overflow-y-auto flex-1">
-              <form id="studentForm" onSubmit={handleSubmit} className="space-y-5">
+
+            <div className="p-5 sm:p-7 overflow-y-auto flex-1">
+              <form
+                id="studentForm"
+                onSubmit={handleSubmit}
+                className="space-y-4 sm:space-y-5"
+              >
                 {formError && (
                   <div className="std-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
                     <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
-                    <p className="text-xs font-bold leading-relaxed">{formError}</p>
+                    <p className="text-xs font-bold leading-relaxed">
+                      {formError}
+                    </p>
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('នាមខ្លួន', 'First Name')} <span className="text-rose-500">*</span>
+                      {t('នាមខ្លួន', 'First Name')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
@@ -2766,7 +3534,8 @@ const ManageStudentsYear2 = () => {
 
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('នាមត្រកូល', 'Last Name')} <span className="text-rose-500">*</span>
+                      {t('នាមត្រកូល', 'Last Name')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
@@ -2781,10 +3550,15 @@ const ManageStudentsYear2 = () => {
 
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('អ៊ីមែល', 'Email')} <span className="text-rose-500">*</span>
+                      {t('អ៊ីមែល', 'Email')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <input
-                      type={editingStudent && formData.email.includes('*') ? 'text' : 'email'}
+                      type={
+                        editingStudent && formData.email.includes('*')
+                          ? 'text'
+                          : 'email'
+                      }
                       name="email"
                       required={!editingStudent}
                       value={formData.email}
@@ -2797,12 +3571,18 @@ const ManageStudentsYear2 = () => {
                         if (editingStudent && !formData.email.trim()) {
                           setFormData((prev) => ({
                             ...prev,
-                            email: maskEmailAddress(editingStudent.email || ''),
+                            email: maskEmailAddress(
+                              editingStudent.email || ''
+                            ),
                           }));
                         }
                       }}
                       onChange={handleInputChange}
-                      placeholder={editingStudent ? maskEmailAddress(editingStudent.email || '') : ''}
+                      placeholder={
+                        editingStudent
+                          ? maskEmailAddress(editingStudent.email || '')
+                          : ''
+                      }
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                     />
                   </div>
@@ -2837,7 +3617,8 @@ const ManageStudentsYear2 = () => {
 
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('ភេទ', 'Gender')} <span className="text-rose-500">*</span>
+                      {t('ភេទ', 'Gender')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <select
                       name="gender"
@@ -2846,7 +3627,9 @@ const ManageStudentsYear2 = () => {
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white"
                     >
-                      <option value="" disabled>{t('ជ្រើសរើសភេទ', 'Select Gender')}</option>
+                      <option value="" disabled>
+                        {t('ជ្រើសរើសភេទ', 'Select Gender')}
+                      </option>
                       <option value="Male">{t('ប្រុស', 'Male')}</option>
                       <option value="Female">{t('ស្រី', 'Female')}</option>
                       <option value="Other">{t('ផ្សេងៗ', 'Other')}</option>
@@ -2868,19 +3651,26 @@ const ManageStudentsYear2 = () => {
 
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('ដេប៉ាតឺម៉ង់', 'Department')} <span className="text-rose-500">*</span>
+                      {t('ដេប៉ាតឺម៉ង់', 'Department')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <select
                       name="department_id"
                       required
-                      disabled={Boolean(editingStudent) || selectedDepartment !== 'all'}
+                      disabled={
+                        Boolean(editingStudent) || selectedDepartment !== 'all'
+                      }
                       value={formData.department_id}
                       onChange={handleInputChange}
                       className={`std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white ${
-                        Boolean(editingStudent) || selectedDepartment !== 'all' ? 'opacity-80 cursor-not-allowed bg-gray-100 font-bold text-indigo-900' : ''
+                        Boolean(editingStudent) || selectedDepartment !== 'all'
+                          ? 'opacity-80 cursor-not-allowed bg-gray-100 font-bold text-indigo-900'
+                          : ''
                       }`}
                     >
-                      <option value="" disabled>{t('ជ្រើសរើសដេប៉ាតឺម៉ង់', 'Select Department')}</option>
+                      <option value="" disabled>
+                        {t('ជ្រើសរើសដេប៉ាតឺម៉ង់', 'Select Department')}
+                      </option>
                       {departments.map((dept) => (
                         <option key={dept.id} value={dept.id}>
                           {getDepartmentDisplayName(dept)}
@@ -2905,7 +3695,8 @@ const ManageStudentsYear2 = () => {
 
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('កម្រិតសិក្សា', 'Degree Level')} <span className="text-rose-500">*</span>
+                      {t('កម្រិតសិក្សា', 'Degree Level')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <select
                       name="degree_level"
@@ -2914,16 +3705,25 @@ const ManageStudentsYear2 = () => {
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white"
                     >
-                      <option value="" disabled>{t('ជ្រើសរើសកម្រិត', 'Select Level')}</option>
-                      <option value="Associate Degree">{t('បរិញ្ញាបត្ររង', 'Associate Degree')}</option>
-                      <option value="Bachelor Degree">{t('បរិញ្ញាបត្រ', 'Bachelor Degree')}</option>
-                      <option value="Master Degree">{t('បរិញ្ញាបត្រជាន់ខ្ពស់', 'Master Degree')}</option>
+                      <option value="" disabled>
+                        {t('ជ្រើសរើសកម្រិត', 'Select Level')}
+                      </option>
+                      <option value="Associate Degree">
+                        {t('បរិញ្ញាបត្ររង', 'Associate Degree')}
+                      </option>
+                      <option value="Bachelor Degree">
+                        {t('បរិញ្ញាបត្រ', 'Bachelor Degree')}
+                      </option>
+                      <option value="Master Degree">
+                        {t('បរិញ្ញាបត្រជាន់ខ្ពស់', 'Master Degree')}
+                      </option>
                     </select>
                   </div>
 
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('វេនសិក្សា', 'Study Shift')} <span className="text-rose-500">*</span>
+                      {t('វេនសិក្សា', 'Study Shift')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <select
                       name="study_shift"
@@ -2932,9 +3732,15 @@ const ManageStudentsYear2 = () => {
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white"
                     >
-                      <option value="" disabled>{t('ជ្រើសរើសវេនសិក្សា', 'Select Study Shift')}</option>
-                      <option value="Monday-Friday">{t('ចន្ទ-សុក្រ', 'Monday-Friday')}</option>
-                      <option value="Saturday-Sunday">{t('សៅរ៍-អាទិត្យ', 'Saturday-Sunday')}</option>
+                      <option value="" disabled>
+                        {t('ជ្រើសរើសវេនសិក្សា', 'Select Study Shift')}
+                      </option>
+                      <option value="Monday-Friday">
+                        {t('ចន្ទ-សុក្រ', 'Monday-Friday')}
+                      </option>
+                      <option value="Saturday-Sunday">
+                        {t('សៅរ៍-អាទិត្យ', 'Saturday-Sunday')}
+                      </option>
                     </select>
                   </div>
 
@@ -2948,16 +3754,24 @@ const ManageStudentsYear2 = () => {
                       value={formData.address}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all resize-none shadow-sm"
-                      placeholder={t('អាសយដ្ឋានបច្ចុប្បន្ន...', 'Current address...')}
+                      placeholder={t(
+                        'អាសយដ្ឋានបច្ចុប្បន្ន...',
+                        'Current address...'
+                      )}
                     />
                   </div>
 
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
                       {editingStudent
-                        ? t('ពាក្យសម្ងាត់ (ទុកឲ្យទទេ ដើម្បីរក្សាដដែល)', 'Password (Leave blank to keep)')
+                        ? t(
+                            'ពាក្យសម្ងាត់ (ទុកឲ្យទទេ ដើម្បីរក្សាដដែល)',
+                            'Password (Leave blank to keep)'
+                          )
                         : t('ពាក្យសម្ងាត់', 'Password')}{' '}
-                      {!editingStudent && <span className="text-rose-500">*</span>}
+                      {!editingStudent && (
+                        <span className="text-rose-500">*</span>
+                      )}
                     </label>
                     <input
                       type="password"
@@ -2972,7 +3786,8 @@ const ManageStudentsYear2 = () => {
 
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('ស្ថានភាព', 'Status')} <span className="text-rose-500">*</span>
+                      {t('ស្ថានភាព', 'Status')}{' '}
+                      <span className="text-rose-500">*</span>
                     </label>
                     <select
                       name="status"
@@ -2981,20 +3796,27 @@ const ManageStudentsYear2 = () => {
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white"
                     >
-                      <option value="" disabled>{t('ជ្រើសរើសស្ថានភាព', 'Select Status')}</option>
+                      <option value="" disabled>
+                        {t('ជ្រើសរើសស្ថានភាព', 'Select Status')}
+                      </option>
                       <option value="active">{t('សកម្ម', 'Active')}</option>
-                      <option value="inactive">{t('អសកម្ម', 'Inactive')}</option>
+                      <option value="inactive">
+                        {t('អសកម្ម', 'Inactive')}
+                      </option>
                     </select>
                   </div>
                 </div>
               </form>
             </div>
-              
-            <div className="std-modal-bar p-6 sm:p-8 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
+
+            <div className="std-modal-bar p-5 sm:p-7 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
-                onClick={() => { setShowModal(false); setFormError(''); }}
-                className="std-cancel-btn px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                onClick={() => {
+                  setShowModal(false);
+                  setFormError('');
+                }}
+                className="std-cancel-btn px-5 sm:px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
@@ -3002,14 +3824,16 @@ const ManageStudentsYear2 = () => {
                 type="submit"
                 form="studentForm"
                 disabled={isSubmitting}
-                className="px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                className="px-5 sm:px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
               >
                 {isSubmitting ? (
                   <ArrowPathIcon className="h-5 w-5 animate-spin" />
                 ) : (
                   <UserGroupIcon className="h-5 w-5" />
                 )}
-                {editingStudent ? t('រក្សាទុកការកែប្រែ', 'Save Changes') : t('បង្កើតសិស្ស', 'Create Student')}
+                {editingStudent
+                  ? t('រក្សាទុកការកែប្រែ', 'Save Changes')
+                  : t('បង្កើតសិស្ស', 'Create Student')}
               </button>
             </div>
           </div>
@@ -3017,16 +3841,16 @@ const ManageStudentsYear2 = () => {
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* 9.7. ផ្ទាំង Modal ចុះឈ្មោះមុខវិជ្ជាឱ្យសិស្សម្នាក់ៗ                      */}
+      {/* 9.7. ផ្ទាំង Modal ចុះឈ្មោះមុខវិជ្ជាឱ្យសិស្សម្នាក់ៗ (Bottom Sheet on Phone) */}
       {/* ------------------------------------------------------------------ */}
       {showEnrollmentModal && selectedStudent && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="std-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
-            <div className="std-modal-bar flex justify-between items-center p-6 sm:p-7 border-b border-gray-100">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
+            <div className="std-modal-bar flex justify-between items-center p-5 sm:p-7 border-b border-gray-100">
               <div>
-                <h2 className="std-text-primary text-xl font-extrabold text-gray-900 flex items-center gap-2">
-                  <span className="std-badge-emerald bg-emerald-100 text-emerald-600 p-2.5 rounded-xl border border-emerald-200">
-                    <BookOpenIcon className="h-6 w-6" />
+                <h2 className="std-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
+                  <span className="std-badge-emerald bg-emerald-100 text-emerald-600 p-2 sm:p-2.5 rounded-xl border border-emerald-200">
+                    <BookOpenIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                   </span>
                   {t('ចុះឈ្មោះមុខវិជ្ជា', 'Manage Courses')}
                 </h2>
@@ -3039,6 +3863,7 @@ const ManageStudentsYear2 = () => {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowEnrollmentModal(false)}
                 className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
@@ -3046,23 +3871,32 @@ const ManageStudentsYear2 = () => {
               </button>
             </div>
 
-            <div className="p-6 sm:p-7 overflow-y-auto flex-1 space-y-6">
-              <div className="std-enroll-box bg-gray-50 border border-gray-200 rounded-2xl p-5 shadow-sm space-y-4">
+            <div className="p-5 sm:p-7 overflow-y-auto flex-1 space-y-5 sm:space-y-6">
+              <div className="std-enroll-box bg-gray-50 border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="std-text-primary text-sm font-extrabold text-gray-800 flex items-center gap-1.5">
+                  <h3 className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-800 flex items-center gap-1.5">
                     <PlusIcon className="h-4 w-4 text-emerald-500 stroke-[2.5]" />
-                    {t('ចុះឈ្មោះមុខវិជ្ជាថ្មី (អាចធីកបានច្រើន)', 'Enroll New Courses (Multi-Select)')}
+                    {t(
+                      'ចុះឈ្មោះមុខវិជ្ជាថ្មី (អាចធីកបានច្រើន)',
+                      'Enroll New Courses (Multi-Select)'
+                    )}
                   </h3>
 
-                  {(selectedStudent.department_id || selectedStudent.department?.id) && (
+                  {(selectedStudent.department_id ||
+                    selectedStudent.department?.id) && (
                     <button
                       type="button"
                       disabled={isEnrollingCourses}
                       onClick={handleQuickEnrollAllDeptCourses}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer"
                     >
-                      <SparklesIcon className="h-4 w-4 text-yellow-300" />
-                      {t('ដាក់គ្រប់មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់នេះទាំងអស់', 'Enroll All Dept Courses')}
+                      <SparklesIcon className="h-4 w-4 text-yellow-300 shrink-0" />
+                      <span>
+                        {t(
+                          'ដាក់គ្រប់មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់នេះទាំងអស់',
+                          'Enroll All Dept Courses'
+                        )}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -3074,9 +3908,17 @@ const ManageStudentsYear2 = () => {
                     className="std-input w-full px-3.5 py-2 border border-gray-200 rounded-xl text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
                   >
                     <option value="student_dept">
-                      {t('មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់របស់សិស្ស', "Student's Department Courses")}
+                      {t(
+                        'មុខវិជ្ជាក្នុងដេប៉ាតឺម៉ង់របស់សិស្ស',
+                        "Student's Department Courses"
+                      )}
                     </option>
-                    <option value="all">{t('បង្ហាញគ្រប់មុខវិជ្ជាទាំងអស់', 'All Departments Courses')}</option>
+                    <option value="all">
+                      {t(
+                        'បង្ហាញគ្រប់មុខវិជ្ជាទាំងអស់',
+                        'All Departments Courses'
+                      )}
+                    </option>
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>
                         {getDepartmentDisplayName(d)}
@@ -3090,7 +3932,7 @@ const ManageStudentsYear2 = () => {
                       type="text"
                       value={enrollCourseSearch}
                       onChange={(e) => setEnrollCourseSearch(e.target.value)}
-                      placeholder=""
+                      placeholder={t('ស្វែងរកមុខវិជ្ជា...', 'Search course...')}
                       className="std-input w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-xs font-medium bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
                     />
                   </div>
@@ -3098,7 +3940,10 @@ const ManageStudentsYear2 = () => {
 
                 {availableCoursesForSingleStudent.length === 0 ? (
                   <p className="std-surface-card std-text-secondary text-xs font-bold text-gray-400 italic bg-white border border-gray-200 rounded-xl p-4 text-center">
-                    {t('សិស្សបានចុះឈ្មោះគ្រប់មុខវិជ្ជាក្នុងផ្នែកនេះរួចរាល់ហើយ។', 'All available courses in this filter are enrolled.')}
+                    {t(
+                      'សិស្សបានចុះឈ្មោះគ្រប់មុខវិជ្ជាក្នុងផ្នែកនេះរួចរាល់ហើយ។',
+                      'All available courses in this filter are enrolled.'
+                    )}
                   </p>
                 ) : (
                   <>
@@ -3108,19 +3953,32 @@ const ManageStudentsYear2 = () => {
                         onClick={handleSelectAllAvailableSingle}
                         className="text-xs font-extrabold text-emerald-600 hover:text-emerald-700 cursor-pointer"
                       >
-                        {availableCoursesForSingleStudent.every((c) => selectedCoursesToEnroll.includes(Number(c.id)))
+                        {availableCoursesForSingleStudent.every((c) =>
+                          selectedCoursesToEnroll.includes(Number(c.id))
+                        )
                           ? t('ដកការជ្រើសរើសទាំងអស់', 'Deselect All')
-                          : t(`ជ្រើសរើសទាំងអស់ (${availableCoursesForSingleStudent.length})`, `Select All (${availableCoursesForSingleStudent.length})`)}
+                          : t(
+                              `ជ្រើសរើសទាំងអស់ (${availableCoursesForSingleStudent.length})`,
+                              `Select All (${availableCoursesForSingleStudent.length})`
+                            )}
                       </button>
                       <span className="std-text-secondary text-xs font-bold text-gray-500">
-                        {t('បានជ្រើសរើស៖', 'Selected:')} <strong className="text-emerald-600">{selectedCoursesToEnroll.length}</strong>
+                        {t('បានជ្រើសរើស៖', 'Selected:')}{' '}
+                        <strong className="text-emerald-600">
+                          {selectedCoursesToEnroll.length}
+                        </strong>
                       </span>
                     </div>
 
                     <div className="max-h-44 overflow-y-auto space-y-2 pr-1">
                       {availableCoursesForSingleStudent.map((course) => {
-                        const isChecked = selectedCoursesToEnroll.includes(Number(course.id));
-                        const teacherInfo = resolveCourseTeacherInfo(course, course.id);
+                        const isChecked = selectedCoursesToEnroll.includes(
+                          Number(course.id)
+                        );
+                        const teacherInfo = resolveCourseTeacherInfo(
+                          course,
+                          course.id
+                        );
                         return (
                           <div
                             key={course.id}
@@ -3144,8 +4002,11 @@ const ManageStudentsYear2 = () => {
                                 </p>
                                 <p className="std-text-secondary text-[11px] text-gray-500 font-medium">
                                   {t('គ្រូ៖', 'Teacher:')}{' '}
-                                  <span className="std-text-primary font-bold">{teacherInfo.name}</span>{' '}
-                                  &bull; {course.credit || 3} {t('ក្រេឌីត', 'Credits')}
+                                  <span className="std-text-primary font-bold">
+                                    {teacherInfo.name}
+                                  </span>{' '}
+                                  &bull; {course.credit || 3}{' '}
+                                  {t('ក្រេឌីត', 'Credits')}
                                 </p>
                               </div>
                             </div>
@@ -3157,7 +4018,10 @@ const ManageStudentsYear2 = () => {
                     <div className="flex justify-end pt-1">
                       <button
                         type="button"
-                        disabled={isEnrollingCourses || selectedCoursesToEnroll.length === 0}
+                        disabled={
+                          isEnrollingCourses ||
+                          selectedCoursesToEnroll.length === 0
+                        }
                         onClick={handleEnrollSelectedCourses}
                         className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
                       >
@@ -3166,7 +4030,10 @@ const ManageStudentsYear2 = () => {
                         ) : (
                           <PlusIcon className="h-4 w-4 stroke-[2.5]" />
                         )}
-                        {t(`ចុះឈ្មោះចូលរៀន (${selectedCoursesToEnroll.length})`, `Enroll Selected (${selectedCoursesToEnroll.length})`)}
+                        {t(
+                          `ចុះឈ្មោះចូលរៀន (${selectedCoursesToEnroll.length})`,
+                          `Enroll Selected (${selectedCoursesToEnroll.length})`
+                        )}
                       </button>
                     </div>
                   </>
@@ -3176,14 +4043,18 @@ const ManageStudentsYear2 = () => {
               <div>
                 <h3 className="std-text-primary text-sm font-extrabold text-gray-800 mb-3 flex items-center gap-1.5">
                   <AcademicCapIcon className="h-4 w-4 text-indigo-500" />
-                  {t('មុខវិជ្ជាកំពុងសិក្សា', 'Enrolled Courses')} ({studentEnrollments.length})
+                  {t('មុខវិជ្ជាកំពុងសិក្សា', 'Enrolled Courses')} (
+                  {studentEnrollments.length})
                 </h3>
-                
+
                 {studentEnrollments.length === 0 ? (
                   <div className="std-enroll-box text-center py-8 bg-gray-50 border border-dashed border-gray-200 rounded-2xl">
                     <BookOpenIcon className="h-10 w-10 text-gray-400 mx-auto mb-2" />
                     <p className="std-text-secondary text-sm text-gray-500 font-bold">
-                      {t('មិនទាន់បានចុះឈ្មោះមុខវិជ្ជាណាមួយនៅឡើយទេ', 'No courses enrolled yet')}
+                      {t(
+                        'មិនទាន់បានចុះឈ្មោះមុខវិជ្ជាណាមួយនៅឡើយទេ',
+                        'No courses enrolled yet'
+                      )}
                     </p>
                   </div>
                 ) : (
@@ -3198,7 +4069,8 @@ const ManageStudentsYear2 = () => {
                       );
                       const teacherAvatarKey = `enr_t_${enrollment.id}`;
                       const hasTeacherAvatar = Boolean(
-                        teacherInfo.avatarUrl && !failedAvatars[teacherAvatarKey]
+                        teacherInfo.avatarUrl &&
+                          !failedAvatars[teacherAvatarKey]
                       );
                       const courseTitle =
                         enrollment.course?.course_name ||
@@ -3210,7 +4082,10 @@ const ManageStudentsYear2 = () => {
                         3;
 
                       return (
-                        <div key={enrollment.id} className="std-enroll-item flex items-center justify-between p-3.5 bg-white border border-gray-200 rounded-2xl hover:border-indigo-300 transition-all shadow-sm">
+                        <div
+                          key={enrollment.id}
+                          className="std-enroll-item flex items-center justify-between p-3.5 bg-white border border-gray-200 rounded-2xl hover:border-indigo-300 transition-all shadow-sm"
+                        >
                           <div className="flex items-start gap-3">
                             <div className="h-9 w-9 rounded-full bg-indigo-500 text-white flex items-center justify-center shrink-0 font-extrabold text-xs overflow-hidden shadow-sm">
                               {hasTeacherAvatar ? (
@@ -3240,13 +4115,17 @@ const ManageStudentsYear2 = () => {
                                 <span className="std-text-primary text-gray-700 font-bold">
                                   {teacherInfo.name}
                                 </span>{' '}
-                                &bull; {courseCredit} {t('ក្រេឌីត', 'Credits')}
+                                &bull; {courseCredit}{' '}
+                                {t('ក្រេឌីត', 'Credits')}
                               </p>
                             </div>
                           </div>
-                          
+
                           <button
-                            onClick={() => setUnenrollTarget(enrollment.course_id)}
+                            type="button"
+                            onClick={() =>
+                              setUnenrollTarget(enrollment.course_id)
+                            }
                             className="std-action-delete p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
                             title={t('លុបមុខវិជ្ជាចេញ', 'Remove Course')}
                           >
@@ -3262,6 +4141,7 @@ const ManageStudentsYear2 = () => {
 
             <div className="std-modal-bar p-5 sm:p-6 border-t border-gray-100 flex justify-end bg-gray-50/50 shrink-0">
               <button
+                type="button"
                 onClick={() => setShowEnrollmentModal(false)}
                 className="std-cancel-btn px-6 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
@@ -3273,24 +4153,28 @@ const ManageStudentsYear2 = () => {
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* 9.8. ផ្ទាំង Modal ចុះឈ្មោះមុខវិជ្ជាជាក្រុម (Bulk Course Enrollment)   */}
+      {/* 9.8. ផ្ទាំង Modal ចុះឈ្មោះមុខវិជ្ជាជាក្រុម (Bottom Sheet on Phone)   */}
       {/* ------------------------------------------------------------------ */}
       {showBulkEnrollModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="std-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent animate-fadeIn">
-            <div className="std-modal-bar flex justify-between items-center p-6 border-b border-gray-100">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent animate-fadeIn">
+            <div className="std-modal-bar flex justify-between items-center p-5 sm:p-6 border-b border-gray-100">
               <div>
-                <h2 className="std-text-primary text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
-                  <span className="std-badge-emerald bg-emerald-100 text-emerald-600 p-2.5 rounded-xl border border-emerald-200">
-                    <BookOpenIcon className="h-6 w-6" />
+                <h2 className="std-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
+                  <span className="std-badge-emerald bg-emerald-100 text-emerald-600 p-2 sm:p-2.5 rounded-xl border border-emerald-200">
+                    <BookOpenIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                   </span>
                   {t('ចុះឈ្មោះមុខវិជ្ជាជាក្រុម', 'Bulk Course Enrollment')}
                 </h2>
                 <p className="std-text-secondary text-xs text-gray-500 font-bold mt-1">
-                  {t(`កំពុងជ្រើសរើសសិស្សចំនួន ${selectedStudents.length} នាក់ ដើម្បីដាក់មុខវិជ្ជារួមគ្នា`, `Enrolling ${selectedStudents.length} selected students into courses at once`)}
+                  {t(
+                    `កំពុងជ្រើសរើសសិស្សចំនួន ${selectedStudents.length} នាក់ ដើម្បីដាក់មុខវិជ្ជារួមគ្នា`,
+                    `Enrolling ${selectedStudents.length} selected students into courses at once`
+                  )}
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowBulkEnrollModal(false)}
                 className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
@@ -3298,18 +4182,26 @@ const ManageStudentsYear2 = () => {
               </button>
             </div>
 
-            <form onSubmit={handleConfirmBulkEnroll} className="p-6 overflow-y-auto flex-1 space-y-5">
+            <form
+              onSubmit={handleConfirmBulkEnroll}
+              className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-5"
+            >
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="std-label block text-xs font-bold text-gray-700 mb-1.5">
-                    {t('ច្រោះមុខវិជ្ជាតាមដេប៉ាតឺម៉ង់', 'Filter Courses by Department')}
+                    {t(
+                      'ច្រោះមុខវិជ្ជាតាមដេប៉ាតឺម៉ង់',
+                      'Filter Courses by Department'
+                    )}
                   </label>
                   <select
                     value={bulkCourseDeptFilter}
                     onChange={(e) => setBulkCourseDeptFilter(e.target.value)}
                     className="std-input w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
                   >
-                    <option value="all">{t('-- គ្រប់ដេប៉ាតឺម៉ង់ទាំងអស់ --', '-- All Departments --')}</option>
+                    <option value="all">
+                      {t('-- គ្រប់ដេប៉ាតឺម៉ង់ទាំងអស់ --', '-- All Departments --')}
+                    </option>
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>
                         {getDepartmentDisplayName(d)}
@@ -3328,7 +4220,7 @@ const ManageStudentsYear2 = () => {
                       type="text"
                       value={bulkCourseSearch}
                       onChange={(e) => setBulkCourseSearch(e.target.value)}
-                      placeholder=""
+                      placeholder={t('ស្វែងរកមុខវិជ្ជា...', 'Search course...')}
                       className="std-input w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-xs font-medium bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
                     />
                   </div>
@@ -3341,12 +4233,19 @@ const ManageStudentsYear2 = () => {
                   onClick={handleSelectAllBulkCourses}
                   className="text-xs font-extrabold text-emerald-600 hover:text-emerald-700 cursor-pointer"
                 >
-                  {filteredBulkCourses.length > 0 && filteredBulkCourses.every((c) => bulkSelectedCourses.includes(Number(c.id)))
+                  {filteredBulkCourses.length > 0 &&
+                  filteredBulkCourses.every((c) =>
+                    bulkSelectedCourses.includes(Number(c.id))
+                  )
                     ? t('ដកការជ្រើសរើសទាំងអស់', 'Deselect All Visible')
-                    : t(`ជ្រើសរើសមុខវិជ្ជាទាំងអស់ក្នុងបញ្ជី (${filteredBulkCourses.length})`, `Select All Visible (${filteredBulkCourses.length})`)}
+                    : t(
+                        `ជ្រើសរើសមុខវិជ្ជាទាំងអស់ក្នុងបញ្ជី (${filteredBulkCourses.length})`,
+                        `Select All Visible (${filteredBulkCourses.length})`
+                      )}
                 </button>
                 <span className="std-badge-emerald px-3 py-1 rounded-lg text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  {t('បានធីក៖', 'Selected:')} {bulkSelectedCourses.length} {t('មុខវិជ្ជា', 'Courses')}
+                  {t('បានធីក៖', 'Selected:')} {bulkSelectedCourses.length}{' '}
+                  {t('មុខវិជ្ជា', 'Courses')}
                 </span>
               </div>
 
@@ -3354,14 +4253,22 @@ const ManageStudentsYear2 = () => {
                 <div className="std-enroll-box text-center py-10 bg-gray-50 border border-dashed border-gray-200 rounded-2xl">
                   <BookOpenIcon className="h-10 w-10 text-gray-400 mx-auto mb-2" />
                   <p className="std-text-secondary text-sm text-gray-500 font-bold">
-                    {t('មិនឃើញមានមុខវិជ្ជាក្នុងផ្នែកនេះទេ', 'No courses found for this filter')}
+                    {t(
+                      'មិនឃើញមានមុខវិជ្ជាក្នុងផ្នែកនេះទេ',
+                      'No courses found for this filter'
+                    )}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                   {filteredBulkCourses.map((course) => {
-                    const isChecked = bulkSelectedCourses.includes(Number(course.id));
-                    const teacherInfo = resolveCourseTeacherInfo(course, course.id);
+                    const isChecked = bulkSelectedCourses.includes(
+                      Number(course.id)
+                    );
+                    const teacherInfo = resolveCourseTeacherInfo(
+                      course,
+                      course.id
+                    );
                     return (
                       <div
                         key={course.id}
@@ -3384,7 +4291,12 @@ const ManageStudentsYear2 = () => {
                               {course.course_code} - {course.course_name}
                             </p>
                             <p className="std-text-secondary text-xs text-gray-500 font-medium mt-0.5">
-                              {t('គ្រូ៖', 'Teacher:')} <span className="font-bold">{teacherInfo.name}</span> &bull; {course.credit || 3} {t('ក្រេឌីត', 'Credits')}
+                              {t('គ្រូ៖', 'Teacher:')}{' '}
+                              <span className="font-bold">
+                                {teacherInfo.name}
+                              </span>{' '}
+                              &bull; {course.credit || 3}{' '}
+                              {t('ក្រេឌីត', 'Credits')}
                             </p>
                           </div>
                         </div>
@@ -3404,7 +4316,9 @@ const ManageStudentsYear2 = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isBulkEnrolling || bulkSelectedCourses.length === 0}
+                  disabled={
+                    isBulkEnrolling || bulkSelectedCourses.length === 0
+                  }
                   className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
                 >
                   {isBulkEnrolling ? (
@@ -3414,7 +4328,10 @@ const ManageStudentsYear2 = () => {
                   )}
                   {isBulkEnrolling
                     ? t('កំពុងចុះឈ្មោះ...', 'Enrolling...')
-                    : t(`ដាក់មុខវិជ្ជាឱ្យសិស្សទាំង ${selectedStudents.length} នាក់`, `Enroll ${selectedStudents.length} Students`)}
+                    : t(
+                        `ដាក់មុខវិជ្ជាឱ្យសិស្សទាំង ${selectedStudents.length} នាក់`,
+                        `Enroll ${selectedStudents.length} Students`
+                      )}
                 </button>
               </div>
             </form>
@@ -3423,18 +4340,21 @@ const ManageStudentsYear2 = () => {
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* 9.9. ផ្ទាំង Modal សម្រាប់នាំចូលទិន្នន័យសិស្សពី Excel                 */}
+      {/* 9.9. ផ្ទាំង Modal សម្រាប់នាំចូលទិន្នន័យសិស្សពី Excel (Bottom Sheet on Phone) */}
       {/* ------------------------------------------------------------------ */}
       {showImportModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="std-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
             <div className="std-modal-bar flex justify-between items-center p-5 border-b border-gray-100">
               <div>
-                <h2 className="std-text-primary text-lg font-extrabold text-gray-900 flex items-center gap-2">
+                <h2 className="std-text-primary text-base sm:text-lg font-extrabold text-gray-900 flex items-center gap-2">
                   <span className="std-badge-emerald bg-emerald-100 text-emerald-600 p-2 rounded-xl border border-emerald-200">
                     <DocumentIcon className="h-5 w-5" />
                   </span>
-                  {t('នាំចូលទិន្នន័យសិស្សឆ្នាំទី២ ពី Excel', 'Import Year 2 Students from Excel')}
+                  {t(
+                    'នាំចូលទិន្នន័យសិស្សឆ្នាំទី២ ពី Excel',
+                    'Import Year 2 Students from Excel'
+                  )}
                 </h2>
                 {activeDepartmentObj && (
                   <p className="std-text-secondary text-xs text-gray-500 font-bold mt-1 ml-11">
@@ -3446,7 +4366,13 @@ const ManageStudentsYear2 = () => {
                 )}
               </div>
               <button
-                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); setImportError(''); }}
+                type="button"
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportPreview([]);
+                  setSelectedFileName('');
+                  setImportError('');
+                }}
                 className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 <XMarkIcon className="h-5 w-5" />
@@ -3457,7 +4383,9 @@ const ManageStudentsYear2 = () => {
               {importError && (
                 <div className="std-warning-box p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
                   <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
-                  <p className="text-xs font-bold leading-relaxed">{importError}</p>
+                  <p className="text-xs font-bold leading-relaxed">
+                    {importError}
+                  </p>
                 </div>
               )}
 
@@ -3468,8 +4396,14 @@ const ManageStudentsYear2 = () => {
                   </h4>
                   <p className="std-import-desc text-xs font-medium text-emerald-700 mt-1">
                     {activeDepartmentObj
-                      ? t(`សិស្សទាំងអស់ក្នុងឯកសារនេះ នឹងត្រូវដាក់បញ្ចូលទៅក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» ដោយស្វ័យប្រវត្តិ។`, `All students in this file will be automatically assigned to "${getDepartmentDisplayName(activeDepartmentObj)}".`)
-                      : t('សូមទាញយកទម្រង់គំរូ Excel ហើយបំពេញព័ត៌មានឱ្យបានត្រឹមត្រូវ។', 'Please download the template and fill in correctly.')}
+                      ? t(
+                          `សិស្សទាំងអស់ក្នុងឯកសារនេះ នឹងត្រូវដាក់បញ្ចូលទៅក្នុងដេប៉ាតឺម៉ង់ «${getDepartmentDisplayName(activeDepartmentObj)}» ដោយស្វ័យប្រវត្តិ។`,
+                          `All students in this file will be automatically assigned to "${getDepartmentDisplayName(activeDepartmentObj)}".`
+                        )
+                      : t(
+                          'សូមទាញយកទម្រង់គំរូ Excel ហើយបំពេញព័ត៌មានឱ្យបានត្រឹមត្រូវ។',
+                          'Please download the template and fill in correctly.'
+                        )}
                   </p>
                 </div>
                 <button
@@ -3484,7 +4418,10 @@ const ManageStudentsYear2 = () => {
 
               <div>
                 <label className="std-label block text-sm font-bold text-gray-700 mb-2">
-                  {t('ជ្រើសរើស ឬទម្លាក់ឯកសារ Excel (.xlsx, .xls)', 'Select or drop Excel file')}
+                  {t(
+                    'ជ្រើសរើស ឬទម្លាក់ឯកសារ Excel (.xlsx, .xls)',
+                    'Select or drop Excel file'
+                  )}
                 </label>
                 <div className="relative group">
                   <input
@@ -3492,16 +4429,25 @@ const ManageStudentsYear2 = () => {
                     accept=".xlsx, .xls, .csv"
                     onChange={handleFileUpload}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                    title={t('ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ', 'Click here to select file')}
+                    title={t(
+                      'ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ',
+                      'Click here to select file'
+                    )}
                   />
-                  
-                  <div className={`std-dropzone border-2 border-dashed rounded-xl py-6 px-4 flex flex-col items-center justify-center text-center transition-all duration-300 shadow-sm ${selectedFileName ? 'border-emerald-500 bg-emerald-50' : 'border-emerald-300 bg-emerald-50/40 group-hover:bg-emerald-50 group-hover:border-emerald-500'}`}>
+
+                  <div
+                    className={`std-dropzone border-2 border-dashed rounded-xl py-6 px-4 flex flex-col items-center justify-center text-center transition-all duration-300 shadow-sm ${
+                      selectedFileName
+                        ? 'border-emerald-500 bg-emerald-50'
+                        : 'border-emerald-300 bg-emerald-50/40 group-hover:bg-emerald-50 group-hover:border-emerald-500'
+                    }`}
+                  >
                     {selectedFileName ? (
                       <>
                         <div className="p-2.5 bg-emerald-500 rounded-full mb-3 shadow-sm border border-emerald-600">
                           <DocumentTextIcon className="h-6 w-6 text-white" />
                         </div>
-                        <h3 className="std-import-title text-sm font-extrabold text-emerald-900 mb-1.5">
+                        <h3 className="std-import-title text-sm font-extrabold text-emerald-900 mb-1.5 break-all">
                           {selectedFileName}
                         </h3>
                         <p className="std-import-desc text-xs text-emerald-600 font-medium">
@@ -3514,7 +4460,10 @@ const ManageStudentsYear2 = () => {
                           <DocumentIcon className="h-6 w-6 text-emerald-600" />
                         </div>
                         <h3 className="std-import-title text-sm font-extrabold text-emerald-900 mb-1.5">
-                          {t('ចុចទីនេះ ឬទាញឯកសារទម្លាក់ទីនេះ', 'Click to upload or drag and drop')}
+                          {t(
+                            'ចុចទីនេះ ឬទាញឯកសារទម្លាក់ទីនេះ',
+                            'Click to upload or drag and drop'
+                          )}
                         </h3>
                       </>
                     )}
@@ -3522,44 +4471,61 @@ const ManageStudentsYear2 = () => {
                 </div>
               </div>
 
-              {importPreview.length > 0 && importPreview.some(r => !r.isValid) && (
-                <div className="std-warning-box mt-4 p-4 bg-rose-50/50 border border-rose-200 rounded-xl flex items-center justify-between gap-4 animate-fadeIn">
-                  <div>
-                    <p className="std-text-primary text-sm font-bold text-gray-800">
-                      {t('មានទិន្នន័យខុសក្នុងបញ្ជី', 'Errors in Parsed Data')}
-                    </p>
-                    <p className="std-text-secondary text-xs text-gray-500">
-                      {importPreview.length} {t('ជួរ', 'rows')}
-                    </p>
+              {importPreview.length > 0 &&
+                importPreview.some((r) => !r.isValid) && (
+                  <div className="std-warning-box mt-4 p-4 bg-rose-50/50 border border-rose-200 rounded-xl flex flex-wrap items-center justify-between gap-4 animate-fadeIn">
+                    <div>
+                      <p className="std-text-primary text-sm font-bold text-gray-800">
+                        {t(
+                          'មានទិន្នន័យខុសក្នុងបញ្ជី',
+                          'Errors in Parsed Data'
+                        )}
+                      </p>
+                      <p className="std-text-secondary text-xs text-gray-500">
+                        {importPreview.length} {t('ជួរ', 'rows')}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="std-badge-emerald bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-transparent">
+                        <CheckCircleIcon className="h-4 w-4" />
+                        {importPreview.filter((r) => r.isValid).length}{' '}
+                        {t('ត្រឹមត្រូវ', 'Valid')}
+                      </span>
+                      <span
+                        className="std-badge-rose bg-rose-100 text-rose-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-transparent"
+                        title={importPreview
+                          .filter((r) => !r.isValid)
+                          .map((r) => `ជួរទី ${r.rowIndex}: ${r.errors[0]}`)
+                          .join('\n')}
+                      >
+                        <ExclamationCircleIcon className="h-4 w-4" />
+                        {importPreview.filter((r) => !r.isValid).length}{' '}
+                        {t('មានកំហុស', 'Error')}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <span className="std-badge-emerald bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-transparent">
-                      <CheckCircleIcon className="h-4 w-4" />
-                      {importPreview.filter(r => r.isValid).length} {t('ត្រឹមត្រូវ', 'Valid')}
-                    </span>
-                    <span
-                      className="std-badge-rose bg-rose-100 text-rose-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-transparent"
-                      title={importPreview.filter(r => !r.isValid).map(r => `ជួរទី ${r.rowIndex}: ${r.errors[0]}`).join('\n')}
-                    >
-                      <ExclamationCircleIcon className="h-4 w-4" />
-                      {importPreview.filter(r => !r.isValid).length} {t('មានកំហុស', 'Error')}
-                    </span>
-                  </div>
-                </div>
-              )}
+                )}
             </div>
 
             <div className="std-modal-bar p-5 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/50 shrink-0">
               <button
                 type="button"
-                onClick={() => { setShowImportModal(false); setImportPreview([]); setSelectedFileName(''); setImportError(''); }}
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportPreview([]);
+                  setSelectedFileName('');
+                  setImportError('');
+                }}
                 className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 type="button"
-                disabled={isImporting || importPreview.filter(r => r.isValid).length === 0}
+                disabled={
+                  isImporting ||
+                  importPreview.filter((r) => r.isValid).length === 0
+                }
                 onClick={handleConfirmImport}
                 className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
               >
@@ -3568,7 +4534,9 @@ const ManageStudentsYear2 = () => {
                 ) : (
                   <DocumentIcon className="h-5 w-5" />
                 )}
-                {isImporting ? t('កំពុងនាំចូល...', 'Importing...') : `${t('នាំចូលទិន្នន័យ', 'Import Data')} (${importPreview.filter(r => r.isValid).length})`}
+                {isImporting
+                  ? t('កំពុងនាំចូល...', 'Importing...')
+                  : `${t('នាំចូលទិន្នន័យ', 'Import Data')} (${importPreview.filter((r) => r.isValid).length})`}
               </button>
             </div>
           </div>
@@ -3576,37 +4544,52 @@ const ManageStudentsYear2 = () => {
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* 9.10. ផ្ទាំង Modal បញ្ជាក់ការលុបគណនីសិស្ស                           */}
+      {/* 9.10. ផ្ទាំង Modal បញ្ជាក់ការលុបគណនីសិស្ស (Bottom Sheet on Phone)   */}
       {/* ------------------------------------------------------------------ */}
       {showDeleteModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="std-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-fadeIn border border-transparent">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="std-delete-title flex items-center text-rose-600 mb-5">
               <div className="std-badge-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
                 <ExclamationTriangleIcon className="h-6 w-6" />
               </div>
-              <h3 className="text-xl font-extrabold">{t('បញ្ជាក់ការលុប', 'Confirm Deletion')}</h3>
+              <h3 className="text-xl font-extrabold">
+                {t('បញ្ជាក់ការលុប', 'Confirm Deletion')}
+              </h3>
             </div>
             <p className="std-text-secondary text-sm font-medium text-gray-600 mb-6 leading-relaxed">
-              {t('តើលោកអ្នកប្រាកដជាចង់លុបគណនីសិស្សឈ្មោះ', 'Are you sure you want to delete student')} «
+              {t(
+                'តើលោកអ្នកប្រាកដជាចង់លុបគណនីសិស្សឈ្មោះ',
+                'Are you sure you want to delete student'
+              )}{' '}
+              «
               <span className="std-text-primary font-extrabold text-gray-900">
                 {getStudentFullName(studentToDelete)}
               </span>
               » {t('នេះមែនទេ?', 'this student?')}
-              <br /><br />
+              <br />
+              <br />
               <span className="std-warning-box text-rose-500 text-xs font-bold bg-rose-50 p-3 rounded-lg border border-rose-100 block">
-                {t('* ទិន្នន័យ ការចុះឈ្មោះ និងប្រវត្តិរបស់សិស្សនេះនឹងត្រូវបាត់បង់ពីប្រព័ន្ធ។', '* Data, enrollments, and history of this student will be lost.')}
+                {t(
+                  '* ទិន្នន័យ ការចុះឈ្មោះ និងប្រវត្តិរបស់សិស្សនេះនឹងត្រូវបាត់បង់ពីប្រព័ន្ធ។',
+                  '* Data, enrollments, and history of this student will be lost.'
+                )}
               </span>
             </p>
             <div className="flex justify-end space-x-3">
               <button
-                onClick={() => { setShowDeleteModal(false); setStudentToDelete(null); }}
+                type="button"
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setStudentToDelete(null);
+                }}
                 disabled={isDeleting}
                 className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
+                type="button"
                 onClick={confirmDelete}
                 disabled={isDeleting}
                 className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer disabled:opacity-50"
@@ -3622,25 +4605,32 @@ const ManageStudentsYear2 = () => {
       {/* 9.11. ផ្ទាំង Modal បញ្ជាក់ការលុបមុខវិជ្ជាចេញពីសិស្ស (Unenroll)       */}
       {/* ------------------------------------------------------------------ */}
       {unenrollTarget && (
-        <div className="fixed inset-0 m-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="std-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-fadeIn border border-transparent">
+        <div className="fixed inset-0 m-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="std-delete-title flex items-center text-rose-600 mb-5">
               <div className="std-badge-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
                 <ExclamationTriangleIcon className="h-6 w-6" />
               </div>
-              <h3 className="text-xl font-extrabold">{t('បញ្ជាក់ការលុបមុខវិជ្ជា', 'Confirm Unenroll')}</h3>
+              <h3 className="text-xl font-extrabold">
+                {t('បញ្ជាក់ការលុបមុខវិជ្ជា', 'Confirm Unenroll')}
+              </h3>
             </div>
             <p className="std-text-secondary text-sm font-medium text-gray-600 mb-6 leading-relaxed">
-              {t('តើអ្នកប្រាកដថាចង់លុបមុខវិជ្ជានេះចេញពីសិស្សនេះមែនទេ?', 'Are you sure you want to unenroll student from this course?')}
+              {t(
+                'តើអ្នកប្រាកដថាចង់លុបមុខវិជ្ជានេះចេញពីសិស្សនេះមែនទេ?',
+                'Are you sure you want to unenroll student from this course?'
+              )}
             </p>
             <div className="flex justify-end space-x-3">
               <button
+                type="button"
                 onClick={() => setUnenrollTarget(null)}
                 className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
+                type="button"
                 onClick={confirmUnenrollCourse}
                 className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer"
               >
@@ -3655,20 +4645,25 @@ const ManageStudentsYear2 = () => {
       {/* 9.12. ផ្ទាំង Modal បញ្ជាក់ការដំឡើងឆ្នាំសិក្សាសិស្ស (ពីឆ្នាំទី២ ទៅឆ្នាំទី៣) */}
       {/* ------------------------------------------------------------------ */}
       {showPromoteModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="std-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-fadeIn border border-transparent">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+          <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="std-promote-title flex items-center text-blue-600 mb-5">
               <div className="std-badge-blue p-2 bg-blue-100 rounded-full mr-3 border border-blue-200">
                 <ChevronDoubleUpIcon className="h-6 w-6" />
               </div>
-              <h3 className="text-xl font-extrabold">{t('បញ្ជាក់ការឡើងឆ្នាំសិក្សា', 'Confirm Promotion')}</h3>
+              <h3 className="text-xl font-extrabold">
+                {t('បញ្ជាក់ការឡើងឆ្នាំសិក្សា', 'Confirm Promotion')}
+              </h3>
             </div>
-            
+
             <form onSubmit={handlePromoteSubmit}>
               <p className="std-text-secondary text-sm font-medium text-gray-600 mb-4 leading-relaxed">
-                {t(`តើអ្នកចង់ដំឡើងឆ្នាំសិក្សាសិស្សចំនួន ${selectedStudents.length} នាក់នេះមែនទេ?`, `Promote ${selectedStudents.length} selected students?`)}
+                {t(
+                  `តើអ្នកចង់ដំឡើងឆ្នាំសិក្សាសិស្សចំនួន ${selectedStudents.length} នាក់នេះមែនទេ?`,
+                  `Promote ${selectedStudents.length} selected students?`
+                )}
               </p>
-              
+
               <div className="mb-6">
                 <label className="std-label block text-sm font-bold text-gray-700 mb-2">
                   {t('ឡើងទៅកាន់ឆ្នាំសិក្សាថ្មី៖', 'Promote to New Year:')}
@@ -3682,14 +4677,20 @@ const ManageStudentsYear2 = () => {
                   required
                 />
                 <p className="std-text-secondary text-[11px] text-gray-500 mt-2 font-medium">
-                  {t('* ប្រព័ន្ធបានទាញយកជំនាន់ និងកំណត់ឆ្នាំបន្ទាប់ដោយស្វ័យប្រវត្តិ។ លោកអ្នកអាចកែប្រែបាន។', '* The system automatically determined the next year. You can edit it if needed.')}
+                  {t(
+                    '* ប្រព័ន្ធបានទាញយកជំនាន់ និងកំណត់ឆ្នាំបន្ទាប់ដោយស្វ័យប្រវត្តិ។ លោកអ្នកអាចកែប្រែបាន។',
+                    '* The system automatically determined the next year. You can edit it if needed.'
+                  )}
                 </p>
               </div>
 
               <span className="std-amber-warning text-amber-600 text-xs font-bold bg-amber-50 p-3 rounded-lg border border-amber-100 block mb-6">
-                {t('* សិស្សដែលត្រូវបានដំឡើងឆ្នាំ នឹងត្រូវផ្ទេរចេញពីតារាង «ឆ្នាំទី២» ទៅកាន់តារាង «ឆ្នាំទី៣» ដោយស្វ័យប្រវត្តិ។', '* Students promoted to the next year will be automatically moved from the "Year 2" list to the "Year 3" list.')}
+                {t(
+                  '* សិស្សដែលត្រូវបានដំឡើងឆ្នាំ នឹងត្រូវផ្ទេរចេញពីតារាង «ឆ្នាំទី២» ទៅកាន់តារាង «ឆ្នាំទី៣» ដោយស្វ័យប្រវត្តិ។',
+                  '* Students promoted to the next year will be automatically moved from the "Year 2" list to the "Year 3" list.'
+                )}
               </span>
-              
+
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"
@@ -3708,7 +4709,9 @@ const ManageStudentsYear2 = () => {
                   ) : (
                     <ChevronDoubleUpIcon className="h-5 w-5 mr-2" />
                   )}
-                  {isPromoting ? t('កំពុងដំណើរការ...', 'Processing...') : t('យល់ព្រម', 'Confirm')}
+                  {isPromoting
+                    ? t('កំពុងដំណើរការ...', 'Processing...')
+                    : t('យល់ព្រម', 'Confirm')}
                 </button>
               </div>
             </form>
@@ -3719,7 +4722,7 @@ const ManageStudentsYear2 = () => {
       {/* ==================================================================== */}
       {/* 📌 ផ្នែកទី ១០៖ CSS សម្រាប់កំណត់ពណ៌ទម្រង់យប់ (DARK MODE STYLING)         */}
       {/* ==================================================================== */}
-     <style>{`
+      <style>{`
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 

@@ -1,19 +1,19 @@
 // src/components/admin/AdminDashboard.jsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import { 
-  UsersIcon, 
-  BookOpenIcon, 
+import {
+  UsersIcon,
+  BookOpenIcon,
   AcademicCapIcon,
   UserGroupIcon,
   ArrowTrendingUpIcon,
   ClockIcon,
   BuildingLibraryIcon,
   ChevronRightIcon,
-  CheckBadgeIcon
+  CheckBadgeIcon,
 } from '@heroicons/react/24/outline';
 import {
   AreaChart,
@@ -49,7 +49,8 @@ const ADMIN_DASH_MEM_CACHE = {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
@@ -71,7 +72,11 @@ const safeWriteListStorage = (key, list, saveToAvatarMap = false) => {
     });
   }
   try {
-    localStorage.setItem(key, JSON.stringify(list));
+    const str = JSON.stringify(list);
+    try {
+      sessionStorage.setItem(key, str);
+    } catch {}
+    localStorage.setItem(key, str);
   } catch {
     try {
       const lightList = list.map((item) => ({
@@ -91,7 +96,11 @@ const safeWriteListStorage = (key, list, saveToAvatarMap = false) => {
             }
           : item.user,
       }));
-      localStorage.setItem(key, JSON.stringify(lightList));
+      const slimStr = JSON.stringify(lightList);
+      try {
+        sessionStorage.setItem(key, slimStr);
+      } catch {}
+      localStorage.setItem(key, slimStr);
     } catch {}
   }
 };
@@ -117,7 +126,10 @@ const resolveAdminUid = (contextUser) => {
   }
   try {
     const raw =
-      localStorage.getItem('user') || localStorage.getItem('auth_user');
+      sessionStorage.getItem('user') ||
+      sessionStorage.getItem('auth_user') ||
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth_user');
     if (raw) {
       const parsed = JSON.parse(raw);
       const u = parsed?.user || parsed?.data || parsed;
@@ -143,7 +155,12 @@ const ensureCleanAdminSessionCache = (newUid) => {
         'cached_admin_courses_list',
         'cached_admin_departments_list',
       ];
-      sharedAdminKeys.forEach((k) => localStorage.removeItem(k));
+      sharedAdminKeys.forEach((k) => {
+        try {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+        } catch {}
+      });
     }
     localStorage.setItem(LAST_ACTIVE_ADMIN_UID_KEY, String(newUid));
   } catch (e) {}
@@ -159,44 +176,56 @@ const prefetchAllAdminPagesData = (uid) => {
     api
       .get('/admin/departments')
       .then((res) => {
-        const data = res.data?.data || res.data || [];
-        if (Array.isArray(data)) {
-          safeWriteListStorage(`cached_admin_departments_list_v8_${uid}`, data);
-          safeWriteListStorage('cached_admin_departments_list', data);
-        }
+        const raw = res.data?.data ?? res.data ?? [];
+        const data = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.data)
+          ? raw.data
+          : [];
+        safeWriteListStorage(`cached_admin_departments_list_v8_${uid}`, data);
+        safeWriteListStorage('cached_admin_departments_list', data);
       })
       .catch(() => {});
 
     api
       .get('/admin/courses')
       .then((res) => {
-        const data = res.data?.data || res.data || [];
-        if (Array.isArray(data)) {
-          safeWriteListStorage(`cached_admin_courses_list_v8_${uid}`, data);
-          safeWriteListStorage('cached_admin_courses_list', data);
-        }
+        const raw = res.data?.data ?? res.data ?? [];
+        const data = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.data)
+          ? raw.data
+          : [];
+        safeWriteListStorage(`cached_admin_courses_list_v8_${uid}`, data);
+        safeWriteListStorage('cached_admin_courses_list', data);
       })
       .catch(() => {});
 
     api
       .get('/admin/teachers')
       .then((res) => {
-        const data = res.data?.data || res.data || [];
-        if (Array.isArray(data)) {
-          safeWriteListStorage(`cached_admin_teachers_list_v8_${uid}`, data);
-          safeWriteListStorage('cached_admin_teachers_list', data);
-        }
+        const raw = res.data?.data ?? res.data ?? [];
+        const data = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.data)
+          ? raw.data
+          : [];
+        safeWriteListStorage(`cached_admin_teachers_list_v8_${uid}`, data);
+        safeWriteListStorage('cached_admin_teachers_list', data);
       })
       .catch(() => {});
 
     api
       .get('/admin/students')
       .then((res) => {
-        const data = res.data?.data || res.data || [];
-        if (Array.isArray(data)) {
-          safeWriteListStorage(`cached_admin_students_list_v8_${uid}`, data);
-          safeWriteListStorage('cached_admin_students_list', data);
-        }
+        const raw = res.data?.data ?? res.data ?? [];
+        const data = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.data)
+          ? raw.data
+          : [];
+        safeWriteListStorage(`cached_admin_students_list_v8_${uid}`, data);
+        safeWriteListStorage('cached_admin_students_list', data);
       })
       .catch(() => {});
   }, 200);
@@ -206,6 +235,7 @@ const AdminDashboard = () => {
   const { t, language } = useLanguage();
   const { getFullName, user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
+  const abortControllerRef = useRef(null);
 
   // ✅ អនុគមន៍បម្លែងទីតាំងរូបភាពឱ្យគាំទ្រទាំង Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const resolveImageUrl = useCallback((rawPath) => {
@@ -329,7 +359,6 @@ const AdminDashboard = () => {
   // 📌 ផ្នែកទី២៖ ទាញយកទិន្នន័យដោយឯករាជ្យមិនរង់ចាំគ្នា (Non-Blocking 0ms Sync)
   // ============================================================================
   const fetchDashboardData = useCallback(() => {
-    // ទាញទិន្នន័យទំព័រផ្សេងៗរបស់ Admin ទុកមុននៅផ្ទៃខាងក្រោយភ្លាមៗ
     prefetchAllAdminPagesData(currentAdminId);
 
     const cachedSt = readStorageJson(getStatsCacheKey(currentAdminId), null);
@@ -362,8 +391,14 @@ const AdminDashboard = () => {
       return;
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     api
-      .get('/admin/stats')
+      .get('/admin/stats', { signal: controller.signal })
       .then((res) => {
         const newStats = res.data?.data || res.data || {};
         setStats(newStats);
@@ -371,27 +406,30 @@ const AdminDashboard = () => {
         ADMIN_DASH_MEM_CACHE.stats = newStats;
         ADMIN_DASH_MEM_CACHE.lastSyncedAt = Date.now();
         try {
-          localStorage.setItem(
-            getStatsCacheKey(currentAdminId),
-            JSON.stringify(newStats)
-          );
-          localStorage.setItem(
-            CACHE_KEY_SHARED_STATS,
-            JSON.stringify(newStats)
-          );
+          const str = JSON.stringify(newStats);
+          try {
+            sessionStorage.setItem(getStatsCacheKey(currentAdminId), str);
+          } catch {}
+          localStorage.setItem(getStatsCacheKey(currentAdminId), str);
+          localStorage.setItem(CACHE_KEY_SHARED_STATS, str);
         } catch (e) {
           console.warn('Failed to cache admin stats:', e);
         }
       })
       .catch((err) => {
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
         console.error('Stats API error:', err);
       });
 
     api
-      .get('/admin/users?per_page=5')
+      .get('/admin/users?per_page=5', { signal: controller.signal })
       .then((res) => {
-        const rawUsers = res.data?.data || res.data || [];
-        const fetchedUsers = Array.isArray(rawUsers) ? rawUsers : [];
+        const rawUsers = res.data?.data ?? res.data ?? [];
+        const fetchedUsers = Array.isArray(rawUsers)
+          ? rawUsers
+          : Array.isArray(rawUsers?.data)
+          ? rawUsers.data
+          : [];
         fetchedUsers.forEach((uItem) => {
           const img =
             uItem?.profile_image ||
@@ -407,127 +445,157 @@ const AdminDashboard = () => {
         safeWriteListStorage(CACHE_KEY_SHARED_USERS, fetchedUsers, false);
       })
       .catch((err) => {
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
         console.error('Users API error:', err);
       });
   }, [currentAdminId]);
 
   useEffect(() => {
     fetchDashboardData();
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [fetchDashboardData]);
 
   const statCards = [
-    { 
-      title: t('អ្នកប្រើប្រាស់សរុប', 'Total Users'), 
-      value: stats?.total_users ?? 0, 
-      icon: UsersIcon, 
+    {
+      title: t('អ្នកប្រើប្រាស់សរុប', 'Total Users'),
+      value: stats?.total_users ?? 0,
+      icon: UsersIcon,
       bgColor: 'bg-blue-50',
       textColor: 'text-blue-600',
       themeClass: 'admin-stat-blue',
-      link: '/admin/users'
+      link: '/reports',
     },
-    { 
-      title: t('សិស្សសរុប', 'Total Students'), 
-      value: stats?.total_students ?? 0, 
-      icon: UserGroupIcon, 
+    {
+      title: t('សិស្សសរុប', 'Total Students'),
+      value: stats?.total_students ?? 0,
+      icon: UserGroupIcon,
       bgColor: 'bg-emerald-50',
       textColor: 'text-emerald-600',
       themeClass: 'admin-stat-emerald',
-      link: '/admin/students'
+      link: '/students/year-1',
     },
-    { 
-      title: t('គ្រូបង្រៀន', 'Teachers'), 
-      value: stats?.total_teachers ?? 0, 
-      icon: AcademicCapIcon, 
+    {
+      title: t('គ្រូបង្រៀន', 'Teachers'),
+      value: stats?.total_teachers ?? 0,
+      icon: AcademicCapIcon,
       bgColor: 'bg-amber-50',
       textColor: 'text-amber-600',
       themeClass: 'admin-stat-amber',
-      link: '/admin/teachers'
+      link: '/teachers',
     },
-    { 
-      title: t('មុខវិជ្ជា', 'Courses'), 
-      value: stats?.total_courses ?? 0, 
-      icon: BookOpenIcon, 
+    {
+      title: t('មុខវិជ្ជា', 'Courses'),
+      value: stats?.total_courses ?? 0,
+      icon: BookOpenIcon,
       bgColor: 'bg-purple-50',
       textColor: 'text-purple-600',
       themeClass: 'admin-stat-purple',
-      link: '/admin/courses'
+      link: '/courses',
     },
-    { 
-      title: t('ដេប៉ាតឺម៉ង់', 'Departments'), 
-      value: stats?.total_departments ?? 0, 
-      icon: BuildingLibraryIcon, 
+    {
+      title: t('ដេប៉ាតឺម៉ង់', 'Departments'),
+      value: stats?.total_departments ?? 0,
+      icon: BuildingLibraryIcon,
       bgColor: 'bg-cyan-50',
       textColor: 'text-cyan-600',
       themeClass: 'admin-stat-cyan',
-      link: '/admin/departments'
+      link: '/departments',
     },
   ];
 
   const getRoleBadgeName = (roleName) => {
     if (language === 'km') {
-      switch(roleName) {
-        case 'Admin': return 'អ្នកគ្រប់គ្រង';
-        case 'Teacher': return 'គ្រូបង្រៀន';
-        case 'Student': return 'សិស្ស';
-        default: return roleName || 'អ្នកប្រើប្រាស់';
+      switch (roleName) {
+        case 'Admin':
+          return 'អ្នកគ្រប់គ្រង';
+        case 'Teacher':
+          return 'គ្រូបង្រៀន';
+        case 'Student':
+          return 'សិស្ស';
+        default:
+          return roleName || 'អ្នកប្រើប្រាស់';
       }
     }
     return roleName || 'User';
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-5 sm:space-y-8 pb-8 sm:pb-10 animate-fadeIn">
+    <div className="max-w-7xl mx-auto px-3 sm:px-5 lg:px-8 space-y-5 sm:space-y-6 lg:space-y-8 pb-28 md:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
-      {/* ✅ Banner - រៀបចំថ្មីឱ្យស្អាត ស្រឡះ សមរម្យសម្រាប់ Phone និង Tablet */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-blue-950 via-indigo-900 to-slate-950 p-5 sm:p-8 md:p-10 border border-blue-800/30 shadow-xl">
-        <div className="absolute top-0 right-0 w-64 sm:w-96 h-64 sm:h-96 bg-blue-500/10 rounded-full blur-3xl -mr-32 -mt-32"></div>
-        <div className="absolute bottom-0 left-0 w-60 sm:w-80 h-60 sm:h-80 bg-indigo-500/10 rounded-full blur-3xl -ml-24 -mb-24"></div>
+      {/* ================================================================== */}
+      {/* 📌 1. WELCOME BANNER (Adaptive Phone / Tablet / iPad / Desktop)    */}
+      {/* ================================================================== */}
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-blue-950 via-indigo-900 to-slate-950 p-5 sm:p-7 md:p-8 lg:p-10 border border-blue-800/30 shadow-xl">
+        <div className="absolute top-0 right-0 w-64 sm:w-96 h-64 sm:h-96 bg-blue-500/10 rounded-full blur-3xl -mr-32 -mt-32 pointer-events-none"></div>
+        <div className="absolute bottom-0 left-0 w-60 sm:w-80 h-60 sm:h-80 bg-indigo-500/10 rounded-full blur-3xl -ml-24 -mb-24 pointer-events-none"></div>
         
-        {/* រូប Watermark សាលាព្រាលៗនៅផ្ទៃខាងក្រោយខាងស្តាំ */}
         <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-64 h-44 sm:h-64 text-white/[0.04] -rotate-12 pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 sm:gap-8">
-          <div className="space-y-3.5 sm:space-y-4">
+        <div className="relative z-10 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6 sm:gap-8">
+          <div className="space-y-3 sm:space-y-4 min-w-0">
             
-            {/* ស្លាកឈ្មោះសាលា (School Identity Badge) */}
             <div className="inline-flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-400/20 text-blue-200 text-[11px] sm:text-xs font-extrabold tracking-wide shadow-inner max-w-full">
               <BuildingLibraryIcon className="h-4 w-4 text-yellow-400 shrink-0" />
-              <span className="truncate">{t('វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង', 'Regional Polytechnic Institute Techo Sen Svay Rieng')}</span>
+              <span className="truncate">
+                {t(
+                  'វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង',
+                  'Regional Polytechnic Institute Techo Sen Svay Rieng'
+                )}
+              </span>
             </div>
 
             <div className="space-y-1.5 sm:space-y-2">
-              <h1 className="text-[22px] sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-x-2.5 gap-y-1.5 leading-snug">
+              <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-x-2.5 gap-y-1.5 leading-snug">
                 <span>{t('ផ្ទាំងគ្រប់គ្រងប្រព័ន្ធ', 'System Dashboard')}</span>
                 <span className="inline-flex items-center gap-2 text-blue-400">
                   <span>{getFullName() || user?.name || 'Admin'}</span>
                   <span className="inline-flex items-center justify-center p-1 sm:p-1.5 rounded-xl sm:rounded-2xl bg-blue-500/15 border border-blue-400/30 shadow-inner shrink-0">
-                    <CheckBadgeIcon className="w-5 h-5 sm:w-7 sm:h-7 md:w-8 md:h-8 text-yellow-400 stroke-[2.2]" />
+                    <CheckBadgeIcon className="w-5 h-5 sm:w-6 sm:h-6 lg:w-7 lg:h-7 text-yellow-400 stroke-[2.2]" />
                   </span>
                 </span>
               </h1>
-              <p className="text-xs sm:text-sm md:text-base text-blue-100/75 max-w-xl leading-relaxed">
-                {t('គ្រប់គ្រងអ្នកប្រើប្រាស់ គ្រូបង្រៀន សិស្ស មុខវិជ្ជា និងទិន្នន័យស្ថិតិសាលាទាំងមូល។', 'Manage users, teachers, students, courses, and institution-wide analytics.')}
+              <p className="text-xs sm:text-sm md:text-base text-blue-100/75 max-w-xl leading-relaxed font-medium">
+                {t(
+                  'គ្រប់គ្រងអ្នកប្រើប្រាស់ គ្រូបង្រៀន សិស្ស មុខវិជ្ជា និងទិន្នន័យស្ថិតិសាលាទាំងមូល។',
+                  'Manage users, teachers, students, courses, and institution-wide analytics.'
+                )}
               </p>
             </div>
 
-            {/* កាលបរិច្ឆេទ និងស្ថានភាពប្រព័ន្ធ (ដាក់ជួរជាមួយគ្នាយ៉ាងស្អាតលើ Phone) */}
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-blue-200/80 font-medium pt-0.5 sm:pt-1">
-              <span className="inline-flex items-center gap-1.5 bg-white/5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-white/10 backdrop-blur-sm">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-blue-200/80 font-bold pt-0.5 sm:pt-1">
+              <span className="inline-flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 backdrop-blur-sm shadow-2xs">
                 <ClockIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-yellow-400 shrink-0" />
-                <span>{new Date().toLocaleDateString(language === 'km' ? 'km-KH' : 'en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                <span>
+                  {new Date().toLocaleDateString(
+                    language === 'km' ? 'km-KH' : 'en-US',
+                    {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    }
+                  )}
+                </span>
               </span>
             </div>
           </div>
 
-          {/* កាតរូបភាព/និមិត្តសញ្ញាសាលា (លាក់លើទូរស័ព្ទដើម្បីកុំឱ្យចង្អៀត បង្ហាញលើ Tablet និង Desktop) */}
-          <div className="hidden sm:flex items-center gap-4 bg-white/[0.06] backdrop-blur-md border border-white/10 p-4 pr-6 rounded-3xl shadow-2xl shrink-0">
-            <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center border border-white/20 shadow-lg shrink-0">
-              <AcademicCapIcon className="h-9 w-9 text-yellow-300" />
+          <div className="hidden md:flex items-center gap-4 bg-white/[0.06] backdrop-blur-md border border-white/10 p-4 pr-6 rounded-3xl shadow-2xl shrink-0 self-start xl:self-center">
+            <div className="h-14 w-14 lg:h-16 lg:w-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center border border-white/20 shadow-lg shrink-0">
+              <AcademicCapIcon className="h-8 w-8 lg:h-9 lg:w-9 text-yellow-300" />
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <span className="text-lg font-black text-white tracking-wider">RPITSSVR</span>
-                <span className="text-[10px] font-extrabold bg-yellow-400/20 text-yellow-300 border border-yellow-400/30 px-2 py-0.5 rounded-md">LMS</span>
+                <span className="text-base lg:text-lg font-black text-white tracking-wider">
+                  RPITSSVR
+                </span>
+                <span className="text-[10px] font-extrabold bg-yellow-400/20 text-yellow-300 border border-yellow-400/30 px-2 py-0.5 rounded-md">
+                  LMS
+                </span>
               </div>
               <p className="text-xs font-bold text-blue-200/80">
                 {t('ប្រព័ន្ធគ្រប់គ្រងការសិក្សាឌីជីថល', 'Digital Learning Portal')}
@@ -541,35 +609,46 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* KPI Stats Grid - 2 Columns លើ Phone/Tablet, 3 លើ Laptop និង 5 លើ Desktop */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-5 lg:gap-6">
+      {/* ================================================================== */}
+      {/* 📌 2. KPI STATS GRID (2 Cols Phone/Tablet, 3 iPad/Laptop, 5 Desktop) */}
+      {/* ================================================================== */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 lg:gap-5">
         {statCards.map((stat, index) => {
           const Icon = stat.icon;
           const isLastItem = index === statCards.length - 1;
           return (
-            <Link 
+            <Link
               key={index}
-              to={stat.link || '#'} 
-              className={`admin-surface-card bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-gray-100 hover:border-transparent shadow-sm hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 relative overflow-hidden block ${
-                isLastItem ? 'col-span-2 sm:col-span-2 md:col-span-1 xl:col-span-1' : ''
+              to={stat.link || '#'}
+              className={`admin-surface-card bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 border border-gray-100 hover:border-blue-200 shadow-sm hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 flex flex-col justify-between relative overflow-hidden ${
+                isLastItem
+                  ? 'col-span-2 md:col-span-1 xl:col-span-1'
+                  : ''
               }`}
             >
-              <div className="flex items-start sm:items-center justify-between gap-2 relative z-10">
+              <div className="flex items-start justify-between gap-2 relative z-10">
                 <div className="space-y-1 sm:space-y-1.5 min-w-0">
-                  <p className="admin-text-muted text-[11px] sm:text-xs font-bold text-gray-400 uppercase tracking-wider truncate">{stat.title}</p>
-                  <p className="admin-text-primary text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">{stat.value}</p>
+                  <p className="admin-text-muted text-[11px] sm:text-xs font-bold text-gray-400 uppercase tracking-wider truncate">
+                    {stat.title}
+                  </p>
+                  <p className="admin-text-primary text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">
+                    {stat.value}
+                  </p>
                 </div>
-                <div className={`admin-stat-icon ${stat.themeClass} h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl ${stat.bgColor} flex items-center justify-center border border-gray-100/50 group-hover:scale-110 transition-transform duration-300 shrink-0`}>
+                <div
+                  className={`admin-stat-icon ${stat.themeClass} h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl ${stat.bgColor} flex items-center justify-center border border-gray-100/50 group-hover:scale-110 transition-transform duration-300 shrink-0`}
+                >
                   <Icon className={`h-5 w-5 sm:h-6 sm:w-6 ${stat.textColor}`} />
                 </div>
               </div>
-              
+
               <div className="admin-card-divider mt-3 sm:mt-4 pt-2.5 sm:pt-3 border-t border-gray-100/80 flex items-center justify-between text-[11px] sm:text-xs text-gray-400 relative z-10">
                 <span className="admin-text-muted font-medium text-gray-400 truncate">
                   {t('សរុបក្នុងប្រព័ន្ធ', 'Total in system')}
                 </span>
-                <span className="admin-manage-link font-semibold text-gray-600 group-hover:text-blue-600 transition-colors flex items-center gap-0.5 sm:gap-1 shrink-0">
-                  {t('គ្រប់គ្រង', 'Manage')} <ChevronRightIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <span className="admin-manage-link font-bold text-gray-600 group-hover:text-blue-600 transition-colors flex items-center gap-0.5 sm:gap-1 shrink-0">
+                  <span>{t('គ្រប់គ្រង', 'Manage')}</span>
+                  <ChevronRightIcon className="w-3.5 h-3.5 stroke-[2.5]" />
                 </span>
               </div>
             </Link>
@@ -577,133 +656,246 @@ const AdminDashboard = () => {
         })}
       </div>
 
-      {/* ✅ ផ្នែក Charts (Responsive សម្រាប់ Phone & Tablet) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-8">
+      {/* ================================================================== */}
+      {/* 📌 3. CHARTS SECTION (Responsive Phone / iPad / Desktop)           */}
+      {/* ================================================================== */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
         {/* User Growth Chart */}
-        <div className="admin-surface-card bg-white rounded-2xl sm:rounded-[2rem] border border-gray-100 shadow-sm p-4 sm:p-7 space-y-4 sm:space-y-6">
+        <div className="admin-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] border border-gray-100 shadow-sm p-4 sm:p-6 lg:p-7 space-y-4 sm:space-y-5">
           <div className="flex items-start sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="admin-text-primary text-base sm:text-lg font-extrabold text-gray-900 flex items-center gap-2">
+            <div className="min-w-0">
+              <h3 className="admin-text-primary text-sm sm:text-base lg:text-lg font-extrabold text-gray-900 flex items-center gap-2">
                 <ArrowTrendingUpIcon className="w-5 h-5 text-emerald-500 shrink-0" />
-                <span>{t('កំណើនអ្នកប្រើប្រាស់', 'User Growth')}</span>
+                <span className="truncate">{t('កំណើនអ្នកប្រើប្រាស់', 'User Growth')}</span>
               </h3>
-              <p className="admin-text-secondary text-[11px] sm:text-xs font-medium text-gray-500 mt-0.5 sm:mt-1">{t('ស្ថិតិប្រៀបធៀបក្នុងរយៈពេល ៦ ខែចុងក្រោយ', 'Comparison statistics over the last 6 months')}</p>
+              <p className="admin-text-secondary text-[11px] sm:text-xs font-medium text-gray-500 mt-0.5 truncate">
+                {t(
+                  'ស្ថិតិប្រៀបធៀបក្នុងរយៈពេល ៦ ខែចុងក្រោយ',
+                  'Comparison statistics over the last 6 months'
+                )}
+              </p>
             </div>
-            <span className="admin-badge-emerald text-[11px] sm:text-xs font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl shrink-0">{t('៦ ខែ', '6 Months')}</span>
+            <span className="admin-badge-emerald text-[11px] sm:text-xs font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl shrink-0">
+              {t('៦ ខែ', '6 Months')}
+            </span>
           </div>
-          <div className="h-[220px] sm:h-[280px] w-full">
+          <div className="h-[210px] sm:h-[260px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}>
+              <AreaChart
+                data={chartData}
+                margin={{ top: 10, right: 8, left: -24, bottom: 0 }}
+              >
                 <defs>
                   <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid className="admin-chart-grid" strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
-                <XAxis dataKey="month" stroke="#9CA3AF" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#9CA3AF" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#1E293B', color: '#FFF', borderRadius: '12px', border: '1px solid #334155', fontWeight: 'bold', fontSize: '12px' }}
+                <CartesianGrid
+                  className="admin-chart-grid"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="#F3F4F6"
+                />
+                <XAxis
+                  dataKey="month"
+                  stroke="#9CA3AF"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="#9CA3AF"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1E293B',
+                    color: '#FFF',
+                    borderRadius: '12px',
+                    border: '1px solid #334155',
+                    fontWeight: 'bold',
+                    fontSize: '12px',
+                  }}
                   itemStyle={{ color: '#10B981' }}
                 />
-                <Area type="monotone" dataKey="users" name={t('អ្នកប្រើប្រាស់', 'Users')} stroke="#10B981" strokeWidth={3.5} fillOpacity={1} fill="url(#colorUsers)" />
+                <Area
+                  type="monotone"
+                  dataKey="users"
+                  name={t('អ្នកប្រើប្រាស់', 'Users')}
+                  stroke="#10B981"
+                  strokeWidth={3.5}
+                  fillOpacity={1}
+                  fill="url(#colorUsers)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
-        
+
         {/* Course Activity Chart */}
-        <div className="admin-surface-card bg-white rounded-2xl sm:rounded-[2rem] border border-gray-100 shadow-sm p-4 sm:p-7 space-y-4 sm:space-y-6">
+        <div className="admin-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] border border-gray-100 shadow-sm p-4 sm:p-6 lg:p-7 space-y-4 sm:space-y-5">
           <div className="flex items-start sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="admin-text-primary text-base sm:text-lg font-extrabold text-gray-900 flex items-center gap-2">
+            <div className="min-w-0">
+              <h3 className="admin-text-primary text-sm sm:text-base lg:text-lg font-extrabold text-gray-900 flex items-center gap-2">
                 <BookOpenIcon className="w-5 h-5 text-blue-500 shrink-0" />
-                <span>{t('សកម្មភាពមុខវិជ្ជា', 'Course Activity')}</span>
+                <span className="truncate">{t('សកម្មភាពមុខវិជ្ជា', 'Course Activity')}</span>
               </h3>
-              <p className="admin-text-secondary text-[11px] sm:text-xs font-medium text-gray-500 mt-0.5 sm:mt-1">{t('ការកើនឡើងនៃមុខវិជ្ជាបង្រៀនតាមខែ', 'Increase in teaching courses by month')}</p>
+              <p className="admin-text-secondary text-[11px] sm:text-xs font-medium text-gray-500 mt-0.5 truncate">
+                {t(
+                  'ការកើនឡើងនៃមុខវិជ្ជាបង្រៀនតាមខែ',
+                  'Increase in teaching courses by month'
+                )}
+              </p>
             </div>
-            <span className="admin-badge-blue text-[11px] sm:text-xs font-extrabold text-blue-700 bg-blue-50 border border-blue-100 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl shrink-0">{t('៦ ខែ', '6 Months')}</span>
+            <span className="admin-badge-blue text-[11px] sm:text-xs font-extrabold text-blue-700 bg-blue-50 border border-blue-100 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl shrink-0">
+              {t('៦ ខែ', '6 Months')}
+            </span>
           </div>
-          <div className="h-[220px] sm:h-[280px] w-full">
+          <div className="h-[210px] sm:h-[260px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}>
-                <CartesianGrid className="admin-chart-grid" strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
-                <XAxis dataKey="month" stroke="#9CA3AF" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#9CA3AF" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#1E293B', color: '#FFF', borderRadius: '12px', border: '1px solid #334155', fontWeight: 'bold', fontSize: '12px' }}
+              <BarChart
+                data={chartData}
+                margin={{ top: 10, right: 8, left: -24, bottom: 0 }}
+              >
+                <CartesianGrid
+                  className="admin-chart-grid"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="#F3F4F6"
+                />
+                <XAxis
+                  dataKey="month"
+                  stroke="#9CA3AF"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="#9CA3AF"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1E293B',
+                    color: '#FFF',
+                    borderRadius: '12px',
+                    border: '1px solid #334155',
+                    fontWeight: 'bold',
+                    fontSize: '12px',
+                  }}
                   itemStyle={{ color: '#3B82F6' }}
                   cursor={{ fill: 'rgba(148, 163, 184, 0.1)' }}
                 />
-                <Bar dataKey="courses" name={t('មុខវិជ្ជា', 'Courses')} fill="#3B82F6" radius={[6, 6, 0, 0]} barSize={28} />
+                <Bar
+                  dataKey="courses"
+                  name={t('មុខវិជ្ជា', 'Courses')}
+                  fill="#3B82F6"
+                  radius={[6, 6, 0, 0]}
+                  barSize={28}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
       </div>
 
-      {/* ✅ ផ្នែកអ្នកប្រើប្រាស់ថ្មីៗ (Recent Users Table) - បន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែក */}
+      {/* ================================================================== */}
+      {/* 📌 4. RECENT USERS (Table on iPad/Desktop, Smart Cards on Phone)   */}
+      {/* ================================================================== */}
       <div className="w-full">
-        <div className="admin-surface-card bg-white rounded-2xl sm:rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden">
+        <div className="admin-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] border border-gray-100 shadow-sm overflow-hidden">
           <div className="admin-card-divider px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <h3 className="admin-text-primary text-base sm:text-lg font-extrabold text-gray-900">{t('អ្នកប្រើប្រាស់ថ្មីៗ', 'Recent Users')}</h3>
-              <p className="admin-text-secondary text-[11px] sm:text-xs font-medium text-gray-500 mt-0.5 leading-relaxed">
-                {t('បញ្ជីអ្នកប្រើប្រាស់ដែលបានចុះឈ្មោះថ្មីៗក្នុងប្រព័ន្ធ', 'List of users recently registered in the system')}
+              <h3 className="admin-text-primary text-base sm:text-lg font-extrabold text-gray-900 truncate">
+                {t('អ្នកប្រើប្រាស់ថ្មីៗ', 'Recent Users')}
+              </h3>
+              <p className="admin-text-secondary text-[11px] sm:text-xs font-medium text-gray-500 mt-0.5 leading-relaxed truncate">
+                {t(
+                  'បញ្ជីអ្នកប្រើប្រាស់ដែលបានចុះឈ្មោះថ្មីៗក្នុងប្រព័ន្ធ',
+                  'List of users recently registered in the system'
+                )}
               </p>
             </div>
-            <Link to="/admin/users" className="admin-badge-emerald text-xs font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1 bg-emerald-50 border border-emerald-100 px-3 sm:px-4 py-2 rounded-xl transition-colors shrink-0">
-              {t('មើលទាំងអស់', 'View All')}
+            <Link
+              to="/reports"
+              className="admin-badge-emerald text-xs font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1 bg-emerald-50 border border-emerald-100 px-3 sm:px-4 py-2 rounded-xl transition-colors shrink-0"
+            >
+              <span>{t('មើលទាំងអស់', 'View All')}</span>
               <ChevronRightIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </Link>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* 💻 iPad, Laptop & Desktop Table (`hidden md:block`) */}
+          <div className="hidden md:block overflow-x-auto hide-scrollbar">
             <table className="w-full min-w-[560px] text-left border-collapse">
               <thead>
                 <tr className="admin-table-head bg-gray-50/70 border-b border-gray-100 text-[11px] sm:text-xs text-gray-500 font-bold uppercase tracking-wider">
-                  <th className="px-4 sm:px-6 py-3.5 sm:py-4 whitespace-nowrap">{t('ឈ្មោះ', 'Name')}</th>
-                  <th className="px-4 sm:px-6 py-3.5 sm:py-4 whitespace-nowrap">{t('អ៊ីមែល', 'Email')}</th>
-                  <th className="px-4 sm:px-6 py-3.5 sm:py-4 whitespace-nowrap">{t('តួនាទី', 'Role')}</th>
-                  <th className="px-4 sm:px-6 py-3.5 sm:py-4 text-center whitespace-nowrap">{t('ស្ថានភាព', 'Status')}</th>
+                  <th className="px-6 py-4 whitespace-nowrap sticky left-0 bg-inherit z-10">
+                    {t('ឈ្មោះ', 'Name')}
+                  </th>
+                  <th className="px-6 py-4 whitespace-nowrap">
+                    {t('អ៊ីមែល', 'Email')}
+                  </th>
+                  <th className="px-6 py-4 whitespace-nowrap">
+                    {t('តួនាទី', 'Role')}
+                  </th>
+                  <th className="px-6 py-4 text-center whitespace-nowrap">
+                    {t('ស្ថានភាព', 'Status')}
+                  </th>
                 </tr>
               </thead>
-              <tbody className="admin-table-body text-sm">
+              <tbody className="admin-table-body text-sm bg-white">
                 {recentUsers.length === 0 ? (
                   <tr>
-                    <td colSpan="4" className="admin-text-muted px-6 py-10 text-center text-gray-400 font-bold">
+                    <td
+                      colSpan="4"
+                      className="admin-text-muted px-6 py-12 text-center text-gray-400 font-bold"
+                    >
                       {t('មិនទាន់មានអ្នកប្រើប្រាស់ទេ', 'No users found')}
                     </td>
                   </tr>
                 ) : (
                   recentUsers.map((u) => {
                     const rawAvatar =
-                      (Number(u.id) === Number(user?.id) && user?.profile_image) ||
+                      (Number(u.id) === Number(user?.id) &&
+                        user?.profile_image) ||
                       u.profile_image ||
                       u.teacher?.profile_image ||
                       u.student?.profile_image ||
                       ADMIN_DASH_MEM_CACHE.avatarMap[u.id];
                     const avatarUrl = resolveImageUrl(rawAvatar);
-                    const hasAvatar = Boolean(avatarUrl && !failedAvatars[u.id]);
-                    const initials = (
-                      (u.first_name?.[0] || u.name?.[0] || '') +
-                      (u.last_name?.[0] || '')
-                    ).toUpperCase() || 'U';
-                    const isActive = String(u.status || 'active').toLowerCase() === 'active';
+                    const hasAvatar = Boolean(
+                      avatarUrl && !failedAvatars[u.id]
+                    );
+                    const initials =
+                      (
+                        (u.first_name?.[0] || u.name?.[0] || '') +
+                        (u.last_name?.[0] || '')
+                      ).toUpperCase() || 'U';
+                    const isActive =
+                      String(u.status || 'active').toLowerCase() === 'active';
 
                     return (
-                      <tr key={u.id} className="admin-table-row hover:bg-blue-50/30 transition-colors">
-                        <td className="admin-text-primary px-4 sm:px-6 py-3.5 sm:py-4 font-extrabold text-gray-800 whitespace-nowrap">
+                      <tr
+                        key={u.id}
+                        className="admin-table-row hover:bg-blue-50/30 transition-colors"
+                      >
+                        <td className="admin-text-primary px-6 py-4 font-extrabold text-gray-800 whitespace-nowrap sticky left-0 bg-inherit z-10">
                           <div className="flex items-center gap-3">
-                            <div className="admin-user-avatar h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-xs sm:text-sm shrink-0 border border-emerald-200 shadow-sm overflow-hidden">
+                            <div className="admin-user-avatar h-10 w-10 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-xs sm:text-sm shrink-0 border border-emerald-200 shadow-sm overflow-hidden">
                               {hasAvatar ? (
                                 <img
                                   src={avatarUrl}
                                   alt={u.first_name || u.name || 'User'}
                                   loading="eager"
                                   decoding="async"
-                                  fetchpriority="high"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
                                     setFailedAvatars((prev) => ({
@@ -716,30 +908,38 @@ const AdminDashboard = () => {
                                 <span>{initials}</span>
                               )}
                             </div>
-                            <span>{u.first_name || u.name} {u.last_name || ''}</span>
+                            <span>
+                              {u.first_name || u.name} {u.last_name || ''}
+                            </span>
                           </div>
                         </td>
-                        <td className="admin-text-secondary px-4 sm:px-6 py-3.5 sm:py-4 text-xs sm:text-sm text-gray-500 font-medium whitespace-nowrap font-mono tracking-tight">
+                        <td className="admin-text-secondary px-6 py-4 text-sm text-gray-500 font-medium whitespace-nowrap font-mono tracking-tight">
                           {maskEmailAddress(u.email)}
                         </td>
-                        <td className="px-4 sm:px-6 py-3.5 sm:py-4 whitespace-nowrap">
-                          <span className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold rounded-xl inline-block ${
-                            u.role?.role_name === 'Admin' 
-                              ? 'admin-badge-rose bg-rose-50 text-rose-700 border border-rose-200' 
-                              : u.role?.role_name === 'Teacher'
-                              ? 'admin-badge-amber bg-amber-50 text-amber-700 border border-amber-200'
-                              : 'admin-badge-blue bg-blue-50 text-blue-700 border border-blue-200'
-                          }`}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span
+                            className={`px-3 py-1.5 text-xs font-bold rounded-xl inline-block ${
+                              u.role?.role_name === 'Admin'
+                                ? 'admin-badge-rose bg-rose-50 text-rose-700 border border-rose-200'
+                                : u.role?.role_name === 'Teacher'
+                                ? 'admin-badge-amber bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'admin-badge-blue bg-blue-50 text-blue-700 border border-blue-200'
+                            }`}
+                          >
                             {getRoleBadgeName(u.role?.role_name)}
                           </span>
                         </td>
-                        <td className="px-4 sm:px-6 py-3.5 sm:py-4 text-center whitespace-nowrap">
-                          <span className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold rounded-xl inline-block ${
-                            isActive 
-                              ? 'admin-badge-emerald bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                              : 'admin-badge-inactive bg-gray-100 text-gray-600 border border-gray-200'
-                          }`}>
-                            {isActive ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
+                        <td className="px-6 py-4 text-center whitespace-nowrap">
+                          <span
+                            className={`px-3 py-1.5 text-xs font-bold rounded-xl inline-block ${
+                              isActive
+                                ? 'admin-badge-emerald bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'admin-badge-inactive bg-gray-100 text-gray-600 border border-gray-200'
+                            }`}
+                          >
+                            {isActive
+                              ? t('សកម្ម', 'Active')
+                              : t('អសកម្ម', 'Inactive')}
                           </span>
                         </td>
                       </tr>
@@ -749,11 +949,106 @@ const AdminDashboard = () => {
               </tbody>
             </table>
           </div>
+
+          {/* 📱 Mobile App-Like User Cards (`md:hidden`) */}
+          <div className="md:hidden p-3.5 space-y-2.5 bg-gray-50/40">
+            {recentUsers.length === 0 ? (
+              <div className="py-10 text-center text-gray-400 font-bold text-sm">
+                {t('មិនទាន់មានអ្នកប្រើប្រាស់ទេ', 'No users found')}
+              </div>
+            ) : (
+              recentUsers.map((u) => {
+                const rawAvatar =
+                  (Number(u.id) === Number(user?.id) && user?.profile_image) ||
+                  u.profile_image ||
+                  u.teacher?.profile_image ||
+                  u.student?.profile_image ||
+                  ADMIN_DASH_MEM_CACHE.avatarMap[u.id];
+                const avatarUrl = resolveImageUrl(rawAvatar);
+                const hasAvatar = Boolean(avatarUrl && !failedAvatars[u.id]);
+                const initials =
+                  (
+                    (u.first_name?.[0] || u.name?.[0] || '') +
+                    (u.last_name?.[0] || '')
+                  ).toUpperCase() || 'U';
+                const isActive =
+                  String(u.status || 'active').toLowerCase() === 'active';
+
+                return (
+                  <div
+                    key={`mob-u-${u.id}`}
+                    className="admin-surface-card bg-white rounded-2xl border border-gray-200/80 p-3.5 shadow-2xs flex items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="admin-user-avatar h-10 w-10 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-xs shrink-0 border border-emerald-200 shadow-2xs overflow-hidden">
+                        {hasAvatar ? (
+                          <img
+                            src={avatarUrl}
+                            alt={u.first_name || u.name || 'User'}
+                            loading="lazy"
+                            className="h-full w-full object-cover rounded-full"
+                            onError={() =>
+                              setFailedAvatars((prev) => ({
+                                ...prev,
+                                [u.id]: true,
+                              }))
+                            }
+                          />
+                        ) : (
+                          <span>{initials}</span>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="admin-text-primary text-sm font-extrabold text-gray-900 truncate">
+                          {u.first_name || u.name} {u.last_name || ''}
+                        </h4>
+                        <p className="admin-text-secondary text-xs text-gray-500 font-mono truncate mt-0.5">
+                          {maskEmailAddress(u.email)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span
+                        className={`px-2.5 py-0.5 text-[10px] font-extrabold rounded-lg ${
+                          u.role?.role_name === 'Admin'
+                            ? 'admin-badge-rose bg-rose-50 text-rose-700 border border-rose-200'
+                            : u.role?.role_name === 'Teacher'
+                            ? 'admin-badge-amber bg-amber-50 text-amber-700 border border-amber-200'
+                            : 'admin-badge-blue bg-blue-50 text-blue-700 border border-blue-200'
+                        }`}
+                      >
+                        {getRoleBadgeName(u.role?.role_name)}
+                      </span>
+
+                      <span
+                        className={`px-2 py-0.5 text-[10px] font-extrabold rounded-md ${
+                          isActive
+                            ? 'admin-badge-emerald bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'admin-badge-inactive bg-gray-100 text-gray-600 border border-gray-200'
+                        }`}
+                      >
+                        {isActive ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive')}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
       {/* ✅ CSS សម្រាប់កំណត់ពណ៌ទម្រង់ថ្ងៃ និងទម្រង់យប់ (Dark Mode) */}
       <style>{`
+        .hide-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .hide-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+
         /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
         .admin-table-row + .admin-table-row > td {
           border-top: 1px solid #f1f5f9;
@@ -821,9 +1116,9 @@ const AdminDashboard = () => {
           stroke: #334155 !important;
         }
 
-        /* ✅ តារាងអ្នកប្រើប្រាស់ថ្មីៗ និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ (គ្មានបន្ទាត់ពណ៌សភ្លឺ) */
+        /* ✅ តារាងអ្នកប្រើប្រាស់ថ្មីៗ និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         html.dark .admin-table-head {
-          background-color: rgba(15, 23, 42, 0.6) !important;
+          background-color: #0f172a !important;
           border-color: rgba(51, 65, 85, 0.7) !important;
           color: #94a3b8 !important;
         }
