@@ -24,11 +24,15 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Instant Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
-const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v2';
-const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v14';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v15';
+const CACHE_KEY_TEACHER_AVATARS_LEGACY = 'cached_student_teacher_avatars_v2';
+const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v15';
+const CACHE_KEY_SHARED_SCORES_LEGACY = 'cached_student_scores_list_v14';
 
-const getScoresCacheKey = (uid) => `cached_student_scores_list_v14_${uid}`;
-const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v15_${uid}`;
+const getScoresLegacyCacheKey = (uid) => `cached_student_scores_list_v14_${uid}`;
+const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v15_${uid}`;
+const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v15_${uid}`;
 
 // ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
 const STUDENT_SCORES_MEM_CACHE = {
@@ -58,6 +62,7 @@ const getTeacherAvatarMapSync = () => {
   }
   const stored =
     readStorageJson(CACHE_KEY_TEACHER_AVATARS, null) ||
+    readStorageJson(CACHE_KEY_TEACHER_AVATARS_LEGACY, null) ||
     readStorageJson('cached_student_teacher_avatars_v1', {});
   STUDENT_SCORES_MEM_CACHE.teacherAvatarMap =
     stored && typeof stored === 'object' ? stored : {};
@@ -116,7 +121,9 @@ const schedulePersistTeacherAvatars = () => {
   teacherAvatarSaveTimer = setTimeout(() => {
     try {
       const map = getTeacherAvatarMapSync();
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(map));
+      const str = JSON.stringify(map);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
     } catch {}
   }, 150);
 };
@@ -228,7 +235,9 @@ const persistStudentScoresFast = (uid, scoresList) => {
   try {
     const listStr = JSON.stringify(slimList);
     localStorage.setItem(getScoresCacheKey(uid), listStr);
+    localStorage.setItem(getScoresLegacyCacheKey(uid), listStr);
     localStorage.setItem(CACHE_KEY_SHARED_SCORES, listStr);
+    localStorage.setItem(CACHE_KEY_SHARED_SCORES_LEGACY, listStr);
   } catch {}
 };
 
@@ -269,12 +278,15 @@ const ensureCleanStudentSessionCache = (newUid) => {
       const legacySharedKeys = [
         'cached_student_scores_list_v5',
         'cached_student_scores_list_v3',
+        'cached_student_scores_list_v14',
+        'cached_student_scores_list_v15',
         'cached_student_dashboard_stats_v8',
         'cached_student_dashboard_enrollments_v8',
         'cached_student_dashboard_activity_v8',
         'cached_student_courses_list_v3',
         'cached_student_attendance_list_v3',
         CACHE_KEY_TEACHER_AVATARS,
+        CACHE_KEY_TEACHER_AVATARS_LEGACY,
       ];
       legacySharedKeys.forEach((k) => {
         try {
@@ -516,9 +528,10 @@ const ViewScores = () => {
     }
     const cached =
       readStorageJson(getScoresCacheKey(currentStudentId), null) ||
+      readStorageJson(getScoresLegacyCacheKey(currentStudentId), null) ||
       readStorageJson(`cached_student_scores_list_v10_${currentStudentId}`, null) ||
-      readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, null) ||
-      readStorageJson(CACHE_KEY_SHARED_SCORES, []);
+      readStorageJson(CACHE_KEY_SHARED_SCORES, null) ||
+      readStorageJson(CACHE_KEY_SHARED_SCORES_LEGACY, []);
     STUDENT_SCORES_MEM_CACHE.grades = Array.isArray(cached) ? cached : [];
     return STUDENT_SCORES_MEM_CACHE.grades;
   });
@@ -529,8 +542,12 @@ const ViewScores = () => {
   // ✅ ទាញបញ្ជីមុខវិជ្ជាដែលមានក្នុង Cache មកទុកជាជំនួយសម្រាប់ផ្គូផ្គងរូបថត និងឈ្មោះគ្រូបង្រៀន
   const cachedCatalogCoursesById = useMemo(() => {
     const map = new Map();
-    const list1 = readStorageJson(`cached_student_dept_courses_v14_${currentStudentId}`, []);
-    const list2 = readStorageJson(getEnrollmentsCacheKey(currentStudentId), []);
+    const list1 =
+      readStorageJson(getDeptCoursesCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_dept_courses_v14_${currentStudentId}`, []);
+    const list2 =
+      readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_dashboard_enrollments_v10_${currentStudentId}`, []);
     [...(Array.isArray(list1) ? list1 : []), ...(Array.isArray(list2) ? list2 : [])].forEach(
       (c) => {
         const itemCourse = c?.course || c;
@@ -551,9 +568,10 @@ const ViewScores = () => {
 
     const cachedList =
       readStorageJson(getScoresCacheKey(currentStudentId), null) ||
+      readStorageJson(getScoresLegacyCacheKey(currentStudentId), null) ||
       readStorageJson(`cached_student_scores_list_v10_${currentStudentId}`, null) ||
-      readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, null) ||
-      readStorageJson(CACHE_KEY_SHARED_SCORES, null);
+      readStorageJson(CACHE_KEY_SHARED_SCORES, null) ||
+      readStorageJson(CACHE_KEY_SHARED_SCORES_LEGACY, null);
 
     if (Array.isArray(cachedList) && cachedList.length > 0) {
       setGrades(cachedList);
@@ -587,7 +605,8 @@ const ViewScores = () => {
 
         const cachedEnrollments =
           readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
-          readStorageJson('cached_student_dashboard_enrollments_v8', []);
+          readStorageJson(`cached_student_dashboard_enrollments_v10_${currentStudentId}`, null) ||
+          readStorageJson('cached_student_dashboard_enrollments_v15', []);
 
         if (Array.isArray(cachedEnrollments) && cachedEnrollments.length > 0) {
           const existingCourseIds = new Set(
@@ -615,7 +634,6 @@ const ViewScores = () => {
           });
         }
 
-        // ✅ រក្សាទុកក្នុង RAM មុនគេដើម្បីបង្ហាញលើអេក្រង់ក្នុង 0ms រួចទើប Save Slim JSON ចូល localStorage
         STUDENT_SCORES_MEM_CACHE.uid = currentStudentId;
         STUDENT_SCORES_MEM_CACHE.grades = validList;
         STUDENT_SCORES_MEM_CACHE.lastSyncedAt = Date.now();
@@ -696,7 +714,6 @@ const ViewScores = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ ទាញយកឈ្មោះ និងរូបថតគ្រូបង្រៀនពី RAM Dictionary និង Catalog Fallback ក្នុងល្បឿន 0ms
   const resolveGradeTeacherMeta = useCallback(
     (gradeRow) => {
       const course = gradeRow?.course || {};
@@ -893,23 +910,23 @@ const ViewScores = () => {
   const getResultBadge = (row) => {
     if (row.resultStatus === 'passed') {
       return (
-        <span className="std-scr-badge-emerald inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
-          <CheckCircleIcon className="w-4 h-4 mr-1.5 shrink-0" />
+        <span className="std-scr-badge-emerald inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs shrink-0">
+          <CheckCircleIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 shrink-0" />
           {t('ប្រឡងជាប់', 'Passed')}
         </span>
       );
     }
     if (row.resultStatus === 'failed') {
       return (
-        <span className="std-scr-badge-rose inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs">
-          <XCircleIcon className="w-4 h-4 mr-1.5 shrink-0" />
+        <span className="std-scr-badge-rose inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs shrink-0">
+          <XCircleIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 shrink-0" />
           {t('ប្រឡងធ្លាក់', 'Failed')}
         </span>
       );
     }
     return (
-      <span className="std-scr-code-pill inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-bold bg-gray-100 text-gray-500 border border-gray-200">
-        <ClockIcon className="w-3.5 h-3.5 mr-1.5 shrink-0 text-amber-500" />
+      <span className="std-scr-code-pill inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-bold bg-gray-100 text-gray-500 border border-gray-200 shrink-0">
+        <ClockIcon className="w-3.5 h-3.5 mr-1 sm:mr-1.5 shrink-0 text-amber-500" />
         {t('រង់ចាំពិន្ទុ', 'Pending')}
       </span>
     );
@@ -975,30 +992,30 @@ const ViewScores = () => {
   ];
 
   return (
-    <div className="std-scr-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
+    <div className="std-scr-page max-w-7xl mx-auto px-3 sm:px-5 lg:px-8 space-y-5 sm:space-y-6 lg:space-y-8 pb-28 md:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
       {/* ================================================================== */}
-      {/* 1. MODERN BENTO HERO SECTION                                       */}
+      {/* 1. MODERN BENTO HERO SECTION (Adaptive Phone / iPad / Desktop)     */}
       {/* ================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (8 Columns) */}
-        <div className="lg:col-span-8 relative overflow-hidden rounded-[1.75rem] sm:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-6 sm:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-scr-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
           <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
-          <div className="relative z-10 space-y-3.5">
+          <div className="relative z-10 space-y-3 sm:space-y-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 sm:py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-[11px] sm:text-xs font-extrabold text-cyan-200 max-w-full">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
-                <span>{studentDeptName}</span>
+                <span className="truncate">{studentDeptName}</span>
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full backdrop-blur-md border text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1013,15 +1030,15 @@ const ViewScores = () => {
               </span>
             </div>
 
-            <div className="space-y-2 pt-1">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
+            <div className="space-y-1.5 sm:space-y-2 pt-1">
+              <h1 className="text-xl sm:text-2xl md:text-3xl xl:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2 leading-snug">
                 <span>{t('លទ្ធផលពិន្ទុសិក្សា,', 'My Scores,')}</span>
                 <span className="bg-gradient-to-r from-yellow-300 via-amber-200 to-white bg-clip-text text-transparent">
                   {activeCourseObj
                     ? activeCourseObj.name
                     : t('គ្រប់មុខវិជ្ជា', 'All Courses')}
                 </span>
-                <CheckBadgeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-yellow-400 shrink-0" />
+                <CheckBadgeIcon className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 text-yellow-400 shrink-0" />
               </h1>
 
               <p className="text-xs sm:text-sm text-blue-100/80 max-w-2xl leading-relaxed font-medium">
@@ -1033,13 +1050,13 @@ const ViewScores = () => {
             </div>
           </div>
 
-          <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-6 pt-5 border-t border-white/15">
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
+          <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15">
+            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
                 <ChartBarIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-lg sm:text-xl font-black text-white leading-none">
+                <span className="block text-base sm:text-xl font-black text-white leading-none">
                   {averageFinalScore} {t('ពិន្ទុ', 'pts')}
                 </span>
                 <span className="block text-[11px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1048,12 +1065,12 @@ const ViewScores = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
+            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-emerald-500/25 border border-emerald-300/30 flex items-center justify-center text-emerald-300 shrink-0">
                 <CheckCircleIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-lg sm:text-xl font-black text-white leading-none">
+                <span className="block text-base sm:text-xl font-black text-white leading-none">
                   {passedCoursesCount} / {enrichedGrades.length}
                 </span>
                 <span className="block text-[11px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1064,19 +1081,19 @@ const ViewScores = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
-        <div className="lg:col-span-4 std-scr-surface bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
-          <div className="space-y-4">
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (5 Cols on lg, 4 Cols on xl) */}
+        <div className="lg:col-span-5 xl:col-span-4 std-scr-surface bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
+          <div className="space-y-3.5 sm:space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-500/30 flex items-center justify-center shrink-0">
                   <ChartBarIcon className="h-5 w-5 stroke-[2.2]" />
                 </div>
-                <div>
-                  <h2 className="std-scr-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight">
+                <div className="min-w-0">
+                  <h2 className="std-scr-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight truncate">
                     {t('ពិន្ទុតាមផ្នែកដែលគ្រូបានកែ', 'Graded Components')}
                   </h2>
-                  <p className="std-scr-text-secondary text-[11px] font-medium text-gray-500 mt-0.5">
+                  <p className="std-scr-text-secondary text-[11px] font-medium text-gray-500 mt-0.5 truncate">
                     {activeCourseObj
                       ? activeCourseObj.name
                       : t('ពិន្ទុទទួលបានធៀបនឹងពិន្ទុពេញតាមផ្នែក', 'Earned points across 4 components')}
@@ -1085,32 +1102,32 @@ const ViewScores = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3 pt-1">
               {scoreComponentCards.map((item) => {
                 const CompIcon = item.icon;
                 return (
                   <div
                     key={item.id}
-                    className="std-scr-subbox p-3.5 rounded-2xl border bg-gray-50/80 border-gray-200/80 flex items-center justify-between gap-2 transition-all"
+                    className="std-scr-subbox p-3 sm:p-3.5 rounded-2xl border bg-gray-50/80 border-gray-200/80 flex items-center justify-between gap-2 transition-all"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                       <div
-                        className={`h-9 w-9 rounded-xl border flex items-center justify-center shrink-0 ${item.iconStyle}`}
+                        className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl border flex items-center justify-center shrink-0 ${item.iconStyle}`}
                       >
-                        <CompIcon className="h-5 w-5 stroke-[2.2]" />
+                        <CompIcon className="h-4 w-4 sm:h-5 sm:w-5 stroke-[2.2]" />
                       </div>
                       <div className="min-w-0">
                         <span className="std-scr-text-primary block text-xs font-extrabold text-gray-900 truncate">
                           {item.title}
                         </span>
                         <span className="std-scr-text-secondary block text-[10px] font-bold text-gray-400 mt-0.5">
-                          {t('ពិន្ទុពេញ', 'Full Marks')} {item.weightLabel}
+                          {t('ពិន្ទុពេញ', 'Full')} {item.weightLabel}
                         </span>
                       </div>
                     </div>
 
                     <span
-                      className={`px-2.5 py-1 rounded-lg text-xs font-black border shrink-0 ${item.valueBadgeStyle}`}
+                      className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-xs font-black border shrink-0 ${item.valueBadgeStyle}`}
                     >
                       {item.value !== null ? item.value : '—'}
                     </span>
@@ -1120,7 +1137,7 @@ const ViewScores = () => {
             </div>
           </div>
 
-          <div className="std-scr-divider pt-4 mt-4 border-t border-gray-100 flex items-center justify-between text-xs">
+          <div className="std-scr-divider pt-3.5 sm:pt-4 mt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="std-scr-text-secondary font-bold text-gray-500">
               {t('មុខវិជ្ជាសរុប៖', 'Courses:')}{' '}
               <strong className="std-scr-text-primary text-gray-800">
@@ -1133,7 +1150,7 @@ const ViewScores = () => {
             </span>
 
             <span className="font-extrabold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
-              <CheckCircleIcon className="h-3.5 w-3.5" />
+              <CheckCircleIcon className="h-3.5 w-3.5 shrink-0" />
               <span>
                 {t('គ្រូដាក់ពិន្ទុ៖', 'Graded:')}{' '}
                 {componentAverages.totalGradedParts}/
@@ -1148,7 +1165,7 @@ const ViewScores = () => {
       {/* ================================================================== */}
       {/* 2. SEARCH & COURSE FILTER BAR                                      */}
       {/* ================================================================== */}
-      <div className="std-scr-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-3.5 items-center justify-between">
+      <div className="std-scr-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-3.5 sm:p-4 flex flex-col sm:flex-row gap-3 sm:gap-3.5 items-center justify-between">
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto flex-1">
           <div className="relative w-full sm:max-w-xs lg:max-w-sm flex-1">
             <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
@@ -1156,14 +1173,17 @@ const ViewScores = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder=""
+              placeholder={t(
+                'ស្វែងរកតាមមុខវិជ្ជា, កូដមុខវិជ្ជា ឬគ្រូបង្រៀន...',
+                'Search course, code, or instructor...'
+              )}
               className="std-scr-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
             />
             {searchTerm && (
               <button
                 type="button"
                 onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-1"
               >
                 <XMarkIcon className="h-4 w-4" />
               </button>
@@ -1195,15 +1215,15 @@ const ViewScores = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 3. DETAILED SCORES TABLE                                           */}
+      {/* 3. DETAILED SCORES (Table on iPad/Desktop, Cards on Phone)         */}
       {/* ================================================================== */}
-      <div className="std-scr-surface bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
-        <div className="std-scr-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <h3 className="std-scr-text-primary text-base sm:text-lg font-extrabold text-gray-900">
+      <div className="std-scr-surface bg-white rounded-2xl sm:rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
+        <div className="std-scr-bar px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+            <h3 className="std-scr-text-primary text-base sm:text-lg font-extrabold text-gray-900 truncate">
               {t('តារាងពិន្ទុលម្អិតតាមមុខវិជ្ជា', 'Detailed Course Scores')}
             </h3>
-            <span className="std-scr-badge-blue px-3 py-1 rounded-lg text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-100">
+            <span className="std-scr-badge-blue px-3 py-1 rounded-lg text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-100 shrink-0">
               {filteredGrades.length} {t('មុខវិជ្ជា', 'Courses')}
             </span>
           </div>
@@ -1215,42 +1235,43 @@ const ViewScores = () => {
                 setSelectedCourse('all');
                 setSearchTerm('');
               }}
-              className="std-scr-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+              className="std-scr-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer shrink-0"
             >
               {t('សម្អាតតម្រងស្វែងរក', 'Reset Filters')}
             </button>
           )}
         </div>
 
-        <div className="overflow-x-auto">
+        {/* 💻 iPad, Laptop & Desktop Table View (`hidden md:block`) */}
+        <div className="hidden md:block overflow-x-auto hide-scrollbar">
           <table className="min-w-full border-collapse">
             <thead className="std-scr-thead bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider w-14">
+                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider w-14 whitespace-nowrap">
                   {t('ល.រ', 'No')}
                 </th>
-                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap sticky left-0 bg-inherit z-10">
                   {t('មុខវិជ្ជាសិក្សា', 'Course')}
                 </th>
-                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('គ្រូបង្រៀន', 'Instructor')}
                 </th>
-                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('កិច្ចការ (20%)', 'Assignment (20%)')}
                 </th>
-                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('សំណួរខ្លី (20%)', 'Quiz (20%)')}
                 </th>
-                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('ពាក់កណ្តាលឆមាស (25%)', 'Midterm (25%)')}
                 </th>
-                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('ប្រឡងបញ្ចប់ (35%)', 'Final Exam (35%)')}
                 </th>
-                <th className="px-5 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-5 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('ពិន្ទុសរុប', 'Total Score')}
                 </th>
-                <th className="px-6 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('លទ្ធផល', 'Result')}
                 </th>
               </tr>
@@ -1305,7 +1326,7 @@ const ViewScores = () => {
                         {idx + 1}
                       </td>
 
-                      <td className="px-6 py-4 whitespace-nowrap align-middle">
+                      <td className="px-6 py-4 whitespace-nowrap align-middle sticky left-0 bg-inherit z-10">
                         <div className="flex items-center gap-3">
                           <div className="std-scr-badge-indigo h-9 w-9 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center shrink-0">
                             <BookOpenIcon className="h-4 w-4 stroke-[2.2]" />
@@ -1443,6 +1464,155 @@ const ViewScores = () => {
             </tbody>
           </table>
         </div>
+
+        {/* 📱 Mobile App-Like Score Cards View (`md:hidden`) */}
+        <div className="md:hidden p-3.5 space-y-3.5 bg-gray-50/40">
+          {filteredGrades.length === 0 ? (
+            <div className="std-scr-subbox py-12 px-4 text-center bg-white rounded-2xl border border-dashed border-gray-200">
+              <ChartBarIcon className="h-14 w-14 text-gray-300 mx-auto mb-2.5" />
+              <p className="std-scr-text-primary font-extrabold text-gray-700 text-sm">
+                {searchTerm || selectedCourse !== 'all'
+                  ? t(
+                      'មិនឃើញមានទិន្នន័យពិន្ទុតាមការស្វែងរកនេះទេ',
+                      'No matching score records found'
+                    )
+                  : t(
+                      'មិនទាន់មានទិន្នន័យពិន្ទុនៅឡើយទេ',
+                      'No score records found'
+                    )}
+              </p>
+              <p className="std-scr-text-secondary text-xs text-gray-400 mt-1">
+                {t(
+                  'តារាងពិន្ទុនឹងបង្ហាញនៅទីនេះ នៅពេលគ្រូបង្រៀនបញ្ចូលពិន្ទុតាមមុខវិជ្ជា។',
+                  'Scores will appear here once recorded by your instructor.'
+                )}
+              </p>
+            </div>
+          ) : (
+            filteredGrades.map((grade, idx) => {
+              const teacherMeta = resolveGradeTeacherMeta(grade);
+              const avatarKey = `mob_scr_t_${grade.course?.id || grade.course_id || idx}`;
+              const hasTeacherAvatar = Boolean(
+                teacherMeta.image && !failedAvatars[avatarKey]
+              );
+
+              const courseName =
+                grade.course?.course_name ||
+                grade.course_name ||
+                t('មុខវិជ្ជាសិក្សា', 'Course');
+              const courseCode = grade.course?.course_code || '';
+              const credit = grade.course?.credit || 3;
+
+              return (
+                <div
+                  key={`mob-scr-${grade.course?.id || grade.course_id || idx}`}
+                  className="std-scr-subbox bg-white rounded-2xl border border-gray-200/80 p-3.5 shadow-2xs space-y-3"
+                >
+                  {/* Top Row: Course Title + Result Badge */}
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="std-scr-badge-indigo h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center shrink-0">
+                        <BookOpenIcon className="h-5 w-5 stroke-[2.2]" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="std-scr-text-primary text-sm font-extrabold text-gray-900 truncate">
+                          {courseName}
+                        </h4>
+                        <span className="std-scr-text-secondary block text-[11px] font-bold text-gray-400 uppercase mt-0.5">
+                          {courseCode ? `${courseCode} • ` : ''}
+                          {credit} {t('ក្រេឌីត', 'Credits')}
+                        </span>
+                      </div>
+                    </div>
+
+                    {getResultBadge(grade)}
+                  </div>
+
+                  {/* Middle Grid: 4 Score Components (2x2 Grid) */}
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="std-scr-code-pill px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-between">
+                      <span className="std-scr-text-secondary text-[11px] font-bold text-gray-500">
+                        {t('កិច្ចការ (20%)', 'Assign (20%)')}
+                      </span>
+                      <span className="std-scr-text-primary text-xs font-black text-gray-900">
+                        {grade.cleanAssign !== null ? grade.cleanAssign : '—'}
+                      </span>
+                    </div>
+
+                    <div className="std-scr-code-pill px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-between">
+                      <span className="std-scr-text-secondary text-[11px] font-bold text-gray-500">
+                        {t('សំណួរខ្លី (20%)', 'Quiz (20%)')}
+                      </span>
+                      <span className="std-scr-text-primary text-xs font-black text-gray-900">
+                        {grade.cleanQuiz !== null ? grade.cleanQuiz : '—'}
+                      </span>
+                    </div>
+
+                    <div className="std-scr-code-pill px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-between">
+                      <span className="std-scr-text-secondary text-[11px] font-bold text-gray-500">
+                        {t('ឆមាស (25%)', 'Midterm (25%)')}
+                      </span>
+                      <span className="std-scr-text-primary text-xs font-black text-gray-900">
+                        {grade.cleanMidterm !== null ? grade.cleanMidterm : '—'}
+                      </span>
+                    </div>
+
+                    <div className="std-scr-code-pill px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-between">
+                      <span className="std-scr-text-secondary text-[11px] font-bold text-gray-500">
+                        {t('ប្រឡង (35%)', 'Final (35%)')}
+                      </span>
+                      <span className="std-scr-text-primary text-xs font-black text-gray-900">
+                        {grade.cleanExam !== null ? grade.cleanExam : '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Bottom Row: Instructor + Total Final Score */}
+                  <div className="std-scr-divider pt-2.5 border-t border-gray-100 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="h-7 w-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-extrabold text-[10px] shrink-0 overflow-hidden shadow-2xs">
+                        {hasTeacherAvatar ? (
+                          <img
+                            src={teacherMeta.image}
+                            alt={teacherMeta.name}
+                            loading="lazy"
+                            className="h-full w-full object-cover rounded-full"
+                            onError={() =>
+                              setFailedAvatars((prev) => ({
+                                ...prev,
+                                [avatarKey]: true,
+                              }))
+                            }
+                          />
+                        ) : (
+                          <span>{teacherMeta.initials}</span>
+                        )}
+                      </div>
+                      <span className="std-scr-text-primary text-xs font-bold text-gray-800 truncate max-w-[140px]">
+                        {teacherMeta.name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="std-scr-text-secondary text-[11px] font-bold text-gray-500">
+                        {t('ពិន្ទុសរុប៖', 'Total:')}
+                      </span>
+                      {grade.cleanFinal !== null ? (
+                        <span className="std-scr-badge-indigo px-2.5 py-1 rounded-lg text-xs font-black text-indigo-700 bg-indigo-50 border border-indigo-200/80">
+                          {grade.cleanFinal} {t('ពិន្ទុ', 'pts')}
+                        </span>
+                      ) : (
+                        <span className="std-scr-text-secondary text-xs font-bold text-gray-400">
+                          —
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {/* ================================================================== */}
@@ -1452,6 +1622,13 @@ const ViewScores = () => {
         .std-scr-grid-pattern {
           background-image: radial-gradient(rgba(255, 255, 255, 0.25) 1px, transparent 1px);
           background-size: 20px 20px;
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .hide-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
 
         .std-scr-row + .std-scr-row > td {
