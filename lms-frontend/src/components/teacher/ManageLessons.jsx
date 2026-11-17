@@ -619,7 +619,7 @@ export default function ManageLessons() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សារបស់មុខវិជ្ជានីមួយៗ និងកាតឆ្នាំទាំង ៥
+  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សារបស់មុខវិជ្ជានីមួយៗ និងកាតឆ្នាំទាំង ៥ (កំណត់ឆ្នាំតែមួយគត់)
   // ============================================================================
   const enrichedCourses = useMemo(() => {
     if (!Array.isArray(courses)) return [];
@@ -638,29 +638,27 @@ export default function ManageLessons() {
         }
       });
 
-      let sortedYears = Object.keys(yearFreq).sort();
+      // ✅ ទី១៖ ទាញយកឆ្នាំសិក្សាពីឈ្មោះ ឬកូដមុខវិជ្ជាមុនគេ (ឧទាហរណ៍៖ បើឈ្មោះមាន "Y1" ឬ "ឆ្នាំទី១")
+      let primaryYear = detectStudentYearNum({
+        batch_year: `${course.course_name || ''} ${course.course_code || ''} ${course.description || ''} ${course.year || ''}`,
+      });
 
-      if (sortedYears.length === 0) {
-        const fromCourseText = detectStudentYearNum({
-          batch_year: `${course.course_name || ''} ${course.description || ''} ${course.year || ''}`,
-        });
-        if (fromCourseText) sortedYears = [fromCourseText];
-      }
-
-      let primaryYear = 'other';
-      if (sortedYears.length === 1) {
-        primaryYear = sortedYears[0];
-      } else if (sortedYears.length > 1) {
-        primaryYear = sortedYears.reduce((a, b) =>
-          yearFreq[a] >= yearFreq[b] ? a : b
-        );
+      // ✅ ទី២៖ បើមុខវិជ្ជាគ្មានបញ្ជាក់ឆ្នាំទេ យកឆ្នាំដែលមានសិស្សចុះឈ្មោះរៀនច្រើនជាងគេបំផុត
+      if (!primaryYear) {
+        const sortedYears = Object.keys(yearFreq);
+        if (sortedYears.length > 0) {
+          primaryYear = sortedYears.reduce((a, b) =>
+            yearFreq[a] >= yearFreq[b] ? a : b
+          );
+        } else {
+          primaryYear = '1'; // Default ឆ្នាំទី១ បើទាន់មានសិស្ស
+        }
       }
 
       return {
         ...course,
         enrolledCount: enrolledList.length,
-        yearsList: sortedYears,
-        primaryYear,
+        primaryYear: String(primaryYear),
       };
     });
   }, [courses, allStudents, courseMap]);
@@ -671,26 +669,13 @@ export default function ManageLessons() {
       if (!yearKey || yearKey === 'all') return enrichedCourses;
       const targetYear = String(yearKey);
 
-      const studentsInThisYear = (allStudents || []).filter(
-        (s) => detectStudentYearNum(s) === targetYear
-      );
-
       const matched = enrichedCourses.filter((course) => {
-        if (
-          studentsInThisYear.some((s) =>
-            isStudentEnrolledInCourse(s, course.id, courseMap)
-          )
-        ) {
-          return true;
-        }
-        return (
-          Array.isArray(course.yearsList) && course.yearsList.includes(targetYear)
-        );
+        return course.primaryYear === targetYear;
       });
 
       return matched.length > 0 ? matched : enrichedCourses;
     },
-    [enrichedCourses, allStudents, courseMap]
+    [enrichedCourses]
   );
 
   // ✅ ច្រោះមុខវិជ្ជាតាមឆ្នាំសិក្សាដែលបានជ្រើសរើសលើកាត
@@ -721,11 +706,7 @@ export default function ManageLessons() {
       const currentCourseObj = enrichedCourses.find(
         (c) => String(c.id) === String(editingLesson.course_id)
       );
-      if (
-        currentCourseObj &&
-        currentCourseObj.primaryYear &&
-        currentCourseObj.primaryYear !== 'other'
-      ) {
+      if (currentCourseObj && currentCourseObj.primaryYear) {
         return getCoursesForYearKey(currentCourseObj.primaryYear);
       }
     }
@@ -733,7 +714,7 @@ export default function ManageLessons() {
     return enrichedCourses;
   }, [selectedYear, editingLesson, enrichedCourses, getCoursesForYearKey]);
 
-  // គណនាមេរៀនសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) សម្រាប់កាតទាំង ៥
+  // គណនាមេរៀនសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) សម្រាប់កាតទាំង ៥ ដោយមិនឱ្យស្ទួន
   const lessonYearCounts = useMemo(() => {
     const counts = { all: 0, '1': 0, '2': 0, '3': 0, '4': 0 };
     if (!Array.isArray(lessons)) return counts;
@@ -743,10 +724,10 @@ export default function ManageLessons() {
       const matchedCourse = enrichedCourses.find(
         (c) => String(c.id) === String(lsn.course_id)
       );
-      if (matchedCourse && Array.isArray(matchedCourse.yearsList)) {
-        matchedCourse.yearsList.forEach((y) => {
-          if (counts[y] !== undefined) counts[y] += 1;
-        });
+      // ✅ រាប់មេរៀនបញ្ចូលតែក្នុងឆ្នាំគោល (primaryYear) តែមួយគត់ ដើម្បីកុំឱ្យស្ទួនកាត
+      if (matchedCourse && matchedCourse.primaryYear) {
+        const py = String(matchedCourse.primaryYear);
+        if (counts[py] !== undefined) counts[py] += 1;
       }
     });
     return counts;
@@ -909,15 +890,8 @@ export default function ManageLessons() {
       setYoutubeVideo((prev) => ({
         ...prev,
         title: prev.title || file.name,
+        file: file,
       }));
-    }
-  };
-
-  // ✅ អនុគមន៍ជំនួយសម្រាប់ទាញយកចំណងជើងវីដេអូដោយស្វ័យប្រវត្តិ ពេលជ្រើសរើសហ្វាល់វីដេអូក្នុងកាតមេរៀន
-  const handleVideoFileChangeWithAutoTitle = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setVideoTitle(file.name);
     }
   };
 
@@ -1002,15 +976,15 @@ export default function ManageLessons() {
       }));
 
       // ✅ បើគ្រូមិនបានវាយចំណងជើងវីដេអូទេ យកឈ្មោះមេរៀនមកប្រើជាចំណងជើងវីដេអូជំនួសស្វ័យប្រវត្តិ
-      const autoYtTitle = ytToUpload.title.trim() || payload.title || 'Video Link';
+      const autoYtTitle = ytToUpload.title.trim() || ytToUpload.file?.name || payload.title || 'Video Link';
 
-      const optimisticVideos = ytToUpload.url.trim()
+      const optimisticVideos = (ytToUpload.url.trim() || ytToUpload.file)
         ? [
             {
               id: `temp_v_${Date.now()}`,
               lesson_id: currentLessonId,
               title: autoYtTitle,
-              video_url: ytToUpload.url.trim(),
+              video_url: ytToUpload.url.trim() || URL.createObjectURL(ytToUpload.file),
             },
           ]
         : [];
@@ -1039,7 +1013,7 @@ export default function ManageLessons() {
       // ✅ បិទផ្ទាំង Modal ភ្លាមៗដោយមិនឱ្យគ្រូរង់ចាំការបង្ហោះហ្វាល់យូរ
       setShowAddModal(false);
       setSelectedFiles([]);
-      setYoutubeVideo({ title: '', url: '' });
+      setYoutubeVideo({ title: '', url: '', file: null });
       setIsSubmitting(false);
 
       // ✅ បង្ហោះឯកសារ និងវីដេអូទាំងអស់ព្រមគ្នា (Parallel) នៅផ្ទៃខាងក្រោយ
@@ -1060,11 +1034,16 @@ export default function ManageLessons() {
         });
       }
 
-      if (ytToUpload.url.trim() && currentLessonId) {
+      if ((ytToUpload.url.trim() || ytToUpload.file) && currentLessonId) {
         const videoPayload = new FormData();
         videoPayload.append('lesson_id', currentLessonId);
         videoPayload.append('title', autoYtTitle);
-        videoPayload.append('video_url', ytToUpload.url.trim());
+        if (ytToUpload.url.trim()) {
+          videoPayload.append('video_url', ytToUpload.url.trim());
+        }
+        if (ytToUpload.file) {
+          videoPayload.append('video', ytToUpload.file);
+        }
         uploadTasks.push(
           api
             .post('/teacher/lessons/video', videoPayload, {
@@ -1456,7 +1435,7 @@ export default function ManageLessons() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ ការច្រោះទិន្នន័យមេរៀន និងការនាំចេញឯកសារ Excel (.xlsx)
+  // 📌 ផ្នែកទី៥៖ ការច្រោះទិន្នន័យមេរៀន និងការនាំចេញឯកសារ Excel (.xlsx) មិនឱ្យស្ទួន
   // ============================================================================
   const filteredLessons = useMemo(() => {
     if (!Array.isArray(lessons)) return [];
@@ -1468,15 +1447,14 @@ export default function ManageLessons() {
           (c) => String(c.id) === String(lesson.course_id)
         );
 
-        // ១. ច្រោះតាមកាតឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) តែបើមុខវិជ្ជាថ្មីមិនទាន់មានសិស្សចុះឈ្មោះ (yearsList ទទេ) ឱ្យបង្ហាញធម្មតា
+        // ១. ច្រោះតាមកាតឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) ដោយផ្អែកលើ Primary Year តែមួយគត់
         if (selectedYear !== 'all') {
-          const courseYears = matchedCourse?.yearsList || [];
-          if (courseYears.length > 0 && !courseYears.includes(String(selectedYear))) {
+          if (matchedCourse && String(matchedCourse.primaryYear) !== String(selectedYear)) {
             return false;
           }
         }
 
-        // ២. ច្រោះតាមមុខវិជ្ជា (ដំណើរការពេលឈរលើកាតឆ្នាំទី១-៤)
+        // ២. ច្រោះតាមមុខវិជ្ជា
         if (
           selectedYear !== 'all' &&
           selectedCourse !== '' &&
@@ -2557,16 +2535,7 @@ export default function ManageLessons() {
                         </div>
                         <input
                           type="file"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              setYoutubeVideo((prev) => ({
-                                ...prev,
-                                title: prev.title || file.name,
-                                file: file,
-                              }));
-                            }
-                          }}
+                          onChange={handleModalVideoFileChange}
                           className="hidden"
                           accept="video/mp4,video/x-m4v,video/*"
                         />
