@@ -48,7 +48,9 @@ Route::post('/check-telegram-link', [AuthController::class, 'checkTelegramLink']
 // ✅ Check file existence route (Secured against Path Traversal '../' + Railway DB Base64 fallback)
 Route::get('/check-file-exists', function (Request $request) {
     $path = trim((string) $request->query('path', ''));
-    if (!$path || str_contains($path, '..')) {
+    $fileId = $request->query('id');
+
+    if ((!$path && !$fileId) || str_contains($path, '..')) {
         return response()->json(['exists' => false, 'message' => 'Invalid path parameter']);
     }
 
@@ -56,19 +58,28 @@ Route::get('/check-file-exists', function (Request $request) {
         return response()->json(['exists' => true]);
     }
 
-    $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', $path);
+    $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', urldecode($path));
     $cleanPath = ltrim($cleanPath, '/\\');
+    $fileNameOnly = basename($cleanPath);
 
-    $exists = Storage::disk('public')->exists($cleanPath) ||
-              file_exists(storage_path('app/public/' . $cleanPath)) ||
-              file_exists(public_path('storage/' . $cleanPath));
+    $exists = ($cleanPath && (
+        Storage::disk('public')->exists($cleanPath) ||
+        file_exists(storage_path('app/public/' . $cleanPath)) ||
+        file_exists(public_path('storage/' . $cleanPath))
+    ));
 
     if (!$exists && Schema::hasTable('lesson_files') && Schema::hasColumn('lesson_files', 'file_data')) {
         $exists = DB::table('lesson_files')
-            ->where(function ($q) use ($cleanPath) {
-                $q->where('file_path', $cleanPath)
-                  ->orWhere('file_path', 'storage/' . $cleanPath)
-                  ->orWhere('file_path', '/storage/' . $cleanPath);
+            ->where(function ($q) use ($cleanPath, $fileNameOnly, $fileId) {
+                if ($fileId) {
+                    $q->where('id', $fileId);
+                }
+                if ($cleanPath) {
+                    $q->orWhere('file_path', $cleanPath)
+                      ->orWhere('file_path', 'storage/' . $cleanPath)
+                      ->orWhere('file_path', '/storage/' . $cleanPath)
+                      ->orWhere('file_path', 'like', '%' . $fileNameOnly);
+                }
             })
             ->whereNotNull('file_data')
             ->exists();
@@ -76,10 +87,16 @@ Route::get('/check-file-exists', function (Request $request) {
 
     if (!$exists && Schema::hasTable('assignment_submissions') && Schema::hasColumn('assignment_submissions', 'file_data')) {
         $exists = DB::table('assignment_submissions')
-            ->where(function ($q) use ($cleanPath) {
-                $q->where('file_path', $cleanPath)
-                  ->orWhere('file_path', 'storage/' . $cleanPath)
-                  ->orWhere('file_path', '/storage/' . $cleanPath);
+            ->where(function ($q) use ($cleanPath, $fileNameOnly, $fileId) {
+                if ($fileId) {
+                    $q->where('id', $fileId);
+                }
+                if ($cleanPath) {
+                    $q->orWhere('file_path', $cleanPath)
+                      ->orWhere('file_path', 'storage/' . $cleanPath)
+                      ->orWhere('file_path', '/storage/' . $cleanPath)
+                      ->orWhere('file_path', 'like', '%' . $fileNameOnly);
+                }
             })
             ->whereNotNull('file_data')
             ->exists();
@@ -91,22 +108,27 @@ Route::get('/check-file-exists', function (Request $request) {
 // ✅ Download file route (Secured against Path Traversal '../' + Railway DB Base64 fallback)
 Route::get('/download-file', function (Request $request) {
     $path = trim((string) $request->query('path', ''));
-    if (!$path || str_contains($path, '..')) {
+    $fileId = $request->query('id');
+
+    if ((!$path && !$fileId) || str_contains($path, '..')) {
         return response()->json(['message' => 'Invalid path parameter'], 400);
     }
 
     $origin = $request->headers->get('Origin') ?: '*';
 
-    $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', $path);
+    $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', urldecode($path));
     $cleanPath = ltrim($cleanPath, '/\\');
+    $fileNameOnly = basename($cleanPath);
 
     $fullPath = null;
-    if (Storage::disk('public')->exists($cleanPath)) {
-        $fullPath = Storage::disk('public')->path($cleanPath);
-    } elseif (file_exists(storage_path('app/public/' . $cleanPath))) {
-        $fullPath = storage_path('app/public/' . $cleanPath);
-    } elseif (file_exists(public_path('storage/' . $cleanPath))) {
-        $fullPath = public_path('storage/' . $cleanPath);
+    if ($cleanPath) {
+        if (Storage::disk('public')->exists($cleanPath)) {
+            $fullPath = Storage::disk('public')->path($cleanPath);
+        } elseif (file_exists(storage_path('app/public/' . $cleanPath))) {
+            $fullPath = storage_path('app/public/' . $cleanPath);
+        } elseif (file_exists(public_path('storage/' . $cleanPath))) {
+            $fullPath = public_path('storage/' . $cleanPath);
+        }
     }
 
     if ($fullPath && file_exists($fullPath)) {
@@ -119,32 +141,59 @@ Route::get('/download-file', function (Request $request) {
 
     // ✅ Fallback សម្រាប់ Railway៖ ទាញយកពីជួរឈរ file_data ក្នុងតារាង lesson_files ឬ assignment_submissions ប្រសិនបើហ្វាល់លើ Disk ត្រូវបានលុបពេល Redeploy
     $dbBase64 = null;
-    $dbFileName = basename($cleanPath);
+    $dbFileName = $fileNameOnly ?: 'downloaded-file';
     $dbMimeType = 'application/octet-stream';
 
-    if (Schema::hasTable('lesson_files') && Schema::hasColumn('lesson_files', 'file_data')) {
-        $lessonFile = DB::table('lesson_files')
-            ->where('file_path', $cleanPath)
-            ->orWhere('file_path', 'storage/' . $cleanPath)
-            ->orWhere('file_path', '/storage/' . $cleanPath)
-            ->first();
+    if (Schema::hasTable('lesson_files')) {
+        $q = DB::table('lesson_files');
+        $lessonFile = null;
 
-        if ($lessonFile && !empty($lessonFile->file_data)) {
-            $dbBase64 = $lessonFile->file_data;
-            $dbFileName = $lessonFile->file_name ?? $dbFileName;
-            $dbMimeType = $lessonFile->mime_type ?? $dbMimeType;
+        if ($fileId) {
+            $lessonFile = (clone $q)->where('id', $fileId)->first();
+        }
+        if (!$lessonFile && $cleanPath) {
+            $lessonFile = (clone $q)
+                ->where('file_path', $cleanPath)
+                ->orWhere('file_path', 'storage/' . $cleanPath)
+                ->orWhere('file_path', '/storage/' . $cleanPath)
+                ->orWhere('file_path', 'like', '%' . $fileNameOnly)
+                ->first();
+        }
+
+        if ($lessonFile) {
+            if (!empty($lessonFile->file_path) && str_starts_with(trim($lessonFile->file_path), 'data:')) {
+                $dbBase64 = trim((string) $lessonFile->file_path);
+                $dbFileName = $lessonFile->file_name ?? $dbFileName;
+                $dbMimeType = $lessonFile->mime_type ?? $dbMimeType;
+            } else {
+                $rawContent = $lessonFile->file_data ?? $lessonFile->base64_data ?? $lessonFile->file_content ?? null;
+                if (!empty($rawContent)) {
+                    $dbBase64 = trim((string) $rawContent);
+                    $dbFileName = $lessonFile->file_name ?? $dbFileName;
+                    $dbMimeType = $lessonFile->mime_type ?? $dbMimeType;
+                }
+            }
         }
     }
 
-    if (!$dbBase64 && Schema::hasTable('assignment_submissions') && Schema::hasColumn('assignment_submissions', 'file_data')) {
-        $subFile = DB::table('assignment_submissions')
-            ->where('file_path', $cleanPath)
-            ->orWhere('file_path', 'storage/' . $cleanPath)
-            ->orWhere('file_path', '/storage/' . $cleanPath)
-            ->first();
+    if (!$dbBase64 && Schema::hasTable('assignment_submissions')) {
+        $q = DB::table('assignment_submissions');
+        $subFile = null;
+
+        if ($fileId) {
+            $subFile = (clone $q)->where('id', $fileId)->first();
+        }
+        if (!$subFile && $cleanPath) {
+            $subFile = (clone $q)
+                ->where('file_path', $cleanPath)
+                ->orWhere('file_path', 'storage/' . $cleanPath)
+                ->orWhere('file_path', '/storage/' . $cleanPath)
+                ->orWhere('file_path', 'like', '%' . $fileNameOnly)
+                ->first();
+        }
 
         if ($subFile && !empty($subFile->file_data)) {
-            $dbBase64 = $subFile->file_data;
+            $dbBase64 = trim((string) $subFile->file_data);
             $dbFileName = $subFile->original_filename ?? $dbFileName;
         }
     }
@@ -154,7 +203,7 @@ Route::get('/download-file', function (Request $request) {
             $dbMimeType = $matches[1] ?: $dbMimeType;
             $dbBase64 = $matches[2];
         }
-        $decodedBytes = base64_decode($dbBase64);
+        $decodedBytes = base64_decode(preg_replace('/\s+/', '', $dbBase64));
         if ($decodedBytes !== false) {
             return response($decodedBytes, 200, [
                 'Content-Type' => $dbMimeType,

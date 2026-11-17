@@ -28,21 +28,22 @@ import {
   EyeIcon,
   ArrowsPointingOutIcon,
   ArrowsPointingInIcon,
+  DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
-const CACHE_KEY_SHARED_QUIZZES = 'cached_student_quizzes_list_v14';
+const CACHE_KEY_SHARED_QUIZZES = 'cached_student_quizzes_list_v15';
 const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
 const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
 
-const getQuizzesCacheKey = (uid) => `cached_student_quizzes_list_v14_${uid}`;
-const getQuizzesMetaCacheKey = (uid) => `cached_student_quizzes_meta_v14_${uid}`;
+const getQuizzesCacheKey = (uid) => `cached_student_quizzes_list_v15_${uid}`;
+const getQuizzesMetaCacheKey = (uid) => `cached_student_quizzes_meta_v15_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
-const getQuizReviewsCacheKey = (uid) => `cached_student_quiz_reviews_v14_${uid}`;
+const getQuizReviewsCacheKey = (uid) => `cached_student_quiz_reviews_v15_${uid}`;
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v14_${uid}`;
 const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v10_${uid}`;
 
@@ -272,6 +273,17 @@ const formatCleanScore = (val, fallback = 0) => {
   return isNaN(num) ? val : Math.round(num * 100) / 100;
 };
 
+// ✅ ពិនិត្យថាតើសំណួរនោះជាសំណួរសរសេរ (Essay) ឬសំណួរជ្រើសរើស (MCQ / TrueFalse)
+const isEssayQuestion = (q) => {
+  if (!q) return false;
+  const qType = String(q.question_type || '').trim().toLowerCase();
+  if (qType === 'essay' || qType === 'text' || qType === 'written' || qType === 'short_answer') {
+    return true;
+  }
+  const opts = Array.isArray(q.options) ? q.options : [];
+  return opts.length <= 1;
+};
+
 const isOptionMarkedCorrect = (opt) => {
   if (!opt) return false;
   return (
@@ -282,15 +294,49 @@ const isOptionMarkedCorrect = (opt) => {
   );
 };
 
+// ✅ បង្កើតបញ្ជីត្រួតពិនិត្យសំណួរ និងចម្លើយ (គាំទ្រទាំង MCQ/TrueFalse និងសំណួរសរសេរ Essay)
 const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
   if (!Array.isArray(questions)) return [];
 
   return questions.map((q, idx) => {
-    const selectedOptId = selectedAnswersMap[q.id];
+    const rawAns = selectedAnswersMap[q.id];
     const options = Array.isArray(q.options) ? q.options : [];
+    const essayMode = isEssayQuestion(q);
+    const mark = formatCleanScore(q.mark ?? 1, 1);
+
+    if (essayMode) {
+      const writtenText = rawAns !== undefined && rawAns !== null ? String(rawAns).trim() : '';
+      const isAnswered = writtenText.length > 0;
+      const modelOption = options.find((opt) => isOptionMarkedCorrect(opt)) || options[0] || null;
+      const modelAnswerText = q.model_answer || modelOption?.option_text || null;
+
+      let isCorrect = false;
+      if (isAnswered) {
+        if (modelAnswerText) {
+          isCorrect = writtenText.toLowerCase() === String(modelAnswerText).trim().toLowerCase();
+        } else {
+          isCorrect = true;
+        }
+      }
+
+      return {
+        questionId: q.id || idx + 1,
+        index: idx + 1,
+        questionText: q.question_text || '',
+        questionType: 'Essay',
+        mark,
+        earnedMark: isCorrect ? mark : 0,
+        isAnswered,
+        isCorrect,
+        selectedOptionId: null,
+        selectedOptionText: isAnswered ? writtenText : null,
+        correctOptionId: modelOption?.id ?? null,
+        correctOptionText: modelAnswerText,
+      };
+    }
 
     const selectedOption = options.find(
-      (opt) => String(opt.id) === String(selectedOptId)
+      (opt) => String(opt.id) === String(rawAns)
     );
     const correctOption = options.find((opt) => isOptionMarkedCorrect(opt));
 
@@ -302,12 +348,11 @@ const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
           isOptionMarkedCorrect(selectedOption))
     );
 
-    const mark = formatCleanScore(q.mark ?? 1, 1);
-
     return {
       questionId: q.id || idx + 1,
       index: idx + 1,
       questionText: q.question_text || '',
+      questionType: q.question_type || 'MCQ',
       mark,
       earnedMark: isCorrect ? mark : 0,
       isAnswered,
@@ -401,7 +446,7 @@ const StudentQuizzes = () => {
     }
     const cached =
       readStorageJson(getQuizzesCacheKey(currentStudentId), null) ||
-      readStorageJson(`cached_student_quizzes_list_v8_${currentStudentId}`, null) ||
+      readStorageJson(`cached_student_quizzes_list_v14_${currentStudentId}`, null) ||
       readStorageJson(CACHE_KEY_SHARED_QUIZZES, []);
     STUDENT_QUIZ_MEM_CACHE.quizzes = Array.isArray(cached) ? cached : [];
     return STUDENT_QUIZ_MEM_CACHE.quizzes;
@@ -426,6 +471,7 @@ const StudentQuizzes = () => {
     }
     const cached =
       readStorageJson(getQuizReviewsCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_quiz_reviews_v14_${currentStudentId}`, null) ||
       readStorageJson('cached_student_quiz_reviews_v1', {});
     STUDENT_QUIZ_MEM_CACHE.reviews = cached;
     return cached;
@@ -840,14 +886,28 @@ const StudentQuizzes = () => {
     }
   };
 
-  const handleSelectOption = (questionId, optionId) => {
+  const handleSelectOption = (questionId, value) => {
     if (unansweredCountPrompt > 0) setUnansweredCountPrompt(0);
     if (submitError) setSubmitError('');
     setAttemptAnswers((prev) => ({
       ...prev,
-      [questionId]: optionId,
+      [questionId]: value,
     }));
   };
+
+  // ✅ ពិនិត្យថាតើសំណួរនោះត្រូវបានឆ្លើយរួចហើយឬនៅ (ទាំងសំណួរធីក និងសំណួរសរសេរ)
+  const isQuestionAnswered = useCallback(
+    (q) => {
+      if (!q) return false;
+      const val = attemptAnswers[q.id];
+      if (val === undefined || val === null) return false;
+      if (isEssayQuestion(q)) {
+        return String(val).trim().length > 0;
+      }
+      return val !== '';
+    },
+    [attemptAnswers]
+  );
 
   const handleQuizSubmit = async (e, isAuto = false, forceSubmit = false) => {
     if (e) e.preventDefault();
@@ -855,7 +915,7 @@ const StudentQuizzes = () => {
 
     if (!isAuto && !forceSubmit && Array.isArray(activeQuizAttempt?.questions)) {
       const unanswered = activeQuizAttempt.questions.filter(
-        (q) => !attemptAnswers[q.id]
+        (q) => !isQuestionAnswered(q)
       );
       if (unanswered.length > 0) {
         setUnansweredCountPrompt(unanswered.length);
@@ -869,15 +929,32 @@ const StudentQuizzes = () => {
     clearInterval(timerRef.current);
     endTimeRef.current = null;
 
-    const formattedAnswers = Object.entries(attemptAnswers).map(
-      ([qId, optId]) => ({
-        question_id: Number(qId),
-        selected_option: optId,
-      })
-    );
+    const questionsList = Array.isArray(activeQuizAttempt.questions)
+      ? activeQuizAttempt.questions
+      : [];
+    const questionsById = new Map(questionsList.map((q) => [String(q.id), q]));
 
-    const reviewItems = buildQuizReviewItems(
-      activeQuizAttempt.questions || [],
+    const formattedAnswers = Object.entries(attemptAnswers)
+      .map(([qId, val]) => {
+        const qObj = questionsById.get(String(qId));
+        if (isEssayQuestion(qObj)) {
+          const textVal = String(val ?? '').trim();
+          if (!textVal) return null;
+          return {
+            question_id: Number(qId),
+            selected_option: null,
+            answer_text: textVal,
+          };
+        }
+        return {
+          question_id: Number(qId),
+          selected_option: Number(val),
+        };
+      })
+      .filter(Boolean);
+
+    const localReviewItems = buildQuizReviewItems(
+      questionsList,
       attemptAnswers
     );
 
@@ -894,6 +971,12 @@ const StudentQuizzes = () => {
       const totalMarks =
         resData.total_marks ?? activeQuizAttempt.total_mark ?? 20;
 
+      // ✅ ប្រើ review_items ពី Backend (ដែលមានចម្លើយត្រឹមត្រូវ ១០០% ពី DB) ឬ Fallback មក localReviewItems
+      const finalReviewItems =
+        Array.isArray(resData.review_items) && resData.review_items.length > 0
+          ? resData.review_items
+          : localReviewItems;
+
       const finalResultPayload = {
         ...resData,
         quizId: activeQuizAttempt.id,
@@ -902,7 +985,7 @@ const StudentQuizzes = () => {
         courseCode: activeQuizAttempt.course?.course_code || '',
         score: earnedScore,
         total_marks: totalMarks,
-        reviewItems,
+        reviewItems: finalReviewItems,
       };
 
       setIsResultExpanded(false);
@@ -924,12 +1007,19 @@ const StudentQuizzes = () => {
           id: Date.now(),
           score: earnedScore,
           submitted_at: new Date().toISOString(),
+          review_items: finalReviewItems,
         }
       );
 
       setQuizzes((prev) => {
         const updated = prev.map((q) =>
-          q.id === activeQuizAttempt.id ? { ...q, attempt: updatedAttemptObj } : q
+          q.id === activeQuizAttempt.id
+            ? {
+                ...q,
+                attempt: updatedAttemptObj,
+                review_items: finalReviewItems,
+              }
+            : q
         );
         STUDENT_QUIZ_MEM_CACHE.quizzes = updated;
         safeWriteStudentQuizCache(
@@ -940,7 +1030,9 @@ const StudentQuizzes = () => {
         try {
           sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
-          localStorage.removeItem(`cached_student_scores_list_v10_${currentStudentId}`);
+          localStorage.removeItem(
+            `cached_student_scores_list_v10_${currentStudentId}`
+          );
           sessionStorage.removeItem(getStatsCacheKey(currentStudentId));
           localStorage.removeItem(getStatsCacheKey(currentStudentId));
         } catch (err) {}
@@ -993,7 +1085,7 @@ const StudentQuizzes = () => {
     return () => clearInterval(timerRef.current);
   }, [activeQuizAttempt]);
 
-  const handleOpenSavedResult = (quiz) => {
+  const handleOpenSavedResult = async (quiz) => {
     setIsResultExpanded(false);
     const reviewKey = `${currentStudentId}_${quiz.id}`;
     const saved = savedReviewsMap[reviewKey];
@@ -1004,13 +1096,23 @@ const StudentQuizzes = () => {
     );
     const earnedScore = formatCleanScore(attempt?.score, 0);
 
-    if (saved) {
+    if (
+      saved &&
+      Array.isArray(saved.reviewItems) &&
+      saved.reviewItems.length > 0
+    ) {
       setQuizResult({
         ...saved,
         score: earnedScore,
         total_marks: totalMarks,
       });
-    } else {
+      return;
+    }
+
+    if (
+      Array.isArray(attempt?.review_items) &&
+      attempt.review_items.length > 0
+    ) {
       setQuizResult({
         quizId: quiz.id,
         quizTitle: quiz.title,
@@ -1018,9 +1120,46 @@ const StudentQuizzes = () => {
         courseCode: quiz.course?.course_code || '',
         score: earnedScore,
         total_marks: totalMarks,
-        reviewItems: [],
+        reviewItems: attempt.review_items,
       });
+      return;
     }
+
+    try {
+      const res = await api.get(`/student/quizzes/${quiz.id}`);
+      if (Array.isArray(res.data?.review_items)) {
+        const fetchedPayload = {
+          quizId: quiz.id,
+          quizTitle: quiz.title,
+          courseName: quiz.course?.course_name || '',
+          courseCode: quiz.course?.course_code || '',
+          score: earnedScore,
+          total_marks: totalMarks,
+          reviewItems: res.data.review_items,
+        };
+        setQuizResult(fetchedPayload);
+        setSavedReviewsMap((prev) => {
+          const nextMap = { ...prev, [reviewKey]: fetchedPayload };
+          STUDENT_QUIZ_MEM_CACHE.reviews = nextMap;
+          safeWriteStudentQuizCache(
+            getQuizReviewsCacheKey(currentStudentId),
+            nextMap
+          );
+          return nextMap;
+        });
+        return;
+      }
+    } catch (e) {}
+
+    setQuizResult({
+      quizId: quiz.id,
+      quizTitle: quiz.title,
+      courseName: quiz.course?.course_name || '',
+      courseCode: quiz.course?.course_code || '',
+      score: earnedScore,
+      total_marks: totalMarks,
+      reviewItems: [],
+    });
   };
 
   const formatTime = (seconds) => {
@@ -1146,7 +1285,9 @@ const StudentQuizzes = () => {
   ];
 
   const totalAttemptQuestions = activeQuizAttempt?.questions?.length || 0;
-  const answeredCount = Object.keys(attemptAnswers).length;
+  const answeredCount = Array.isArray(activeQuizAttempt?.questions)
+    ? activeQuizAttempt.questions.filter((q) => isQuestionAnswered(q)).length
+    : 0;
   const progressPercent =
     totalAttemptQuestions > 0
       ? Math.round((answeredCount / totalAttemptQuestions) * 100)
@@ -1863,7 +2004,9 @@ const StudentQuizzes = () => {
                     }
                   >
                     {activeQuizAttempt.questions.map((q, idx) => {
-                      const isAnswered = attemptAnswers[q.id] !== undefined;
+                      const isAnswered = isQuestionAnswered(q);
+                      const essayMode = isEssayQuestion(q);
+
                       return (
                         <div
                           key={q.id || idx}
@@ -1884,46 +2027,80 @@ const StudentQuizzes = () => {
                               >
                                 {idx + 1}
                               </span>
-                              <h3 className="std-qz-text-primary text-sm sm:text-[15px] font-extrabold text-gray-900 leading-relaxed">
+                              <h3 className="std-qz-text-primary text-sm sm:text-[15px] font-extrabold text-gray-900 leading-relaxed whitespace-pre-line">
                                 {q.question_text}
                               </h3>
                             </div>
 
                             {q.mark && (
                               <span className="std-qz-code-pill px-2.5 py-0.5 rounded-lg text-[11px] font-extrabold bg-white text-indigo-600 border border-gray-200 shrink-0">
-                                {q.mark} {t('ពិន្ទុ', 'pts')}
+                                {formatCleanScore(q.mark, 1)} {t('ពិន្ទុ', 'pts')}
                               </span>
                             )}
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:pl-8">
-                            {q.options?.map((opt) => {
-                              const isSelected = attemptAnswers[q.id] === opt.id;
-                              return (
-                                <label
-                                  key={opt.id}
-                                  className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-bold cursor-pointer transition-all duration-150 select-none ${
-                                    isSelected
-                                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                                      : 'std-qz-option bg-white border-gray-200/90 text-gray-700 hover:border-indigo-400'
-                                  }`}
-                                >
-                                  <input
-                                    type="radio"
-                                    name={`question-${q.id}`}
-                                    checked={isSelected}
-                                    onChange={() =>
-                                      handleSelectOption(q.id, opt.id)
-                                    }
-                                    className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 shrink-0"
-                                  />
-                                  <span className="leading-snug">
-                                    {opt.option_text}
+                          {/* ✅ បើជាសំណួរសរសេរ (Essay) បង្ហាញប្រអប់ Textarea នៅខាងក្រោមសំណួរឱ្យសិស្សសរសេរចម្លើយ */}
+                          {essayMode ? (
+                            <div className="sm:pl-8 space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px] font-bold text-indigo-500 dark:text-indigo-400">
+                                <span className="inline-flex items-center gap-1">
+                                  <DocumentTextIcon className="h-3.5 w-3.5" />
+                                  {t(
+                                    'សំណួរសរសេររៀបរាប់ (សូមសរសេរចម្លើយខាងក្រោម)៖',
+                                    'Written Question (Write your answer below):'
+                                  )}
+                                </span>
+                                {isAnswered && (
+                                  <span className="text-emerald-600 dark:text-emerald-400">
+                                    ✓ {t('បានសរសេរចម្លើយ', 'Answered')}
                                   </span>
-                                </label>
-                              );
-                            })}
-                          </div>
+                                )}
+                              </div>
+                              <textarea
+                                rows={4}
+                                value={attemptAnswers[q.id] || ''}
+                                onChange={(e) =>
+                                  handleSelectOption(q.id, e.target.value)
+                                }
+                                placeholder={t(
+                                  'សូមសរសេរចម្លើយរបស់អ្នកនៅទីនេះ...',
+                                  'Type your detailed answer here...'
+                                )}
+                                className="std-qz-input w-full p-3.5 rounded-xl border border-gray-200/90 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-xs sm:text-sm font-medium text-gray-800 leading-relaxed resize-y transition-all"
+                              />
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:pl-8">
+                              {q.options?.map((opt) => {
+                                const isSelected =
+                                  String(attemptAnswers[q.id]) ===
+                                  String(opt.id);
+                                return (
+                                  <label
+                                    key={opt.id}
+                                    className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-bold cursor-pointer transition-all duration-150 select-none ${
+                                      isSelected
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                        : 'std-qz-option bg-white border-gray-200/90 text-gray-700 hover:border-indigo-400'
+                                    }`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name={`question-${q.id}`}
+                                      checked={isSelected}
+                                      onChange={() =>
+                                        handleSelectOption(q.id, opt.id)
+                                      }
+                                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 shrink-0"
+                                    />
+                                    <span className="leading-snug">
+                                      {opt.option_text}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2099,8 +2276,12 @@ const StudentQuizzes = () => {
                       }
                     >
                       {quizResult.reviewItems.map((item) => {
-                        const showWrongSideBySide =
-                          !item.isCorrect && Boolean(item.correctOptionText);
+                        const isEssayItem =
+                          String(item.questionType || '').toLowerCase() === 'essay';
+                        const hasCorrectAnswerText =
+                          item.correctOptionText !== null &&
+                          item.correctOptionText !== undefined &&
+                          String(item.correctOptionText).trim() !== '';
 
                         return (
                           <div
@@ -2122,7 +2303,7 @@ const StudentQuizzes = () => {
                                 >
                                   {item.index}
                                 </span>
-                                <h4 className="std-qz-text-primary text-xs sm:text-sm font-extrabold text-gray-900 leading-snug pt-0.5">
+                                <h4 className="std-qz-text-primary text-xs sm:text-sm font-extrabold text-gray-900 leading-snug pt-0.5 whitespace-pre-line">
                                   {item.questionText}
                                 </h4>
                               </div>
@@ -2153,44 +2334,40 @@ const StudentQuizzes = () => {
                               </span>
                             </div>
 
-                            <div
-                              className={`mt-2.5 sm:pl-8 ${
-                                showWrongSideBySide
-                                  ? 'grid grid-cols-1 sm:grid-cols-2 gap-2.5'
-                                  : ''
-                              }`}
-                            >
+                            {/* ✅ បង្ហាញចម្លើយរបស់សិស្ស និងបើឆ្លើយខុស បង្ហាញប្រអប់ចម្លើយត្រឹមត្រូវនៅខាងក្រោមជានិច្ច */}
+                            <div className="mt-2.5 sm:pl-8 space-y-2">
                               <div
-                                className={`px-3.5 py-2.5 rounded-xl border flex items-center justify-between gap-2.5 ${
+                                className={`px-3.5 py-2.5 rounded-xl border flex items-start justify-between gap-2.5 ${
                                   item.isCorrect
                                     ? 'std-qz-ans-box-correct bg-white border-emerald-300 text-emerald-900'
                                     : 'std-qz-ans-box-wrong bg-white border-rose-300 text-rose-900'
                                 }`}
                               >
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <input
-                                    type="radio"
-                                    checked
-                                    readOnly
-                                    className={`h-3.5 w-3.5 shrink-0 ${
-                                      item.isCorrect
-                                        ? 'accent-emerald-600'
-                                        : 'accent-rose-600'
-                                    }`}
-                                  />
+                                <div className="flex items-start gap-2.5 min-w-0">
+                                  {!isEssayItem && (
+                                    <input
+                                      type="radio"
+                                      checked
+                                      readOnly
+                                      className={`h-3.5 w-3.5 mt-1 shrink-0 ${
+                                        item.isCorrect
+                                          ? 'accent-emerald-600'
+                                          : 'accent-rose-600'
+                                      }`}
+                                    />
+                                  )}
                                   <div className="min-w-0">
                                     <span className="std-qz-text-secondary block text-[10px] font-extrabold text-gray-400 leading-tight">
-                                      {t(
-                                        'ចម្លើយដែលអ្នកបានធីក៖',
-                                        'Your Selected Answer:'
-                                      )}
+                                      {isEssayItem
+                                        ? t('ចម្លើយដែលអ្នកបានសរសេរ៖', 'Your Written Answer:')
+                                        : t('ចម្លើយដែលអ្នកបានធីក៖', 'Your Selected Answer:')}
                                     </span>
-                                    <span className="std-qz-text-primary block text-xs sm:text-sm font-black mt-0.5 break-words">
+                                    <span className="std-qz-text-primary block text-xs sm:text-sm font-black mt-0.5 break-words whitespace-pre-line">
                                       {item.isAnswered
                                         ? item.selectedOptionText
                                         : t(
-                                            'មិនបានជ្រើសរើសចម្លើយ',
-                                            'No option selected'
+                                            'មិនបានឆ្លើយសំណួរនេះទេ',
+                                            'No answer provided'
                                           )}
                                     </span>
                                   </div>
@@ -2203,18 +2380,18 @@ const StudentQuizzes = () => {
                                 )}
                               </div>
 
-                              {showWrongSideBySide && (
-                                <div className="std-qz-correct-hint px-3.5 py-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-2.5">
-                                  <div className="flex items-center gap-2.5 min-w-0">
-                                    <CheckBadgeIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              {/* ✅ នៅពេលឆ្លើយខុស លោតប្រអប់ចម្លើយត្រឹមត្រូវនៅខាងក្រោមភ្លាមៗ */}
+                              {!item.isCorrect && hasCorrectAnswerText && (
+                                <div className="std-qz-correct-hint px-3.5 py-2.5 rounded-xl bg-emerald-50 border border-emerald-300 flex items-start justify-between gap-2.5 shadow-2xs">
+                                  <div className="flex items-start gap-2.5 min-w-0">
+                                    <CheckBadgeIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                                     <div className="min-w-0">
                                       <span className="block text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 leading-tight">
-                                        {t(
-                                          'ចម្លើយដែលត្រឹមត្រូវគឺ៖',
-                                          'Correct Answer:'
-                                        )}
+                                        {isEssayItem
+                                          ? t('ចម្លើយគំរូរបស់គ្រូ៖', 'Model Answer:')
+                                          : t('ចម្លើយដែលត្រឹមត្រូវគឺ៖', 'Correct Answer:')}
                                       </span>
-                                      <span className="block text-xs sm:text-sm font-black text-emerald-900 dark:text-emerald-100 mt-0.5 break-words">
+                                      <span className="block text-xs sm:text-sm font-black text-emerald-900 dark:text-emerald-100 mt-0.5 break-words whitespace-pre-line">
                                         {item.correctOptionText}
                                       </span>
                                     </div>

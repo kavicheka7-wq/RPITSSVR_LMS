@@ -1,4 +1,5 @@
 <?php
+// app/Http/Controllers/Api/TeacherController.php
 
 namespace App\Http\Controllers\Api;
 
@@ -87,7 +88,7 @@ class TeacherController extends Controller
             $teacherIds = $this->getTeacherCourseIds();
 
             $courses = Course::whereIn('teacher_id', $teacherIds)
-                ->with(['department:id,department_name,department_code'])
+                ->with(['department'])
                 ->withCount(['enrollments as students_count', 'lessons', 'assignments', 'quizzes'])
                 ->get();
 
@@ -958,7 +959,7 @@ class TeacherController extends Controller
             $grade = Grade::updateOrCreate(
                 [
                     'student_id' => $validated['student_id'],
-                'course_id' => $validated['course_id'],
+                    'course_id' => $validated['course_id'],
                 ],
                 $updatePayload
             );
@@ -1132,21 +1133,36 @@ class TeacherController extends Controller
         $file = $request->file('file');
         $filePath = $file->store('lesson_files', 'public');
 
-        $createData = [
+        // ✅ បង្កើតជួរឈរ file_data (LONGTEXT) និង mime_type ដោយស្វ័យប្រវត្តិបើក្នុង Database លើ Railway មិនទាន់មាន
+        try {
+            if (!Schema::hasColumn('lesson_files', 'file_data')) {
+                DB::statement('ALTER TABLE lesson_files ADD COLUMN file_data LONGTEXT NULL');
+            }
+            if (!Schema::hasColumn('lesson_files', 'mime_type')) {
+                DB::statement('ALTER TABLE lesson_files ADD COLUMN mime_type VARCHAR(120) NULL');
+            }
+        } catch (\Throwable $e) {
+        }
+
+        $lessonFile = LessonFile::create([
             'lesson_id' => $request->lesson_id,
             'file_name' => $file->getClientOriginalName(),
             'file_path' => $filePath,
             'file_type' => $file->getClientOriginalExtension(),
-        ];
+        ]);
 
+        // ✅ បញ្ចូល file_data និង mime_type តាមរយៈ Query Builder ផ្ទាល់ ដើម្បីការពារបញ្ហាជាប់ $fillable ក្នុង Model LessonFile
+        $extraColumns = [];
         if (Schema::hasColumn('lesson_files', 'file_data')) {
-            $createData['file_data'] = base64_encode(file_get_contents($file->getRealPath()));
+            $extraColumns['file_data'] = base64_encode(file_get_contents($file->getRealPath()));
         }
         if (Schema::hasColumn('lesson_files', 'mime_type')) {
-            $createData['mime_type'] = $file->getMimeType() ?: 'application/octet-stream';
+            $extraColumns['mime_type'] = $file->getMimeType() ?: 'application/octet-stream';
+        }
+        if (!empty($extraColumns)) {
+            DB::table('lesson_files')->where('id', $lessonFile->id)->update($extraColumns);
         }
 
-        $lessonFile = LessonFile::create($createData);
         $lessonFile->makeHidden(['file_data']);
 
         return response()->json([
@@ -1781,7 +1797,7 @@ class TeacherController extends Controller
         }
     }
 
-public function addQuestion(Request $request, $quizId)
+    public function addQuestion(Request $request, $quizId)
     {
         try {
             $validated = $request->validate([
@@ -1837,7 +1853,7 @@ public function addQuestion(Request $request, $quizId)
                         ]);
                     }
                 } elseif ($validated['question_type'] === 'Essay' && !empty($validated['model_answer'])) {
-                    // រក្សាទុកចម្លើយគំរូ/គោលការណ៍កែរបស់គ្រូ (បើគ្រូបានដាក់) សម្រាប់ទុកជាแนวทางពេលគ្រូពិនិត្យដាក់ពិន្ទុ
+                    // រក្សាទុកចម្លើយគំរូ/គោលការណ៍កែរបស់គ្រូ (បើគ្រូបានដាក់) សម្រាប់ទុកជាគោលការណ៍ពេលគ្រូពិនិត្យដាក់ពិន្ទុ
                     QuestionOption::create([
                         'question_id' => $q->id,
                         'option_text' => trim($validated['model_answer']),
@@ -1867,7 +1883,7 @@ public function addQuestion(Request $request, $quizId)
         }
     }
 
-   public function deleteQuestion($id)
+    public function deleteQuestion($id)
     {
         try {
             $question = Question::findOrFail($id);
@@ -1899,7 +1915,7 @@ public function addQuestion(Request $request, $quizId)
         }
     }
 
-   // --- Online Exam ---
+    // --- Online Exam ---
     public function getQuizzes($courseId)
     {
         $this->teacherCourseQuery()->findOrFail($courseId);

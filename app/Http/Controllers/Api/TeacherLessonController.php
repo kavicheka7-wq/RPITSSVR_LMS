@@ -378,24 +378,40 @@ class TeacherLessonController extends Controller
             $fileName = time() . '_' . $originalName;
             $filePath = $file->storeAs('lesson_files', $fileName, 'public');
 
-            $createData = [
+            // ✅ បង្កើតជួរឈរ file_data (LONGTEXT) និង mime_type ដោយស្វ័យប្រវត្តិបើក្នុង Database លើ Railway មិនទាន់មាន
+            try {
+                if (!Schema::hasColumn('lesson_files', 'file_data')) {
+                    DB::statement('ALTER TABLE lesson_files ADD COLUMN file_data LONGTEXT NULL');
+                }
+                if (!Schema::hasColumn('lesson_files', 'mime_type')) {
+                    DB::statement('ALTER TABLE lesson_files ADD COLUMN mime_type VARCHAR(120) NULL');
+                }
+            } catch (\Throwable $schemaErr) {
+                // បន្តទៅមុខបើមានរួចហើយ
+            }
+
+            $base64Content = base64_encode(file_get_contents($file->getRealPath()));
+            $mimeType = $file->getMimeType() ?: 'application/octet-stream';
+
+            $lessonFile = LessonFile::create([
                 'lesson_id' => $validated['lesson_id'],
                 'file_name' => $originalName,
                 'file_path' => $filePath,
                 'file_type' => $file->getClientOriginalExtension(),
-            ];
+            ]);
 
-            // ✅ រក្សាទុកទិន្នន័យ Base64 ចូលក្នុង Database (ប្រសិនបើមានជួរឈរ file_data) ដើម្បីការពារបាត់ឯកសារលើ Railway
+            // ✅ បញ្ចូល file_data និង mime_type តាមរយៈ Query Builder ផ្ទាល់ ដើម្បីការពារបញ្ហាជាប់ $fillable ក្នុង Model LessonFile
+            $extraColumns = [];
             if (Schema::hasColumn('lesson_files', 'file_data')) {
-                $createData['file_data'] = base64_encode(file_get_contents($file->getRealPath()));
+                $extraColumns['file_data'] = $base64Content;
             }
             if (Schema::hasColumn('lesson_files', 'mime_type')) {
-                $createData['mime_type'] = $file->getMimeType() ?: 'application/octet-stream';
+                $extraColumns['mime_type'] = $mimeType;
+            }
+            if (!empty($extraColumns)) {
+                DB::table('lesson_files')->where('id', $lessonFile->id)->update($extraColumns);
             }
 
-            $lessonFile = LessonFile::create($createData);
-
-            // ✅ លាក់ file_data ពេលបញ្ជូន JSON ត្រឡប់ទៅ Frontend វិញ ដើម្បីឱ្យការ Upload ចប់ភ្លាមៗដោយមិនទាញទិន្នន័យធំមកវិញ
             $lessonFile->makeHidden(['file_data']);
 
             $this->clearRelatedCaches();

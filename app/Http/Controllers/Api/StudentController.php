@@ -33,6 +33,19 @@ class StudentController extends Controller
     private array $preloadedTeachersById = [];
     private array $preloadedTeachersByUserId = [];
     private array $preloadedUsersById = [];
+    private array $optimizedAvatarMemo = [];
+
+    /**
+     * ✅ កំណត់ជួរឈរសម្រាប់តារាង lesson_files ដោយមិនទាញយក file_data (Base64 ធំៗ) មកក្នុង RAM
+     */
+    private function getSafeLessonFileColumns(): array
+    {
+        $cols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
+        if (Schema::hasTable('lesson_files') && Schema::hasColumn('lesson_files', 'mime_type')) {
+            $cols[] = 'mime_type';
+        }
+        return $cols;
+    }
 
     /**
      * ✅ សម្អាត Cache របស់សិស្សម្នាក់នេះនៅពេលគាត់ប្រគល់កិច្ចការ ឬប្រឡងចប់
@@ -240,6 +253,112 @@ class StudentController extends Controller
     }
 
     /**
+     * ✅ បង្រួមរូបថតគ្រូបង្រៀនមកទំហំតូចល្មម (96x96px ~4KB Base64) និងទុកក្នុង Cache ដើម្បីឱ្យបង្ហាញលើអេក្រង់សិស្សក្នុង 0ms
+     */
+    private function optimizeTeacherAvatarFast(?string $rawImage, string $teacherCacheKey): ?string
+    {
+        if (!$rawImage) {
+            return null;
+        }
+
+        $trimmed = trim($rawImage);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (isset($this->optimizedAvatarMemo[$teacherCacheKey])) {
+            return $this->optimizedAvatarMemo[$teacherCacheKey];
+        }
+
+        $cacheKey = 'std_fast_tch_avatar_v2_' . $teacherCacheKey . '_' . md5(substr($trimmed, 0, 120) . strlen($trimmed));
+
+        $optimized = Cache::remember($cacheKey, 86400, function () use ($trimmed) {
+            $binaryData = null;
+            $mimeType = 'image/jpeg';
+
+            if (str_starts_with($trimmed, 'data:image')) {
+                // បើរូបតូចស្រាប់ (< 18KB) ប្រើផ្ទាល់តែម្ដងមិនបាច់បង្រួមទេ
+                if (strlen($trimmed) <= 18000) {
+                    return $trimmed;
+                }
+                if (preg_match('/^data:([^;]+);base64,(.+)$/s', $trimmed, $m)) {
+                    $mimeType = $m[1] ?: 'image/jpeg';
+                    $binaryData = base64_decode(preg_replace('/\s+/', '', $m[2]));
+                }
+            } elseif (!str_starts_with($trimmed, 'http://') && !str_starts_with($trimmed, 'https://') && !str_starts_with($trimmed, '//')) {
+                $cleanImg = preg_replace('/^\/?storage\//', '', ltrim($trimmed, '/'));
+                if ($cleanImg && Storage::disk('public')->exists($cleanImg)) {
+                    $binaryData = Storage::disk('public')->get($cleanImg);
+                    $mimeType = Storage::disk('public')->mimeType($cleanImg) ?: 'image/jpeg';
+                } else {
+                    return asset('storage/' . $cleanImg);
+                }
+            } else {
+                return $trimmed;
+            }
+
+            if (!$binaryData) {
+                return $trimmed;
+            }
+
+            // បង្រួមរូបភាពតាមរយៈ PHP GD (បើមាន) មកត្រឹម 96x96px (~3KB-5KB)
+            if (function_exists('imagecreatefromstring') && function_exists('imagesx')) {
+                try {
+                    $srcImg = @imagecreatefromstring($binaryData);
+                    if ($srcImg !== false) {
+                        $w = imagesx($srcImg);
+                        $h = imagesy($srcImg);
+                        $maxDim = 96;
+
+                        if ($w > $maxDim || $h > $maxDim) {
+                            if ($w > $h) {
+                                $newW = $maxDim;
+                                $newH = max(1, (int) round(($h * $maxDim) / $w));
+                            } else {
+                                $newH = $maxDim;
+                                $newW = max(1, (int) round(($w * $maxDim) / $h));
+                            }
+                        } else {
+                            $newW = $w;
+                            $newH = $h;
+                        }
+
+                        $dstImg = imagecreatetruecolor($newW, $newH);
+                        imagealphablending($dstImg, false);
+                        imagesavealpha($dstImg, true);
+                        $transparent = imagecolorallocatealpha($dstImg, 255, 255, 255, 127);
+                        imagefilledrectangle($dstImg, 0, 0, $newW, $newH, $transparent);
+                        imagecopyresampled($dstImg, $srcImg, 0, 0, 0, 0, $newW, $newH, $w, $h);
+
+                        ob_start();
+                        if (function_exists('imagewebp')) {
+                            imagewebp($dstImg, null, 78);
+                            $outMime = 'image/webp';
+                        } else {
+                            imagejpeg($dstImg, null, 80);
+                            $outMime = 'image/jpeg';
+                        }
+                        $compressedBytes = ob_get_clean();
+
+                        imagedestroy($srcImg);
+                        imagedestroy($dstImg);
+
+                        if ($compressedBytes && strlen($compressedBytes) < strlen($binaryData)) {
+                            return 'data:' . $outMime . ';base64,' . base64_encode($compressedBytes);
+                        }
+                    }
+                } catch (\Throwable $e) {
+                }
+            }
+
+            return 'data:' . $mimeType . ';base64,' . base64_encode($binaryData);
+        });
+
+        $this->optimizedAvatarMemo[$teacherCacheKey] = $optimized;
+        return $optimized;
+    }
+
+    /**
      * ✅ ស្រង់យកលេខឆ្នាំសិក្សា (1, 2, 3, 4)
      */
     private function parseAcademicYearNumber($text, $code = '', $semester = null)
@@ -288,7 +407,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយប្រើ Preloaded Map
+     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយប្រើ Preloaded Map និងរូបថតគ្រូដែលបានបង្រួមស្រាប់ (0ms Instant Avatar)
      */
     private function formatTeacherData($course, bool $includeAvatar = true)
     {
@@ -317,29 +436,23 @@ class StudentController extends Controller
             $teacherName = $teacherUser->name ?? ($teacherProfile->name ?? ($teacherProfile->email ?? ($teacherUser->email ?? 'គ្រូបង្រៀន')));
         }
 
-        $profileImg = null;
-        if ($includeAvatar) {
-            if ($teacherProfile && !empty($teacherProfile->profile_image)) {
-                $profileImg = trim((string) $teacherProfile->profile_image);
-            } elseif ($teacherUser && !empty($teacherUser->profile_image)) {
-                $profileImg = trim((string) $teacherUser->profile_image);
-            }
-
-            if (
-                $profileImg &&
-                !str_starts_with($profileImg, 'data:') &&
-                !str_starts_with($profileImg, 'http://') &&
-                !str_starts_with($profileImg, 'https://') &&
-                !str_starts_with($profileImg, '//')
-            ) {
-                $cleanImg = preg_replace('/^\/?storage\//', '', ltrim($profileImg, '/'));
-                $profileImg = asset('storage/' . $cleanImg);
-            }
-        }
-
         $resolvedTeacherKey = $teacherProfile
             ? 'tch_' . $teacherProfile->id
             : ($teacherUser ? 'usr_' . $teacherUser->id : 'id_' . ($tid ?? 'default'));
+
+        $profileImg = null;
+        if ($includeAvatar) {
+            $rawImg = null;
+            if ($teacherProfile && !empty($teacherProfile->profile_image)) {
+                $rawImg = trim((string) $teacherProfile->profile_image);
+            } elseif ($teacherUser && !empty($teacherUser->profile_image)) {
+                $rawImg = trim((string) $teacherUser->profile_image);
+            }
+
+            if ($rawImg) {
+                $profileImg = $this->optimizeTeacherAvatarFast($rawImg, $resolvedTeacherKey);
+            }
+        }
 
         return [
             'id' => $teacherProfile->id ?? ($teacherUser->id ?? $tid),
@@ -1013,8 +1126,13 @@ class StudentController extends Controller
 
             $studentCurrentYear = $detectedYear ?? 1;
 
-            $lessonsQuery = Lesson::with(['files', 'videos'])
-                ->orderBy('lesson_order', 'asc');
+            $safeFileCols = $this->getSafeLessonFileColumns();
+            $lessonsQuery = Lesson::with([
+                'files' => function ($q) use ($safeFileCols) {
+                    $q->select($safeFileCols);
+                },
+                'videos',
+            ])->orderBy('lesson_order', 'asc');
 
             if (!empty($deptCourseIds)) {
                 $lessonsQuery->whereIn('course_id', $deptCourseIds);
@@ -1049,14 +1167,6 @@ class StudentController extends Controller
                     $studyStatus = 'learn_ahead';
                 }
 
-                // លាក់ទិន្នន័យ Base64 ធំៗក្នុង lesson_files កុំឱ្យធ្ងន់ JSON
-                $cleanFiles = collect($lesson->files ?? [])->map(function ($f) {
-                    if ($f instanceof \Illuminate\Database\Eloquent\Model) {
-                        $f->makeHidden(['file_data', 'base64_data', 'file_content']);
-                    }
-                    return $f;
-                });
-
                 return [
                     'id' => $lesson->id,
                     'course_id' => $cid,
@@ -1088,7 +1198,7 @@ class StudentController extends Controller
                         'teacher' => $fullTeacher,
                         'teacher_profile' => $fullTeacher,
                     ] : null,
-                    'files' => $cleanFiles,
+                    'files' => $lesson->files ?? [],
                     'videos' => $lesson->videos ?? [],
                 ];
             });
@@ -1153,64 +1263,97 @@ class StudentController extends Controller
         }
     }
 
-    // ✅ អានឯកសារមេរៀនជា Base64
+    // ✅ អានឯកសារមេរៀនជា Base64 (គាំទ្រទាំង Storage Disk និង Database Base64 លើ Railway)
     public function readLessonFile(Request $request)
     {
         $path = trim((string) $request->query('path', ''));
-        if (!$path) {
+        $fileId = $request->query('id');
+
+        if (!$path && !$fileId) {
             return response()->json(['message' => 'រកមិនឃើញឯកសារមេរៀននេះទេ'], 404);
         }
 
+        // ១. បើ path ជា Data URI ស្រាប់
         if (str_starts_with($path, 'data:')) {
             if (preg_match('/^data:([^;]+);base64,(.+)$/s', $path, $matches)) {
                 return response()->json([
                     'file_name' => 'lesson-file',
                     'mime_type' => $matches[1] ?: 'application/octet-stream',
-                    'base64' => $matches[2],
+                    'base64' => preg_replace('/\s+/', '', $matches[2]),
                 ]);
             }
         }
 
-        $cleanPath = preg_replace('/^storage\//', '', ltrim($path, '/'));
+        $cleanPath = preg_replace('/^\/?storage\//', '', ltrim(urldecode($path), '/'));
+        $fileNameOnly = basename($cleanPath);
 
+        // ២. ឆែកមើលក្នុង Storage Disk ជាមុន
         if ($cleanPath && Storage::disk('public')->exists($cleanPath)) {
             $fileContent = Storage::disk('public')->get($cleanPath);
             $mimeType = Storage::disk('public')->mimeType($cleanPath) ?: 'application/octet-stream';
 
             return response()->json([
-                'file_name' => basename($cleanPath),
+                'file_name' => $fileNameOnly,
                 'mime_type' => $mimeType,
                 'base64' => base64_encode($fileContent),
             ]);
         }
 
+        // ៣. ឆែកមើលក្នុងតារាង lesson_files (តាម id, file_path ឬឈ្មោះហ្វាល់ចុងក្រោយ)
         if (Schema::hasTable('lesson_files')) {
-            $dbFile = DB::table('lesson_files')
-                ->where('file_path', $cleanPath)
-                ->orWhere('file_path', 'storage/' . $cleanPath)
-                ->orWhere('file_path', '/storage/' . $cleanPath)
-                ->first();
+            $query = DB::table('lesson_files');
+
+            if ($fileId) {
+                $dbFile = (clone $query)->where('id', $fileId)->first();
+            } else {
+                $dbFile = null;
+            }
+
+            if (!$dbFile && $cleanPath) {
+                $dbFile = (clone $query)
+                    ->where('file_path', $cleanPath)
+                    ->orWhere('file_path', 'storage/' . $cleanPath)
+                    ->orWhere('file_path', '/storage/' . $cleanPath)
+                    ->orWhere('file_path', 'like', '%' . $fileNameOnly)
+                    ->first();
+            }
 
             if ($dbFile) {
-                $rawContent = $dbFile->file_data ?? $dbFile->base64_data ?? $dbFile->file_content ?? null;
-                if ($rawContent) {
-                    if (str_starts_with($rawContent, 'data:') && preg_match('/^data:([^;]+);base64,(.+)$/s', $rawContent, $m)) {
+                // បើ file_path ក្នុង DB ផ្ទុក Data URI ផ្ទាល់
+                if (!empty($dbFile->file_path) && str_starts_with(trim($dbFile->file_path), 'data:')) {
+                    if (preg_match('/^data:([^;]+);base64,(.+)$/s', trim($dbFile->file_path), $m)) {
                         return response()->json([
-                            'file_name' => $dbFile->file_name ?? basename($cleanPath),
+                            'file_name' => $dbFile->file_name ?? $fileNameOnly,
                             'mime_type' => $m[1] ?: ($dbFile->mime_type ?? 'application/octet-stream'),
-                            'base64' => $m[2],
+                            'base64' => preg_replace('/\s+/', '', $m[2]),
                         ]);
                     }
+                }
+
+                // ឆែកជួរឈរ Base64 ក្នុង DB
+                $rawContent = $dbFile->file_data ?? $dbFile->base64_data ?? $dbFile->file_content ?? null;
+                if (!empty($rawContent)) {
+                    $rawContent = trim((string) $rawContent);
+                    if (str_starts_with($rawContent, 'data:') && preg_match('/^data:([^;]+);base64,(.+)$/s', $rawContent, $m)) {
+                        return response()->json([
+                            'file_name' => $dbFile->file_name ?? $fileNameOnly,
+                            'mime_type' => $m[1] ?: ($dbFile->mime_type ?? 'application/octet-stream'),
+                            'base64' => preg_replace('/\s+/', '', $m[2]),
+                        ]);
+                    }
+
                     return response()->json([
-                        'file_name' => $dbFile->file_name ?? basename($cleanPath),
+                        'file_name' => $dbFile->file_name ?? $fileNameOnly,
                         'mime_type' => $dbFile->mime_type ?? 'application/octet-stream',
-                        'base64' => $rawContent,
+                        'base64' => preg_replace('/\s+/', '', $rawContent),
                     ]);
                 }
             }
         }
 
-        return response()->json(['message' => 'រកមិនឃើញឯកសារមេរៀននេះទេ'], 404);
+        return response()->json([
+            'message' => 'ឯកសារនេះមិនមាននៅលើ Server ទៀតទេ សូមឱ្យគ្រូបង្រៀនបង្ហោះឯកសារមេរៀននេះឡើងវិញ។',
+        ], 404);
     }
 
     // View Lessons by Course
@@ -1226,8 +1369,11 @@ class StudentController extends Controller
             $courseYearsMap = $course ? $this->buildCourseYearsMap(collect([$course->id => $course])) : [];
             $yearInfo = $courseYearsMap[(int) $courseId] ?? ['primary_year' => 1, 'years_list' => ['1']];
 
+            $safeFileCols = $this->getSafeLessonFileColumns();
             $lessons = Lesson::with([
-                'files',
+                'files' => function ($q) use ($safeFileCols) {
+                    $q->select($safeFileCols);
+                },
                 'videos',
                 'course.department',
             ])
@@ -1283,23 +1429,37 @@ class StudentController extends Controller
         $file = $request->file('file');
         $filePath = $file->store('assignment_submissions', 'public');
 
-        $submissionData = [
+        // ✅ បង្កើតជួរឈរ file_data (LONGTEXT) និង original_filename ដោយស្វ័យប្រវត្តិបើមិនទាន់មានលើ Railway
+        try {
+            if (!Schema::hasColumn('assignment_submissions', 'file_data')) {
+                DB::statement('ALTER TABLE assignment_submissions ADD COLUMN file_data LONGTEXT NULL');
+            }
+            if (!Schema::hasColumn('assignment_submissions', 'original_filename')) {
+                DB::statement('ALTER TABLE assignment_submissions ADD COLUMN original_filename VARCHAR(255) NULL');
+            }
+        } catch (\Throwable $e) {
+        }
+
+        $submission = AssignmentSubmission::create([
             'assignment_id' => $request->assignment_id,
             'student_id' => $student->id,
             'file_path' => $filePath,
             'submitted_at' => now(),
-        ];
+        ]);
 
+        // ✅ បញ្ចូល file_data និង original_filename តាមរយៈ Query Builder ផ្ទាល់ ដើម្បីការពារបញ្ហាជាប់ $fillable ក្នុង Model AssignmentSubmission
+        $extraColumns = [];
         if (Schema::hasColumn('assignment_submissions', 'original_filename')) {
-            $submissionData['original_filename'] = $file->getClientOriginalName();
+            $extraColumns['original_filename'] = $file->getClientOriginalName();
         }
-
         if (Schema::hasColumn('assignment_submissions', 'file_data')) {
             $mime = $file->getMimeType() ?: 'application/octet-stream';
-            $submissionData['file_data'] = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($file->getRealPath()));
+            $extraColumns['file_data'] = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($file->getRealPath()));
+        }
+        if (!empty($extraColumns)) {
+            DB::table('assignment_submissions')->where('id', $submission->id)->update($extraColumns);
         }
 
-        $submission = AssignmentSubmission::create($submissionData);
         $submission->makeHidden(['file_data']);
 
         $this->clearStudentDashboardCache();
@@ -1361,7 +1521,7 @@ class StudentController extends Controller
         ]);
     }
 
-    // Quiz/Exam: ចាប់ផ្តើម ឬបន្តការធ្វើតេស្ត
+    // ✅ Quiz/Exam: ចាប់ផ្តើម ឬបន្តការធ្វើតេស្ត (គាំទ្រការមើលលទ្ធផល និងចម្លើយត្រឹមត្រូវពេលប្រឡងចប់)
     public function getQuiz($quizId)
     {
         $student = auth()->user();
@@ -1369,12 +1529,87 @@ class StudentController extends Controller
 
         $quiz = Quiz::with(['course', 'questions.options'])->findOrFail($quizId);
 
+        // ធានាថាជម្រើសចម្លើយបង្ហាញ is_correct ដើម្បីឱ្យប្រព័ន្ធពិនិត្យចម្លើយត្រឹមត្រូវបាន ១០០%
+        $quiz->questions->each(function ($q) {
+            $q->options->each(function ($opt) {
+                $opt->makeVisible(['is_correct']);
+            });
+        });
+
         $attempt = QuizAttempt::where('quiz_id', $quizId)
             ->whereIn('student_id', $studentIds)
             ->first();
 
         if ($attempt && $attempt->submitted_at) {
-            return response()->json(['message' => 'អ្នកបានបញ្ចប់ការប្រឡងកម្រងសំណួរនេះរួចរាល់ហើយ'], 400);
+            $savedAnswers = [];
+            if (!empty($attempt->answers)) {
+                $decoded = is_string($attempt->answers)
+                    ? json_decode($attempt->answers, true)
+                    : $attempt->answers;
+                if (is_array($decoded)) {
+                    $savedAnswers = collect($decoded)->keyBy('question_id')->all();
+                }
+            }
+
+            $reviewItems = $quiz->questions->values()->map(function ($q, $idx) use ($savedAnswers) {
+                $qType = strtolower(trim((string) ($q->question_type ?? 'MCQ')));
+                $isEssay = ($qType === 'essay' || $q->options->count() <= 1);
+                $ansRow = $savedAnswers[$q->id] ?? null;
+                $qMark = (float) ($q->mark ?? 1);
+
+                $correctOpt = $q->options->first(function ($opt) {
+                    return (bool) $opt->is_correct === true || (int) $opt->is_correct === 1 || strtolower((string) $opt->is_correct) === 'true';
+                });
+
+                if ($isEssay) {
+                    $written = trim((string) ($ansRow['answer_text'] ?? $ansRow['selected_option'] ?? ''));
+                    $modelText = $correctOpt ? $correctOpt->option_text : null;
+                    $isCorrect = $written !== '' && ($modelText ? mb_strtolower($written) === mb_strtolower(trim($modelText)) : true);
+
+                    return [
+                        'questionId' => $q->id,
+                        'index' => $idx + 1,
+                        'questionText' => $q->question_text,
+                        'questionType' => 'Essay',
+                        'mark' => $qMark,
+                        'earnedMark' => $isCorrect ? $qMark : 0,
+                        'isAnswered' => $written !== '',
+                        'isCorrect' => $isCorrect,
+                        'selectedOptionId' => null,
+                        'selectedOptionText' => $written !== '' ? $written : null,
+                        'correctOptionId' => $correctOpt?->id,
+                        'correctOptionText' => $modelText,
+                    ];
+                }
+
+                $selectedOptId = $ansRow['selected_option'] ?? null;
+                $selectedOpt = $selectedOptId !== null
+                    ? $q->options->first(fn ($o) => (int) $o->id === (int) $selectedOptId)
+                    : null;
+                $isCorrect = $selectedOpt && $correctOpt && (int) $selectedOpt->id === (int) $correctOpt->id;
+
+                return [
+                    'questionId' => $q->id,
+                    'index' => $idx + 1,
+                    'questionText' => $q->question_text,
+                    'questionType' => $q->question_type ?? 'MCQ',
+                    'mark' => $qMark,
+                    'earnedMark' => $isCorrect ? $qMark : 0,
+                    'isAnswered' => $selectedOpt !== null,
+                    'isCorrect' => (bool) $isCorrect,
+                    'selectedOptionId' => $selectedOpt?->id,
+                    'selectedOptionText' => $selectedOpt?->option_text,
+                    'correctOptionId' => $correctOpt?->id,
+                    'correctOptionText' => $correctOpt?->option_text,
+                ];
+            });
+
+            return response()->json([
+                'quiz' => $quiz,
+                'attempt' => $attempt,
+                'review_items' => $reviewItems,
+                'message' => 'អ្នកបានបញ្ចប់ការប្រឡងកម្រងសំណួរនេះរួចរាល់ហើយ',
+            ]);
         }
 
         $durationInSeconds = max(1, (int) ($quiz->duration ?? 30)) * 60;
@@ -1415,13 +1650,14 @@ class StudentController extends Controller
         ]);
     }
 
-    // បញ្ជូនចម្លើយប្រឡង និងគណនាពិន្ទុដោយស្វ័យប្រវត្តិ
+    // ✅ បញ្ជូនចម្លើយប្រឡង និងគណនាពិន្ទុដោយស្វ័យប្រវត្តិ (គាំទ្រទាំងសំណួរធីក MCQ/TrueFalse និងសំណួរសរសេរ Essay)
     public function submitQuiz(Request $request, $quizId)
     {
         $request->validate([
             'answers' => 'nullable|array',
             'answers.*.question_id' => 'required|exists:questions,id',
-            'answers.*.selected_option' => 'required|integer',
+            'answers.*.selected_option' => 'nullable',
+            'answers.*.answer_text' => 'nullable|string',
         ]);
 
         $student = auth()->user();
@@ -1442,33 +1678,111 @@ class StudentController extends Controller
 
         $score = 0;
         $calculatedTotalMarks = 0;
+        $reviewItems = [];
 
-        foreach ($quiz->questions as $question) {
+        foreach ($quiz->questions->values() as $idx => $question) {
+            $question->options->each(fn ($opt) => $opt->makeVisible(['is_correct']));
+
             $qMark = (float) ($question->mark ?? 1);
             $calculatedTotalMarks += $qMark;
 
+            $qType = strtolower(trim((string) ($question->question_type ?? 'MCQ')));
+            $isEssay = ($qType === 'essay' || $question->options->count() <= 1);
+
             $studentAnswer = $answersByQuestionId->get($question->id);
-            if (!$studentAnswer) {
+            $correctOption = $question->options->first(function ($opt) {
+                return (bool) $opt->is_correct === true || (int) $opt->is_correct === 1 || strtolower((string) $opt->is_correct) === 'true';
+            });
+
+            if ($isEssay) {
+                $writtenText = $studentAnswer
+                    ? trim((string) ($studentAnswer['answer_text'] ?? $studentAnswer['selected_option'] ?? ''))
+                    : '';
+                $modelAnswerText = $correctOption ? trim((string) $correctOption->option_text) : null;
+
+                $isAnswered = $writtenText !== '';
+                $isCorrect = false;
+                if ($isAnswered) {
+                    if ($modelAnswerText !== null && $modelAnswerText !== '') {
+                        $isCorrect = mb_strtolower($writtenText) === mb_strtolower($modelAnswerText);
+                    } else {
+                        $isCorrect = true;
+                    }
+                }
+
+                if ($isCorrect) {
+                    $score += $qMark;
+                }
+
+                $reviewItems[] = [
+                    'questionId' => $question->id,
+                    'index' => $idx + 1,
+                    'questionText' => $question->question_text,
+                    'questionType' => 'Essay',
+                    'mark' => $qMark,
+                    'earnedMark' => $isCorrect ? $qMark : 0,
+                    'isAnswered' => $isAnswered,
+                    'isCorrect' => $isCorrect,
+                    'selectedOptionId' => null,
+                    'selectedOptionText' => $isAnswered ? $writtenText : null,
+                    'correctOptionId' => $correctOption?->id,
+                    'correctOptionText' => $modelAnswerText,
+                ];
                 continue;
             }
 
-            $correctOption = $question->options->first(function ($opt) {
-                return (bool) $opt->is_correct === true || (int) $opt->is_correct === 1;
-            });
+            $selectedOptId = $studentAnswer['selected_option'] ?? null;
+            $selectedOption = ($selectedOptId !== null && $selectedOptId !== '')
+                ? $question->options->first(fn ($opt) => (int) $opt->id === (int) $selectedOptId)
+                : null;
 
-            if ($correctOption && (int) $correctOption->id === (int) $studentAnswer['selected_option']) {
+            $isAnswered = $selectedOption !== null;
+            $isCorrect = $isAnswered && $correctOption && (int) $correctOption->id === (int) $selectedOption->id;
+
+            if ($isCorrect) {
                 $score += $qMark;
             }
+
+            $reviewItems[] = [
+                'questionId' => $question->id,
+                'index' => $idx + 1,
+                'questionText' => $question->question_text,
+                'questionType' => $question->question_type ?? 'MCQ',
+                'mark' => $qMark,
+                'earnedMark' => $isCorrect ? $qMark : 0,
+                'isAnswered' => $isAnswered,
+                'isCorrect' => (bool) $isCorrect,
+                'selectedOptionId' => $selectedOption?->id,
+                'selectedOptionText' => $selectedOption?->option_text,
+                'correctOptionId' => $correctOption?->id,
+                'correctOptionText' => $correctOption?->option_text,
+            ];
         }
 
         $finalTotalMarks = $calculatedTotalMarks > 0
             ? $calculatedTotalMarks
             : (float) ($quiz->total_mark ?? 20);
 
-        $attempt->update([
+        // ✅ រក្សាទុកចម្លើយដែលសិស្សបានឆ្លើយចូលក្នុងតារាង quiz_attempts (បង្កើតជួរឈរ answers ដោយស្វ័យប្រវត្តិបើមិនទាន់មាន)
+        try {
+            if (!Schema::hasColumn('quiz_attempts', 'answers')) {
+                DB::statement('ALTER TABLE quiz_attempts ADD COLUMN answers LONGTEXT NULL');
+            }
+        } catch (\Throwable $e) {
+        }
+
+        $attemptUpdateData = [
             'score' => $score,
             'submitted_at' => now(),
-        ]);
+        ];
+
+        $attempt->update($attemptUpdateData);
+
+        if (Schema::hasColumn('quiz_attempts', 'answers')) {
+            DB::table('quiz_attempts')
+                ->where('id', $attempt->id)
+                ->update(['answers' => json_encode(array_values($answers), JSON_UNESCAPED_UNICODE)]);
+        }
 
         // ✅ គណនាភាគរយពិន្ទុតេស្តសរុបក្នុងមុខវិជ្ជានេះឡើងវិញ និងធ្វើបច្ចុប្បន្នភាពក្នុងតារាង grades ដោយមិនបង្កើតជួរស្ទួន
         if ($finalTotalMarks > 0 && $quiz->course_id) {
@@ -1524,6 +1838,7 @@ class StudentController extends Controller
             'attempt' => $attempt,
             'score' => $score,
             'total_marks' => $finalTotalMarks,
+            'review_items' => $reviewItems,
             'message' => 'បានបញ្ជូនចម្លើយប្រឡងដោយជោគជ័យ',
         ]);
     }
