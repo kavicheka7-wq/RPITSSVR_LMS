@@ -421,6 +421,7 @@ export default function ManageLessons() {
   const [editingLesson, setEditingLesson] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  const [mediaErrorMsg, setMediaErrorMsg] = useState('');
 
   const [deleteMediaTarget, setDeleteMediaTarget] = useState(null);
 
@@ -450,6 +451,7 @@ export default function ManageLessons() {
       const next = prev === lessonId ? null : lessonId;
       setVideoTitle('');
       setVideoUrlInput('');
+      setMediaErrorMsg('');
       return next;
     });
   }, []);
@@ -780,6 +782,11 @@ export default function ManageLessons() {
       typeof fileOrPath === 'object' && fileOrPath !== null
         ? fileOrPath.file_data || fileOrPath.file_path || ''
         : fileOrPath;
+    const fileId =
+      typeof fileOrPath === 'object' && fileOrPath !== null
+        ? fileOrPath.id
+        : null;
+
     if (!rawPath || typeof rawPath !== 'string') return '#';
     const trimmed = rawPath.trim();
     if (!trimmed) return '#';
@@ -798,7 +805,9 @@ export default function ManageLessons() {
       'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
-    return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
+    return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}${
+      fileId ? `&id=${encodeURIComponent(fileId)}` : ''
+    }`;
   };
 
   const getVideoUrl = (url) => {
@@ -953,6 +962,7 @@ export default function ManageLessons() {
         });
       }
 
+      // ✅ សំខាន់បំផុត៖ ប្រើ headers: { 'Content-Type': undefined } ដើម្បីឱ្យ Browser បង្កើត multipart/form-data boundary ដោយស្វ័យប្រវត្តិ
       if (selectedFiles.length > 0 && currentLessonId) {
         for (const file of selectedFiles) {
           const filePayload = new FormData();
@@ -960,7 +970,9 @@ export default function ManageLessons() {
           filePayload.append('file', file);
 
           try {
-            await api.post('/teacher/lessons/file', filePayload);
+            await api.post('/teacher/lessons/file', filePayload, {
+              headers: { 'Content-Type': undefined },
+            });
           } catch (fileError) {
             console.error('File upload failed', fileError);
           }
@@ -977,7 +989,9 @@ export default function ManageLessons() {
         videoPayload.append('video_url', youtubeVideo.url.trim());
 
         try {
-          await api.post('/teacher/lessons/video', videoPayload);
+          await api.post('/teacher/lessons/video', videoPayload, {
+            headers: { 'Content-Type': undefined },
+          });
         } catch (videoError) {
           console.error('Video upload failed', videoError);
         }
@@ -986,6 +1000,9 @@ export default function ManageLessons() {
       setShowAddModal(false);
       setSelectedFiles([]);
       setYoutubeVideo({ title: '', url: '' });
+      if (currentLessonId) {
+        setExpandedLesson(currentLessonId);
+      }
       await fetchLessons();
     } catch (error) {
       console.error('Submit error:', error);
@@ -1040,11 +1057,12 @@ export default function ManageLessons() {
     }
   };
 
-  // ✅ Upload File + បញ្ជូនសារទៅកាន់កណ្ដឹង
+  // ✅ Upload File + Real-time State Update (0ms) + បញ្ជូនសារទៅកាន់កណ្ដឹង
   const handleUploadFile = async (lessonId, e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setMediaErrorMsg('');
     const filePayload = new FormData();
     filePayload.append('lesson_id', lessonId);
     filePayload.append('file', file);
@@ -1053,7 +1071,36 @@ export default function ManageLessons() {
 
     setUploadingFileId(lessonId);
     try {
-      await api.post('/teacher/lessons/file', filePayload);
+      const res = await api.post('/teacher/lessons/file', filePayload, {
+        headers: { 'Content-Type': undefined },
+      });
+
+      const uploadedFile = res.data?.file || res.data?.data || null;
+      const updatedLessonFromServer = res.data?.lesson || null;
+
+      // ✅ ធ្វើបច្ចុប្បន្នភាពបញ្ជីឯកសារក្នុង React State ភ្លាមៗក្នុង 0 វិនាទី
+      if (uploadedFile || updatedLessonFromServer) {
+        setLessons((prev) => {
+          const updated = prev.map((lsn) => {
+            if (String(lsn.id) !== String(lessonId)) return lsn;
+            if (updatedLessonFromServer && Array.isArray(updatedLessonFromServer.files)) {
+              return { ...lsn, files: updatedLessonFromServer.files };
+            }
+            const existingFiles = Array.isArray(lsn.files) ? lsn.files : [];
+            const alreadyIn = existingFiles.some(
+              (f) => String(f.id) === String(uploadedFile.id)
+            );
+            return {
+              ...lsn,
+              files: alreadyIn ? existingFiles : [...existingFiles, uploadedFile],
+            };
+          });
+          LESSONS_MEM_CACHE.lessons = updated;
+          safeSaveLessonsCache(currentTeacherId, updated);
+          return updated;
+        });
+      }
+
       await fetchLessons();
 
       pushLocalNotification({
@@ -1066,6 +1113,18 @@ export default function ManageLessons() {
       });
     } catch (error) {
       console.error('Failed to upload file:', error);
+      const apiErrors = error.response?.data?.errors;
+      const firstValidationMsg = apiErrors
+        ? Object.values(apiErrors).flat()[0]
+        : null;
+      const msg =
+        firstValidationMsg ||
+        error.response?.data?.message ||
+        t(
+          'មិនអាចផ្ទុកឡើងឯកសារបានទេ (សូមពិនិត្យទំហំ ឬប្រភេទឯកសារឡើងវិញ)!',
+          'Could not upload file (please check file size or format)!'
+        );
+      setMediaErrorMsg(String(msg));
     } finally {
       setUploadingFileId(null);
       e.target.value = '';
@@ -1080,7 +1139,7 @@ export default function ManageLessons() {
     });
   };
 
-  // ✅ Upload Video + បញ្ជូនសារទៅកាន់កណ្ដឹង
+  // ✅ Upload Video + Real-time State Update + បញ្ជូនសារទៅកាន់កណ្ដឹង
   const handleUploadVideo = async (lessonId, e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1089,6 +1148,7 @@ export default function ManageLessons() {
       return;
     }
 
+    setMediaErrorMsg('');
     const videoPayload = new FormData();
     videoPayload.append('lesson_id', lessonId);
     videoPayload.append('title', videoTitle.trim());
@@ -1098,7 +1158,24 @@ export default function ManageLessons() {
 
     setUploadingVideoId(lessonId);
     try {
-      await api.post('/teacher/lessons/video', videoPayload);
+      const res = await api.post('/teacher/lessons/video', videoPayload, {
+        headers: { 'Content-Type': undefined },
+      });
+
+      const uploadedVid = res.data?.video || res.data?.data || null;
+      if (uploadedVid) {
+        setLessons((prev) => {
+          const updated = prev.map((lsn) => {
+            if (String(lsn.id) !== String(lessonId)) return lsn;
+            const existingVideos = Array.isArray(lsn.videos) ? lsn.videos : [];
+            return { ...lsn, videos: [...existingVideos, uploadedVid] };
+          });
+          LESSONS_MEM_CACHE.lessons = updated;
+          safeSaveLessonsCache(currentTeacherId, updated);
+          return updated;
+        });
+      }
+
       setVideoTitle('');
       await fetchLessons();
 
@@ -1112,18 +1189,23 @@ export default function ManageLessons() {
       });
     } catch (error) {
       console.error('Failed to upload video:', error);
+      const msg =
+        error.response?.data?.message ||
+        t('មិនអាចផ្ទុកឡើងវីដេអូបានទេ!', 'Could not upload video!');
+      setMediaErrorMsg(String(msg));
     } finally {
       setUploadingVideoId(null);
       e.target.value = '';
     }
   };
 
-  // ✅ Add Video URL + បញ្ជូនសារទៅកាន់កណ្ដឹង
+  // ✅ Add Video URL + Real-time State Update + បញ្ជូនសារទៅកាន់កណ្ដឹង
   const handleAddVideoUrl = async (lessonId) => {
     if (!videoTitle.trim() || !videoUrlInput.trim()) {
       return;
     }
 
+    setMediaErrorMsg('');
     const videoPayload = new FormData();
     videoPayload.append('lesson_id', lessonId);
     videoPayload.append('title', videoTitle.trim());
@@ -1133,7 +1215,24 @@ export default function ManageLessons() {
 
     setUploadingVideoId(lessonId);
     try {
-      await api.post('/teacher/lessons/video', videoPayload);
+      const res = await api.post('/teacher/lessons/video', videoPayload, {
+        headers: { 'Content-Type': undefined },
+      });
+
+      const uploadedVid = res.data?.video || res.data?.data || null;
+      if (uploadedVid) {
+        setLessons((prev) => {
+          const updated = prev.map((lsn) => {
+            if (String(lsn.id) !== String(lessonId)) return lsn;
+            const existingVideos = Array.isArray(lsn.videos) ? lsn.videos : [];
+            return { ...lsn, videos: [...existingVideos, uploadedVid] };
+          });
+          LESSONS_MEM_CACHE.lessons = updated;
+          safeSaveLessonsCache(currentTeacherId, updated);
+          return updated;
+        });
+      }
+
       setVideoTitle('');
       setVideoUrlInput('');
       await fetchLessons();
@@ -1148,6 +1247,10 @@ export default function ManageLessons() {
       });
     } catch (error) {
       console.error('Failed to attach video URL:', error);
+      const msg =
+        error.response?.data?.message ||
+        t('មិនអាចភ្ជាប់លីងវីដេអូបានទេ!', 'Could not attach video link!');
+      setMediaErrorMsg(String(msg));
     } finally {
       setUploadingVideoId(null);
     }
@@ -1244,13 +1347,12 @@ export default function ManageLessons() {
           (c) => String(c.id) === String(lesson.course_id)
         );
 
-        // ១. ច្រោះតាមកាតឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤)
+        // ១. ច្រោះតាមកាតឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) តែបើមុខវិជ្ជាថ្មីមិនទាន់មានសិស្សចុះឈ្មោះ (yearsList ទទេ) ឱ្យបង្ហាញធម្មតា
         if (selectedYear !== 'all') {
-          const hasYear =
-            matchedCourse &&
-            Array.isArray(matchedCourse.yearsList) &&
-            matchedCourse.yearsList.includes(String(selectedYear));
-          if (!hasYear) return false;
+          const courseYears = matchedCourse?.yearsList || [];
+          if (courseYears.length > 0 && !courseYears.includes(String(selectedYear))) {
+            return false;
+          }
         }
 
         // ២. ច្រោះតាមមុខវិជ្ជា (ដំណើរការពេលឈរលើកាតឆ្នាំទី១-៤)
@@ -1719,7 +1821,7 @@ export default function ManageLessons() {
                         : 'border-gray-200 hover:border-blue-200 hover:shadow-md'
                     }`}
                   >
-                    {/* ផ្ទៃកាតខាងលើ (Main Card Info - Responsive Phone / iPad / Desktop) */}
+                    {/* ផ្ទៃកាតខាងលើ */}
                     <div
                       className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-5 cursor-pointer"
                       onClick={() => handleToggleExpandLesson(lesson.id)}
@@ -1752,7 +1854,7 @@ export default function ManageLessons() {
                         </div>
                       </div>
 
-                      {/* ផ្នែកខាងស្តាំ (Badges & Actions - រៀបពេញភ្នែកលើទូរស័ព្ទ និង iPad) */}
+                      {/* ផ្នែកខាងស្តាំ */}
                       <div
                         className="lsn-divider-top flex items-center justify-between md:justify-end gap-2.5 sm:gap-4 shrink-0 pt-3 md:pt-0 border-t border-gray-100 md:border-t-0"
                         onClick={(e) => e.stopPropagation()}
@@ -1822,6 +1924,24 @@ export default function ManageLessons() {
                     {/* ផ្ទៃកាតទម្លាក់ចុះក្រោម (Expanded Content: Files & Videos) */}
                     {isExpanded && (
                       <div className="lsn-expanded-bg bg-slate-50/80 border-t border-gray-100 rounded-b-2xl sm:rounded-b-[1.25rem] p-3.5 sm:p-5 lg:p-6">
+                        {mediaErrorMsg && (
+                          <div className="lsn-warning-box max-w-6xl mx-auto mb-4 p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between gap-2.5 text-rose-600">
+                            <div className="flex items-center gap-2">
+                              <ExclamationCircleIcon className="h-5 w-5 shrink-0" />
+                              <p className="text-xs font-bold leading-relaxed">
+                                {mediaErrorMsg}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setMediaErrorMsg('')}
+                              className="p-1 hover:bg-rose-100 rounded-lg cursor-pointer"
+                            >
+                              <XMarkIcon className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 max-w-6xl mx-auto">
                           
                           {/* ផ្នែកឯកសារមេរៀន (Files Section) */}
@@ -1913,7 +2033,7 @@ export default function ManageLessons() {
                                 type="file"
                                 onChange={(e) => handleUploadFile(lesson.id, e)}
                                 className="hidden"
-                                accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls"
+                                accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.csv,.txt,.zip,.rar,.jpg,.jpeg,.png,.webp"
                               />
                             </div>
                           </div>
@@ -2106,7 +2226,7 @@ export default function ManageLessons() {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 5. MODAL - Add/Edit Lesson (Bottom Sheet on Phone, Centered on iPad/Desktop) */}
+      {/* 5. MODAL - Add/Edit Lesson                                         */}
       {/* ------------------------------------------------------------------ */}
       {showAddModal && (
         <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4">
@@ -2230,7 +2350,7 @@ export default function ManageLessons() {
                       multiple
                       onChange={handleFileChange}
                       className="hidden"
-                      accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls"
+                      accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.csv,.txt,.zip,.rar,.jpg,.jpeg,.png,.webp"
                     />
                   </label>
 

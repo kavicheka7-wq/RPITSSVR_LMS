@@ -40,7 +40,7 @@ class TeacherLessonController extends Controller
     }
 
     /**
-     * ✅ HELPER: សម្អាត Cache ស្ថិតិរបស់គ្រូ Admin និងសិស្សទាំងអស់ ពេលមានការបន្ថែម/កែ/លុបមេរៀន ឬផ្ទុកឯកសារឡើង
+     * ✅ HELPER: សម្អាត Cache ស្ថិតិរបស់គ្រូ និង Admin ពេលមានការបន្ថែម/កែ/លុបមេរៀន
      */
     private function clearRelatedCaches(): void
     {
@@ -50,14 +50,6 @@ class TeacherLessonController extends Controller
         }
         Cache::forget('admin_overview_report');
         Cache::forget('admin_dashboard_stats');
-        
-        // សម្អាត Cache បញ្ជីមេរៀន និង Dashboard របស់សិស្សទាំងអស់ ដើម្បីឱ្យមេរៀនថ្មីលោតចូលភ្លាមៗ
-        DB::table('users')->where('role_id', '!=', 1)->pluck('id')->each(function ($studentId) {
-            Cache::forget("student_dashboard_fast_v3_{$studentId}");
-            Cache::forget("student_dashboard_fast_v4_{$studentId}");
-            Cache::forget("student_dashboard_fast_v5_{$studentId}");
-            Cache::forget("dept_courses_years_map_v5_" . md5($studentId)); 
-        });
     }
 
     /**
@@ -375,7 +367,7 @@ class TeacherLessonController extends Controller
         try {
             $validated = $request->validate([
                 'lesson_id' => 'required|exists:lessons,id',
-                'file' => 'required|file|max:10240|mimes:pdf,doc,docx,ppt,pptx,xls,xlsx,csv,txt,zip,rar,jpg,jpeg,png,webp',
+                'file' => 'required|file|max:20480',
             ]);
 
             $lesson = Lesson::findOrFail($validated['lesson_id']);
@@ -383,10 +375,28 @@ class TeacherLessonController extends Controller
 
             $file = $request->file('file');
             $originalName = $file->getClientOriginalName();
-            $fileName = time() . '_' . $originalName;
-            $filePath = $file->storeAs('lesson_files', $fileName, 'public');
+            $extension = strtolower($file->getClientOriginalExtension() ?: pathinfo($originalName, PATHINFO_EXTENSION));
+            $mimeType = $file->getMimeType() ?: 'application/octet-stream';
 
-            // ✅ បង្កើតជួរឈរ file_data (LONGTEXT) និង mime_type ដោយស្វ័យប្រវត្តិបើក្នុង Database លើ Railway មិនទាន់មាន
+            // ✅ ១. អានទិន្នន័យ Base64 ពី Temporary File ទុកមុនគេ (មុនពេលហៅ storeAs ការពារករណី Disk លើ Railway មានបញ្ហា)
+            $realPath = $file->getRealPath() ?: $file->getPathname();
+            $base64Content = ($realPath && file_exists($realPath))
+                ? base64_encode(file_get_contents($realPath))
+                : null;
+
+            // ✅ ២. រក្សាទុកចូល Storage Disk (ប្រើ try-catch ការពារកុំឱ្យគាំងបើថត storage លើ Railway គ្មានសិទ្ធិសរសេរ)
+            $fileName = time() . '_' . $originalName;
+            $filePath = 'lesson_files/' . $fileName;
+            try {
+                $stored = $file->storeAs('lesson_files', $fileName, 'public');
+                if ($stored) {
+                    $filePath = $stored;
+                }
+            } catch (\Throwable $diskErr) {
+                Log::warning('Storage disk write warning on uploadFile: ' . $diskErr->getMessage());
+            }
+
+            // ✅ ៣. បង្កើតជួរឈរ file_data (LONGTEXT) និង mime_type ដោយស្វ័យប្រវត្តិបើក្នុង Database លើ Railway មិនទាន់មាន
             try {
                 if (!Schema::hasColumn('lesson_files', 'file_data')) {
                     DB::statement('ALTER TABLE lesson_files ADD COLUMN file_data LONGTEXT NULL');
@@ -398,29 +408,34 @@ class TeacherLessonController extends Controller
                 // បន្តទៅមុខបើមានរួចហើយ
             }
 
-            $base64Content = base64_encode(file_get_contents($file->getRealPath()));
-            $mimeType = $file->getMimeType() ?: 'application/octet-stream';
-
-            $lessonFile = LessonFile::create([
-                'lesson_id' => $validated['lesson_id'],
+            // ✅ ៤. បញ្ចូលកំណត់ត្រាឯកសារមេរៀនតាមរយៈ Query Builder ផ្ទាល់ ដើម្បីការពារបញ្ហាជាប់ $fillable ក្នុង Model LessonFile
+            $insertId = DB::table('lesson_files')->insertGetId([
+                'lesson_id' => (int) $validated['lesson_id'],
                 'file_name' => $originalName,
                 'file_path' => $filePath,
-                'file_type' => $file->getClientOriginalExtension(),
+                'file_type' => $extension ?: 'file',
+                'created_at' => now(),
+                'updated_at' => now(),
             ]);
 
-            // ✅ បញ្ចូល file_data និង mime_type តាមរយៈ Query Builder ផ្ទាល់ ដើម្បីការពារបញ្ហាជាប់ $fillable ក្នុង Model LessonFile
             $extraColumns = [];
-            if (Schema::hasColumn('lesson_files', 'file_data')) {
+            if ($base64Content && Schema::hasColumn('lesson_files', 'file_data')) {
                 $extraColumns['file_data'] = $base64Content;
             }
             if (Schema::hasColumn('lesson_files', 'mime_type')) {
                 $extraColumns['mime_type'] = $mimeType;
             }
             if (!empty($extraColumns)) {
-                DB::table('lesson_files')->where('id', $lessonFile->id)->update($extraColumns);
+                DB::table('lesson_files')->where('id', $insertId)->update($extraColumns);
             }
 
-            $lessonFile->makeHidden(['file_data']);
+            $cols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
+            if (Schema::hasColumn('lesson_files', 'mime_type')) {
+                $cols[] = 'mime_type';
+            }
+
+            $lessonFile = LessonFile::select($cols)->find($insertId);
+            $freshLesson = Lesson::with($this->lessonRelations())->find($lesson->id);
 
             $this->clearRelatedCaches();
 
@@ -428,6 +443,7 @@ class TeacherLessonController extends Controller
                 'message' => 'បានផ្ទុកឡើងឯកសារដោយជោគជ័យ',
                 'file' => $lessonFile,
                 'data' => $lessonFile,
+                'lesson' => $freshLesson,
             ], 201);
         } catch (ValidationException $e) {
             return response()->json([
@@ -630,8 +646,6 @@ class TeacherLessonController extends Controller
                     $lesson->update(['lesson_order' => $item['order']]);
                 }
             });
-            
-            $this->clearRelatedCaches();
 
             return response()->json([
                 'message' => 'បានរៀបចំលំដាប់មេរៀនដោយជោគជ័យ',
