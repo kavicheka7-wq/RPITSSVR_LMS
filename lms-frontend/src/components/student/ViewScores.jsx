@@ -125,7 +125,6 @@ const schedulePersistTeacherAvatars = () => {
 const persistStudentScoresFast = (uid, scoresList) => {
   if (!Array.isArray(scoresList)) return;
   const avatarMap = getTeacherAvatarMapSync();
-  let avatarMapUpdated = false;
 
   const extractAndSlimTeacher = (person, courseIdFallback = '') => {
     if (!person || typeof person !== 'object') return person;
@@ -147,15 +146,12 @@ const persistStudentScoresFast = (uid, scoresList) => {
     if (rawImg && typeof rawImg === 'string') {
       if (cid && !avatarMap[`crs_${cid}`]) {
         avatarMap[`crs_${cid}`] = rawImg;
-        avatarMapUpdated = true;
       }
       if (tchId && !avatarMap[`tch_${tchId}`]) {
         avatarMap[`tch_${tchId}`] = rawImg;
-        avatarMapUpdated = true;
       }
       if (nameKey && !avatarMap[nameKey]) {
         avatarMap[nameKey] = rawImg;
-        avatarMapUpdated = true;
       }
 
       compressTeacherAvatar(rawImg, (tinyImg) => {
@@ -520,6 +516,7 @@ const ViewScores = () => {
     }
     const cached =
       readStorageJson(getScoresCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_scores_list_v10_${currentStudentId}`, null) ||
       readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, null) ||
       readStorageJson(CACHE_KEY_SHARED_SCORES, []);
     STUDENT_SCORES_MEM_CACHE.grades = Array.isArray(cached) ? cached : [];
@@ -552,16 +549,15 @@ const ViewScores = () => {
   useEffect(() => {
     let isMounted = true;
 
-    if (page === 1) {
-      const cachedList =
-        readStorageJson(getScoresCacheKey(currentStudentId), null) ||
-        readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, null) ||
-        readStorageJson(CACHE_KEY_SHARED_SCORES, null);
+    const cachedList =
+      readStorageJson(getScoresCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_scores_list_v10_${currentStudentId}`, null) ||
+      readStorageJson(`cached_student_scores_list_v8_${currentStudentId}`, null) ||
+      readStorageJson(CACHE_KEY_SHARED_SCORES, null);
 
-      if (Array.isArray(cachedList) && cachedList.length > 0) {
-        setGrades(cachedList);
-        STUDENT_SCORES_MEM_CACHE.grades = cachedList;
-      }
+    if (Array.isArray(cachedList) && cachedList.length > 0) {
+      setGrades(cachedList);
+      STUDENT_SCORES_MEM_CACHE.grades = cachedList;
     }
 
     const now = Date.now();

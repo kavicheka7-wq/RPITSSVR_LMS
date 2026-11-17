@@ -133,6 +133,44 @@ class StudentController extends Controller
         }
     }
 
+    /**
+     * ✅ ស្វែងរក department_id របស់សិស្សដោយស្វ័យប្រវត្តិ (ពី Profile, User, ឬមុខវិជ្ជាដែលធ្លាប់រៀន)
+     */
+    private function resolveStudentDepartmentId($user = null, array $enrolledCourseIds = []): ?int
+    {
+        $user = $user ?: auth()->user();
+        $studentProfile = $this->resolveStudentProfile($user);
+
+        $deptId = $studentProfile->department_id ?? $user->department_id ?? null;
+        if ($deptId) {
+            return (int) $deptId;
+        }
+
+        if (!empty($enrolledCourseIds)) {
+            $fromEnrolled = Course::whereIn('id', $enrolledCourseIds)
+                ->whereNotNull('department_id')
+                ->value('department_id');
+            if ($fromEnrolled) {
+                return (int) $fromEnrolled;
+            }
+        }
+
+        $studentIds = $this->getStudentAllIds($user);
+        if (!empty($studentIds)) {
+            $gradeCourseId = Grade::whereIn('student_id', $studentIds)->value('course_id')
+                ?: Attendance::whereIn('student_id', $studentIds)->value('course_id');
+
+            if ($gradeCourseId) {
+                $fromCourse = Course::where('id', $gradeCourseId)->value('department_id');
+                if ($fromCourse) {
+                    return (int) $fromCourse;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private function getActiveEnrollment($studentId, $courseId)
     {
         $studentIds = is_array($studentId) ? $studentId : $this->getStudentAllIds(auth()->user());
@@ -146,7 +184,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ ទាញយកព័ត៌មានគ្រូបង្រៀនទាំងអស់ក្នុង Query តែ ១ ដង (ដោយមិនបង្ខំឈ្មោះជួរឈរដែលអាចគ្មានក្នុង DB)
+     * ✅ ទាញយកព័ត៌មានគ្រូបង្រៀនទាំងអស់ក្នុង Query តែ ១ ដង
      */
     private function preloadTeachersForCourses($courses): void
     {
@@ -433,7 +471,6 @@ class StudentController extends Controller
         try {
             $student = auth()->user();
             $studentIds = $this->getStudentAllIds($student);
-            $studentProfile = $this->resolveStudentProfile($student);
 
             $enrollments = Enrollment::whereIn('student_id', $studentIds)
                 ->with(['course' => function ($query) {
@@ -444,7 +481,7 @@ class StudentController extends Controller
 
             // ✅ បើសិស្សមិនទាន់មានក្នុងតារាង enrollments ទាញតាម department_id ឬទាញមុខវិជ្ជាទាំងអស់ជំនួស
             if ($enrollments->isEmpty()) {
-                $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+                $deptId = $this->resolveStudentDepartmentId($student);
                 $deptCoursesQuery = Course::with(['department'])
                     ->withCount(['lessons', 'assignments', 'quizzes']);
 
@@ -558,11 +595,10 @@ class StudentController extends Controller
     {
         try {
             $student = auth()->user();
-            $studentProfile = $this->resolveStudentProfile($student);
             $perPage = max(1, min((int) $request->input('per_page', 12), 100));
 
             $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
-            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+            $deptId = $this->resolveStudentDepartmentId($student, $enrolledCourseIds);
 
             $query = Course::with(['department'])
                 ->withCount(['lessons', 'assignments', 'quizzes']);
@@ -731,16 +767,16 @@ class StudentController extends Controller
         try {
             $student = auth()->user();
             $studentIds = $this->getStudentAllIds($student);
-            $studentProfile = $this->resolveStudentProfile($student);
 
             $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
+            $deptId = $this->resolveStudentDepartmentId($student, $enrolledCourseIds);
 
             $coursesQuery = Course::with(['department']);
 
             if (!empty($enrolledCourseIds)) {
                 $courses = $coursesQuery->whereIn('id', $enrolledCourseIds)->get();
-            } elseif ($studentProfile && $studentProfile->department_id) {
-                $courses = $coursesQuery->where('department_id', $studentProfile->department_id)->get();
+            } elseif ($deptId) {
+                $courses = $coursesQuery->where('department_id', $deptId)->get();
             } else {
                 $courses = $coursesQuery->get();
             }
@@ -764,16 +800,19 @@ class StudentController extends Controller
                     ->groupBy('assignment_id')
                 : collect();
 
-            $allQuizzes = Quiz::whereIn('course_id', $courseIds)
-                ->get()
-                ->groupBy('course_id');
+            $quizQuery = Quiz::whereIn('course_id', $courseIds);
+            if (Schema::hasTable('questions') && Schema::hasColumn('questions', 'mark')) {
+                $quizQuery->withSum('questions as questions_total_mark', 'mark');
+            }
+            $allQuizzes = $quizQuery->get()->groupBy('course_id');
             $allQuizIds = $allQuizzes->flatten()->pluck('id');
 
             $allAttempts = $allQuizIds->isNotEmpty()
-                ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score')
+                ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score', 'submitted_at')
                     ->whereIn('quiz_id', $allQuizIds)
                     ->whereIn('student_id', $studentIds)
                     ->whereNotNull('score')
+                    ->whereNotNull('submitted_at')
                     ->get()
                     ->groupBy('quiz_id')
                 : collect();
@@ -816,7 +855,7 @@ class StudentController extends Controller
                         $attempts = $allAttempts->get($quiz->id, collect());
                         if ($attempts->isNotEmpty()) {
                             $bestScore = $attempts->max('score');
-                            $maxMark = $quiz->total_mark ?? 20;
+                            $maxMark = $quiz->total_mark ?? $quiz->questions_total_mark ?? 20;
                             if ($maxMark > 0) {
                                 $totalEarned += $bestScore;
                                 $totalMax += $maxMark;
@@ -920,13 +959,7 @@ class StudentController extends Controller
             $studentProfile = $this->resolveStudentProfile($student);
 
             $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
-
-            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
-            if (!$deptId && !empty($enrolledCourseIds)) {
-                $deptId = Course::whereIn('id', $enrolledCourseIds)
-                    ->whereNotNull('department_id')
-                    ->value('department_id');
-            }
+            $deptId = $this->resolveStudentDepartmentId($student, $enrolledCourseIds);
 
             $coursesQuery = Course::with(['department']);
 
@@ -1437,17 +1470,52 @@ class StudentController extends Controller
             'submitted_at' => now(),
         ]);
 
+        // ✅ គណនាភាគរយពិន្ទុតេស្តសរុបក្នុងមុខវិជ្ជានេះឡើងវិញ និងធ្វើបច្ចុប្បន្នភាពក្នុងតារាង grades ដោយមិនបង្កើតជួរស្ទួន
         if ($finalTotalMarks > 0 && $quiz->course_id) {
-            $quizPercent = round(($score / $finalTotalMarks) * 100, 2);
-            Grade::updateOrCreate(
-                [
+            $courseQuizzesQuery = Quiz::where('course_id', $quiz->course_id);
+            if (Schema::hasTable('questions') && Schema::hasColumn('questions', 'mark')) {
+                $courseQuizzesQuery->withSum('questions as questions_total_mark', 'mark');
+            }
+            $courseQuizzes = $courseQuizzesQuery->get();
+            $courseQuizIds = $courseQuizzes->pluck('id');
+
+            $studentAttempts = QuizAttempt::whereIn('quiz_id', $courseQuizIds)
+                ->whereIn('student_id', $studentIds)
+                ->whereNotNull('score')
+                ->whereNotNull('submitted_at')
+                ->get()
+                ->groupBy('quiz_id');
+
+            $totalEarned = 0;
+            $totalMax = 0;
+            foreach ($courseQuizzes as $cq) {
+                $atts = $studentAttempts->get($cq->id, collect());
+                if ($atts->isNotEmpty()) {
+                    $maxM = (float) ($cq->total_mark ?? $cq->questions_total_mark ?? 20);
+                    if ($maxM > 0) {
+                        $totalEarned += (float) $atts->max('score');
+                        $totalMax += $maxM;
+                    }
+                }
+            }
+
+            $quizPercent = $totalMax > 0
+                ? round(($totalEarned / $totalMax) * 100, 2)
+                : round(($score / $finalTotalMarks) * 100, 2);
+
+            $existingGrade = Grade::whereIn('student_id', $studentIds)
+                ->where('course_id', $quiz->course_id)
+                ->first();
+
+            if ($existingGrade) {
+                $existingGrade->update(['quiz_score' => $quizPercent]);
+            } else {
+                Grade::create([
                     'student_id' => $student->id,
                     'course_id' => $quiz->course_id,
-                ],
-                [
                     'quiz_score' => $quizPercent,
-                ]
-            );
+                ]);
+            }
         }
 
         $this->clearStudentDashboardCache();
@@ -1466,11 +1534,10 @@ class StudentController extends Controller
         try {
             $student = auth()->user();
             $studentIds = $this->getStudentAllIds($student);
-            $studentProfile = $this->resolveStudentProfile($student);
             $perPage = max(1, min((int) $request->input('per_page', 15), 100));
 
             $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
-            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+            $deptId = $this->resolveStudentDepartmentId($student, $enrolledCourseIds);
 
             $query = Assignment::with(['course.department'])
                 ->orderBy('due_date', 'asc');
@@ -1553,15 +1620,17 @@ class StudentController extends Controller
         try {
             $student = auth()->user();
             $studentIds = $this->getStudentAllIds($student);
-            $studentProfile = $this->resolveStudentProfile($student);
             $perPage = max(1, min((int) $request->input('per_page', 15), 100));
 
             $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
-            $deptId = $studentProfile->department_id ?? $student->department_id ?? null;
+            $deptId = $this->resolveStudentDepartmentId($student, $enrolledCourseIds);
 
             $query = Quiz::with(['course.department'])
-                ->withSum('questions as questions_total_mark', 'mark')
                 ->orderBy('start_date', 'asc');
+
+            if (Schema::hasTable('questions') && Schema::hasColumn('questions', 'mark')) {
+                $query->withSum('questions as questions_total_mark', 'mark');
+            }
 
             if ($request->filled('course_id') && $request->course_id !== 'all') {
                 $query->where('course_id', $request->course_id);

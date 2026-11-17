@@ -41,6 +41,7 @@ const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v14_${u
 const getAssignmentsMetaCacheKey = (uid) => `cached_student_assignments_meta_v14_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v14_${uid}`;
 
 const DEFAULT_META = {
   current_page: 1,
@@ -342,6 +343,7 @@ const StudentAssignments = () => {
     }
     const cached =
       readStorageJson(getAssignmentsCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_assignments_list_v10_${currentStudentId}`, null) ||
       readStorageJson(`cached_student_assignments_list_v8_${currentStudentId}`, null) ||
       readStorageJson(CACHE_KEY_SHARED_ASSIGNMENTS, []);
     STUDENT_ASG_MEM_CACHE.assignments = Array.isArray(cached) ? cached : [];
@@ -770,6 +772,7 @@ const StudentAssignments = () => {
         try {
           sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
+          localStorage.removeItem(`cached_student_scores_list_v10_${currentStudentId}`);
         } catch (err) {}
         return updated;
       });
@@ -887,7 +890,6 @@ const StudentAssignments = () => {
 
       if (statusFilter === 'pending' && (isSubmitted || isOverdue)) return false;
       if (statusFilter === 'submitted' && !isSubmitted) return false;
-      if (statusFilter === 'graded' && !isGradgraded) return false;
       if (statusFilter === 'graded' && !isGraded) return false;
       if (statusFilter === 'overdue' && !isOverdue) return false;
 
@@ -1211,7 +1213,7 @@ const StudentAssignments = () => {
           <h3 className="std-asg-text-primary text-lg font-extrabold text-gray-800">
             {searchQuery || selectedCourse !== 'all' || statusFilter !== 'all'
               ? t(
-                  'មិនឃើញមានកិច្ចការតាមการស្វែងរកនេះទេ',
+                  'មិនឃើញមានកិច្ចការតាមការស្វែងរកនេះទេ',
                   'No matching assignments found'
                 )
               : t('មិនទាន់មានកិច្ចការនៅឡើយទេ', 'No assignments available yet')}
@@ -1228,7 +1230,7 @@ const StudentAssignments = () => {
           {filteredAssignments.map((assign) => {
             const submission = assign.resolvedSubmission;
             const isSubmitted = Boolean(submission);
-            const isGradgraded =
+            const isGraded =
               isSubmitted &&
               submission?.score !== null &&
               submission?.score !== undefined &&
@@ -1268,7 +1270,7 @@ const StudentAssignments = () => {
 
                     <span
                       className={`text-xs font-extrabold inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border ${
-                        isGradgraded
+                        isGraded
                           ? 'std-asg-badge-indigo bg-indigo-50 text-indigo-700 border-indigo-200'
                           : isSubmitted
                           ? 'std-asg-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -1277,7 +1279,7 @@ const StudentAssignments = () => {
                           : 'std-asg-badge-amber bg-amber-50 text-amber-700 border-amber-200'
                       }`}
                     >
-                      {isGradgraded ? (
+                      {isGraded ? (
                         <>
                           <CheckBadgeIcon className="h-4 w-4" />
                           <span>{t('ដាក់ពិន្ទុរួច', 'Graded')}</span>
@@ -1355,7 +1357,7 @@ const StudentAssignments = () => {
                         <span className="std-asg-text-secondary font-bold text-gray-600">
                           {t('ពិន្ទុទទួលបាន៖', 'Score Earned:')}
                         </span>
-                        {isGradgraded ? (
+                        {isGraded ? (
                           <span className="std-asg-badge-emerald px-2.5 py-1 rounded-lg font-black text-emerald-700 bg-emerald-50 border border-emerald-200 text-sm">
                             {formatCleanScore(submission.score)} / {maxScore}
                           </span>

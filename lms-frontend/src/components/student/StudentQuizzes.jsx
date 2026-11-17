@@ -43,7 +43,7 @@ const getQuizzesMetaCacheKey = (uid) => `cached_student_quizzes_meta_v14_${uid}`
 const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
 const getQuizReviewsCacheKey = (uid) => `cached_student_quiz_reviews_v14_${uid}`;
-const getScoresCacheKey = (uid) => `cached_student_scores_list_v10_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v14_${uid}`;
 const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v10_${uid}`;
 
 const DEFAULT_META = {
@@ -940,6 +940,7 @@ const StudentQuizzes = () => {
         try {
           sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
+          localStorage.removeItem(`cached_student_scores_list_v10_${currentStudentId}`);
           sessionStorage.removeItem(getStatsCacheKey(currentStudentId));
           localStorage.removeItem(getStatsCacheKey(currentStudentId));
         } catch (err) {}
@@ -962,7 +963,7 @@ const StudentQuizzes = () => {
       const errMsg =
         error.response?.data?.message ||
         t(
-          'មានបញ្ហាក្នុងการបញ្ជូនចម្លើយ សូមសាកល្បងម្ដងទៀត!',
+          'មានបញ្ហាក្នុងការបញ្ជូនចម្លើយ សូមសាកល្បងម្ដងទៀត!',
           'Failed to submit quiz answers. Please try again!'
         );
       setSubmitError(String(errMsg));
@@ -1094,7 +1095,7 @@ const StudentQuizzes = () => {
   }, [enrichedQuizzes, selectedCourse, statusFilter, searchQuery]);
 
   const getActiveStatusTitle = () => {
-    if (statusFilter === 'available') return t('អាចធ្វើតេស្តได้', 'Available Quizzes');
+    if (statusFilter === 'available') return t('អាចធ្វើតេស្តបាន', 'Available Quizzes');
     if (statusFilter === 'completed') return t('ធ្វើតេស្តរួចរាល់', 'Completed Quizzes');
     if (statusFilter === 'upcoming') return t('មិនទាន់បើកប្រឡង', 'Upcoming Quizzes');
     if (statusFilter === 'expired') return t('ហួសពេលកំណត់', 'Expired Quizzes');
@@ -1104,7 +1105,7 @@ const StudentQuizzes = () => {
   const statusSelectorItems = [
     {
       id: 'available',
-      title: t('អាចធ្វើได้', 'Available'),
+      title: t('អាចធ្វើបាន', 'Available'),
       count: quizStats.available,
       icon: PencilSquareIcon,
       iconStyle:
