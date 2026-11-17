@@ -21,18 +21,67 @@ use Illuminate\Validation\ValidationException;
 
 class TeacherLessonController extends Controller
 {
+    private static ?array $cachedFileColumns = null;
+    private static bool $schemaChecked = false;
+
+    /**
+     * ✅ ពិនិត្យ និងបង្កើតជួរឈរ file_data / mime_type តែ ១ ដងគត់ (មិនឆែកគ្រប់ Request ឱ្យយឺតទេ)
+     */
+    private function ensureLessonFilesSchemaOnce(): void
+    {
+        if (self::$schemaChecked) {
+            return;
+        }
+
+        Cache::rememberForever('lms_lesson_files_schema_ready_v2', function () {
+            try {
+                if (!Schema::hasColumn('lesson_files', 'file_data')) {
+                    DB::statement('ALTER TABLE lesson_files ADD COLUMN file_data LONGTEXT NULL');
+                }
+                if (!Schema::hasColumn('lesson_files', 'mime_type')) {
+                    DB::statement('ALTER TABLE lesson_files ADD COLUMN mime_type VARCHAR(120) NULL');
+                }
+            } catch (\Throwable $e) {
+            }
+            return true;
+        });
+
+        self::$schemaChecked = true;
+    }
+
+    /**
+     * ✅ ទាញយកបញ្ជីជួរឈរសុវត្ថិភាពរបស់ lesson_files ពី Cache (0ms)
+     */
+    private function getLessonFileSelectColumns(): array
+    {
+        if (self::$cachedFileColumns !== null) {
+            return self::$cachedFileColumns;
+        }
+
+        self::$cachedFileColumns = Cache::remember('lms_lesson_files_select_cols_v2', 86400, function () {
+            $cols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
+            try {
+                if (Schema::hasColumn('lesson_files', 'mime_type')) {
+                    $cols[] = 'mime_type';
+                }
+            } catch (\Throwable $e) {
+            }
+            return $cols;
+        });
+
+        return self::$cachedFileColumns;
+    }
+
     /**
      * ✅ HELPER: កំណត់ទំនាក់ទំនង (Eager Load Relations) ដោយមិនទាញយកជួរឈរ file_data (Base64 ធំៗ) មកជាមួយដាច់ខាត
      */
     private function lessonRelations(): array
     {
+        $cols = $this->getLessonFileSelectColumns();
+
         return [
             'course:id,course_code,course_name,department_id,teacher_id,credit',
-            'files' => function ($q) {
-                $cols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
-                if (Schema::hasColumn('lesson_files', 'mime_type')) {
-                    $cols[] = 'mime_type';
-                }
+            'files' => function ($q) use ($cols) {
                 $q->select($cols);
             },
             'videos:id,lesson_id,title,video_url,duration,created_at,updated_at',
@@ -93,11 +142,14 @@ class TeacherLessonController extends Controller
 
     private function ensureLessonAccess(Lesson $lesson): void
     {
+        if ($lesson->created_by && (int) $lesson->created_by === (int) Auth::id()) {
+            return;
+        }
+
         $courseIds = $this->getTeacherCoursesQuery()->pluck('id')->map(fn ($id) => (int) $id)->all();
         $isOwnerCourse = in_array((int) $lesson->course_id, $courseIds, true);
-        $isCreator = $lesson->created_by && (int) $lesson->created_by === (int) Auth::id();
 
-        if (!$isOwnerCourse && !$isCreator) {
+        if (!$isOwnerCourse) {
             throw (new ModelNotFoundException())->setModel(Lesson::class, [$lesson->id]);
         }
     }
@@ -359,91 +411,88 @@ class TeacherLessonController extends Controller
     }
 
     /**
-     * Upload lesson file
+     * ✅ Upload lesson file (Ultra-Fast Response + Background Base64 Sync)
      * POST /teacher/lessons/file
      */
     public function uploadFile(Request $request)
     {
         try {
             $validated = $request->validate([
-                'lesson_id' => 'required|exists:lessons,id',
+                'lesson_id' => 'required|integer',
                 'file' => 'required|file|max:20480',
             ]);
 
-            $lesson = Lesson::findOrFail($validated['lesson_id']);
+            $lesson = Lesson::select('id', 'course_id', 'created_by')->findOrFail($validated['lesson_id']);
             $this->ensureLessonAccess($lesson);
+            $this->ensureLessonFilesSchemaOnce();
 
             $file = $request->file('file');
             $originalName = $file->getClientOriginalName();
             $extension = strtolower($file->getClientOriginalExtension() ?: pathinfo($originalName, PATHINFO_EXTENSION));
             $mimeType = $file->getMimeType() ?: 'application/octet-stream';
 
-            // ✅ ១. អានទិន្នន័យ Base64 ពី Temporary File ទុកមុនគេ (មុនពេលហៅ storeAs ការពារករណី Disk លើ Railway មានបញ្ហា)
-            $realPath = $file->getRealPath() ?: $file->getPathname();
-            $base64Content = ($realPath && file_exists($realPath))
-                ? base64_encode(file_get_contents($realPath))
-                : null;
-
-            // ✅ ២. រក្សាទុកចូល Storage Disk (ប្រើ try-catch ការពារកុំឱ្យគាំងបើថត storage លើ Railway គ្មានសិទ្ធិសរសេរ)
+            // ១. រក្សាទុកចូល Storage Disk ជាមុន
             $fileName = time() . '_' . $originalName;
             $filePath = 'lesson_files/' . $fileName;
+            $realPath = $file->getRealPath() ?: $file->getPathname();
+            $rawBytes = ($realPath && file_exists($realPath)) ? file_get_contents($realPath) : null;
+
             try {
-                $stored = $file->storeAs('lesson_files', $fileName, 'public');
-                if ($stored) {
-                    $filePath = $stored;
+                if ($rawBytes !== null) {
+                    Storage::disk('public')->put($filePath, $rawBytes);
+                } else {
+                    $stored = $file->storeAs('lesson_files', $fileName, 'public');
+                    if ($stored) {
+                        $filePath = $stored;
+                    }
                 }
             } catch (\Throwable $diskErr) {
                 Log::warning('Storage disk write warning on uploadFile: ' . $diskErr->getMessage());
             }
 
-            // ✅ ៣. បង្កើតជួរឈរ file_data (LONGTEXT) និង mime_type ដោយស្វ័យប្រវត្តិបើក្នុង Database លើ Railway មិនទាន់មាន
-            try {
-                if (!Schema::hasColumn('lesson_files', 'file_data')) {
-                    DB::statement('ALTER TABLE lesson_files ADD COLUMN file_data LONGTEXT NULL');
-                }
-                if (!Schema::hasColumn('lesson_files', 'mime_type')) {
-                    DB::statement('ALTER TABLE lesson_files ADD COLUMN mime_type VARCHAR(120) NULL');
-                }
-            } catch (\Throwable $schemaErr) {
-                // បន្តទៅមុខបើមានរួចហើយ
-            }
+            $now = now();
 
-            // ✅ ៤. បញ្ចូលកំណត់ត្រាឯកសារមេរៀនតាមរយៈ Query Builder ផ្ទាល់ ដើម្បីការពារបញ្ហាជាប់ $fillable ក្នុង Model LessonFile
+            // ២. បញ្ចូលតែព័ត៌មានស្រាលៗចូលក្នុង Database មុន ដើម្បីឆ្លើយតបទៅ Frontend វិញភ្លាមៗក្នុងកម្រិតមីលីវិនាទី
             $insertId = DB::table('lesson_files')->insertGetId([
                 'lesson_id' => (int) $validated['lesson_id'],
                 'file_name' => $originalName,
                 'file_path' => $filePath,
                 'file_type' => $extension ?: 'file',
-                'created_at' => now(),
-                'updated_at' => now(),
+                'created_at' => $now,
+                'updated_at' => $now,
             ]);
 
-            $extraColumns = [];
-            if ($base64Content && Schema::hasColumn('lesson_files', 'file_data')) {
-                $extraColumns['file_data'] = $base64Content;
-            }
-            if (Schema::hasColumn('lesson_files', 'mime_type')) {
-                $extraColumns['mime_type'] = $mimeType;
-            }
-            if (!empty($extraColumns)) {
-                DB::table('lesson_files')->where('id', $insertId)->update($extraColumns);
-            }
-
-            $cols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
-            if (Schema::hasColumn('lesson_files', 'mime_type')) {
-                $cols[] = 'mime_type';
+            // ៣. រក្សាទុកទិន្នន័យ Base64 ចូល Database នៅផ្ទៃខាងក្រោយ បន្ទាប់ពីបញ្ជូន Response ទៅឱ្យគ្រូរួចរាល់
+            if ($rawBytes !== null) {
+                app()->terminating(function () use ($insertId, $rawBytes, $mimeType) {
+                    try {
+                        DB::table('lesson_files')->where('id', $insertId)->update([
+                            'file_data' => base64_encode($rawBytes),
+                            'mime_type' => $mimeType,
+                        ]);
+                    } catch (\Throwable $bgErr) {
+                        Log::warning('Background base64 save warning: ' . $bgErr->getMessage());
+                    }
+                });
             }
 
-            $lessonFile = LessonFile::select($cols)->find($insertId);
-            $freshLesson = Lesson::with($this->lessonRelations())->find($lesson->id);
+            $responsePayload = [
+                'id' => $insertId,
+                'lesson_id' => (int) $validated['lesson_id'],
+                'file_name' => $originalName,
+                'file_path' => $filePath,
+                'file_type' => $extension ?: 'file',
+                'mime_type' => $mimeType,
+                'created_at' => $now->toISOString(),
+                'updated_at' => $now->toISOString(),
+            ];
 
             $this->clearRelatedCaches();
 
             return response()->json([
                 'message' => 'បានផ្ទុកឡើងឯកសារដោយជោគជ័យ',
-                'file' => $lessonFile,
-                'data' => $lessonFile,
-                'lesson' => $freshLesson,
+                'file' => $responsePayload,
+                'data' => $responsePayload,
             ], 201);
         } catch (ValidationException $e) {
             return response()->json([
@@ -470,7 +519,7 @@ class TeacherLessonController extends Controller
     {
         try {
             $file = LessonFile::select('id', 'lesson_id', 'file_name', 'file_path')->findOrFail($fileId);
-            $lesson = Lesson::findOrFail($file->lesson_id);
+            $lesson = Lesson::select('id', 'course_id', 'created_by')->findOrFail($file->lesson_id);
             $this->ensureLessonAccess($lesson);
 
             if (
@@ -507,14 +556,14 @@ class TeacherLessonController extends Controller
     {
         try {
             $validated = $request->validate([
-                'lesson_id' => 'required|exists:lessons,id',
+                'lesson_id' => 'required|integer',
                 'title' => 'required|string|max:255',
                 'video' => 'nullable|file|max:512000|mimes:mp4,mov,avi,wmv,flv,mkv',
                 'video_url' => 'nullable|string',
                 'duration' => 'nullable|string',
             ]);
 
-            $lesson = Lesson::findOrFail($validated['lesson_id']);
+            $lesson = Lesson::select('id', 'course_id', 'created_by')->findOrFail($validated['lesson_id']);
             $this->ensureLessonAccess($lesson);
 
             $videoPath = '';
@@ -568,7 +617,7 @@ class TeacherLessonController extends Controller
     {
         try {
             $video = Video::findOrFail($videoId);
-            $lesson = Lesson::findOrFail($video->lesson_id);
+            $lesson = Lesson::select('id', 'course_id', 'created_by')->findOrFail($video->lesson_id);
             $this->ensureLessonAccess($lesson);
 
             if (
