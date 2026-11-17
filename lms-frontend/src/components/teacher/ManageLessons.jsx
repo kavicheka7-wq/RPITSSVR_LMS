@@ -902,8 +902,27 @@ export default function ManageLessons() {
     setShowAddModal(true);
   };
 
+  // ✅ អនុគមន៍ជំនួយសម្រាប់ទាញយកចំណងជើងវីដេអូដោយស្វ័យប្រវត្តិ ពេលជ្រើសរើសហ្វាល់វីដេអូក្នុង Modal មេរៀនថ្មី
+  const handleModalVideoFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setYoutubeVideo((prev) => ({
+        ...prev,
+        title: prev.title || file.name,
+      }));
+    }
+  };
+
+  // ✅ អនុគមន៍ជំនួយសម្រាប់ទាញយកចំណងជើងវីដេអូដោយស្វ័យប្រវត្តិ ពេលជ្រើសរើសហ្វាល់វីដេអូក្នុងកាតមេរៀន
+  const handleVideoFileChangeWithAutoTitle = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setVideoTitle(file.name);
+    }
+  };
+
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបមេរៀន និងផ្ទុកហ្វាល់ (ភ្ជាប់តែកណ្ដឹង)
+  // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបមេរៀន និងផ្ទុកហ្វាល់ (0ms Optimistic UI Update)
   // ============================================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -929,13 +948,20 @@ export default function ManageLessons() {
     );
     const courseName = targetCourse?.course_name || '';
 
+    const filesToUpload = [...selectedFiles];
+    const ytToUpload = { ...youtubeVideo };
+
     setIsSubmitting(true);
     try {
-      let currentLessonId = null;
+      let savedLesson = null;
 
       if (editingLesson) {
-        await api.put(`/teacher/lessons/${editingLesson.id}`, payload);
-        currentLessonId = editingLesson.id;
+        const res = await api.put(`/teacher/lessons/${editingLesson.id}`, payload);
+        savedLesson = res.data?.lesson || res.data?.data || {
+          ...editingLesson,
+          ...payload,
+          course: targetCourse || editingLesson.course,
+        };
 
         pushLocalNotification({
           titleKm: 'បានកែប្រែមេរៀន',
@@ -947,10 +973,13 @@ export default function ManageLessons() {
         });
       } else {
         const response = await api.post('/teacher/lessons', payload);
-        currentLessonId =
-          response.data?.lesson?.id ||
-          response.data?.data?.id ||
-          response.data?.id;
+        savedLesson = response.data?.lesson || response.data?.data || {
+          id: response.data?.id || Date.now(),
+          ...payload,
+          course: targetCourse,
+          files: [],
+          videos: [],
+        };
 
         pushLocalNotification({
           titleKm: 'បានបន្ថែមមេរៀនថ្មី',
@@ -962,55 +991,99 @@ export default function ManageLessons() {
         });
       }
 
-      // ✅ សំខាន់បំផុត៖ ប្រើ headers: { 'Content-Type': undefined } ដើម្បីឱ្យ Browser បង្កើត multipart/form-data boundary ដោយស្វ័យប្រវត្តិ
-      if (selectedFiles.length > 0 && currentLessonId) {
-        for (const file of selectedFiles) {
-          const filePayload = new FormData();
-          filePayload.append('lesson_id', currentLessonId);
-          filePayload.append('file', file);
+      const currentLessonId = savedLesson?.id;
 
-          try {
-            await api.post('/teacher/lessons/file', filePayload, {
-              headers: { 'Content-Type': undefined },
-            });
-          } catch (fileError) {
-            console.error('File upload failed', fileError);
-          }
-        }
+      // ✅ បង្កើតបញ្ជីឯកសារ និងវីដេអូបណ្ដោះអាសន្នដើម្បីបង្ហាញលើអេក្រង់ភ្លាមៗក្នុង 0ms
+      const optimisticFiles = filesToUpload.map((f, idx) => ({
+        id: `temp_f_${Date.now()}_${idx}`,
+        lesson_id: currentLessonId,
+        file_name: f.name,
+        file_path: URL.createObjectURL(f),
+      }));
+
+      // ✅ បើគ្រូមិនបានវាយចំណងជើងវីដេអូទេ យកឈ្មោះមេរៀនមកប្រើជាចំណងជើងវីដេអូជំនួសស្វ័យប្រវត្តិ
+      const autoYtTitle = ytToUpload.title.trim() || payload.title || 'Video Link';
+
+      const optimisticVideos = ytToUpload.url.trim()
+        ? [
+            {
+              id: `temp_v_${Date.now()}`,
+              lesson_id: currentLessonId,
+              title: autoYtTitle,
+              video_url: ytToUpload.url.trim(),
+            },
+          ]
+        : [];
+
+      if (currentLessonId) {
+        setLessons((prev) => {
+          const exists = prev.some((l) => String(l.id) === String(currentLessonId));
+          const mergedLesson = {
+            ...savedLesson,
+            course: savedLesson.course || targetCourse,
+            files: [...(savedLesson.files || []), ...optimisticFiles],
+            videos: [...(savedLesson.videos || []), ...optimisticVideos],
+          };
+          const updated = exists
+            ? prev.map((l) =>
+                String(l.id) === String(currentLessonId) ? mergedLesson : l
+              )
+            : [...prev, mergedLesson];
+          LESSONS_MEM_CACHE.lessons = updated;
+          safeSaveLessonsCache(currentTeacherId, updated);
+          return updated;
+        });
+        setExpandedLesson(currentLessonId);
       }
 
-      if (youtubeVideo.url.trim() && currentLessonId) {
-        const videoPayload = new FormData();
-        videoPayload.append('lesson_id', currentLessonId);
-        videoPayload.append(
-          'title',
-          youtubeVideo.title.trim() || payload.title
-        );
-        videoPayload.append('video_url', youtubeVideo.url.trim());
-
-        try {
-          await api.post('/teacher/lessons/video', videoPayload, {
-            headers: { 'Content-Type': undefined },
-          });
-        } catch (videoError) {
-          console.error('Video upload failed', videoError);
-        }
-      }
-
+      // ✅ បិទផ្ទាំង Modal ភ្លាមៗដោយមិនឱ្យគ្រូរង់ចាំការបង្ហោះហ្វាល់យូរ
       setShowAddModal(false);
       setSelectedFiles([]);
       setYoutubeVideo({ title: '', url: '' });
-      if (currentLessonId) {
-        setExpandedLesson(currentLessonId);
+      setIsSubmitting(false);
+
+      // ✅ បង្ហោះឯកសារ និងវីដេអូទាំងអស់ព្រមគ្នា (Parallel) នៅផ្ទៃខាងក្រោយ
+      const uploadTasks = [];
+
+      if (filesToUpload.length > 0 && currentLessonId) {
+        filesToUpload.forEach((file) => {
+          const filePayload = new FormData();
+          filePayload.append('lesson_id', currentLessonId);
+          filePayload.append('file', file);
+          uploadTasks.push(
+            api
+              .post('/teacher/lessons/file', filePayload, {
+                headers: { 'Content-Type': undefined },
+              })
+              .catch((err) => console.error('File upload failed', err))
+          );
+        });
       }
-      await fetchLessons();
+
+      if (ytToUpload.url.trim() && currentLessonId) {
+        const videoPayload = new FormData();
+        videoPayload.append('lesson_id', currentLessonId);
+        videoPayload.append('title', autoYtTitle);
+        videoPayload.append('video_url', ytToUpload.url.trim());
+        uploadTasks.push(
+          api
+            .post('/teacher/lessons/video', videoPayload, {
+              headers: { 'Content-Type': undefined },
+            })
+            .catch((err) => console.error('Video upload failed', err))
+        );
+      }
+
+      if (uploadTasks.length > 0) {
+        await Promise.all(uploadTasks);
+        fetchLessons();
+      }
     } catch (error) {
       console.error('Submit error:', error);
       const errMsg =
         error.response?.data?.message ||
         t('មិនអាចរក្សាទុកមេរៀនបានទេ សូមព្យាយាមម្ដងទៀត!', 'Could not save lesson, please try again!');
       setFormError(String(errMsg));
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -1057,17 +1130,35 @@ export default function ManageLessons() {
     }
   };
 
-  // ✅ Upload File + Real-time State Update (0ms) + បញ្ជូនសារទៅកាន់កណ្ដឹង
+  // ✅ Upload File ក្នុងកាតមេរៀន៖ បង្ហាញឯកសារភ្លាមៗក្នុង 0 វិនាទី (Optimistic UI)
   const handleUploadFile = async (lessonId, e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
 
     setMediaErrorMsg('');
+    const targetLesson = lessons.find((l) => l.id === lessonId);
+
+    // ១. បង្ហាញឯកសារលើអេក្រង់ភ្លាមៗក្នុង 0ms មុនពេលបញ្ជូនទៅ Server
+    const tempId = `temp_file_${Date.now()}`;
+    const optimisticFile = {
+      id: tempId,
+      lesson_id: lessonId,
+      file_name: file.name,
+      file_path: URL.createObjectURL(file),
+    };
+
+    setLessons((prev) =>
+      prev.map((lsn) =>
+        String(lsn.id) === String(lessonId)
+          ? { ...lsn, files: [...(Array.isArray(lsn.files) ? lsn.files : []), optimisticFile] }
+          : lsn
+      )
+    );
+
     const filePayload = new FormData();
     filePayload.append('lesson_id', lessonId);
     filePayload.append('file', file);
-
-    const targetLesson = lessons.find((l) => l.id === lessonId);
 
     setUploadingFileId(lessonId);
     try {
@@ -1075,33 +1166,21 @@ export default function ManageLessons() {
         headers: { 'Content-Type': undefined },
       });
 
-      const uploadedFile = res.data?.file || res.data?.data || null;
-      const updatedLessonFromServer = res.data?.lesson || null;
+      const uploadedFile = res.data?.file || res.data?.data || optimisticFile;
 
-      // ✅ ធ្វើបច្ចុប្បន្នភាពបញ្ជីឯកសារក្នុង React State ភ្លាមៗក្នុង 0 វិនាទី
-      if (uploadedFile || updatedLessonFromServer) {
-        setLessons((prev) => {
-          const updated = prev.map((lsn) => {
-            if (String(lsn.id) !== String(lessonId)) return lsn;
-            if (updatedLessonFromServer && Array.isArray(updatedLessonFromServer.files)) {
-              return { ...lsn, files: updatedLessonFromServer.files };
-            }
-            const existingFiles = Array.isArray(lsn.files) ? lsn.files : [];
-            const alreadyIn = existingFiles.some(
-              (f) => String(f.id) === String(uploadedFile.id)
-            );
-            return {
-              ...lsn,
-              files: alreadyIn ? existingFiles : [...existingFiles, uploadedFile],
-            };
-          });
-          LESSONS_MEM_CACHE.lessons = updated;
-          safeSaveLessonsCache(currentTeacherId, updated);
-          return updated;
+      // ២. ជំនួសឯកសារបណ្ដោះអាសន្នដោយទិន្នន័យពិតពី Server ដោយមិនបាច់ហៅ fetchLessons() ឡើងវិញ
+      setLessons((prev) => {
+        const updated = prev.map((lsn) => {
+          if (String(lsn.id) !== String(lessonId)) return lsn;
+          const nextFiles = (lsn.files || []).map((f) =>
+            f.id === tempId ? uploadedFile : f
+          );
+          return { ...lsn, files: nextFiles };
         });
-      }
-
-      await fetchLessons();
+        LESSONS_MEM_CACHE.lessons = updated;
+        safeSaveLessonsCache(currentTeacherId, updated);
+        return updated;
+      });
 
       pushLocalNotification({
         titleKm: 'បានផ្ទុកឡើងឯកសារមេរៀន',
@@ -1112,7 +1191,14 @@ export default function ManageLessons() {
         link: '/lessons',
       });
     } catch (error) {
-      console.error('Failed to upload file:', error);
+      // បើមានបញ្ហា លុបឯកសារបណ្ដោះអាសន្នចេញវិញ
+      setLessons((prev) =>
+        prev.map((lsn) =>
+          String(lsn.id) === String(lessonId)
+            ? { ...lsn, files: (lsn.files || []).filter((f) => f.id !== tempId) }
+            : lsn
+        )
+      );
       const apiErrors = error.response?.data?.errors;
       const firstValidationMsg = apiErrors
         ? Object.values(apiErrors).flat()[0]
@@ -1127,34 +1213,42 @@ export default function ManageLessons() {
       setMediaErrorMsg(String(msg));
     } finally {
       setUploadingFileId(null);
-      e.target.value = '';
     }
   };
 
-  const handleDeleteFileClick = (file) => {
-    setDeleteMediaTarget({
-      type: 'file',
-      id: file.id,
-      name: file.file_name || t('ឯកសារនេះ', 'this file'),
-    });
-  };
-
-  // ✅ Upload Video + Real-time State Update + បញ្ជូនសារទៅកាន់កណ្ដឹង
+  // ✅ Upload Video៖ បង្ហាញភ្លាមៗក្នុង 0ms (អនុញ្ញាតឱ្យផ្ទុកឡើងដោយមិនបាច់វាយចំណងជើង វាយកឈ្មោះហ្វាល់ស្វ័យប្រវត្តិ)
   const handleUploadVideo = async (lessonId, e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!videoTitle.trim()) {
-      e.target.value = '';
-      return;
-    }
+    e.target.value = '';
+    
+    // បើគ្រូមិនបានវាយចំណងជើងទេ យកឈ្មោះហ្វាល់មកធ្វើជាចំណងជើងវីដេអូដោយស្វ័យប្រវត្តិ
+    const titleVal = videoTitle.trim() || file.name || 'Video File';
 
     setMediaErrorMsg('');
+    setVideoTitle('');
+    const targetLesson = lessons.find((l) => l.id === lessonId);
+
+    const tempId = `temp_vid_${Date.now()}`;
+    const optimisticVid = {
+      id: tempId,
+      lesson_id: lessonId,
+      title: titleVal,
+      video_url: URL.createObjectURL(file),
+    };
+
+    setLessons((prev) =>
+      prev.map((lsn) =>
+        String(lsn.id) === String(lessonId)
+          ? { ...lsn, videos: [...(Array.isArray(lsn.videos) ? lsn.videos : []), optimisticVid] }
+          : lsn
+      )
+    );
+
     const videoPayload = new FormData();
     videoPayload.append('lesson_id', lessonId);
-    videoPayload.append('title', videoTitle.trim());
+    videoPayload.append('title', titleVal);
     videoPayload.append('video', file);
-
-    const targetLesson = lessons.find((l) => l.id === lessonId);
 
     setUploadingVideoId(lessonId);
     try {
@@ -1162,56 +1256,80 @@ export default function ManageLessons() {
         headers: { 'Content-Type': undefined },
       });
 
-      const uploadedVid = res.data?.video || res.data?.data || null;
-      if (uploadedVid) {
-        setLessons((prev) => {
-          const updated = prev.map((lsn) => {
-            if (String(lsn.id) !== String(lessonId)) return lsn;
-            const existingVideos = Array.isArray(lsn.videos) ? lsn.videos : [];
-            return { ...lsn, videos: [...existingVideos, uploadedVid] };
-          });
-          LESSONS_MEM_CACHE.lessons = updated;
-          safeSaveLessonsCache(currentTeacherId, updated);
-          return updated;
-        });
-      }
+      const uploadedVid = res.data?.video || res.data?.data || optimisticVid;
 
-      setVideoTitle('');
-      await fetchLessons();
+      setLessons((prev) => {
+        const updated = prev.map((lsn) => {
+          if (String(lsn.id) !== String(lessonId)) return lsn;
+          return {
+            ...lsn,
+            videos: (lsn.videos || []).map((v) => (v.id === tempId ? uploadedVid : v)),
+          };
+        });
+        LESSONS_MEM_CACHE.lessons = updated;
+        safeSaveLessonsCache(currentTeacherId, updated);
+        return updated;
+      });
 
       pushLocalNotification({
         titleKm: 'បានផ្ទុកឡើងវីដេអូបង្រៀន',
         titleEn: 'Teaching Video Uploaded',
-        descKm: `បានផ្ទុកឡើងវីដេអូ «${videoTitle.trim()}» ទៅកាន់មេរៀន «${targetLesson?.title || ''}»។`,
-        descEn: `Uploaded video "${videoTitle.trim()}" to lesson "${targetLesson?.title || ''}".`,
+        descKm: `បានផ្ទុកឡើងវីដេអូ «${titleVal}» ទៅកាន់មេរៀន «${targetLesson?.title || ''}»។`,
+        descEn: `Uploaded video "${titleVal}" to lesson "${targetLesson?.title || ''}".`,
         category: 'lesson',
         link: '/lessons',
       });
     } catch (error) {
-      console.error('Failed to upload video:', error);
+      setLessons((prev) =>
+        prev.map((lsn) =>
+          String(lsn.id) === String(lessonId)
+            ? { ...lsn, videos: (lsn.videos || []).filter((v) => v.id !== tempId) }
+            : lsn
+        )
+      );
       const msg =
         error.response?.data?.message ||
         t('មិនអាចផ្ទុកឡើងវីដេអូបានទេ!', 'Could not upload video!');
       setMediaErrorMsg(String(msg));
     } finally {
       setUploadingVideoId(null);
-      e.target.value = '';
     }
   };
 
-  // ✅ Add Video URL + Real-time State Update + បញ្ជូនសារទៅកាន់កណ្ដឹង
+  // ✅ Add Video URL៖ បង្ហាញភ្លាមៗក្នុង 0ms (បើមិនវាយចំណងជើង វានឹងយកឈ្មោះមេរៀនជំនួស)
   const handleAddVideoUrl = async (lessonId) => {
-    if (!videoTitle.trim() || !videoUrlInput.trim()) {
-      return;
-    }
+    if (!videoUrlInput.trim()) return;
 
     setMediaErrorMsg('');
+    const targetLesson = lessons.find((l) => l.id === lessonId);
+    
+    // បើគ្រូមិនបានវាយចំណងជើងទេ យកឈ្មោះមេរៀនមកធ្វើជាចំណងជើងលីងដោយស្វ័យប្រវត្តិ
+    const titleVal = videoTitle.trim() || targetLesson?.title || 'YouTube Video';
+    const urlVal = videoUrlInput.trim();
+    
+    setVideoTitle('');
+    setVideoUrlInput('');
+
+    const tempId = `temp_yt_${Date.now()}`;
+    const optimisticVid = {
+      id: tempId,
+      lesson_id: lessonId,
+      title: titleVal,
+      video_url: urlVal,
+    };
+
+    setLessons((prev) =>
+      prev.map((lsn) =>
+        String(lsn.id) === String(lessonId)
+          ? { ...lsn, videos: [...(Array.isArray(lsn.videos) ? lsn.videos : []), optimisticVid] }
+          : lsn
+      )
+    );
+
     const videoPayload = new FormData();
     videoPayload.append('lesson_id', lessonId);
-    videoPayload.append('title', videoTitle.trim());
-    videoPayload.append('video_url', videoUrlInput.trim());
-
-    const targetLesson = lessons.find((l) => l.id === lessonId);
+    videoPayload.append('title', titleVal);
+    videoPayload.append('video_url', urlVal);
 
     setUploadingVideoId(lessonId);
     try {
@@ -1219,34 +1337,37 @@ export default function ManageLessons() {
         headers: { 'Content-Type': undefined },
       });
 
-      const uploadedVid = res.data?.video || res.data?.data || null;
-      if (uploadedVid) {
-        setLessons((prev) => {
-          const updated = prev.map((lsn) => {
-            if (String(lsn.id) !== String(lessonId)) return lsn;
-            const existingVideos = Array.isArray(lsn.videos) ? lsn.videos : [];
-            return { ...lsn, videos: [...existingVideos, uploadedVid] };
-          });
-          LESSONS_MEM_CACHE.lessons = updated;
-          safeSaveLessonsCache(currentTeacherId, updated);
-          return updated;
-        });
-      }
+      const uploadedVid = res.data?.video || res.data?.data || optimisticVid;
 
-      setVideoTitle('');
-      setVideoUrlInput('');
-      await fetchLessons();
+      setLessons((prev) => {
+        const updated = prev.map((lsn) => {
+          if (String(lsn.id) !== String(lessonId)) return lsn;
+          return {
+            ...lsn,
+            videos: (lsn.videos || []).map((v) => (v.id === tempId ? uploadedVid : v)),
+          };
+        });
+        LESSONS_MEM_CACHE.lessons = updated;
+        safeSaveLessonsCache(currentTeacherId, updated);
+        return updated;
+      });
 
       pushLocalNotification({
         titleKm: 'បានភ្ជាប់តំណវីដេអូ YouTube',
         titleEn: 'YouTube Video Linked',
-        descKm: `បានភ្ជាប់តំណវីដេអូ «${videoTitle.trim()}» ទៅកាន់មេរៀន «${targetLesson?.title || ''}»។`,
-        descEn: `Attached video link "${videoTitle.trim()}" to lesson "${targetLesson?.title || ''}".`,
+        descKm: `បានភ្ជាប់តំណវីដេអូ «${titleVal}» ទៅកាន់មេរៀន «${targetLesson?.title || ''}»។`,
+        descEn: `Attached video link "${titleVal}" to lesson "${targetLesson?.title || ''}".`,
         category: 'lesson',
         link: '/lessons',
       });
     } catch (error) {
-      console.error('Failed to attach video URL:', error);
+      setLessons((prev) =>
+        prev.map((lsn) =>
+          String(lsn.id) === String(lessonId)
+            ? { ...lsn, videos: (lsn.videos || []).filter((v) => v.id !== tempId) }
+            : lsn
+        )
+      );
       const msg =
         error.response?.data?.message ||
         t('មិនអាចភ្ជាប់លីងវីដេអូបានទេ!', 'Could not attach video link!');
@@ -1821,7 +1942,7 @@ export default function ManageLessons() {
                         : 'border-gray-200 hover:border-blue-200 hover:shadow-md'
                     }`}
                   >
-                    {/* ផ្ទៃកាតខាងលើ */}
+                    {/* ផ្ទៃកាតខាងលើ (Main Card Info - Responsive Phone / iPad / Desktop) */}
                     <div
                       className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-5 cursor-pointer"
                       onClick={() => handleToggleExpandLesson(lesson.id)}
@@ -1854,7 +1975,7 @@ export default function ManageLessons() {
                         </div>
                       </div>
 
-                      {/* ផ្នែកខាងស្តាំ */}
+                      {/* ផ្នែកខាងស្តាំ (Badges & Actions - រៀបពេញភ្នែកលើទូរស័ព្ទ និង iPad) */}
                       <div
                         className="lsn-divider-top flex items-center justify-between md:justify-end gap-2.5 sm:gap-4 shrink-0 pt-3 md:pt-0 border-t border-gray-100 md:border-t-0"
                         onClick={(e) => e.stopPropagation()}
@@ -2054,7 +2175,10 @@ export default function ManageLessons() {
                               <div className="lsn-mode-switch inline-flex bg-gray-100 p-1 rounded-xl">
                                 <button
                                   type="button"
-                                  onClick={() => setVideoInputMode('file')}
+                                  onClick={() => {
+                                    setVideoInputMode('file');
+                                    setVideoTitle('');
+                                  }}
                                   className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                                     videoInputMode === 'file'
                                       ? 'bg-purple-600 text-white shadow-2xs'
@@ -2065,7 +2189,10 @@ export default function ManageLessons() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setVideoInputMode('url')}
+                                  onClick={() => {
+                                    setVideoInputMode('url');
+                                    setVideoTitle('');
+                                  }}
                                   className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                                     videoInputMode === 'url'
                                       ? 'bg-purple-600 text-white shadow-2xs'
@@ -2138,8 +2265,8 @@ export default function ManageLessons() {
                                   <input
                                     type="text"
                                     placeholder={t(
-                                      'បញ្ចូលចំណងជើងវីដេអូមុនផ្ទុកឡើង...',
-                                      'Enter video title before uploading...'
+                                      'បញ្ចូលចំណងជើង (ឬទុកទទេដើម្បីយកឈ្មោះហ្វាល់)...',
+                                      'Enter title (or leave empty for file name)...'
                                     )}
                                     value={videoTitle}
                                     onChange={(e) => setVideoTitle(e.target.value)}
@@ -2148,10 +2275,7 @@ export default function ManageLessons() {
                                   <button
                                     type="button"
                                     onClick={() => videoFileInputRef.current?.click()}
-                                    disabled={
-                                      uploadingVideoId === lesson.id ||
-                                      !videoTitle.trim()
-                                    }
+                                    disabled={uploadingVideoId === lesson.id}
                                     className="w-full sm:w-auto inline-flex items-center justify-center px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-sm disabled:opacity-50 cursor-pointer shrink-0"
                                   >
                                     {uploadingVideoId === lesson.id ? (
@@ -2167,8 +2291,8 @@ export default function ManageLessons() {
                                   <input
                                     type="text"
                                     placeholder={t(
-                                      'ចំណងជើងវីដេអូ...',
-                                      'Video title...'
+                                      'ចំណងជើង (ឬទុកទទេដើម្បីយកឈ្មោះមេរៀន)...',
+                                      'Video title (or leave empty for lesson title)...'
                                     )}
                                     value={videoTitle}
                                     onChange={(e) => setVideoTitle(e.target.value)}
@@ -2189,7 +2313,6 @@ export default function ManageLessons() {
                                       onClick={() => handleAddVideoUrl(lesson.id)}
                                       disabled={
                                         uploadingVideoId === lesson.id ||
-                                        !videoTitle.trim() ||
                                         !videoUrlInput.trim()
                                       }
                                       className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm disabled:opacity-50 cursor-pointer shrink-0"
@@ -2226,7 +2349,7 @@ export default function ManageLessons() {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 5. MODAL - Add/Edit Lesson                                         */}
+      {/* 5. MODAL - Add/Edit Lesson (Bottom Sheet on Phone, Centered on iPad/Desktop) */}
       {/* ------------------------------------------------------------------ */}
       {showAddModal && (
         <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4">
@@ -2380,32 +2503,105 @@ export default function ManageLessons() {
                 <div className="lsn-box-purple bg-purple-50/30 p-4 rounded-2xl border border-purple-100/50">
                   <label className="lsn-label block text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
                     <VideoCameraIcon className="h-5 w-5 text-purple-600" />
-                    {t('ភ្ជាប់វីដេអូពី (YouTube URL)', 'Attach Video (YouTube URL)')}
+                    {t('ភ្ជាប់វីដេអូពី (YouTube URL) ឬផ្ទុកហ្វាល់', 'Attach Video (YouTube URL) or Upload')}
                   </label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
-                    <input
-                      type="text"
-                      placeholder={t('ចំណងជើងវីដេអូ...', 'Video title...')}
-                      value={youtubeVideo.title}
-                      onChange={(e) =>
-                        setYoutubeVideo({ ...youtubeVideo, title: e.target.value })
-                      }
-                      className="lsn-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-600 font-medium transition-all shadow-sm bg-white"
-                    />
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                        <LinkIcon className="h-5 w-5 text-gray-400" />
-                      </div>
+                  
+                  <div className="space-y-3.5 sm:space-y-4">
+                    <div className="flex flex-col sm:flex-row gap-3">
                       <input
-                        type="url"
-                        placeholder="https://www.youtube.com/watch?v=..."
-                        value={youtubeVideo.url}
+                        type="text"
+                        placeholder={t('ចំណងជើង (ឬទុកទទេដើម្បីយកឈ្មោះវីដេអូ)...', 'Video title (or leave empty)...')}
+                        value={youtubeVideo.title}
                         onChange={(e) =>
-                          setYoutubeVideo({ ...youtubeVideo, url: e.target.value })
+                          setYoutubeVideo({ ...youtubeVideo, title: e.target.value })
                         }
-                        className="lsn-input w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-600 font-medium transition-all shadow-sm bg-white"
+                        className="lsn-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-600 font-medium transition-all shadow-sm bg-white"
                       />
                     </div>
+                    
+                    <div className="lsn-mode-switch inline-flex bg-white p-1 rounded-xl shadow-sm border border-gray-200 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVideoInputMode('file');
+                          setYoutubeVideo({ ...youtubeVideo, url: '' });
+                        }}
+                        className={`flex-1 sm:flex-initial px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                          videoInputMode === 'file'
+                            ? 'bg-purple-600 text-white shadow-md'
+                            : 'lsn-text-secondary text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        {t('ជ្រើសរើសហ្វាល់', 'Select File')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVideoInputMode('url')}
+                        className={`flex-1 sm:flex-initial px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                          videoInputMode === 'url'
+                            ? 'bg-purple-600 text-white shadow-md'
+                            : 'lsn-text-secondary text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        {t('បញ្ចូលលីង YouTube', 'YouTube Link')}
+                      </button>
+                    </div>
+
+                    {videoInputMode === 'file' ? (
+                      <label className="lsn-dropzone flex flex-col items-center justify-center w-full h-24 border-2 border-purple-200 border-dashed rounded-xl cursor-pointer bg-white hover:bg-purple-50 hover:border-purple-400 transition-all">
+                        <div className="flex flex-col items-center justify-center pt-5 pb-6 text-purple-600">
+                          <VideoCameraIcon className="w-6 h-6 mb-2" />
+                          <p className="lsn-text-secondary text-xs sm:text-sm font-bold">
+                            {t('ចុចទីនេះដើម្បីជ្រើសរើសវីដេអូ', 'Click to select video')}
+                          </p>
+                        </div>
+                        <input
+                          type="file"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setYoutubeVideo((prev) => ({
+                                ...prev,
+                                title: prev.title || file.name,
+                                file: file,
+                              }));
+                            }
+                          }}
+                          className="hidden"
+                          accept="video/mp4,video/x-m4v,video/*"
+                        />
+                      </label>
+                    ) : (
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                          <LinkIcon className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <input
+                          type="url"
+                          placeholder="https://www.youtube.com/watch?v=..."
+                          value={youtubeVideo.url}
+                          onChange={(e) =>
+                            setYoutubeVideo({ ...youtubeVideo, url: e.target.value })
+                          }
+                          className="lsn-input w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-600 font-medium transition-all shadow-sm bg-white"
+                        />
+                      </div>
+                    )}
+                    
+                    {videoInputMode === 'file' && youtubeVideo.file && (
+                      <div className="lsn-media-item flex items-center justify-between bg-white border border-purple-200 px-4 py-2.5 rounded-xl shadow-sm mt-2">
+                        <span className="lsn-text-primary text-xs font-bold text-gray-700 truncate max-w-[80%]">
+                          {youtubeVideo.file.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setYoutubeVideo({ ...youtubeVideo, file: null })}
+                          className="lsn-badge-rose text-rose-500 hover:text-rose-700 bg-rose-50 p-1.5 rounded-md transition cursor-pointer"
+                        >
+                          <XMarkIcon className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </form>
