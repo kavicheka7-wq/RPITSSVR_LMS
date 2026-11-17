@@ -1,5 +1,6 @@
 // src/components/student/StudentDashboard.jsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -200,7 +201,7 @@ const extractArrayFromRes = (resData) => {
   return [];
 };
 
-// ✅ ទាញទិន្នន័យគ្រប់ទំព័រទាំងអស់របស់សិស្សទុកមុនភ្លាមៗ (ទោះ uid ជា default_student ក៏អនុញ្ញាតឱ្យទាញដែរ ឱ្យតែមាន Token)
+// ✅ ទាញទិន្នន័យគ្រប់ទំព័រទាំងអស់របស់សិស្សទុកមុនភ្លាមៗ
 const prefetchAllStudentPagesData = (
   uid,
   onAssignmentsSynced,
@@ -421,6 +422,7 @@ const resolveStudentAttempt = (quiz) => {
 const StudentDashboard = () => {
   const { t, language } = useLanguage();
   const { getFullName, user } = useAuth();
+  const abortControllerRef = useRef(null);
 
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
@@ -779,6 +781,7 @@ const StudentDashboard = () => {
           statusPill: t('កំពុងសិក្សា', 'Enrolled'),
           icon: PlayCircleIcon,
           iconBoxStyle: theme.iconGradient,
+          link: '/lessons',
         });
       });
     }
@@ -796,6 +799,7 @@ const StudentDashboard = () => {
       statusPill: `${doneHomeworkCount}/${totalAsg} ${t('ធ្វើរួច', 'Done')}`,
       icon: ClipboardDocumentListIcon,
       iconBoxStyle: 'from-purple-400 to-indigo-500 text-white',
+      link: '/assignments',
     });
 
     const totalQz = teacherAssignedQuizzes.length || stats?.total_quizzes || 0;
@@ -811,6 +815,7 @@ const StudentDashboard = () => {
       statusPill: `${doneQuizzesCount}/${totalQz} ${t('ធ្វើរួច', 'Done')}`,
       icon: AcademicCapIcon,
       iconBoxStyle: 'from-emerald-400 to-teal-500 text-slate-950',
+      link: '/quizzes',
     });
 
     slides.push({
@@ -825,6 +830,7 @@ const StudentDashboard = () => {
       statusPill: `${averageScoreNum} / 100 ${t('ពិន្ទុ', 'pts')}`,
       icon: ChartBarIcon,
       iconBoxStyle: 'from-cyan-400 to-blue-500 text-slate-950',
+      link: '/grades',
     });
 
     return slides;
@@ -910,7 +916,6 @@ const StudentDashboard = () => {
       setQuizzes(cachedQz);
     }
 
-    // ✅ Skip API តែនៅពេលមានទិន្នន័យមុខវិជ្ជាពិតប្រាកដ (> 0) ប៉ុណ្ណោះ
     if (
       STUDENT_DASH_MEM_CACHE.uid === currentStudentId &&
       cachedSt &&
@@ -922,8 +927,16 @@ const StudentDashboard = () => {
       return;
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      const dashRes = await api.get('/student/dashboard');
+      const dashRes = await api.get('/student/dashboard', {
+        signal: controller.signal,
+      });
       const resData = dashRes?.data?.data || dashRes?.data || {};
 
       const newStats = resData?.stats || {
@@ -997,12 +1010,20 @@ const StudentDashboard = () => {
         );
       } catch (e) {}
     } catch (error) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        return;
+      }
       console.error('Error fetching student dashboard data:', error);
     }
   }, [currentStudentId]);
 
   useEffect(() => {
     fetchDashboardData();
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [fetchDashboardData]);
 
   const ringRadius = 46;
@@ -1036,8 +1057,9 @@ const StudentDashboard = () => {
       title: t('មុខវិជ្ជាកំពុងរៀន', 'Enrolled Courses'),
       value: stats?.total_courses || enrollments.length || 0,
       icon: BookOpenIcon,
+      link: '/courses',
       cardStyle:
-        'from-blue-500/10 via-indigo-500/5 to-transparent border-blue-200/70',
+        'from-blue-500/10 via-indigo-500/5 to-transparent border-blue-200/70 hover:border-blue-300',
       iconBox:
         'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-blue-500/25',
     },
@@ -1045,8 +1067,9 @@ const StudentDashboard = () => {
       title: t('ពិន្ទុមធ្យមភាគ', 'Average Score'),
       value: `${averageScoreNum}%`,
       icon: ChartBarIcon,
+      link: '/grades',
       cardStyle:
-        'from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-200/70',
+        'from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-200/70 hover:border-emerald-300',
       iconBox:
         'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-emerald-500/25',
     },
@@ -1054,8 +1077,9 @@ const StudentDashboard = () => {
       title: t('កិច្ចការសិស្ស', 'Assignments'),
       value: totalHomeworkCount,
       icon: ClipboardDocumentListIcon,
+      link: '/assignments',
       cardStyle:
-        'from-purple-500/10 via-fuchsia-500/5 to-transparent border-purple-200/70',
+        'from-purple-500/10 via-fuchsia-500/5 to-transparent border-purple-200/70 hover:border-purple-300',
       iconBox:
         'bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-purple-500/25',
     },
@@ -1063,8 +1087,9 @@ const StudentDashboard = () => {
       title: t('កម្រងសំណួរប្រឡង', 'Quizzes'),
       value: totalQuizzesCount,
       icon: AcademicCapIcon,
+      link: '/quizzes',
       cardStyle:
-        'from-amber-500/10 via-orange-500/5 to-transparent border-amber-200/70',
+        'from-amber-500/10 via-orange-500/5 to-transparent border-amber-200/70 hover:border-amber-300',
       iconBox:
         'bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-amber-500/25',
     },
@@ -1073,31 +1098,31 @@ const StudentDashboard = () => {
   const SlideIcon = currentSlide?.icon || PlayCircleIcon;
 
   return (
-    <div className="std-bento-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn select-none">
+    <div className="std-bento-page max-w-7xl mx-auto px-3 sm:px-5 lg:px-8 space-y-5 sm:space-y-6 lg:space-y-8 pb-28 md:pb-12 mt-2 md:mt-0 animate-fadeIn select-none">
       
       {/* ================================================================== */}
-      {/* 📌 1. MODERN BENTO HERO SECTION                                    */}
+      {/* 📌 1. MODERN BENTO HERO SECTION (Adaptive Phone / iPad / Desktop)  */}
       {/* ================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ផ្ទាំងស្វាគមន៍សិស្សបែបឌីជីថល និងប្រអប់រំកិលស្វ័យប្រវត្តិ (8 Columns) */}
-        <div className="lg:col-span-8 relative overflow-hidden rounded-[1.75rem] sm:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-6 sm:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
+        {/* ១.១. ផ្ទាំងស្វាគមន៍សិស្សបែបឌីជីថល និងប្រអប់រំកិលស្វ័យប្រវត្តិ (7 Cols on lg, 8 Cols on xl) */}
+        <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-hero-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
           <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
-          <div className="relative z-10 space-y-3.5">
+          <div className="relative z-10 space-y-3 sm:space-y-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
+                <span className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-[11px] sm:text-xs font-extrabold text-cyan-200 max-w-full">
                   <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
-                  <span>{studentDeptName}</span>
+                  <span className="truncate">{studentDeptName}</span>
                 </span>
 
                 <span
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-extrabold ${
+                  className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                     isWeekendShift
                       ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                       : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1120,13 +1145,13 @@ const StudentDashboard = () => {
               </span>
             </div>
 
-            <div className="space-y-2 pt-1">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
+            <div className="space-y-1.5 sm:space-y-2 pt-1">
+              <h1 className="text-xl sm:text-2xl md:text-3xl xl:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2 leading-snug">
                 <span>{t('សូមស្វាគមន៍,', 'Welcome back,')}</span>
                 <span className="bg-gradient-to-r from-yellow-300 via-amber-200 to-white bg-clip-text text-transparent">
                   {getStudentDisplayName()}
                 </span>
-                <CheckBadgeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-yellow-400 shrink-0" />
+                <CheckBadgeIcon className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 text-yellow-400 shrink-0" />
               </h1>
 
               <p className="text-xs sm:text-sm text-blue-100/80 max-w-xl leading-relaxed font-medium">
@@ -1139,49 +1164,52 @@ const StudentDashboard = () => {
           </div>
 
           <div
-            className="relative z-10 mt-6 pt-5 border-t border-white/15"
+            className="relative z-10 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15"
             onMouseEnter={() => setIsCarouselPaused(true)}
             onMouseLeave={() => setIsCarouselPaused(false)}
           >
             {currentSlide && (
               <div className="space-y-2.5">
-                <div className="relative overflow-hidden bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 transition-all duration-300">
+                <Link
+                  to={currentSlide.link || '/courses'}
+                  className="block relative overflow-hidden bg-white/10 hover:bg-white/[0.14] backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 transition-all duration-300"
+                >
                   <div
                     key={currentSlide.id}
-                    className="std-carousel-slide flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    className="std-carousel-slide flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4"
                   >
-                    <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                    <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
                       <div
-                        className={`h-11 w-11 sm:h-12 sm:w-12 rounded-xl bg-gradient-to-br ${currentSlide.iconBoxStyle} flex items-center justify-center shrink-0 shadow-md`}
+                        className={`h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-gradient-to-br ${currentSlide.iconBoxStyle} flex items-center justify-center shrink-0 shadow-md`}
                       >
-                        <SlideIcon className="h-6 w-6 sm:h-7 sm:w-7 stroke-[2]" />
+                        <SlideIcon className="h-5 w-5 sm:h-7 sm:w-7 stroke-[2]" />
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                           <span
-                            className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded border ${currentSlide.badgeStyle}`}
+                            className={`text-[10px] font-extrabold uppercase tracking-wider px-2 sm:px-2.5 py-0.5 rounded border ${currentSlide.badgeStyle}`}
                           >
                             {currentSlide.badge}
                           </span>
-                          <span className="text-xs font-bold text-blue-200 truncate">
+                          <span className="text-[11px] sm:text-xs font-bold text-blue-200 truncate">
                             {currentSlide.meta}
                           </span>
                         </div>
-                        <h3 className="text-sm sm:text-base font-extrabold text-white truncate mt-1">
+                        <h3 className="text-xs sm:text-base font-extrabold text-white line-clamp-1 mt-1">
                           {currentSlide.title}
                         </h3>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900/80 text-cyan-200 border border-white/15 font-extrabold text-xs shadow-sm">
+                      <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-slate-900/80 text-cyan-200 border border-white/15 font-extrabold text-xs shadow-sm">
                         <SparklesIcon className="h-4 w-4 text-yellow-300 shrink-0" />
                         <span>{currentSlide.statusPill}</span>
                       </span>
                     </div>
                   </div>
-                </div>
+                </Link>
 
                 {spotlightSlides.length > 1 && (
                   <div className="flex items-center justify-between px-1 pt-0.5">
@@ -1208,7 +1236,7 @@ const StudentDashboard = () => {
                       <button
                         type="button"
                         onClick={handlePrevSlide}
-                        className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                        className="p-1.5 sm:p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
                         title={t('មុន', 'Previous')}
                       >
                         <ChevronLeftIcon className="h-3.5 w-3.5 stroke-[2.5]" />
@@ -1216,7 +1244,7 @@ const StudentDashboard = () => {
                       <button
                         type="button"
                         onClick={handleNextSlide}
-                        className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                        className="p-1.5 sm:p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
                         title={t('បន្ទាប់', 'Next')}
                       >
                         <ChevronRightIcon className="h-3.5 w-3.5 stroke-[2.5]" />
@@ -1230,26 +1258,26 @@ const StudentDashboard = () => {
         </div>
 
         {/* ================================================================ */}
-        {/* 📌 ១.២. កាតលទ្ធផលការសិក្សារួម + កងមូលមានទឹករលក និងលេខ % ចំកណ្ដាល */}
+        {/* 📌 ១.២. កាតលទ្ធផលការសិក្សារួម + កងមូលមានទឹករលក (5 Cols on lg, 4 Cols on xl) */}
         {/* ================================================================ */}
-        <div className="lg:col-span-4 std-surface-card bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
+        <div className="lg:col-span-5 xl:col-span-4 std-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <h2 className="std-text-primary text-lg font-extrabold text-gray-900 mt-0.5">
+              <h2 className="std-text-primary text-base sm:text-lg font-extrabold text-gray-900 mt-0.5">
                 {t('លទ្ធផលការសិក្សារួម', 'Academic Standing')}
               </h2>
             </div>
 
             <span
-              className={`px-3 py-1 rounded-full text-xs font-extrabold border ${masteryInfo.badgeClass}`}
+              className={`px-3 py-1 rounded-full text-[11px] sm:text-xs font-extrabold border shrink-0 ${masteryInfo.badgeClass}`}
             >
               {masteryInfo.label}
             </span>
           </div>
 
-          <div className="my-5 flex items-center justify-center gap-5 sm:gap-6">
-            <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
-              <div className="std-liquid-inner absolute inset-[9px] rounded-full overflow-hidden bg-slate-100/90 dark:bg-slate-900/90 z-0 shadow-inner">
+          <div className="my-4 sm:my-5 flex items-center justify-center gap-4 sm:gap-5">
+            <div className="relative w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center shrink-0">
+              <div className="std-liquid-inner absolute inset-[8px] sm:inset-[9px] rounded-full overflow-hidden bg-slate-100/90 dark:bg-slate-900/90 z-0 shadow-inner">
                 <div
                   className="absolute bottom-0 left-0 right-0 transition-all duration-1000 ease-out"
                   style={{ height: `${liquidLevelPercent}%` }}
@@ -1294,7 +1322,7 @@ const StudentDashboard = () => {
 
               <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
                 <span
-                  className={`text-2xl font-black tracking-tight transition-colors duration-500 ${
+                  className={`text-xl sm:text-2xl font-black tracking-tight transition-colors duration-500 ${
                     isLiquidDarkText
                       ? 'std-text-primary text-slate-900'
                       : 'text-white drop-shadow-xs'
@@ -1306,12 +1334,12 @@ const StudentDashboard = () => {
             </div>
 
             <div className="space-y-2 min-w-0 flex-1">
-              <div className="std-subbox bg-gray-50 border border-gray-100 rounded-2xl px-3.5 py-2.5">
+              <div className="std-subbox bg-gray-50 border border-gray-100 rounded-2xl px-3 sm:px-3.5 py-2 sm:py-2.5">
                 <span className="std-text-secondary block text-[10px] font-bold uppercase text-gray-400">
                   {t('ស្ថានភាពលទ្ធផល', 'Result Status')}
                 </span>
                 <span
-                  className={`block text-base sm:text-lg font-black mt-0.5 truncate ${masteryInfo.statusTextColor}`}
+                  className={`block text-sm sm:text-base xl:text-lg font-black mt-0.5 truncate ${masteryInfo.statusTextColor}`}
                 >
                   {masteryInfo.statusText}
                 </span>
@@ -1327,56 +1355,61 @@ const StudentDashboard = () => {
                 </span>
               </div>
 
-              <p className="std-text-secondary text-[11px] font-semibold text-gray-500 leading-snug px-1">
+              <p className="std-text-secondary text-[11px] font-semibold text-gray-500 leading-snug px-1 line-clamp-2">
                 {masteryInfo.desc}
               </p>
             </div>
           </div>
 
-          <div className="std-card-divider pt-4 border-t border-gray-100 flex items-center justify-between text-xs">
+          <div className="std-card-divider pt-3.5 sm:pt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="std-text-secondary font-bold text-gray-500">
               {t('ពិន្ទុជាប់កំណត់៖', 'Passing Score:')}{' '}
               <strong className="std-text-primary text-emerald-600 dark:text-emerald-400">
                 50 {t('ពិន្ទុ', 'pts')}
               </strong>
             </span>
-            <span className="font-extrabold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+            <Link
+              to="/grades"
+              className="font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+            >
               <CheckBadgeIcon className="h-4 w-4 text-emerald-500 shrink-0" />
               <span>{getStudentBatchYear()}</span>
-            </span>
+            </Link>
           </div>
         </div>
 
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. STATIC METRIC TILES                                          */}
+      {/* 📌 2. METRIC TILES (2 Cols on Phone/Tablet, 4 on Laptop/Desktop)   */}
       {/* ================================================================== */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
         {statCards.map((stat, index) => {
           const Icon = stat.icon;
           return (
-            <div
+            <Link
               key={index}
-              className={`std-metric-tile relative overflow-hidden rounded-2xl sm:rounded-3xl bg-white bg-gradient-to-br ${stat.cardStyle} p-4 sm:p-5 border shadow-2xs flex flex-col justify-between`}
+              to={stat.link}
+              className={`std-metric-tile group relative overflow-hidden rounded-2xl sm:rounded-3xl bg-white bg-gradient-to-br ${stat.cardStyle} p-4 sm:p-5 border shadow-2xs hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between`}
             >
-              <div className="flex items-start justify-start">
+              <div className="flex items-start justify-between gap-2">
                 <div
-                  className={`h-11 w-11 sm:h-12 sm:w-12 rounded-2xl ${stat.iconBox} flex items-center justify-center shadow-lg shrink-0`}
+                  className={`h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl ${stat.iconBox} flex items-center justify-center shadow-lg shrink-0 group-hover:scale-105 transition-transform`}
                 >
                   <Icon className="h-5 w-5 sm:h-6 sm:w-6 stroke-[2.2]" />
                 </div>
+                <ChevronRightIcon className="h-4 w-4 text-gray-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
               </div>
 
-              <div className="mt-4">
+              <div className="mt-3.5 sm:mt-4">
                 <p className="std-text-primary text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
                   {stat.value}
                 </p>
-                <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-800 mt-1 truncate">
+                <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-800 mt-0.5 sm:mt-1 truncate">
                   {stat.title}
                 </p>
               </div>
-            </div>
+            </Link>
           );
         })}
       </div>
@@ -1384,27 +1417,35 @@ const StudentDashboard = () => {
       {/* ================================================================== */}
       {/* 📌 3. ២ កាតទន្ទឹមគ្នា៖ កិច្ចការថ្មីៗ និង កម្រងសំណួរថ្មីៗ                   */}
       {/* ================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6 lg:gap-8 items-stretch">
         
         {/* ៣.១. កាតកិច្ចការថ្មីៗ */}
-        <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
-          <div className="space-y-5">
-            <div className="flex items-center justify-start gap-3 pb-4 border-b border-gray-100 std-card-divider">
-              <div className="flex items-center gap-3.5 min-w-0">
-                <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-purple-500/20 shrink-0">
-                  <ClipboardDocumentListIcon className="h-6 w-6 stroke-[2]" />
+        <div className="std-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] border border-gray-200/80 shadow-sm p-4 sm:p-6 lg:p-7 flex flex-col justify-between h-full">
+          <div className="space-y-4 sm:space-y-5">
+            <div className="flex items-center justify-between gap-3 pb-3.5 sm:pb-4 border-b border-gray-100 std-card-divider">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-purple-500/20 shrink-0">
+                  <ClipboardDocumentListIcon className="h-5 w-5 sm:h-6 sm:w-6 stroke-[2]" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="std-text-primary text-lg sm:text-xl font-black text-gray-900 truncate">
+                  <h3 className="std-text-primary text-base sm:text-xl font-black text-gray-900 truncate">
                     {t('កិច្ចការថ្មីៗ', 'Recent Assignments')}
                   </h3>
                 </div>
               </div>
+
+              <Link
+                to="/assignments"
+                className="inline-flex items-center gap-1 text-xs font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+              >
+                <span>{t('មើលទាំងអស់', 'View All')}</span>
+                <ChevronRightIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+              </Link>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2.5 sm:space-y-3">
               {teacherAssignedHomework.length === 0 ? (
-                <div className="std-empty-box py-12 px-4 text-center bg-gray-50/70 rounded-2xl border border-dashed border-gray-200 space-y-2.5">
+                <div className="std-empty-box py-10 sm:py-12 px-4 text-center bg-gray-50/70 rounded-2xl border border-dashed border-gray-200 space-y-2.5">
                   <div className="h-12 w-12 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto">
                     <ClipboardDocumentListIcon className="h-6 w-6" />
                   </div>
@@ -1431,13 +1472,14 @@ const StudentDashboard = () => {
                     t('មុខវិជ្ជាសិក្សា', 'Course');
 
                   return (
-                    <div
+                    <Link
                       key={assign.id || idx}
-                      className="std-activity-item flex items-center justify-between gap-3.5 p-3.5 sm:p-4 rounded-2xl border border-gray-100 bg-gray-50/60 transition-all"
+                      to="/assignments"
+                      className="std-activity-item flex items-center justify-between gap-2.5 sm:gap-3.5 p-3 sm:p-4 rounded-2xl border border-gray-100 hover:border-indigo-300 bg-gray-50/60 transition-all"
                     >
-                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
                         <div
-                          className={`h-11 w-11 rounded-xl border flex items-center justify-center shrink-0 ${
+                          className={`h-10 w-10 sm:h-11 sm:w-11 rounded-xl border flex items-center justify-center shrink-0 ${
                             assign.isDone
                               ? 'bg-emerald-50 text-emerald-600 border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
                               : assign.isOverdue
@@ -1458,14 +1500,14 @@ const StudentDashboard = () => {
                           <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-900 truncate">
                             {assign.title}
                           </p>
-                          <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] font-semibold">
-                            <span className="text-indigo-600 dark:text-indigo-400 font-bold truncate max-w-[140px]">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[11px] font-semibold">
+                            <span className="text-indigo-600 dark:text-indigo-400 font-bold truncate max-w-[130px] sm:max-w-[160px]">
                               {courseName}
                             </span>
                             <span className="text-gray-300 dark:text-slate-600">•</span>
                             <span className="std-text-secondary text-gray-500 flex items-center gap-1">
                               <CalendarDaysIcon className="h-3.5 w-3.5 text-purple-400 shrink-0" />
-                              <span>
+                              <span className="truncate">
                                 {assign.isDone
                                   ? formatSafeDate(sub?.submitted_at || assign.due_date)
                                   : `${t('ផុតកំណត់៖', 'Due:')} ${formatSafeDate(
@@ -1480,8 +1522,8 @@ const StudentDashboard = () => {
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         {assign.isDone ? (
                           <>
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
-                              <CheckCircleIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+                            <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
+                              <CheckCircleIcon className="h-3.5 w-3.5 stroke-[2.5] shrink-0" />
                               <span>{t('ធ្វើរួចហើយ', 'Completed')}</span>
                             </span>
                             {assign.isGraded && (
@@ -1492,25 +1534,25 @@ const StudentDashboard = () => {
                             )}
                           </>
                         ) : assign.isOverdue ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">
-                            <ExclamationCircleIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+                          <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">
+                            <ExclamationCircleIcon className="h-3.5 w-3.5 stroke-[2.5] shrink-0" />
                             <span>{t('ហួសកំណត់', 'Overdue')}</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30">
-                            <ClockIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+                          <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30">
+                            <ClockIcon className="h-3.5 w-3.5 stroke-[2.5] shrink-0" />
                             <span>{t('មិនទាន់ធ្វើ', 'Not Done Yet')}</span>
                           </span>
                         )}
                       </div>
-                    </div>
+                    </Link>
                   );
                 })
               )}
             </div>
           </div>
 
-          <div className="std-card-divider pt-4 mt-5 border-t border-gray-100 flex items-center justify-between text-xs">
+          <div className="std-card-divider pt-3.5 sm:pt-4 mt-4 sm:mt-5 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="std-text-secondary font-bold text-gray-500">
               {t('កិច្ចការសរុប៖', 'Total Tasks:')}{' '}
               <strong className="std-text-primary text-gray-800">
@@ -1531,24 +1573,32 @@ const StudentDashboard = () => {
         </div>
 
         {/* ៣.២. កាតកម្រងសំណួរថ្មីៗ */}
-        <div className="std-surface-card bg-white rounded-[1.75rem] border border-gray-200/80 shadow-sm p-5 sm:p-7 flex flex-col justify-between h-full">
-          <div className="space-y-5">
-            <div className="flex items-center justify-start gap-3 pb-4 border-b border-gray-100 std-card-divider">
-              <div className="flex items-center gap-3.5 min-w-0">
-                <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-md shadow-amber-500/20 shrink-0">
-                  <PencilSquareIcon className="h-6 w-6 stroke-[2]" />
+        <div className="std-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] border border-gray-200/80 shadow-sm p-4 sm:p-6 lg:p-7 flex flex-col justify-between h-full">
+          <div className="space-y-4 sm:space-y-5">
+            <div className="flex items-center justify-between gap-3 pb-3.5 sm:pb-4 border-b border-gray-100 std-card-divider">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-md shadow-amber-500/20 shrink-0">
+                  <PencilSquareIcon className="h-5 w-5 sm:h-6 sm:w-6 stroke-[2]" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="std-text-primary text-lg sm:text-xl font-black text-gray-900 truncate">
+                  <h3 className="std-text-primary text-base sm:text-xl font-black text-gray-900 truncate">
                     {t('កម្រងសំណួរថ្មីៗ', 'Recent Quizzes')}
                   </h3>
                 </div>
               </div>
+
+              <Link
+                to="/quizzes"
+                className="inline-flex items-center gap-1 text-xs font-extrabold text-amber-600 dark:text-amber-400 hover:underline shrink-0"
+              >
+                <span>{t('មើលទាំងអស់', 'View All')}</span>
+                <ChevronRightIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+              </Link>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2.5 sm:space-y-3">
               {teacherAssignedQuizzes.length === 0 ? (
-                <div className="std-empty-box py-12 px-4 text-center bg-gray-50/70 rounded-2xl border border-dashed border-gray-200 space-y-2.5">
+                <div className="std-empty-box py-10 sm:py-12 px-4 text-center bg-gray-50/70 rounded-2xl border border-dashed border-gray-200 space-y-2.5">
                   <div className="h-12 w-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
                     <AcademicCapIcon className="h-6 w-6" />
                   </div>
@@ -1575,13 +1625,14 @@ const StudentDashboard = () => {
                     t('មុខវិជ្ជាសិក្សា', 'Course');
 
                   return (
-                    <div
+                    <Link
                       key={quiz.id || idx}
-                      className="std-activity-item flex items-center justify-between gap-3.5 p-3.5 sm:p-4 rounded-2xl border border-gray-100 bg-gray-50/60 transition-all"
+                      to="/quizzes"
+                      className="std-activity-item flex items-center justify-between gap-2.5 sm:gap-3.5 p-3 sm:p-4 rounded-2xl border border-gray-100 hover:border-amber-300 bg-gray-50/60 transition-all"
                     >
-                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
                         <div
-                          className={`h-11 w-11 rounded-xl border flex items-center justify-center shrink-0 ${
+                          className={`h-10 w-10 sm:h-11 sm:w-11 rounded-xl border flex items-center justify-center shrink-0 ${
                             quiz.isDone
                               ? 'bg-emerald-50 text-emerald-600 border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
                               : quiz.isExpired
@@ -1600,14 +1651,14 @@ const StudentDashboard = () => {
                           <p className="std-text-primary text-xs sm:text-sm font-extrabold text-gray-900 truncate">
                             {quiz.title}
                           </p>
-                          <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] font-semibold">
-                            <span className="text-indigo-600 dark:text-indigo-400 font-bold truncate max-w-[140px]">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[11px] font-semibold">
+                            <span className="text-indigo-600 dark:text-indigo-400 font-bold truncate max-w-[130px] sm:max-w-[160px]">
                               {courseName}
                             </span>
                             <span className="text-gray-300 dark:text-slate-600">•</span>
                             <span className="std-text-secondary text-gray-500 flex items-center gap-1">
                               <ClockIcon className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                              <span>
+                              <span className="truncate">
                                 {quiz.isDone
                                   ? formatSafeDate(att?.submitted_at || quiz.end_date)
                                   : `${quiz.duration || 30} ${t('នាទី', 'mins')}`}
@@ -1620,8 +1671,8 @@ const StudentDashboard = () => {
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         {quiz.isDone ? (
                           <>
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
-                              <CheckCircleIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+                            <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
+                              <CheckCircleIcon className="h-3.5 w-3.5 stroke-[2.5] shrink-0" />
                               <span>{t('ធ្វើរួចហើយ', 'Completed')}</span>
                             </span>
                             <span className="text-[11px] font-black text-amber-600 dark:text-amber-400">
@@ -1630,25 +1681,25 @@ const StudentDashboard = () => {
                             </span>
                           </>
                         ) : quiz.isExpired ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">
-                            <ExclamationCircleIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+                          <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">
+                            <ExclamationCircleIcon className="h-3.5 w-3.5 stroke-[2.5] shrink-0" />
                             <span>{t('ហួសកំណត់', 'Expired')}</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30">
-                            <ClockIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+                          <span className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30">
+                            <ClockIcon className="h-3.5 w-3.5 stroke-[2.5] shrink-0" />
                             <span>{t('មិនទាន់ធ្វើ', 'Not Done Yet')}</span>
                           </span>
                         )}
                       </div>
-                    </div>
+                    </Link>
                   );
                 })
               )}
             </div>
           </div>
 
-          <div className="std-card-divider pt-4 mt-5 border-t border-gray-100 flex items-center justify-between text-xs">
+          <div className="std-card-divider pt-3.5 sm:pt-4 mt-4 sm:mt-5 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="std-text-secondary font-bold text-gray-500">
               {t('កម្រងសំណួរសរុប៖', 'Total Quizzes:')}{' '}
               <strong className="std-text-primary text-gray-800">

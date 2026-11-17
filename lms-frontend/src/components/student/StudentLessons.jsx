@@ -35,17 +35,22 @@ import {
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 
-const CACHE_KEY_SHARED_LESSONS = 'cached_student_dept_lessons_v14';
-const CACHE_KEY_SHARED_DEPT_COURSES = 'cached_student_dept_courses_all_years_v14';
-const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
-const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
-const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v2';
+const CACHE_KEY_SHARED_LESSONS = 'cached_student_dept_lessons_v15';
+const CACHE_KEY_SHARED_LESSONS_LEGACY = 'cached_student_dept_lessons_v14';
+const CACHE_KEY_SHARED_DEPT_COURSES = 'cached_student_dept_courses_all_years_v15';
+const CACHE_KEY_SHARED_DEPT_COURSES_LEGACY = 'cached_student_dept_courses_all_years_v14';
+const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v15';
+const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v15';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v15';
+const CACHE_KEY_TEACHER_AVATARS_LEGACY = 'cached_student_teacher_avatars_v2';
 
-const getLessonsCacheKey = (uid) => `cached_student_dept_lessons_v14_${uid}`;
-const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v14_${uid}`;
-const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
-const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
-const getStudentYearCacheKey = (uid) => `cached_student_current_year_v14_${uid}`;
+const getLessonsCacheKey = (uid) => `cached_student_dept_lessons_v15_${uid}`;
+const getLessonsLegacyCacheKey = (uid) => `cached_student_dept_lessons_v14_${uid}`;
+const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v15_${uid}`;
+const getDeptCoursesLegacyCacheKey = (uid) => `cached_student_dept_courses_v14_${uid}`;
+const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v15_${uid}`;
+const getCoursesCacheKey = (uid) => `cached_student_courses_list_v15_${uid}`;
+const getStudentYearCacheKey = (uid) => `cached_student_current_year_v15_${uid}`;
 
 // ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
 const STUDENT_LESSONS_MEM_CACHE = {
@@ -76,7 +81,9 @@ const getTeacherAvatarMapSync = () => {
   ) {
     return STUDENT_LESSONS_MEM_CACHE.teacherAvatarMap;
   }
-  const stored = readStorageJson(CACHE_KEY_TEACHER_AVATARS, {});
+  const stored =
+    readStorageJson(CACHE_KEY_TEACHER_AVATARS, null) ||
+    readStorageJson(CACHE_KEY_TEACHER_AVATARS_LEGACY, {});
   STUDENT_LESSONS_MEM_CACHE.teacherAvatarMap =
     stored && typeof stored === 'object' ? stored : {};
   return STUDENT_LESSONS_MEM_CACHE.teacherAvatarMap;
@@ -134,7 +141,9 @@ const schedulePersistTeacherAvatars = () => {
   teacherAvatarSaveTimer = setTimeout(() => {
     try {
       const map = getTeacherAvatarMapSync();
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(map));
+      const str = JSON.stringify(map);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
     } catch {}
   }, 150);
 };
@@ -155,9 +164,10 @@ const persistStudentLessonsFast = (uid, lessonsList, deptCoursesList) => {
 
     const tchId = String(person.id || person.user_id || '');
     const cid = String(courseIdFallback || '');
-    const nameKey = person.name || person.full_name
-      ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
-      : '';
+    const nameKey =
+      person.name || person.full_name
+        ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
+        : '';
 
     if (rawImg && typeof rawImg === 'string') {
       if (cid && !avatarMap[`crs_${cid}`]) avatarMap[`crs_${cid}`] = rawImg;
@@ -224,7 +234,9 @@ const persistStudentLessonsFast = (uid, lessonsList, deptCoursesList) => {
   if (Array.isArray(deptCoursesList) && deptCoursesList.length > 0) {
     const slimDept = deptCoursesList.map(slimCourseObj);
     try {
-      localStorage.setItem(getDeptCoursesCacheKey(uid), JSON.stringify(slimDept));
+      const deptStr = JSON.stringify(slimDept);
+      localStorage.setItem(getDeptCoursesCacheKey(uid), deptStr);
+      localStorage.setItem(CACHE_KEY_SHARED_DEPT_COURSES, deptStr);
     } catch {}
   }
 
@@ -248,7 +260,9 @@ const persistStudentLessonsFast = (uid, lessonsList, deptCoursesList) => {
     });
 
     try {
-      localStorage.setItem(getLessonsCacheKey(uid), JSON.stringify(slimLessons));
+      const lsnStr = JSON.stringify(slimLessons);
+      localStorage.setItem(getLessonsCacheKey(uid), lsnStr);
+      localStorage.setItem(CACHE_KEY_SHARED_LESSONS, lsnStr);
     } catch {}
   }
 
@@ -292,15 +306,19 @@ const ensureCleanStudentSessionCache = (newUid) => {
       const sharedLocalKeys = [
         'cached_student_dashboard_stats_v8',
         'cached_student_dashboard_enrollments_v8',
+        'cached_student_dashboard_enrollments_v15',
         'cached_student_dashboard_activity_v8',
         'cached_student_courses_list_v3',
+        'cached_student_courses_list_v15',
         'cached_student_courses_meta_v3',
         'cached_student_dept_lessons_v8',
         'cached_student_dept_lessons_v12',
         'cached_student_dept_lessons_v14',
+        'cached_student_dept_lessons_v15',
         'cached_student_dept_courses_all_years_v10',
         'cached_student_dept_courses_all_years_v12',
         'cached_student_dept_courses_all_years_v14',
+        'cached_student_dept_courses_all_years_v15',
         'cached_student_assignments_list_v5',
         'cached_student_quizzes_list_v5',
         'cached_student_scores_list_v5',
@@ -320,22 +338,26 @@ const ensureCleanStudentSessionCache = (newUid) => {
 const FOLDER_THEMES = [
   {
     topBar: 'from-blue-600 to-indigo-600',
-    iconBg: 'bg-blue-50 text-blue-600 border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30',
+    iconBg:
+      'bg-blue-50 text-blue-600 border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30',
     avatarBg: 'from-blue-500 to-indigo-600',
   },
   {
     topBar: 'from-emerald-500 to-teal-600',
-    iconBg: 'bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
+    iconBg:
+      'bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
     avatarBg: 'from-emerald-500 to-teal-600',
   },
   {
     topBar: 'from-purple-600 to-violet-600',
-    iconBg: 'bg-purple-50 text-purple-600 border-purple-100 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-500/30',
+    iconBg:
+      'bg-purple-50 text-purple-600 border-purple-100 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-500/30',
     avatarBg: 'from-purple-500 to-fuchsia-600',
   },
   {
     topBar: 'from-amber-500 to-orange-500',
-    iconBg: 'bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30',
+    iconBg:
+      'bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30',
     avatarBg: 'from-amber-500 to-orange-600',
   },
 ];
@@ -420,10 +442,14 @@ const detectExplicitYearFromObj = (lessonObj) => {
     course?.year_level ??
     '';
   const dyStr = String(directYear).trim().toLowerCase();
-  if (dyStr === '4' || dyStr === '៤' || /ឆ្នាំទី\s*[៤4]|year\s*4|\by4\b/.test(dyStr)) return '4';
-  if (dyStr === '3' || dyStr === '៣' || /ឆ្នាំទី\s*[៣3]|year\s*3|\by3\b/.test(dyStr)) return '3';
-  if (dyStr === '2' || dyStr === '២' || /ឆ្នាំទី\s*[២2]|year\s*2|\by2\b/.test(dyStr)) return '2';
-  if (dyStr === '1' || dyStr === '១' || /ឆ្នាំទី\s*[១1]|year\s*1|\by1\b/.test(dyStr)) return '1';
+  if (dyStr === '4' || dyStr === '៤' || /ឆ្នាំទី\s*[៤4]|year\s*4|\by4\b/.test(dyStr))
+    return '4';
+  if (dyStr === '3' || dyStr === '៣' || /ឆ្នាំទី\s*[៣3]|year\s*3|\by3\b/.test(dyStr))
+    return '3';
+  if (dyStr === '2' || dyStr === '២' || /ឆ្នាំទី\s*[២2]|year\s*2|\by2\b/.test(dyStr))
+    return '2';
+  if (dyStr === '1' || dyStr === '១' || /ឆ្នាំទី\s*[១1]|year\s*1|\by1\b/.test(dyStr))
+    return '1';
 
   const combinedText = `${course?.course_name || ''} ${course?.description || ''} ${lessonObj?.title || ''}`.toLowerCase();
   if (/ឆ្នាំទី\s*[៤4]|year\s*4|\by4\b/.test(combinedText)) return '4';
@@ -441,7 +467,7 @@ const detectExplicitYearFromObj = (lessonObj) => {
   return null;
 };
 
-// ✅ កែសម្រួល៖ បើមុខវិជ្ជានេះសិស្សកំពុងរៀន (isEnrolledCourse = true) ត្រូវធានាថាវាបង្ហាញក្នុងឆ្នាំបច្ចុប្បន្នរបស់សិស្សជានិច្ច
+// ✅ បើមុខវិជ្ជានេះសិស្សកំពុងរៀន (isEnrolledCourse = true) ត្រូវធានាថាវាបង្ហាញក្នុងឆ្នាំបច្ចុប្បន្នរបស់សិស្សជានិច្ច
 const extractApplicableYears = (
   obj,
   isEnrolledCourse = false,
@@ -589,6 +615,7 @@ const StudentLessons = () => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [failedAvatars, setFailedAvatars] = useState({});
+  const abortControllerRef = useRef(null);
 
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
@@ -614,35 +641,38 @@ const StudentLessons = () => {
     if (Array.isArray(STUDENT_LESSONS_MEM_CACHE.lessons)) {
       return STUDENT_LESSONS_MEM_CACHE.lessons;
     }
-    const fromUserKey = readStorageJson(
-      getLessonsCacheKey(currentStudentId),
-      null
-    );
+    const fromUserKey =
+      readStorageJson(getLessonsCacheKey(currentStudentId), null) ||
+      readStorageJson(getLessonsLegacyCacheKey(currentStudentId), null);
     if (Array.isArray(fromUserKey)) {
       STUDENT_LESSONS_MEM_CACHE.lessons = fromUserKey;
       return fromUserKey;
     }
-    const fromShared = readStorageJson(CACHE_KEY_SHARED_LESSONS, []);
-    STUDENT_LESSONS_MEM_CACHE.lessons = fromShared;
-    return fromShared;
+    const fromShared =
+      readStorageJson(CACHE_KEY_SHARED_LESSONS, null) ||
+      readStorageJson(CACHE_KEY_SHARED_LESSONS_LEGACY, []);
+    const valid = Array.isArray(fromShared) ? fromShared : [];
+    STUDENT_LESSONS_MEM_CACHE.lessons = valid;
+    return valid;
   });
 
   const [deptCourses, setDeptCourses] = useState(() => {
     if (Array.isArray(STUDENT_LESSONS_MEM_CACHE.deptCourses)) {
       return STUDENT_LESSONS_MEM_CACHE.deptCourses;
     }
-    const fromUserKey = readStorageJson(
-      getDeptCoursesCacheKey(currentStudentId),
-      null
-    );
+    const fromUserKey =
+      readStorageJson(getDeptCoursesCacheKey(currentStudentId), null) ||
+      readStorageJson(getDeptCoursesLegacyCacheKey(currentStudentId), null);
     if (Array.isArray(fromUserKey)) {
       STUDENT_LESSONS_MEM_CACHE.deptCourses = fromUserKey;
       return fromUserKey;
     }
-    return readStorageJson(CACHE_KEY_SHARED_DEPT_COURSES, []);
+    const fromShared =
+      readStorageJson(CACHE_KEY_SHARED_DEPT_COURSES, null) ||
+      readStorageJson(CACHE_KEY_SHARED_DEPT_COURSES_LEGACY, []);
+    return Array.isArray(fromShared) ? fromShared : [];
   });
 
-  // ✅ រក្សាទុកឆ្នាំសិក្សាបច្ចុប្បន្នរបស់សិស្សដែលបញ្ជូនមកពី Backend (StudentController)
   const [apiStudentYear, setApiStudentYear] = useState(() => {
     if (STUDENT_LESSONS_MEM_CACHE.studentYear) {
       return STUDENT_LESSONS_MEM_CACHE.studentYear;
@@ -700,7 +730,6 @@ const StudentLessons = () => {
     }
   }, [playingVideo]);
 
-  // ✅ អនុគមន៍រំកិលបញ្ជីឈ្មោះគ្រូទៅឆ្វេង-ស្ដាំ នៅពេលមានឈ្មោះគ្រូច្រើននាក់
   const handleScrollTeacherBar = (direction) => {
     if (!teacherScrollRef.current) return;
     const scrollAmount = direction === 'left' ? -240 : 240;
@@ -749,7 +778,8 @@ const StudentLessons = () => {
     const cachedEnr =
       readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
       readStorageJson(getCoursesCacheKey(currentStudentId), null) ||
-      readStorageJson(CACHE_KEY_SHARED_ENROLLMENTS, []);
+      readStorageJson(CACHE_KEY_SHARED_ENROLLMENTS, null) ||
+      readStorageJson(CACHE_KEY_SHARED_COURSES, []);
     if (Array.isArray(cachedEnr)) {
       cachedEnr.forEach((item) => {
         const cid = item?.course_id || item?.course?.id || item?.id;
@@ -791,7 +821,7 @@ const StudentLessons = () => {
   }, [searchQuery]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ទាញឈ្មោះ និងរូបថតគ្រូបង្រៀនប្រចាំមុខវិជ្ជានីមួយៗ (O(1) Lookup)
+  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ទាញឈ្មោះ និងរូបថតគ្រូបង្រៀនប្រចាំមុខវិជ្ជានីមួយៗ
   // ============================================================================
   const getViewUrl = useCallback((path) => {
     if (!path || typeof path !== 'string') return '#';
@@ -815,7 +845,6 @@ const StudentLessons = () => {
     return `${backendBase}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getImageUrl = useCallback((path) => {
     if (!path || typeof path !== 'string') return null;
     const trimmed = path.trim();
@@ -837,7 +866,6 @@ const StudentLessons = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ បង្កើត Map នៃមុខវិជ្ជាក្នុង RAM ជាមុន ដើម្បីកុំឱ្យរត់ .find() នៅក្នុង Loop
   const deptCoursesById = useMemo(() => {
     const map = new Map();
     if (Array.isArray(deptCourses)) {
@@ -962,14 +990,15 @@ const StudentLessons = () => {
       const cachedForUser =
         STUDENT_LESSONS_MEM_CACHE.lessons !== null
           ? STUDENT_LESSONS_MEM_CACHE.lessons
-          : readStorageJson(getLessonsCacheKey(currentStudentId), null);
+          : readStorageJson(getLessonsCacheKey(currentStudentId), null) ||
+            readStorageJson(getLessonsLegacyCacheKey(currentStudentId), null);
 
       const cachedDeptCrs =
         STUDENT_LESSONS_MEM_CACHE.deptCourses !== null
           ? STUDENT_LESSONS_MEM_CACHE.deptCourses
-          : readStorageJson(getDeptCoursesCacheKey(currentStudentId), null);
+          : readStorageJson(getDeptCoursesCacheKey(currentStudentId), null) ||
+            readStorageJson(getDeptCoursesLegacyCacheKey(currentStudentId), null);
 
-      // ✅ ១. បង្ហាញទិន្នន័យពី Cache លើអេក្រង់ភ្លាមៗក្នុង 0ms
       if (Array.isArray(cachedForUser) && cachedForUser.length > 0) {
         setLessons(cachedForUser);
         STUDENT_LESSONS_MEM_CACHE.lessons = cachedForUser;
@@ -979,7 +1008,6 @@ const StudentLessons = () => {
         STUDENT_LESSONS_MEM_CACHE.deptCourses = cachedDeptCrs;
       }
 
-      // ✅ ២. តែងតែទាញទិន្នន័យថ្មីពី Server នៅផ្ទៃខាងក្រោយ (Background Sync) បើលើសពី ៥ វិនាទី ដើម្បីធានាថាទិន្នន័យដែល Admin ទើបបញ្ចូលលោតមកជានិច្ច
       const now = Date.now();
       if (
         !forceRefresh &&
@@ -993,14 +1021,26 @@ const StudentLessons = () => {
         return;
       }
 
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       try {
         let validLessons = [];
         let validDeptCourses = [];
 
         try {
-          const response = await api.get('/student/lessons');
+          const response = await api.get('/student/lessons', {
+            signal: controller.signal,
+          });
           const rawData = response.data?.data ?? response.data ?? [];
-          validLessons = Array.isArray(rawData) ? rawData : [];
+          validLessons = Array.isArray(rawData)
+            ? rawData
+            : Array.isArray(rawData?.data)
+            ? rawData.data
+            : [];
           if (Array.isArray(response.data?.department_courses)) {
             validDeptCourses = response.data.department_courses;
           }
@@ -1016,9 +1056,19 @@ const StudentLessons = () => {
             } catch {}
           }
         } catch (primaryErr) {
+          if (
+            primaryErr.name === 'CanceledError' ||
+            primaryErr.code === 'ERR_CANCELED'
+          ) {
+            return;
+          }
           const [scoresRes, coursesRes] = await Promise.all([
-            api.get('/student/scores').catch(() => null),
-            api.get('/student/courses?all=true').catch(() => null),
+            api
+              .get('/student/scores', { signal: controller.signal })
+              .catch(() => null),
+            api
+              .get('/student/courses?all=true', { signal: controller.signal })
+              .catch(() => null),
           ]);
 
           const courseMapById = new Map();
@@ -1054,7 +1104,9 @@ const StudentLessons = () => {
             const cid = courseObj?.id || courseObj?.course_id;
             if (!cid) return [];
             try {
-              const lRes = await api.get(`/student/courses/${cid}/lessons`);
+              const lRes = await api.get(`/student/courses/${cid}/lessons`, {
+                signal: controller.signal,
+              });
               const lArr = Array.isArray(lRes.data?.data)
                 ? lRes.data.data
                 : Array.isArray(lRes.data)
@@ -1077,7 +1129,6 @@ const StudentLessons = () => {
           validLessons = nestedLessons.flat();
         }
 
-        // ✅ រក្សាទុកក្នុង RAM មុនគេដើម្បីបង្ហាញលើអេក្រង់ក្នុង 0ms រួចទើប Save Slim JSON ចូល localStorage
         STUDENT_LESSONS_MEM_CACHE.uid = currentStudentId;
         STUDENT_LESSONS_MEM_CACHE.lessons = validLessons;
         STUDENT_LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
@@ -1093,6 +1144,9 @@ const StudentLessons = () => {
           validDeptCourses
         );
       } catch (error) {
+        if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+          return;
+        }
         console.error('Error fetching lessons:', error);
       }
     },
@@ -1101,14 +1155,23 @@ const StudentLessons = () => {
 
   useEffect(() => {
     fetchLessons(false);
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [fetchLessons]);
 
   // ============================================================================
   // 📌 ផ្នែកទី៥៖ មុខងារទាញយកឯកសារមេរៀន (Download File - គាំទ្រ Railway & Base64)
   // ============================================================================
-  const handleDownloadFile = async (filePath, fileName, fileId) => {
-    if (!filePath || typeof filePath !== 'string') return;
-    const trimmed = filePath.trim();
+  const handleDownloadFile = async (docOrPath, fileName, fileId) => {
+    const rawPath =
+      typeof docOrPath === 'object' && docOrPath !== null
+        ? docOrPath.file_data || docOrPath.file_path || ''
+        : docOrPath;
+    if (!rawPath || typeof rawPath !== 'string') return;
+    const trimmed = rawPath.trim();
 
     if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
       const link = document.createElement('a');
@@ -1127,7 +1190,7 @@ const StudentLessons = () => {
 
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
 
-    setDownloadingFileId(fileId || filePath);
+    setDownloadingFileId(fileId || rawPath);
     try {
       const cached = STUDENT_LESSONS_MEM_CACHE.fileCacheByPath[cleanPath];
       if (cached?.base64) {
@@ -1272,7 +1335,6 @@ const StudentLessons = () => {
     [t]
   );
 
-  // ✅ ចំណងជើងមុខវិជ្ជាតាមឆ្នាំសិក្សា
   const getYearCourseTitle = useCallback(
     (yearNum) => {
       if (String(yearNum) === '1') return t('មុខវិជ្ជាឆ្នាំទី ១', 'Year 1 Courses');
@@ -1296,7 +1358,6 @@ const StudentLessons = () => {
     []
   );
 
-  // ✅ បញ្ជីកាតមុខវិជ្ជាទាំងអស់ (Course Folders) សម្រាប់បង្ហាញក្នុងជំហានទី ១
   const allCourseFolders = useMemo(() => {
     const map = new Map();
 
@@ -1415,7 +1476,6 @@ const StudentLessons = () => {
     return counts;
   }, [enrichedLessons, allCourseFolders, studentCurrentYear]);
 
-  // ✅ ជំហានទី ២៖ បញ្ជីឈ្មោះគ្រូបង្រៀនទាំងអស់ក្នុងឆ្នាំសិក្សាដែលបានជ្រើសរើស
   const availableTeachersForYear = useMemo(() => {
     const map = new Map();
 
@@ -1452,7 +1512,6 @@ const StudentLessons = () => {
     };
   }, [allCourseFolders, availableTeachersForYear.length]);
 
-  // កាតមុខវិជ្ជាដែលត្រូវបង្ហាញក្នុងជំហានទី ១
   const visibleCourseFolders = useMemo(() => {
     return allCourseFolders.filter((f) => {
       if (!doesItemMatchYear(f.yearsList, f.yearNum, selectedYear)) return false;
@@ -1466,7 +1525,6 @@ const StudentLessons = () => {
     });
   }, [allCourseFolders, selectedYear, selectedTeacherKey, doesItemMatchYear]);
 
-  // ✅ រៀបចំបណ្ដុំមុខវិជ្ជាតាមឆ្នាំសិក្សា៖
   const prioritizedYearSections = useMemo(() => {
     const curY = Number(studentCurrentYear) || 1;
 
@@ -1544,7 +1602,6 @@ const StudentLessons = () => {
     t,
   ]);
 
-  // មុខវិជ្ជាដែលសិស្សបានចុចបើកមើលក្នុងជំហានទី ២
   const activeSelectedFolder = useMemo(() => {
     if (selectedCourseId === 'all') return null;
     return (
@@ -1612,7 +1669,6 @@ const StudentLessons = () => {
     return { activeDocsList: docs, activeVidsList: vids };
   }, [activeSelectedFolder, visibleCourseFolders, searchQuery]);
 
-  // កំណត់ថាតើសិស្សបានចុចចូលមុខវិជ្ជាណាមួយ ឬកំពុងវាយ Search
   const isShowingCourseFilesView =
     selectedCourseId !== 'all' || searchQuery.trim() !== '';
 
@@ -1660,30 +1716,30 @@ const StudentLessons = () => {
   ];
 
   return (
-    <div className="std-lsn-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
+    <div className="std-lsn-page max-w-7xl mx-auto px-3 sm:px-5 lg:px-8 space-y-5 sm:space-y-6 lg:space-y-8 pb-28 md:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
       {/* ================================================================== */}
-      {/* 📌 1. MODERN BENTO HERO SECTION                                    */}
+      {/* 📌 1. MODERN BENTO HERO SECTION (Adaptive Phone / iPad / Desktop)  */}
       {/* ================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (8 Columns) */}
-        <div className="lg:col-span-8 relative overflow-hidden rounded-[1.75rem] sm:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-6 sm:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-lsn-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
           <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
-          <div className="relative z-10 space-y-3.5">
+          <div className="relative z-10 space-y-3 sm:space-y-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
+              <span className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-[11px] sm:text-xs font-extrabold text-cyan-200 max-w-full">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
-                <span>{studentDeptName}</span>
+                <span className="truncate">{studentDeptName}</span>
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1698,8 +1754,8 @@ const StudentLessons = () => {
               </span>
             </div>
 
-            <div className="space-y-2 pt-1">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
+            <div className="space-y-1.5 sm:space-y-2 pt-1">
+              <h1 className="text-xl sm:text-2xl md:text-3xl xl:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2 leading-snug">
                 <span>{t('មេរៀន និងឯកសារ,', 'Study Hub,')}</span>
                 <span className="bg-gradient-to-r from-yellow-300 via-amber-200 to-white bg-clip-text text-transparent">
                   {activeSelectedFolder
@@ -1708,7 +1764,7 @@ const StudentLessons = () => {
                     ? `${getYearCourseTitle(studentCurrentYear)} ${t('(កំពុងសិក្សា)', '(Current)')}`
                     : getYearCourseTitle(selectedYear)}
                 </span>
-                <CheckBadgeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-yellow-400 shrink-0" />
+                <CheckBadgeIcon className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 text-yellow-400 shrink-0" />
               </h1>
 
               <p className="text-xs sm:text-sm text-blue-100/80 max-w-2xl leading-relaxed font-medium">
@@ -1720,13 +1776,13 @@ const StudentLessons = () => {
             </div>
           </div>
 
-          <div className="relative z-10 grid grid-cols-3 gap-2.5 sm:gap-3.5 mt-6 pt-5 border-t border-white/15 select-none">
-            <div className="bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-3.5 flex items-center gap-3">
-              <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-blue-500/25 border border-blue-300/30 flex items-center justify-center text-cyan-300 shrink-0">
-                <BookOpenIcon className="h-5 w-5" />
+          <div className="relative z-10 grid grid-cols-3 gap-2 sm:gap-3.5 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15 select-none">
+            <div className="bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl p-2.5 sm:p-3.5 flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1.5 sm:gap-3">
+              <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl bg-blue-500/25 border border-blue-300/30 flex items-center justify-center text-cyan-300 shrink-0">
+                <BookOpenIcon className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-base sm:text-lg font-black text-white leading-none">
+                <span className="block text-sm sm:text-lg font-black text-white leading-none">
                   {totalDeptSummary.coursesCount}
                 </span>
                 <span className="block text-[10px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1735,12 +1791,12 @@ const StudentLessons = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-3.5 flex items-center gap-3">
-              <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
-                <DocumentTextIcon className="h-5 w-5" />
+            <div className="bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl p-2.5 sm:p-3.5 flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1.5 sm:gap-3">
+              <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
+                <DocumentTextIcon className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-base sm:text-lg font-black text-white leading-none">
+                <span className="block text-sm sm:text-lg font-black text-white leading-none">
                   {totalDeptSummary.docsCount}
                 </span>
                 <span className="block text-[10px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1749,12 +1805,12 @@ const StudentLessons = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-3.5 flex items-center gap-3">
-              <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-purple-500/25 border border-purple-300/30 flex items-center justify-center text-purple-200 shrink-0">
-                <PlayCircleIcon className="h-5 w-5" />
+            <div className="bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl p-2.5 sm:p-3.5 flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1.5 sm:gap-3">
+              <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl bg-purple-500/25 border border-purple-300/30 flex items-center justify-center text-purple-200 shrink-0">
+                <PlayCircleIcon className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-base sm:text-lg font-black text-white leading-none">
+                <span className="block text-sm sm:text-lg font-black text-white leading-none">
                   {totalDeptSummary.vidsCount}
                 </span>
                 <span className="block text-[10px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1765,9 +1821,9 @@ const StudentLessons = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ខាងស្ដាំ (4 Columns - ជ្រើសរើសឆ្នាំសិក្សា ១-៤) */}
-        <div className="lg:col-span-4 std-lsn-surface bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
-          <div className="space-y-4">
+        {/* ១.២. ប្រអប់ខាងស្ដាំ (5 Cols on lg, 4 Cols on xl - ជ្រើសរើសឆ្នាំសិក្សា ១-៤) */}
+        <div className="lg:col-span-5 xl:col-span-4 std-lsn-surface bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
+          <div className="space-y-3.5 sm:space-y-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
                 <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-500/30 flex items-center justify-center shrink-0">
@@ -1781,7 +1837,7 @@ const StudentLessons = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3 pt-1">
               {yearSelectorItems.map((yr) => {
                 const isSelected = String(selectedYear) === String(yr.id);
                 const isMyCurrentYear =
@@ -1796,7 +1852,7 @@ const StudentLessons = () => {
                       setSelectedTeacherKey('all');
                       setSelectedCourseId('all');
                     }}
-                    className={`group p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-center justify-between gap-2 ${
+                    className={`group p-3 sm:p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-center justify-between gap-2 ${
                       isSelected
                         ? `bg-gradient-to-br ${yr.activeGradient} text-white shadow-md -translate-y-0.5`
                         : isMyCurrentYear
@@ -1804,15 +1860,15 @@ const StudentLessons = () => {
                         : 'std-lsn-subbox bg-gray-50/80 hover:bg-indigo-50/50 border-gray-200/80 hover:border-indigo-300 text-gray-800 hover:-translate-y-0.5'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                       <div
-                        className={`h-9 w-9 rounded-xl border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${
+                        className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${
                           isSelected
                             ? 'bg-white/20 text-white border-white/30'
                             : yr.iconStyle
                         }`}
                       >
-                        <YearIcon className="h-5 w-5 stroke-[2.2]" />
+                        <YearIcon className="h-4 w-4 sm:h-5 sm:w-5 stroke-[2.2]" />
                       </div>
                       <div className="min-w-0">
                         <span
@@ -1842,7 +1898,7 @@ const StudentLessons = () => {
             </div>
           </div>
 
-          <div className="std-lsn-divider pt-4 mt-4 border-t border-gray-100 flex items-center justify-between text-xs">
+          <div className="std-lsn-divider pt-3.5 sm:pt-4 mt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="std-lsn-text-secondary font-bold text-gray-500">
               {t('គ្រូបង្រៀន៖', 'Teachers:')}{' '}
               <strong className="std-lsn-text-primary text-gray-800">
@@ -1870,14 +1926,14 @@ const StudentLessons = () => {
                 <ChevronRightIcon className="h-3.5 w-3.5 stroke-[2.5]" />
               </button>
             ) : (
-              <span className="std-lsn-text-secondary inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-gray-500 shrink-0 mr-1">
+              <span className="std-lsn-text-secondary inline-flex items-center gap-1.5 text-[11px] font-extrabold text-gray-500 shrink-0">
                 <UserGroupIcon className="h-4 w-4 text-indigo-500 shrink-0" />
-                <p className="std-lsn-text-secondary text-[11px] font-medium text-gray-500 mt-0.5">
+                <span>
                   {t('អ្នកជាសិស្ស', 'You are in')}{' '}
                   <strong className="text-indigo-600 dark:text-indigo-400">
                     {getYearBadgeLabel(studentCurrentYear)}
                   </strong>
-                </p>
+                </span>
               </span>
             )}
           </div>
@@ -1886,22 +1942,22 @@ const StudentLessons = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 2. UNIFIED SINGLE-ROW TOOLBAR                                   */}
+      {/* 📌 2. UNIFIED TOOLBAR (Responsive Phone / iPad / Desktop)          */}
       {/* ================================================================== */}
-      <div className="std-lsn-surface bg-white rounded-3xl border border-gray-200/80 shadow-xs px-4 py-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div className="std-lsn-surface bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-xs p-3.5 sm:px-4 sm:py-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         
         {isShowingCourseFilesView && (
-          <div className="std-lsn-subbox inline-flex bg-gray-100 p-1 rounded-full border border-gray-200/70 shrink-0 w-full sm:w-auto justify-center animate-fadeIn">
+          <div className="std-lsn-subbox inline-flex bg-gray-100 p-1 rounded-xl sm:rounded-full border border-gray-200/70 shrink-0 w-full sm:w-auto justify-center animate-fadeIn">
             <button
               type="button"
               onClick={() => setActiveTab('documents')}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-full text-xs font-extrabold transition-all duration-300 cursor-pointer ${
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 rounded-lg sm:rounded-full text-xs font-extrabold transition-all duration-300 cursor-pointer ${
                 activeTab === 'documents'
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'std-lsn-tab-inactive text-gray-600 hover:text-indigo-600'
               }`}
             >
-              <DocumentIcon className="w-4 h-4" />
+              <DocumentIcon className="w-4 h-4 shrink-0" />
               <span>{t('ឯកសារមេរៀន', 'Documents')}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
@@ -1917,13 +1973,13 @@ const StudentLessons = () => {
             <button
               type="button"
               onClick={() => setActiveTab('videos')}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-full text-xs font-extrabold transition-all duration-300 cursor-pointer ${
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 rounded-lg sm:rounded-full text-xs font-extrabold transition-all duration-300 cursor-pointer ${
                 activeTab === 'videos'
                   ? 'bg-purple-600 text-white shadow-sm'
                   : 'std-lsn-tab-inactive text-gray-600 hover:text-purple-600'
               }`}
             >
-              <VideoCameraIcon className="w-4 h-4" />
+              <VideoCameraIcon className="w-4 h-4 shrink-0" />
               <span>{t('វីដេអូបង្រៀន', 'Videos')}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
@@ -2017,13 +2073,14 @@ const StudentLessons = () => {
           </div>
         )}
 
-        <div className="flex items-center justify-end shrink-0 ml-auto">
+        {/* ប្រអប់ស្វែងរក៖ ពេញទទឹងលើទូរស័ព្ទ (w-full), ប្រែជា Expandable Pill លើ iPad/Desktop */}
+        <div className="flex items-center justify-end shrink-0 w-full sm:w-auto sm:ml-auto">
           <div
             ref={searchRef}
             className={`std-lsn-subbox relative flex items-center bg-gray-50 border border-gray-200/80 rounded-full shadow-2xs transition-all duration-300 ease-in-out overflow-hidden ${
               isSearchExpanded || searchQuery
-                ? 'w-full sm:w-[240px] px-3.5 py-2 ring-2 ring-indigo-500/20 border-indigo-400 bg-white'
-                : 'w-10 h-10 p-0 justify-center hover:border-indigo-300'
+                ? 'w-full sm:w-[250px] px-3.5 py-2 ring-2 ring-indigo-500/20 border-indigo-400 bg-white'
+                : 'w-full sm:w-10 h-10 px-3.5 sm:p-0 sm:justify-center hover:border-indigo-300'
             }`}
           >
             <button
@@ -2041,13 +2098,13 @@ const StudentLessons = () => {
             <input
               ref={searchInputRef}
               type="text"
-              placeholder=""
+              placeholder={t('ស្វែងរកមេរៀន, ឯកសារ ឬគ្រូ...', 'Search lessons, files, or teacher...')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className={`std-lsn-search-input bg-transparent text-gray-800 placeholder-gray-400 text-xs font-semibold focus:outline-none transition-all duration-300 ${
                 isSearchExpanded || searchQuery
                   ? 'w-full pl-2.5 pr-6 opacity-100'
-                  : 'w-0 opacity-0 pointer-events-none'
+                  : 'w-full pl-2.5 pr-6 opacity-100 sm:w-0 sm:p-0 sm:opacity-0 sm:pointer-events-none'
               }`}
             />
 
@@ -2069,9 +2126,9 @@ const StudentLessons = () => {
       {/* 📌 3. MAIN CONTENT AREA (តម្រៀបឆ្នាំបច្ចុប្បន្ននៅលើ + ឆ្នាំចាស់នៅក្រោម) */}
       {/* ================================================================== */}
       {!isShowingCourseFilesView ? (
-        <div className="space-y-8 animate-fadeIn">
+        <div className="space-y-6 sm:space-y-8 animate-fadeIn">
           {prioritizedYearSections.length === 0 ? (
-            <div className="std-lsn-surface bg-white rounded-3xl border border-gray-200/80 p-14 text-center space-y-3 shadow-2xs">
+            <div className="std-lsn-surface bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 p-10 sm:p-14 text-center space-y-3 shadow-2xs">
               <FolderOpenIcon className="h-14 w-14 mx-auto text-indigo-300" />
               <h3 className="std-lsn-text-primary text-base sm:text-lg font-extrabold text-gray-900">
                 {t(
@@ -2088,11 +2145,11 @@ const StudentLessons = () => {
             </div>
           ) : (
             prioritizedYearSections.map((section) => (
-              <div key={`year-sec-${section.yearKey}`} className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-                  <div className="flex flex-wrap items-center gap-2.5">
+              <div key={`year-sec-${section.yearKey}`} className="space-y-3.5 sm:space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2.5 px-1">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
                     <FolderOpenIcon
-                      className={`h-5 w-5 ${
+                      className={`h-5 w-5 shrink-0 ${
                         section.isCurrent
                           ? 'text-emerald-600 dark:text-emerald-400'
                           : 'text-indigo-600 dark:text-indigo-400'
@@ -2106,18 +2163,19 @@ const StudentLessons = () => {
                       className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold border ${section.badgeStyle}`}
                     >
                       {section.isCurrent ? (
-                        <CheckBadgeIcon className="h-3.5 w-3.5" />
+                        <CheckBadgeIcon className="h-3.5 w-3.5 shrink-0" />
                       ) : section.isPast ? (
-                        <ClockIcon className="h-3.5 w-3.5" />
+                        <ClockIcon className="h-3.5 w-3.5 shrink-0" />
                       ) : (
-                        <SparklesIcon className="h-3.5 w-3.5" />
+                        <SparklesIcon className="h-3.5 w-3.5 shrink-0" />
                       )}
                       <span>{section.badgeText}</span>
                     </span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
+                {/* ក្រឡាចត្រង្គថតមុខវិជ្ជា៖ 1 Col Phone, 2 Cols Tablet/iPad/Laptop, 3 Cols Desktop */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5 items-stretch">
                   {section.folders.map((folder, idx) => {
                     const theme = FOLDER_THEMES[idx % FOLDER_THEMES.length];
                     const tMeta = folder.teacherMeta;
@@ -2130,14 +2188,14 @@ const StudentLessons = () => {
                       <div
                         key={`${section.yearKey}-${folder.courseId}`}
                         onClick={() => handleSelectCourseFolder(folder)}
-                        className="std-lsn-card group bg-white rounded-[1.5rem] border border-gray-200/80 hover:border-indigo-400 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between overflow-hidden cursor-pointer"
+                        className="std-lsn-card group bg-white rounded-2xl sm:rounded-[1.5rem] border border-gray-200/80 hover:border-indigo-400 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between overflow-hidden cursor-pointer"
                       >
                         <div>
                           <div
                             className={`h-1.5 w-full bg-gradient-to-r ${theme.topBar}`}
                           />
 
-                          <div className="p-5">
+                          <div className="p-4 sm:p-5">
                             <div className="flex items-start justify-between gap-3 mb-3">
                               <div
                                 className={`h-10 w-10 rounded-xl border flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform ${theme.iconBg}`}
@@ -2145,7 +2203,7 @@ const StudentLessons = () => {
                                 <FolderOpenIcon className="h-5 w-5 stroke-[2.2]" />
                               </div>
 
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex flex-wrap items-center justify-end gap-1.5">
                                 {folder.courseCode && (
                                   <span className="std-lsn-subbox px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-gray-50 text-gray-600 border border-gray-200/80 uppercase">
                                     {folder.courseCode}
@@ -2177,7 +2235,7 @@ const StudentLessons = () => {
 
                             <div className="flex items-center gap-3 mt-3.5 pt-3 border-t border-gray-100 std-lsn-divider text-xs font-bold">
                               <span className="std-lsn-text-secondary flex items-center gap-1.5 text-gray-600">
-                                <DocumentTextIcon className="h-4 w-4 text-indigo-500" />
+                                <DocumentTextIcon className="h-4 w-4 text-indigo-500 shrink-0" />
                                 <span>
                                   {folder.docsItems.length}{' '}
                                   {t('ឯកសារមេរៀន', 'Documents')}
@@ -2187,7 +2245,7 @@ const StudentLessons = () => {
                                 •
                               </span>
                               <span className="std-lsn-text-secondary flex items-center gap-1.5 text-gray-600">
-                                <PlayCircleIcon className="h-4 w-4 text-purple-500" />
+                                <PlayCircleIcon className="h-4 w-4 text-purple-500 shrink-0" />
                                 <span>
                                   {folder.vidsItems.length}{' '}
                                   {t('វីដេអូ', 'Videos')}
@@ -2197,8 +2255,8 @@ const StudentLessons = () => {
                           </div>
                         </div>
 
-                        <div className="std-lsn-subbox px-5 py-3 bg-gray-50/70 border-t border-gray-100 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2 min-w-0">
+                        <div className="std-lsn-subbox px-4 sm:px-5 py-3 bg-gray-50/70 border-t border-gray-100 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
                             <div
                               className={`h-7 w-7 rounded-full bg-gradient-to-br ${theme.avatarBg} text-white font-black text-[10px] flex items-center justify-center shrink-0 overflow-hidden relative shadow-2xs`}
                             >
@@ -2239,14 +2297,14 @@ const StudentLessons = () => {
           )}
         </div>
       ) : (
-        <div className="space-y-5 animate-fadeIn">
+        <div className="space-y-4 sm:space-y-5 animate-fadeIn">
           
-          <div className="flex flex-wrap items-center justify-between gap-4 px-1 pt-1">
-            <div className="flex flex-wrap items-center gap-3 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4 px-1 pt-1">
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 min-w-0">
               {activeSelectedFolder ? (
                 <>
                   <span className="w-1.5 h-6 bg-gradient-to-b from-indigo-500 to-blue-600 rounded-full shrink-0"></span>
-                  <h2 className="std-lsn-text-primary text-lg sm:text-xl font-black text-gray-900 tracking-tight">
+                  <h2 className="std-lsn-text-primary text-base sm:text-xl font-black text-gray-900 tracking-tight truncate">
                     {activeSelectedFolder.courseName}
                   </h2>
                   {activeSelectedFolder.teacherMeta && (
@@ -2271,7 +2329,7 @@ const StudentLessons = () => {
                           </span>
                         )}
                       </div>
-                      <span>
+                      <span className="truncate max-w-[160px] sm:max-w-none">
                         {t('គ្រូ៖', 'Teacher:')}{' '}
                         {activeSelectedFolder.teacherMeta.name}
                       </span>
@@ -2289,7 +2347,7 @@ const StudentLessons = () => {
               <button
                 type="button"
                 onClick={handleBackToAllCourses}
-                className="group ml-auto inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50/90 hover:bg-indigo-600 text-indigo-600 hover:text-white dark:bg-indigo-500/15 dark:hover:bg-indigo-600 dark:text-indigo-300 dark:hover:text-white border border-indigo-200/80 dark:border-indigo-500/30 text-xs font-extrabold transition-all duration-200 cursor-pointer shrink-0 shadow-2xs"
+                className="group w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl sm:rounded-full bg-indigo-50/90 hover:bg-indigo-600 text-indigo-600 hover:text-white dark:bg-indigo-500/15 dark:hover:bg-indigo-600 dark:text-indigo-300 dark:hover:text-white border border-indigo-200/80 dark:border-indigo-500/30 text-xs font-extrabold transition-all duration-200 cursor-pointer shrink-0 shadow-2xs"
               >
                 <ArrowLeftIcon className="h-4 w-4 stroke-[2.5] group-hover:-translate-x-0.5 transition-transform" />
                 <span>{t('ត្រឡប់ទៅមុខវិជ្ជាទាំងអស់', 'Back to All Courses')}</span>
@@ -2300,7 +2358,7 @@ const StudentLessons = () => {
           {activeTab === 'documents' && (
             <div>
               {activeDocsList.length === 0 ? (
-                <div className="std-lsn-surface bg-white rounded-3xl border border-gray-200/80 p-14 text-center space-y-3">
+                <div className="std-lsn-surface bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 p-10 sm:p-14 text-center space-y-3">
                   <DocumentTextIcon className="h-14 w-14 mx-auto text-indigo-300" />
                   <h3 className="std-lsn-text-primary text-base font-extrabold text-gray-900">
                     {t(
@@ -2323,7 +2381,7 @@ const StudentLessons = () => {
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
                   {activeDocsList.map((doc, idx) => {
                     const fileMeta = getFileTypeMeta(doc.file_name);
                     const isDownloading =
@@ -2339,7 +2397,7 @@ const StudentLessons = () => {
                             onClick={() =>
                               !isDownloading &&
                               handleDownloadFile(
-                                doc.file_path,
+                                doc,
                                 doc.file_name,
                                 doc.id
                               )
@@ -2387,12 +2445,12 @@ const StudentLessons = () => {
                             disabled={isDownloading}
                             onClick={() =>
                               handleDownloadFile(
-                                doc.file_path,
+                                doc,
                                 doc.file_name,
                                 doc.id
                               )
                             }
-                            className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-2xs disabled:opacity-60"
+                            className="w-full flex items-center justify-center gap-2 py-2.5 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-2xs disabled:opacity-60"
                           >
                             <ArrowDownTrayIcon className="w-4 h-4 stroke-[2.2]" />
                             <span>
@@ -2413,7 +2471,7 @@ const StudentLessons = () => {
           {activeTab === 'videos' && (
             <div>
               {activeVidsList.length === 0 ? (
-                <div className="std-lsn-surface bg-white rounded-3xl border border-gray-200/80 p-14 text-center space-y-3">
+                <div className="std-lsn-surface bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 p-10 sm:p-14 text-center space-y-3">
                   <VideoCameraIcon className="h-14 w-14 mx-auto text-purple-300" />
                   <h3 className="std-lsn-text-primary text-base font-extrabold text-gray-900">
                     {t(
@@ -2436,7 +2494,7 @@ const StudentLessons = () => {
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
                   {activeVidsList.map((video, idx) => {
                     const thumbnailUrl = getYouTubeThumbnail(video.video_url);
 
@@ -2496,7 +2554,7 @@ const StudentLessons = () => {
                           <button
                             type="button"
                             onClick={() => setPlayingVideo(video)}
-                            className="w-full flex items-center justify-center gap-2 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-2xs"
+                            className="w-full flex items-center justify-center gap-2 py-2.5 sm:py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-2xs"
                           >
                             <PlayIcon className="w-4 h-4 stroke-[2.5]" />
                             <span>{t('ចាក់វីដេអូមេរៀន', 'Watch Video')}</span>
@@ -2520,17 +2578,17 @@ const StudentLessons = () => {
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fadeIn"
+            className="fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-4 animate-fadeIn"
             onClick={() => setPlayingVideo(null)}
           >
             <div
-              className="bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden"
+              className="bg-slate-900 border border-slate-700 rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="px-5 sm:px-6 py-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-4">
+              <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
                       {t('មេរៀនទី', 'Lesson')}{' '}
                       {playingVideo.lesson?.lesson_order || 1}
                     </span>

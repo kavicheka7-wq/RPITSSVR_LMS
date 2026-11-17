@@ -1,5 +1,6 @@
 // src/components/student/StudentCourses.jsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -276,6 +277,7 @@ const StudentCourses = () => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
   const [failedAvatars, setFailedAvatars] = useState({});
+  const abortControllerRef = useRef(null);
 
   const currentStudentId = useMemo(() => {
     const uid = resolveStudentUid(user);
@@ -293,7 +295,7 @@ const StudentCourses = () => {
   }
   STUDENT_COURSES_MEM_CACHE.uid = currentStudentId;
 
-  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី (តែបើមានទិន្នន័យពិតប្រាកដប៉ុណ្ណោះ)
+  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី
   const [courses, setCourses] = useState(() => {
     if (
       Array.isArray(STUDENT_COURSES_MEM_CACHE.courses) &&
@@ -373,6 +375,12 @@ const StudentCourses = () => {
         }
       }
 
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       try {
         let coursesData = [];
         let newMeta = null;
@@ -380,17 +388,34 @@ const StudentCourses = () => {
         try {
           const response = await api.get('/student/courses', {
             params: { page, per_page: perPage },
+            signal: controller.signal,
           });
           coursesData = extractValidCoursesList(response.data);
           newMeta = response.data?.meta || response.data?.data?.meta || null;
         } catch (primaryErr) {
+          if (
+            primaryErr.name === 'CanceledError' ||
+            primaryErr.code === 'ERR_CANCELED'
+          ) {
+            return;
+          }
           try {
-            const dashRes = await api.get('/student/dashboard');
+            const dashRes = await api.get('/student/dashboard', {
+              signal: controller.signal,
+            });
             coursesData = extractValidCoursesList(
               dashRes.data?.enrollments || dashRes.data
             );
           } catch (dashErr) {
-            const scoreRes = await api.get('/student/scores');
+            if (
+              dashErr.name === 'CanceledError' ||
+              dashErr.code === 'ERR_CANCELED'
+            ) {
+              return;
+            }
+            const scoreRes = await api.get('/student/scores', {
+              signal: controller.signal,
+            });
             coursesData = extractValidCoursesList(scoreRes.data);
           }
         }
@@ -420,6 +445,9 @@ const StudentCourses = () => {
           );
         }
       } catch (error) {
+        if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+          return;
+        }
         console.error('Error fetching courses:', error);
       }
     },
@@ -428,6 +456,11 @@ const StudentCourses = () => {
 
   useEffect(() => {
     fetchCourses(false);
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [fetchCourses]);
 
   // ============================================================================
@@ -767,30 +800,30 @@ const StudentCourses = () => {
   }, [enrichedCourses, searchTerm, getTeacherDisplayName]);
 
   return (
-    <div className="stdc-page-bg max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
+    <div className="stdc-page-bg max-w-7xl mx-auto px-3 sm:px-5 lg:px-8 space-y-5 sm:space-y-6 lg:space-y-8 pb-28 md:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
       {/* ================================================================== */}
-      {/* 📌 1. MODERN BENTO HERO SECTION                                    */}
+      {/* 📌 1. MODERN BENTO HERO SECTION (Adaptive Phone / iPad / Desktop)  */}
       {/* ================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (8 Columns) */}
-        <div className="lg:col-span-8 relative overflow-hidden rounded-[1.75rem] sm:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-6 sm:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="stdc-hero-grid absolute inset-0 opacity-15 pointer-events-none"></div>
           <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
-          <div className="relative z-10 space-y-3.5">
+          <div className="relative z-10 space-y-3 sm:space-y-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
+              <span className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-[11px] sm:text-xs font-extrabold text-cyan-200 max-w-full">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
-                <span>{studentDeptName}</span>
+                <span className="truncate">{studentDeptName}</span>
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -805,13 +838,13 @@ const StudentCourses = () => {
               </span>
             </div>
 
-            <div className="space-y-2 pt-1">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
+            <div className="space-y-1.5 sm:space-y-2 pt-1">
+              <h1 className="text-xl sm:text-2xl md:text-3xl xl:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2 leading-snug">
                 <span>{t('មុខវិជ្ជាសិក្សា,', 'My Courses,')}</span>
                 <span className="bg-gradient-to-r from-yellow-300 via-amber-200 to-white bg-clip-text text-transparent">
                   {getStudentBatchYear()}
                 </span>
-                <CheckBadgeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-yellow-400 shrink-0" />
+                <CheckBadgeIcon className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 text-yellow-400 shrink-0" />
               </h1>
 
               <p className="text-xs sm:text-sm text-blue-100/80 max-w-2xl leading-relaxed font-medium">
@@ -824,35 +857,35 @@ const StudentCourses = () => {
           </div>
 
           <div
-            className="relative z-10 mt-6 pt-5 border-t border-white/15"
+            className="relative z-10 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15"
             onMouseEnter={() => setIsCarouselPaused(true)}
             onMouseLeave={() => setIsCarouselPaused(false)}
           >
             {!currentInstructor ? (
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="h-12 w-12 rounded-full bg-indigo-500/30 border border-indigo-300/30 flex items-center justify-center text-indigo-200 shrink-0">
-                    <UserIcon className="h-6 w-6" />
+              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-indigo-500/30 border border-indigo-300/30 flex items-center justify-center text-indigo-200 shrink-0">
+                    <UserIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                   </div>
-                  <span className="text-base sm:text-lg font-black text-white truncate">
+                  <span className="text-sm sm:text-lg font-black text-white truncate">
                     {t('មិនទាន់មានគ្រូបង្រៀន', 'No instructor assigned')}
                   </span>
                 </div>
-                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/35 text-xs font-extrabold text-cyan-200 shrink-0">
-                  <AcademicCapIcon className="h-4 w-4 text-cyan-300" />
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/35 text-[11px] sm:text-xs font-extrabold text-cyan-200 shrink-0">
+                  <AcademicCapIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-cyan-300" />
                   <span>{t('គ្រូបង្រៀន', 'Instructor')}</span>
                 </span>
               </div>
             ) : (
               <div className="space-y-2.5">
-                <div className="relative overflow-hidden bg-white/10 hover:bg-white/[0.14] backdrop-blur-md border border-white/20 rounded-2xl px-4 py-3.5 transition-all duration-300">
+                <div className="relative overflow-hidden bg-white/10 hover:bg-white/[0.14] backdrop-blur-md border border-white/20 rounded-2xl px-3.5 sm:px-4 py-3 sm:py-3.5 transition-all duration-300">
                   <div
                     key={`${currentInstructor.key}-${activeSlideIndex}`}
-                    className="std-carousel-slide flex items-center justify-between gap-4"
+                    className="std-carousel-slide flex items-center justify-between gap-3"
                   >
-                    <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                    <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
                       <div
-                        className={`h-12 w-12 rounded-full bg-gradient-to-br ${currentInstructor.avatarBg} flex items-center justify-center font-black text-sm text-white shrink-0 overflow-hidden relative ring-2 ring-white/30 shadow-md transition-transform duration-300`}
+                        className={`h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-gradient-to-br ${currentInstructor.avatarBg} flex items-center justify-center font-black text-xs sm:text-sm text-white shrink-0 overflow-hidden relative ring-2 ring-white/30 shadow-md transition-transform duration-300`}
                       >
                         {currentInstructor.imageUrl &&
                         !failedAvatars[`inst_${currentInstructor.key}`] ? (
@@ -874,13 +907,13 @@ const StudentCourses = () => {
                         )}
                       </div>
 
-                      <h3 className="text-base sm:text-lg font-black text-white truncate leading-snug">
+                      <h3 className="text-sm sm:text-lg font-black text-white truncate leading-snug">
                         {currentInstructor.name}
                       </h3>
                     </div>
 
-                    <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/35 text-xs font-extrabold text-cyan-200 shadow-2xs shrink-0">
-                      <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/35 text-[11px] sm:text-xs font-extrabold text-cyan-200 shadow-2xs shrink-0">
+                      <AcademicCapIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-cyan-300 shrink-0" />
                       <span>{t('គ្រូបង្រៀន', 'Instructor')}</span>
                     </span>
                   </div>
@@ -911,7 +944,7 @@ const StudentCourses = () => {
                       <button
                         type="button"
                         onClick={handlePrevSlide}
-                        className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                        className="p-1.5 sm:p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
                         title={t('មុន', 'Previous')}
                       >
                         <ChevronLeftIcon className="h-3.5 w-3.5 stroke-[2.5]" />
@@ -919,7 +952,7 @@ const StudentCourses = () => {
                       <button
                         type="button"
                         onClick={handleNextSlide}
-                        className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                        className="p-1.5 sm:p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
                         title={t('បន្ទាប់', 'Next')}
                       >
                         <ChevronRightIcon className="h-3.5 w-3.5 stroke-[2.5]" />
@@ -932,19 +965,19 @@ const StudentCourses = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
-        <div className="lg:col-span-4 stdc-surface-card bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (5 Cols on lg, 4 Cols on xl) */}
+        <div className="lg:col-span-5 xl:col-span-4 stdc-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-500/30 flex items-center justify-center shrink-0">
                   <AcademicCapIcon className="h-5 w-5 stroke-[2.2]" />
                 </div>
-                <div>
-                  <h2 className="stdc-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight">
+                <div className="min-w-0">
+                  <h2 className="stdc-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight truncate">
                     {t('សង្ខេបការសិក្សារបស់ខ្ញុំ', 'Academic Summary')}
                   </h2>
-                  <p className="stdc-text-secondary text-[11px] font-medium text-gray-500 mt-0.5">
+                  <p className="stdc-text-secondary text-[11px] font-medium text-gray-500 mt-0.5 truncate">
                     {t(
                       'ទិន្នន័យសរុបនៃមុខវិជ្ជា និងក្រេឌីតសិក្សា',
                       'Overview of your active courses & credits'
@@ -954,50 +987,50 @@ const StudentCourses = () => {
               </div>
             </div>
 
-            <div className="space-y-3 pt-1">
-              <div className="stdc-subbox p-4 rounded-2xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/70 via-teal-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3 transition-all">
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="h-12 w-12 rounded-2xl bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-300 border border-emerald-300/50 dark:border-emerald-500/30 flex items-center justify-center shrink-0 shadow-2xs">
-                    <BookOpenIcon className="h-6 w-6 stroke-[2.2]" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3 pt-1">
+              <div className="stdc-subbox p-3.5 sm:p-4 rounded-2xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/70 via-teal-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3 transition-all">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-2xl bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-300 border border-emerald-300/50 dark:border-emerald-500/30 flex items-center justify-center shrink-0 shadow-2xs">
+                    <BookOpenIcon className="h-5 w-5 sm:h-6 sm:w-6 stroke-[2.2]" />
                   </div>
                   <div className="min-w-0">
-                    <span className="stdc-text-primary block text-lg sm:text-xl font-black text-gray-900 leading-tight">
+                    <span className="stdc-text-primary block text-base sm:text-xl font-black text-gray-900 leading-tight">
                       {courseStats.total} {t('មុខវិជ្ជា', 'Courses')}
                     </span>
-                    <span className="stdc-text-secondary block text-xs font-bold text-gray-500 mt-0.5">
+                    <span className="stdc-text-secondary block text-[11px] sm:text-xs font-bold text-gray-500 mt-0.5 truncate">
                       {t('មុខវិជ្ជាសិក្សាសកម្ម', 'Active Enrolled Courses')}
                     </span>
                   </div>
                 </div>
 
-                <span className="px-3 py-1 rounded-xl text-[11px] font-extrabold bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/30 shrink-0">
+                <span className="px-2.5 py-1 rounded-xl text-[10px] sm:text-[11px] font-extrabold bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/30 shrink-0">
                   {t('កំពុងសិក្សា', 'Active')}
                 </span>
               </div>
 
-              <div className="stdc-subbox p-4 rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50/70 via-orange-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3 transition-all">
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="h-12 w-12 rounded-2xl bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-300/50 dark:border-amber-500/30 flex items-center justify-center shrink-0 shadow-2xs">
-                    <AcademicCapIcon className="h-6 w-6 stroke-[2.2]" />
+              <div className="stdc-subbox p-3.5 sm:p-4 rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50/70 via-orange-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3 transition-all">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-2xl bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-300/50 dark:border-amber-500/30 flex items-center justify-center shrink-0 shadow-2xs">
+                    <AcademicCapIcon className="h-5 w-5 sm:h-6 sm:w-6 stroke-[2.2]" />
                   </div>
                   <div className="min-w-0">
-                    <span className="stdc-text-primary block text-lg sm:text-xl font-black text-gray-900 leading-tight">
+                    <span className="stdc-text-primary block text-base sm:text-xl font-black text-gray-900 leading-tight">
                       {courseStats.totalCredits} {t('ក្រេឌីត', 'Credits')}
                     </span>
-                    <span className="stdc-text-secondary block text-xs font-bold text-gray-500 mt-0.5">
+                    <span className="stdc-text-secondary block text-[11px] sm:text-xs font-bold text-gray-500 mt-0.5 truncate">
                       {t('ចំនួនក្រេឌីតសរុប', 'Total Course Credits')}
                     </span>
                   </div>
                 </div>
 
-                <span className="px-3 py-1 rounded-xl text-[11px] font-extrabold bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 shrink-0">
+                <span className="px-2.5 py-1 rounded-xl text-[10px] sm:text-[11px] font-extrabold bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 shrink-0">
                   {courseStats.totalCredits} Cr
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="stdc-divider pt-4 mt-4 border-t border-gray-100 flex items-center justify-between text-xs">
+          <div className="stdc-divider pt-3.5 sm:pt-4 mt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="stdc-text-secondary font-bold text-gray-500">
               {t('គ្រូបង្រៀនសរុប៖', 'Instructors:')}{' '}
               <strong className="stdc-text-primary text-gray-800">
@@ -1006,7 +1039,7 @@ const StudentCourses = () => {
             </span>
 
             <span className="font-extrabold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-              <SparklesIcon className="h-3.5 w-3.5" />
+              <SparklesIcon className="h-3.5 w-3.5 shrink-0" />
               <span>{getStudentBatchYear()}</span>
             </span>
           </div>
@@ -1016,12 +1049,15 @@ const StudentCourses = () => {
       {/* ================================================================== */}
       {/* 📌 2. SEARCH BAR                                                   */}
       {/* ================================================================== */}
-      <div className="stdc-surface-card bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-4 items-center justify-between">
+      <div className="stdc-surface-card bg-white rounded-2xl border border-gray-200/80 shadow-xs p-3.5 sm:p-4 flex flex-col sm:flex-row gap-3.5 sm:gap-4 items-center justify-between">
         <div className="relative w-full sm:max-w-md flex-1">
           <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder=""
+            placeholder={t(
+              'ស្វែងរកឈ្មោះមុខវិជ្ជា, កូដមុខវិជ្ជា ឬគ្រូបង្រៀន...',
+              'Search course name, code, or instructor...'
+            )}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="stdc-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
@@ -1030,7 +1066,7 @@ const StudentCourses = () => {
             <button
               type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-1"
             >
               <XMarkIcon className="h-4 w-4" />
             </button>
@@ -1049,13 +1085,13 @@ const StudentCourses = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. MAIN COURSES CARDS (Static Display)                           */}
+      {/* 📌 3. MAIN COURSES CARDS (1 Col Phone, 2 Tablet/Laptop, 3-4 Desktop) */}
       {/* ================================================================== */}
       <div className="w-full">
         {filteredCourses.length === 0 ? (
-          <div className="stdc-surface-card bg-white border border-gray-200/80 rounded-3xl p-14 text-center text-gray-500 shadow-xs">
+          <div className="stdc-surface-card bg-white border border-gray-200/80 rounded-2xl sm:rounded-3xl p-10 sm:p-14 text-center text-gray-500 shadow-xs">
             <div className="max-w-md mx-auto space-y-3">
-              <ExclamationCircleIcon className="h-16 w-16 text-indigo-300 mx-auto" />
+              <ExclamationCircleIcon className="h-14 w-14 sm:h-16 sm:w-16 text-indigo-300 mx-auto" />
               <h3 className="stdc-text-primary text-base sm:text-lg font-extrabold text-gray-900">
                 {searchTerm
                   ? t('មិនឃើញមុខវិជ្ជាតាមការស្វែងរកទេ', 'No matching courses found')
@@ -1075,7 +1111,7 @@ const StudentCourses = () => {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-5 items-stretch">
             {filteredCourses.map((course, idx) => {
               const teacherName = getTeacherDisplayName(course);
               const teacherInitials = getTeacherInitials(teacherName);
@@ -1097,52 +1133,52 @@ const StudentCourses = () => {
               return (
                 <div
                   key={course.id}
-                  className={`stdc-course-card group relative bg-white rounded-2xl border border-gray-200/80 shadow-xs ${theme.glow} transition-all duration-300 overflow-hidden flex flex-col justify-between h-full select-none`}
+                  className={`stdc-course-card group relative bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-xs hover:-translate-y-1 ${theme.glow} transition-all duration-300 overflow-hidden flex flex-col justify-between h-full select-none`}
                 >
                   <div>
                     <div
-                      className={`relative h-20 bg-gradient-to-r ${theme.coverBg} p-3 flex flex-col justify-between text-white overflow-hidden`}
+                      className={`relative h-20 sm:h-22 bg-gradient-to-r ${theme.coverBg} p-3.5 flex flex-col justify-between text-white overflow-hidden`}
                     >
                       <div className="stdc-hero-grid absolute inset-0 opacity-20 pointer-events-none"></div>
                       <BookOpenIcon className="absolute right-2 -bottom-3 h-16 w-16 text-white/[0.12] -rotate-12 pointer-events-none" />
 
                       <div className="relative z-10 flex items-center justify-between gap-1.5">
-                        <span className="px-2 py-0.5 rounded-lg bg-slate-950/35 backdrop-blur-md border border-white/20 text-[10px] font-black tracking-wider uppercase">
+                        <span className="px-2.5 py-0.5 rounded-lg bg-slate-950/35 backdrop-blur-md border border-white/20 text-[10px] sm:text-[11px] font-black tracking-wider uppercase">
                           {course.course_code || 'COURSE'}
                         </span>
 
-                        <span className="px-2 py-0.5 rounded-lg bg-white/20 backdrop-blur-md border border-white/25 text-[10px] font-extrabold">
+                        <span className="px-2.5 py-0.5 rounded-lg bg-white/20 backdrop-blur-md border border-white/25 text-[10px] sm:text-[11px] font-extrabold">
                           {credit} {t('ក្រេឌីត', 'Cr')}
                         </span>
                       </div>
 
                       <div className="relative z-10 flex justify-end">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-400/20 backdrop-blur-md border border-emerald-300/30 text-[9px] font-extrabold text-emerald-100">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-400/20 backdrop-blur-md border border-emerald-300/30 text-[9.5px] font-extrabold text-emerald-100">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
                           {t('កំពុងបើកបង្រៀន', 'Active')}
                         </span>
                       </div>
                     </div>
 
-                    <div className="px-4 pb-3 pt-2.5 relative">
+                    <div className="px-4 sm:px-5 pb-3.5 pt-2.5 relative">
                       <div className="flex items-center justify-between gap-2 mb-3 relative z-20">
                         <div
-                          className={`-mt-7 h-10 w-10 rounded-xl bg-gradient-to-br ${theme.floatingIconBg} border-[3px] border-white dark:border-slate-800 flex items-center justify-center shadow-sm shrink-0`}
+                          className={`-mt-7 h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-gradient-to-br ${theme.floatingIconBg} border-[3px] border-white dark:border-slate-800 flex items-center justify-center shadow-sm shrink-0`}
                         >
-                          <BookOpenIcon className="h-4 w-4 stroke-[2.2]" />
+                          <BookOpenIcon className="h-4 w-4 sm:h-5 sm:w-5 stroke-[2.2]" />
                         </div>
 
-                        <span className="stdc-code-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold bg-gray-100/90 text-gray-700 border border-gray-200/80 truncate max-w-[155px] shadow-2xs">
+                        <span className="stdc-code-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] sm:text-[11px] font-extrabold bg-gray-100/90 text-gray-700 border border-gray-200/80 truncate max-w-[180px] shadow-2xs">
                           <BuildingLibraryIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
                           <span className="truncate">{deptName}</span>
                         </span>
                       </div>
 
-                      <div className="space-y-1">
-                        <h3 className="stdc-text-primary text-sm sm:text-base font-black text-gray-900 line-clamp-1">
+                      <div className="space-y-1.5">
+                        <h3 className="stdc-text-primary text-sm sm:text-base font-black text-gray-900 line-clamp-1 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                           {course.course_name}
                         </h3>
-                        <p className="stdc-text-secondary text-[11px] text-gray-500 line-clamp-1 leading-relaxed font-medium">
+                        <p className="stdc-text-secondary text-[11px] sm:text-xs text-gray-500 line-clamp-2 min-h-[32px] leading-relaxed font-medium">
                           {course.description ||
                             t(
                               'ចូលមើលមេរៀន វីដេអូបង្រៀន និងធ្វើលំហាត់អនុវត្តន៍។',
@@ -1151,38 +1187,48 @@ const StudentCourses = () => {
                         </p>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-gray-100 dark:border-slate-700/70">
-                        <span className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50/80 text-blue-700 border border-blue-100">
-                          <FolderIcon className="h-3 w-3" />
-                          <span>
+                      {/* ផ្លាកមេរៀន / កិច្ចការ / កម្រងសំណួរ (Interactive Quick Links) */}
+                      <div className="grid grid-cols-3 gap-1.5 mt-3.5 pt-3 border-t border-gray-100 dark:border-slate-700/70">
+                        <Link
+                          to={`/lessons?course_id=${course.id}`}
+                          className="stdc-resource-tag flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg text-[10px] sm:text-[11px] font-bold bg-blue-50/80 hover:bg-blue-100 text-blue-700 border border-blue-100 transition-colors"
+                        >
+                          <FolderIcon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">
                             {t('មេរៀន', 'Lessons')}
                             {course.lessons_count > 0 ? ` (${course.lessons_count})` : ''}
                           </span>
-                        </span>
-                        <span className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50/80 text-purple-700 border border-purple-100">
-                          <ClipboardDocumentListIcon className="h-3 w-3" />
-                          <span>
-                            {t('កិច្ចការ', 'Homework')}
+                        </Link>
+                        <Link
+                          to="/assignments"
+                          className="stdc-resource-tag flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg text-[10px] sm:text-[11px] font-bold bg-purple-50/80 hover:bg-purple-100 text-purple-700 border border-purple-100 transition-colors"
+                        >
+                          <ClipboardDocumentListIcon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">
+                            {t('កិច្ចការ', 'Tasks')}
                             {course.assignments_count > 0
                               ? ` (${course.assignments_count})`
                               : ''}
                           </span>
-                        </span>
-                        <span className="stdc-resource-tag inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50/80 text-emerald-700 border border-emerald-100">
-                          <AcademicCapIcon className="h-3 w-3" />
-                          <span>
-                            {t('កម្រងសំណួរ', 'Quizzes')}
+                        </Link>
+                        <Link
+                          to="/quizzes"
+                          className="stdc-resource-tag flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg text-[10px] sm:text-[11px] font-bold bg-emerald-50/80 hover:bg-emerald-100 text-emerald-700 border border-emerald-100 transition-colors"
+                        >
+                          <AcademicCapIcon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">
+                            {t('សំណួរ', 'Quizzes')}
                             {course.quizzes_count > 0 ? ` (${course.quizzes_count})` : ''}
                           </span>
-                        </span>
+                        </Link>
                       </div>
                     </div>
                   </div>
 
-                  <div className="stdc-card-footer px-4 py-2.5 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="stdc-card-footer px-4 sm:px-5 py-3 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <div
-                        className={`h-8 w-8 rounded-full bg-gradient-to-br ${theme.avatarBg} flex items-center justify-center font-black text-[10px] shrink-0 overflow-hidden relative shadow-2xs`}
+                        className={`h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-gradient-to-br ${theme.avatarBg} flex items-center justify-center font-black text-[10px] sm:text-xs shrink-0 overflow-hidden relative shadow-2xs`}
                       >
                         {hasTeacherAvatar ? (
                           <img
@@ -1202,8 +1248,8 @@ const StudentCourses = () => {
                           <span>{teacherInitials}</span>
                         )}
                       </div>
-                      <div className="min-w-0">
-                        <span className="stdc-text-muted block text-[9px] font-extrabold uppercase tracking-wider text-gray-400 leading-none truncate">
+                      <div className="min-w-0 flex-1">
+                        <span className="stdc-text-muted block text-[9.5px] font-extrabold uppercase tracking-wider text-gray-400 leading-none truncate">
                           {course.teacher_profile?.specialization ||
                             course.teacher?.specialization ||
                             t('គ្រូបង្រៀន', 'Instructor')}
@@ -1217,8 +1263,8 @@ const StudentCourses = () => {
                       </div>
                     </div>
 
-                    <span className="stdc-code-pill inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-extrabold bg-white text-indigo-600 border border-gray-200/80 shrink-0">
-                      <CheckBadgeIcon className="h-3.5 w-3.5 text-emerald-500" />
+                    <span className="stdc-code-pill inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] sm:text-[11px] font-extrabold bg-white text-indigo-600 border border-gray-200/80 shrink-0">
+                      <CheckBadgeIcon className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                       <span>{t('បានចុះឈ្មោះ', 'Enrolled')}</span>
                     </span>
                   </div>
@@ -1230,17 +1276,17 @@ const StudentCourses = () => {
 
         {/* Pagination Controls */}
         {meta.last_page > 1 && (
-          <div className="stdc-surface-card mt-8 bg-white rounded-2xl border border-gray-200/80 shadow-xs px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+          <div className="stdc-surface-card mt-6 sm:mt-8 bg-white rounded-2xl border border-gray-200/80 shadow-xs px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
             <p className="stdc-text-secondary text-xs font-bold text-gray-600">
               {t('ទំព័រ', 'Page')} {meta.current_page} / {meta.last_page} (
               {meta.total} {t('មុខវិជ្ជា', 'courses')})
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={meta.current_page === 1}
-                className="stdc-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="stdc-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('មុន', 'Previous')}
               </button>
@@ -1275,7 +1321,7 @@ const StudentCourses = () => {
                 type="button"
                 onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
                 disabled={meta.current_page === meta.last_page}
-                className="stdc-page-btn px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="stdc-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('បន្ទាប់', 'Next')}
               </button>
@@ -1340,6 +1386,10 @@ const StudentCourses = () => {
           background-color: #0f172a !important;
           border-color: #334155 !important;
           color: #cbd5e1 !important;
+        }
+        html.dark .stdc-resource-tag:hover {
+          border-color: #6366f1 !important;
+          color: #ffffff !important;
         }
         html.dark .stdc-page-btn:hover:not(:disabled) {
           background-color: #4f46e5 !important;

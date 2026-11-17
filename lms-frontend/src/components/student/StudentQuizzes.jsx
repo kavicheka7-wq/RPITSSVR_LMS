@@ -36,16 +36,16 @@ import {
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 const CACHE_KEY_SHARED_QUIZZES = 'cached_student_quizzes_list_v15';
-const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
-const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
+const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v15';
+const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v15';
 
 const getQuizzesCacheKey = (uid) => `cached_student_quizzes_list_v15_${uid}`;
 const getQuizzesMetaCacheKey = (uid) => `cached_student_quizzes_meta_v15_${uid}`;
-const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
-const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
+const getCoursesCacheKey = (uid) => `cached_student_courses_list_v15_${uid}`;
+const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v15_${uid}`;
 const getQuizReviewsCacheKey = (uid) => `cached_student_quiz_reviews_v15_${uid}`;
-const getScoresCacheKey = (uid) => `cached_student_scores_list_v14_${uid}`;
-const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v10_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v15_${uid}`;
+const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v15_${uid}`;
 
 const DEFAULT_META = {
   current_page: 1,
@@ -145,6 +145,7 @@ const ensureCleanStudentSessionCache = (newUid) => {
     if (prevUid && prevUid !== String(newUid)) {
       const legacySharedKeys = [
         'cached_student_quizzes_list_v5',
+        'cached_student_quizzes_list_v15',
         'cached_student_courses_list_v3',
         'cached_student_courses_meta_v3',
         'cached_student_dashboard_stats_v8',
@@ -459,6 +460,7 @@ const StudentQuizzes = () => {
     const cached =
       readStorageJson(getCoursesCacheKey(currentStudentId), null) ||
       readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_courses_list_v10_${currentStudentId}`, null) ||
       readStorageJson(CACHE_KEY_SHARED_COURSES, null) ||
       readStorageJson(CACHE_KEY_SHARED_ENROLLMENTS, []);
     STUDENT_QUIZ_MEM_CACHE.courses = Array.isArray(cached) ? cached : [];
@@ -895,7 +897,6 @@ const StudentQuizzes = () => {
     }));
   };
 
-  // ✅ ពិនិត្យថាតើសំណួរនោះត្រូវបានឆ្លើយរួចហើយឬនៅ (ទាំងសំណួរធីក និងសំណួរសរសេរ)
   const isQuestionAnswered = useCallback(
     (q) => {
       if (!q) return false;
@@ -971,7 +972,6 @@ const StudentQuizzes = () => {
       const totalMarks =
         resData.total_marks ?? activeQuizAttempt.total_mark ?? 20;
 
-      // ✅ ប្រើ review_items ពី Backend (ដែលមានចម្លើយត្រឹមត្រូវ ១០០% ពី DB) ឬ Fallback មក localReviewItems
       const finalReviewItems =
         Array.isArray(resData.review_items) && resData.review_items.length > 0
           ? resData.review_items
@@ -1031,7 +1031,7 @@ const StudentQuizzes = () => {
           sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(
-            `cached_student_scores_list_v10_${currentStudentId}`
+            `cached_student_scores_list_v14_${currentStudentId}`
           );
           sessionStorage.removeItem(getStatsCacheKey(currentStudentId));
           localStorage.removeItem(getStatsCacheKey(currentStudentId));
@@ -1300,30 +1300,30 @@ const StudentQuizzes = () => {
   const isManyAttemptQuestions = totalAttemptQuestions >= 5;
 
   return (
-    <div className="std-qz-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
+    <div className="std-qz-page max-w-7xl mx-auto px-3 sm:px-5 lg:px-8 space-y-5 sm:space-y-6 lg:space-y-8 pb-28 md:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
       {/* ================================================================== */}
-      {/* 1. MODERN BENTO HERO SECTION                                       */}
+      {/* 1. MODERN BENTO HERO SECTION (Adaptive Phone / iPad / Desktop)     */}
       {/* ================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (8 Columns) */}
-        <div className="lg:col-span-8 relative overflow-hidden rounded-[1.75rem] sm:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-6 sm:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-qz-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
           <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
-          <div className="relative z-10 space-y-3.5">
+          <div className="relative z-10 space-y-3 sm:space-y-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
+              <span className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-[11px] sm:text-xs font-extrabold text-cyan-200 max-w-full">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
-                <span>{studentDeptName}</span>
+                <span className="truncate">{studentDeptName}</span>
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1338,13 +1338,13 @@ const StudentQuizzes = () => {
               </span>
             </div>
 
-            <div className="space-y-2 pt-1">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
+            <div className="space-y-1.5 sm:space-y-2 pt-1">
+              <h1 className="text-xl sm:text-2xl md:text-3xl xl:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2 leading-snug">
                 <span>{t('កម្រងសំណួរប្រឡង,', 'Quizzes,')}</span>
                 <span className="bg-gradient-to-r from-yellow-300 via-amber-200 to-white bg-clip-text text-transparent">
                   {getActiveStatusTitle()}
                 </span>
-                <CheckBadgeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-yellow-400 shrink-0" />
+                <CheckBadgeIcon className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 text-yellow-400 shrink-0" />
               </h1>
 
               <p className="text-xs sm:text-sm text-blue-100/80 max-w-2xl leading-relaxed font-medium">
@@ -1356,13 +1356,13 @@ const StudentQuizzes = () => {
             </div>
           </div>
 
-          <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-6 pt-5 border-t border-white/15">
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
+          <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15">
+            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-emerald-500/25 border border-emerald-300/30 flex items-center justify-center text-emerald-300 shrink-0">
                 <CheckCircleIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-lg sm:text-xl font-black text-white leading-none">
+                <span className="block text-base sm:text-xl font-black text-white leading-none">
                   {quizStats.completed} / {quizStats.total}
                 </span>
                 <span className="block text-[11px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1371,12 +1371,12 @@ const StudentQuizzes = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
+            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
                 <ChartBarIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-lg sm:text-xl font-black text-white leading-none">
+                <span className="block text-base sm:text-xl font-black text-white leading-none">
                   {quizStats.completed > 0 ? `${quizStats.avgScorePercent}%` : '—'}
                 </span>
                 <span className="block text-[11px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1387,26 +1387,26 @@ const StudentQuizzes = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
-        <div className="lg:col-span-4 std-qz-surface bg-white rounded-[1.75rem] sm:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
-          <div className="space-y-4">
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (5 Cols on lg, 4 Cols on xl) */}
+        <div className="lg:col-span-5 xl:col-span-4 std-qz-surface bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
+          <div className="space-y-3.5 sm:space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-500/30 flex items-center justify-center shrink-0">
                   <AcademicCapIcon className="h-5 w-5 stroke-[2.2]" />
                 </div>
-                <div>
-                  <h2 className="std-qz-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight">
+                <div className="min-w-0">
+                  <h2 className="std-qz-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight truncate">
                     {t('តាមដានតេស្តតាមស្ថានភាព', 'Filter by Status')}
                   </h2>
-                  <p className="std-qz-text-secondary text-[11px] font-medium text-gray-500 mt-0.5">
+                  <p className="std-qz-text-secondary text-[11px] font-medium text-gray-500 mt-0.5 truncate">
                     {t('ចុចជ្រើសរើសស្ថានភាពដើម្បីច្រោះមើល', 'Select a status to filter quizzes')}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3 pt-1">
               {statusSelectorItems.map((item) => {
                 const isSelected = statusFilter === item.id;
                 const StatusIcon = item.icon;
@@ -1417,7 +1417,7 @@ const StudentQuizzes = () => {
                     onClick={() =>
                       setStatusFilter(isSelected ? 'all' : item.id)
                     }
-                    className={`group px-3 py-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-center justify-between gap-1.5 ${
+                    className={`group p-3 sm:p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-center justify-between gap-1.5 ${
                       isSelected
                         ? `bg-gradient-to-br ${item.activeGradient} text-white shadow-md -translate-y-0.5`
                         : 'std-qz-subbox bg-gray-50/80 hover:bg-indigo-50/50 border-gray-200/80 hover:border-indigo-300 text-gray-800 hover:-translate-y-0.5'
@@ -1434,7 +1434,7 @@ const StudentQuizzes = () => {
                         <StatusIcon className="h-4 w-4 sm:h-5 sm:w-5 stroke-[2.2]" />
                       </div>
                       <span
-                        className={`text-xs sm:text-[13px] font-black whitespace-nowrap ${
+                        className={`text-xs sm:text-sm font-black truncate ${
                           isSelected
                             ? 'text-white'
                             : 'std-qz-text-primary text-gray-900'
@@ -1459,7 +1459,7 @@ const StudentQuizzes = () => {
             </div>
           </div>
 
-          <div className="std-qz-divider pt-4 mt-4 border-t border-gray-100 flex items-center justify-between text-xs">
+          <div className="std-qz-divider pt-3.5 sm:pt-4 mt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="std-qz-text-secondary font-bold text-gray-500">
               {t('សរុប៖', 'Total:')}{' '}
               <strong className="std-qz-text-primary text-gray-800">
@@ -1482,7 +1482,7 @@ const StudentQuizzes = () => {
               </button>
             ) : (
               <span className="font-extrabold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                <SparklesIcon className="h-3.5 w-3.5" />
+                <SparklesIcon className="h-3.5 w-3.5 shrink-0" />
                 <span>{t('បង្ហាញគ្រប់ស្ថានភាព', 'All Shown')}</span>
               </span>
             )}
@@ -1494,12 +1494,15 @@ const StudentQuizzes = () => {
       {/* ================================================================== */}
       {/* 2. SEARCH & COURSE FILTER BAR                                      */}
       {/* ================================================================== */}
-      <div className="std-qz-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-3.5 items-center justify-between">
+      <div className="std-qz-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-3.5 sm:p-4 flex flex-col sm:flex-row gap-3 sm:gap-3.5 items-center justify-between">
         <div className="relative w-full sm:max-w-md flex-1">
           <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder=""
+            placeholder={t(
+              'ស្វែងរកតាមចំណងជើងកម្រងសំណួរ ឬមុខវិជ្ជា...',
+              'Search quiz title or course...'
+            )}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="std-qz-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
@@ -1508,7 +1511,7 @@ const StudentQuizzes = () => {
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-1"
             >
               <XMarkIcon className="h-4 w-4" />
             </button>
@@ -1517,7 +1520,7 @@ const StudentQuizzes = () => {
 
         <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
           {availableCourses.length > 0 && (
-            <div className="relative w-full sm:w-72 shrink-0">
+            <div className="relative w-full sm:w-64 lg:w-72 shrink-0">
               <BookOpenIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <select
                 value={selectedCourse}
@@ -1546,12 +1549,12 @@ const StudentQuizzes = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. QUIZ CARDS GRID (គ្មាន Skeleton Loading)                      */}
+      {/* 📌 3. QUIZ CARDS GRID (1 Col Phone, 2 Cols Tablet/iPad/Laptop, 3 Desktop) */}
       {/* ================================================================== */}
       {filteredQuizzes.length === 0 ? (
-        <div className="std-qz-surface bg-white rounded-3xl border border-gray-200/80 shadow-xs p-14 text-center space-y-3">
-          <PencilSquareIcon className="h-16 w-16 mx-auto text-indigo-300" />
-          <h3 className="std-qz-text-primary text-lg font-extrabold text-gray-800">
+        <div className="std-qz-surface bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-xs p-10 sm:p-14 text-center space-y-3">
+          <PencilSquareIcon className="h-14 w-14 sm:h-16 sm:w-16 mx-auto text-indigo-300" />
+          <h3 className="std-qz-text-primary text-base sm:text-lg font-extrabold text-gray-800">
             {searchQuery || selectedCourse !== 'all' || statusFilter !== 'all'
               ? t(
                   'មិនឃើញមានកម្រងសំណួរតាមការស្វែងរកនេះទេ',
@@ -1567,7 +1570,7 @@ const StudentQuizzes = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5 lg:gap-6 items-stretch">
           {filteredQuizzes.map((quiz) => {
             const attempt = quiz.resolvedAttempt;
             const totalMark = formatCleanScore(
@@ -1580,16 +1583,16 @@ const StudentQuizzes = () => {
             return (
               <div
                 key={quiz.id}
-                className="std-qz-card group bg-white border border-gray-200/80 hover:border-indigo-400 rounded-[1.75rem] p-6 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between h-full"
+                className="std-qz-card group bg-white border border-gray-200/80 hover:border-indigo-400 rounded-2xl sm:rounded-[1.75rem] p-4 sm:p-5 lg:p-6 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between h-full"
               >
-                <div className="space-y-4">
+                <div className="space-y-3.5 sm:space-y-4">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="std-qz-code-pill text-xs font-extrabold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100 uppercase truncate max-w-[140px]">
+                    <span className="std-qz-code-pill text-[11px] sm:text-xs font-extrabold text-indigo-700 bg-indigo-50 px-2.5 sm:px-3 py-1 rounded-lg border border-indigo-100 uppercase truncate max-w-[140px]">
                       {quiz.course?.course_code || 'COURSE'}
                     </span>
 
                     <span
-                      className={`text-xs font-extrabold inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border shrink-0 ${
+                      className={`text-[11px] sm:text-xs font-extrabold inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg border shrink-0 ${
                         quiz.isCompleted
                           ? 'std-qz-badge-emerald bg-emerald-50 text-emerald-700 border-emerald-200'
                           : quiz.hasActiveAttempt
@@ -1603,27 +1606,27 @@ const StudentQuizzes = () => {
                     >
                       {quiz.isCompleted ? (
                         <>
-                          <CheckCircleIcon className="h-4 w-4" />
+                          <CheckCircleIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                           <span>{t('ធ្វើរួចរាល់', 'Completed')}</span>
                         </>
                       ) : quiz.hasActiveAttempt ? (
                         <>
-                          <PencilSquareIcon className="h-4 w-4" />
+                          <PencilSquareIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                           <span>{t('កំពុងធ្វើ', 'In Progress')}</span>
                         </>
                       ) : quiz.isExpired ? (
                         <>
-                          <XCircleIcon className="h-4 w-4" />
+                          <XCircleIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                           <span>{t('ហួសពេលកំណត់', 'Expired')}</span>
                         </>
                       ) : quiz.isUpcoming ? (
                         <>
-                          <ClockIcon className="h-4 w-4" />
+                          <ClockIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                           <span>{t('មិនទាន់បើក', 'Upcoming')}</span>
                         </>
                       ) : (
                         <>
-                          <PencilSquareIcon className="h-4 w-4" />
+                          <PencilSquareIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                           <span>{t('អាចធ្វើបាន', 'Available')}</span>
                         </>
                       )}
@@ -1636,7 +1639,7 @@ const StudentQuizzes = () => {
                       <span className="truncate">{quiz.course?.course_name}</span>
                     </div>
                     <h3
-                      className="std-qz-text-primary text-base sm:text-lg font-black text-gray-900 leading-snug line-clamp-2 min-h-[46px] group-hover:text-indigo-600 transition-colors"
+                      className="std-qz-text-primary text-base sm:text-lg font-black text-gray-900 leading-snug line-clamp-2 min-h-[44px] group-hover:text-indigo-600 transition-colors"
                       title={quiz.title}
                     >
                       {quiz.title}
@@ -1649,9 +1652,9 @@ const StudentQuizzes = () => {
                   </div>
 
                   <div className="std-qz-subbox bg-gray-50/80 border border-gray-100 rounded-2xl p-3.5 space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="std-qz-text-secondary font-semibold text-gray-500 flex items-center gap-1.5">
-                        <ClockIcon className="h-4 w-4 text-amber-500" />
+                        <ClockIcon className="h-4 w-4 text-amber-500 shrink-0" />
                         <span>{t('រយៈពេលប្រឡង៖', 'Duration:')}</span>
                       </span>
                       <span className="std-qz-text-primary font-extrabold text-gray-800">
@@ -1660,9 +1663,9 @@ const StudentQuizzes = () => {
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="std-qz-text-secondary font-semibold text-gray-500 flex items-center gap-1.5">
-                        <CalendarDaysIcon className="h-4 w-4 text-indigo-500" />
+                        <CalendarDaysIcon className="h-4 w-4 text-indigo-500 shrink-0" />
                         <span>{t('ចាប់ផ្តើម៖', 'Starts:')}</span>
                       </span>
                       <span className="std-qz-text-primary font-bold text-gray-700">
@@ -1670,9 +1673,9 @@ const StudentQuizzes = () => {
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="std-qz-text-secondary font-semibold text-gray-500 flex items-center gap-1.5">
-                        <CalendarDaysIcon className="h-4 w-4 text-rose-500" />
+                        <CalendarDaysIcon className="h-4 w-4 text-rose-500 shrink-0" />
                         <span>{t('ផុតកំណត់៖', 'Ends:')}</span>
                       </span>
                       <span className="std-qz-text-primary font-bold text-gray-700">
@@ -1682,7 +1685,7 @@ const StudentQuizzes = () => {
                   </div>
                 </div>
 
-                <div className="std-qz-divider mt-5 pt-4 border-t border-gray-100">
+                <div className="std-qz-divider mt-4 sm:mt-5 pt-3.5 sm:pt-4 border-t border-gray-100">
                   {quiz.isCompleted ? (
                     <button
                       type="button"
@@ -1719,7 +1722,7 @@ const StudentQuizzes = () => {
                       disabled
                       className="std-qz-code-pill w-full bg-gray-100 border border-gray-200 text-gray-400 text-xs font-extrabold py-3 rounded-xl cursor-not-allowed flex items-center justify-center gap-1.5"
                     >
-                      <ClockIcon className="h-4 w-4" />
+                      <ClockIcon className="h-4 w-4 shrink-0" />
                       <span>{t('មិនទាន់ដល់ថ្ងៃបើកប្រឡង', 'Not Started Yet')}</span>
                     </button>
                   ) : quiz.isExpired && !quiz.hasActiveAttempt ? (
@@ -1728,7 +1731,7 @@ const StudentQuizzes = () => {
                       disabled
                       className="std-qz-badge-rose w-full bg-rose-50 border border-rose-200 text-rose-500 text-xs font-extrabold py-3 rounded-xl cursor-not-allowed flex items-center justify-center gap-1.5"
                     >
-                      <XCircleIcon className="h-4 w-4" />
+                      <XCircleIcon className="h-4 w-4 shrink-0" />
                       <span>{t('ផុតកំណត់ពេលប្រឡងហើយ', 'Quiz Expired')}</span>
                     </button>
                   ) : (
@@ -1740,12 +1743,12 @@ const StudentQuizzes = () => {
                     >
                       {isStartingThis ? (
                         <>
-                          <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                          <ArrowPathIcon className="h-4 w-4 animate-spin shrink-0" />
                           <span>{t('កំពុងបើកសំណួរ...', 'Loading Quiz...')}</span>
                         </>
                       ) : (
                         <>
-                          <PlayCircleIcon className="h-5 w-5 stroke-[2.2]" />
+                          <PlayCircleIcon className="h-5 w-5 stroke-[2.2] shrink-0" />
                           <span>
                             {quiz.hasActiveAttempt
                               ? t('បន្តការធ្វើតេស្ត', 'Resume Quiz')
@@ -1766,17 +1769,17 @@ const StudentQuizzes = () => {
       {/* 📌 4. PAGINATION CONTROLS                                          */}
       {/* ================================================================== */}
       {meta.last_page > 1 && (
-        <div className="std-qz-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="std-qz-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <p className="std-qz-text-secondary text-xs font-bold text-gray-600">
             {t('ទំព័រ', 'Page')} {meta.current_page} / {meta.last_page} (
             {meta.total} {t('កម្រងសំណួរ', 'quizzes')})
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={meta.current_page === 1}
-              className="std-qz-code-pill px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-qz-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
             >
               {t('មុន', 'Previous')}
             </button>
@@ -1811,7 +1814,7 @@ const StudentQuizzes = () => {
               type="button"
               onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
               disabled={meta.current_page === meta.last_page}
-              className="std-qz-code-pill px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-qz-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
             >
               {t('បន្ទាប់', 'Next')}
             </button>
@@ -1820,14 +1823,14 @@ const StudentQuizzes = () => {
       )}
 
       {/* ================================================================== */}
-      {/* 📌 5. INTERACTIVE QUIZ ATTEMPT STUDIO MODAL                        */}
+      {/* 📌 5. INTERACTIVE QUIZ ATTEMPT STUDIO MODAL (Bottom Sheet on Phone) */}
       {/* ================================================================== */}
       {activeQuizAttempt &&
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className={`fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-950/80 backdrop-blur-md transition-all duration-300 ${
-              isAttemptExpanded ? 'p-0 sm:p-2' : 'p-2 sm:p-4'
+            className={`fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-md transition-all duration-300 ${
+              isAttemptExpanded ? 'p-0 sm:p-2' : 'p-0 sm:p-4'
             }`}
           >
             <div
@@ -1835,39 +1838,39 @@ const StudentQuizzes = () => {
                 isAttemptExpanded
                   ? 'w-full h-full max-w-none max-h-none rounded-none sm:rounded-2xl'
                   : isManyAttemptQuestions
-                  ? 'w-full max-w-4xl max-h-[90vh] rounded-[1.75rem]'
-                  : 'w-full max-w-xl max-h-[88vh] rounded-[1.75rem]'
+                  ? 'w-full max-w-4xl max-h-[92vh] sm:max-h-[90vh] rounded-t-3xl sm:rounded-[1.75rem]'
+                  : 'w-full max-w-xl max-h-[92vh] sm:max-h-[88vh] rounded-t-3xl sm:rounded-[1.75rem]'
               }`}
             >
-              <div className="px-5 sm:px-7 py-5 bg-gradient-to-r from-blue-950 via-indigo-900 to-violet-950 text-white shrink-0 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="px-4 sm:px-7 py-4 sm:py-5 bg-gradient-to-r from-blue-950 via-indigo-900 to-violet-950 text-white shrink-0 space-y-3.5 sm:space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-black text-yellow-300 bg-white/15 border border-white/20 px-2.5 py-0.5 rounded-md uppercase">
+                      <span className="text-[10px] font-black text-yellow-300 bg-white/15 border border-white/20 px-2.5 py-0.5 rounded-md uppercase shrink-0">
                         {activeQuizAttempt.course?.course_code || 'QUIZ'}
                       </span>
                       <span className="text-xs font-bold text-blue-200 truncate">
                         {activeQuizAttempt.course?.course_name}
                       </span>
                     </div>
-                    <h2 className="text-base sm:text-xl font-extrabold text-white truncate mt-1">
+                    <h2 className="text-sm sm:text-xl font-extrabold text-white truncate mt-1">
                       {activeQuizAttempt.title}
                     </h2>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
                     <div
-                      className={`flex items-center gap-2 px-3.5 py-2 rounded-2xl border text-xs sm:text-sm font-extrabold shadow-inner shrink-0 ${
+                      className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-2xl border text-xs sm:text-sm font-extrabold shadow-inner shrink-0 ${
                         timeLeft < 60
                           ? 'bg-rose-500/30 border-rose-400 text-rose-200 animate-pulse'
                           : 'bg-white/10 border-white/20 text-white'
                       }`}
                     >
-                      <ClockIcon className="h-5 w-5 text-yellow-400" />
+                      <ClockIcon className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-400 shrink-0" />
                       <span className="hidden sm:inline">
                         {t('ម៉ោងនៅសល់៖', 'Time Left:')}
                       </span>
-                      <span className="text-base sm:text-lg font-black text-yellow-300 tracking-wider">
+                      <span className="text-sm sm:text-lg font-black text-yellow-300 tracking-wider">
                         {formatTime(timeLeft)}
                       </span>
                     </div>
@@ -1875,7 +1878,7 @@ const StudentQuizzes = () => {
                     <button
                       type="button"
                       onClick={() => setIsAttemptExpanded((prev) => !prev)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors cursor-pointer"
                       title={
                         isAttemptExpanded
                           ? t('បង្រួមផ្ទាំងវិញ', 'Restore Size')
@@ -1918,7 +1921,7 @@ const StudentQuizzes = () => {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+              <div className="flex-1 overflow-y-auto p-3.5 sm:p-6 space-y-3.5 sm:space-y-4">
                 {submitError && (
                   <div className="std-qz-badge-rose p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
                     <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
@@ -1999,8 +2002,8 @@ const StudentQuizzes = () => {
                   <div
                     className={
                       isAttemptExpanded || isManyAttemptQuestions
-                        ? 'grid grid-cols-1 lg:grid-cols-2 gap-4 items-start'
-                        : 'space-y-4'
+                        ? 'grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4 items-start'
+                        : 'space-y-3.5 sm:space-y-4'
                     }
                   >
                     {activeQuizAttempt.questions.map((q, idx) => {
@@ -2010,14 +2013,14 @@ const StudentQuizzes = () => {
                       return (
                         <div
                           key={q.id || idx}
-                          className={`std-qz-subbox p-4 sm:p-5 rounded-2xl border transition-all ${
+                          className={`std-qz-subbox p-3.5 sm:p-5 rounded-2xl border transition-all ${
                             isAnswered
                               ? 'border-indigo-300 bg-indigo-50/20 dark:border-indigo-500/40'
                               : 'border-gray-200/80 bg-gray-50/50'
                           }`}
                         >
-                          <div className="flex items-start justify-between gap-3 mb-3.5">
-                            <div className="flex items-start gap-2.5">
+                          <div className="flex items-start justify-between gap-2.5 sm:gap-3 mb-3 sm:mb-3.5">
+                            <div className="flex items-start gap-2.5 min-w-0">
                               <span
                                 className={`h-6 w-6 rounded-lg flex items-center justify-center text-xs font-black shrink-0 mt-0.5 ${
                                   isAnswered
@@ -2027,7 +2030,7 @@ const StudentQuizzes = () => {
                               >
                                 {idx + 1}
                               </span>
-                              <h3 className="std-qz-text-primary text-sm sm:text-[15px] font-extrabold text-gray-900 leading-relaxed whitespace-pre-line">
+                              <h3 className="std-qz-text-primary text-xs sm:text-[15px] font-extrabold text-gray-900 leading-relaxed whitespace-pre-line">
                                 {q.question_text}
                               </h3>
                             </div>
@@ -2039,19 +2042,18 @@ const StudentQuizzes = () => {
                             )}
                           </div>
 
-                          {/* ✅ បើជាសំណួរសរសេរ (Essay) បង្ហាញប្រអប់ Textarea នៅខាងក្រោមសំណួរឱ្យសិស្សសរសេរចម្លើយ */}
                           {essayMode ? (
                             <div className="sm:pl-8 space-y-1.5">
                               <div className="flex items-center justify-between text-[11px] font-bold text-indigo-500 dark:text-indigo-400">
                                 <span className="inline-flex items-center gap-1">
-                                  <DocumentTextIcon className="h-3.5 w-3.5" />
+                                  <DocumentTextIcon className="h-3.5 w-3.5 shrink-0" />
                                   {t(
                                     'សំណួរសរសេររៀបរាប់ (សូមសរសេរចម្លើយខាងក្រោម)៖',
                                     'Written Question (Write your answer below):'
                                   )}
                                 </span>
                                 {isAnswered && (
-                                  <span className="text-emerald-600 dark:text-emerald-400">
+                                  <span className="text-emerald-600 dark:text-emerald-400 shrink-0">
                                     ✓ {t('បានសរសេរចម្លើយ', 'Answered')}
                                   </span>
                                 )}
@@ -2115,11 +2117,11 @@ const StudentQuizzes = () => {
                 )}
               </div>
 
-              <div className="std-qz-modal-bar px-5 sm:px-7 py-4 border-t border-gray-100 flex items-center justify-between gap-3 shrink-0 bg-gray-50">
+              <div className="std-qz-modal-bar px-4 sm:px-7 py-4 border-t border-gray-100 flex items-center justify-between gap-3 shrink-0 bg-gray-50">
                 <button
                   type="button"
                   onClick={() => setShowExitConfirmModal(true)}
-                  className="std-qz-code-pill bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 text-xs sm:text-sm font-extrabold px-5 py-2.5 rounded-xl transition cursor-pointer"
+                  className="std-qz-code-pill bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 text-xs sm:text-sm font-extrabold px-4 sm:px-5 py-2.5 rounded-xl transition cursor-pointer"
                 >
                   {t('ចាកចេញសិន', 'Close')}
                 </button>
@@ -2128,7 +2130,7 @@ const StudentQuizzes = () => {
                   type="button"
                   onClick={(e) => handleQuizSubmit(e)}
                   disabled={isSubmitting}
-                  className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-50 text-white text-xs sm:text-sm font-extrabold px-6 py-2.5 rounded-xl shadow-md transition cursor-pointer flex items-center gap-2"
+                  className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-50 text-white text-xs sm:text-sm font-extrabold px-5 sm:px-6 py-2.5 rounded-xl shadow-md transition cursor-pointer flex items-center gap-2"
                 >
                   {isSubmitting ? (
                     <>
@@ -2149,14 +2151,14 @@ const StudentQuizzes = () => {
         )}
 
       {/* ================================================================== */}
-      {/* 📌 6. QUIZ RESULT & ANSWER REVIEW DIALOG                           */}
+      {/* 📌 6. QUIZ RESULT & ANSWER REVIEW DIALOG (Bottom Sheet on Phone)   */}
       {/* ================================================================== */}
       {quizResult &&
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className={`fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-950/80 backdrop-blur-md transition-all duration-300 ${
-              isResultExpanded ? 'p-0 sm:p-2' : 'p-2 sm:p-4'
+            className={`fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-md transition-all duration-300 ${
+              isResultExpanded ? 'p-0 sm:p-2' : 'p-0 sm:p-4'
             }`}
             onClick={() => {
               setQuizResult(null);
@@ -2168,24 +2170,24 @@ const StudentQuizzes = () => {
                 isResultExpanded
                   ? 'w-full h-full max-w-none max-h-none rounded-none sm:rounded-2xl'
                   : isManyResultQuestions
-                  ? 'w-full max-w-3xl max-h-[90vh] rounded-[1.75rem]'
-                  : 'w-full max-w-xl max-h-[88vh] rounded-[1.75rem]'
+                  ? 'w-full max-w-3xl max-h-[92vh] sm:max-h-[90vh] rounded-t-3xl sm:rounded-[1.75rem]'
+                  : 'w-full max-w-xl max-h-[92vh] sm:max-h-[88vh] rounded-t-3xl sm:rounded-[1.75rem]'
               }`}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="relative overflow-hidden bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 text-white px-5 py-4 sm:px-6 sm:py-5 shrink-0">
+              <div className="relative overflow-hidden bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 text-white px-4 py-4 sm:px-6 sm:py-5 shrink-0">
                 <div className="std-qz-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
 
-                <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4">
                   <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    <div className="h-12 w-12 rounded-2xl bg-emerald-400/20 border border-emerald-300/30 flex items-center justify-center shrink-0 shadow-lg">
-                      <CheckBadgeIcon className="h-7 w-7 text-emerald-300" />
+                    <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-2xl bg-emerald-400/20 border border-emerald-300/30 flex items-center justify-center shrink-0 shadow-lg">
+                      <CheckBadgeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-emerald-300" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <span className="inline-block px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase bg-emerald-400/20 text-emerald-200 border border-emerald-300/30">
                         {t('លទ្ធផលការប្រឡងតេស្ត', 'Quiz Assessment Result')}
                       </span>
-                      <h2 className="text-base sm:text-lg font-black text-white truncate mt-0.5">
+                      <h2 className="text-sm sm:text-lg font-black text-white truncate mt-0.5">
                         {t('បញ្ជូនចម្លើយប្រឡងជោគជ័យ!', 'Quiz Submitted Successfully!')}
                       </h2>
                       <p className="text-xs font-bold text-blue-200 truncate">
@@ -2194,7 +2196,7 @@ const StudentQuizzes = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2 sm:pt-0 border-t border-white/10 sm:border-0">
+                  <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2.5 sm:pt-0 border-t border-white/10 sm:border-0">
                     <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-3.5 py-2 text-center shadow-inner">
                       <span className="block text-[9px] font-extrabold uppercase tracking-wider text-blue-200 leading-none">
                         {t('ពិន្ទុទទួលបាន', 'Score Earned')}
@@ -2247,13 +2249,13 @@ const StudentQuizzes = () => {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-4 sm:px-5 pt-4 pb-6 space-y-3.5">
+              <div className="flex-1 overflow-y-auto px-3.5 sm:px-5 pt-4 pb-6 space-y-3.5">
                 {Array.isArray(quizResult.reviewItems) &&
                 quizResult.reviewItems.length > 0 ? (
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-2 px-1">
                       <h3 className="std-qz-text-primary text-xs font-extrabold text-gray-800 flex items-center gap-1.5">
-                        <PencilSquareIcon className="h-4 w-4 text-indigo-500" />
+                        <PencilSquareIcon className="h-4 w-4 text-indigo-500 shrink-0" />
                         <span>
                           {t(
                             'ពិនិត្យមើលសំណួរ និងចម្លើយដែលអ្នកបានជ្រើសរើស',
@@ -2334,7 +2336,6 @@ const StudentQuizzes = () => {
                               </span>
                             </div>
 
-                            {/* ✅ បង្ហាញចម្លើយរបស់សិស្ស និងបើឆ្លើយខុស បង្ហាញប្រអប់ចម្លើយត្រឹមត្រូវនៅខាងក្រោមជានិច្ច */}
                             <div className="mt-2.5 sm:pl-8 space-y-2">
                               <div
                                 className={`px-3.5 py-2.5 rounded-xl border flex items-start justify-between gap-2.5 ${
@@ -2380,7 +2381,6 @@ const StudentQuizzes = () => {
                                 )}
                               </div>
 
-                              {/* ✅ នៅពេលឆ្លើយខុស លោតប្រអប់ចម្លើយត្រឹមត្រូវនៅខាងក្រោមភ្លាមៗ */}
                               {!item.isCorrect && hasCorrectAnswerText && (
                                 <div className="std-qz-correct-hint px-3.5 py-2.5 rounded-xl bg-emerald-50 border border-emerald-300 flex items-start justify-between gap-2.5 shadow-2xs">
                                   <div className="flex items-start gap-2.5 min-w-0">

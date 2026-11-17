@@ -27,21 +27,24 @@ import {
   XMarkIcon,
   ChartBarIcon,
   ChatBubbleLeftEllipsisIcon,
+  DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
-const CACHE_KEY_SHARED_ASSIGNMENTS = 'cached_student_assignments_list_v14';
-const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v3';
-const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v8';
+const CACHE_KEY_SHARED_ASSIGNMENTS = 'cached_student_assignments_list_v15';
+const CACHE_KEY_SHARED_ASSIGNMENTS_LEGACY = 'cached_student_assignments_list_v14';
+const CACHE_KEY_SHARED_COURSES = 'cached_student_courses_list_v15';
+const CACHE_KEY_SHARED_ENROLLMENTS = 'cached_student_dashboard_enrollments_v15';
 
-const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v14_${uid}`;
-const getAssignmentsMetaCacheKey = (uid) => `cached_student_assignments_meta_v14_${uid}`;
-const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
-const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v10_${uid}`;
-const getScoresCacheKey = (uid) => `cached_student_scores_list_v14_${uid}`;
+const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v15_${uid}`;
+const getAssignmentsLegacyCacheKey = (uid) => `cached_student_assignments_list_v14_${uid}`;
+const getAssignmentsMetaCacheKey = (uid) => `cached_student_assignments_meta_v15_${uid}`;
+const getCoursesCacheKey = (uid) => `cached_student_courses_list_v15_${uid}`;
+const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v15_${uid}`;
+const getScoresCacheKey = (uid) => `cached_student_scores_list_v15_${uid}`;
 
 const DEFAULT_META = {
   current_page: 1,
@@ -140,6 +143,8 @@ const ensureCleanStudentSessionCache = (newUid) => {
     if (prevUid && prevUid !== String(newUid)) {
       const legacySharedKeys = [
         'cached_student_assignments_list_v5',
+        'cached_student_assignments_list_v14',
+        'cached_student_assignments_list_v15',
         'cached_student_courses_list_v3',
         'cached_student_courses_meta_v3',
         'cached_student_dashboard_stats_v8',
@@ -343,9 +348,10 @@ const StudentAssignments = () => {
     }
     const cached =
       readStorageJson(getAssignmentsCacheKey(currentStudentId), null) ||
+      readStorageJson(getAssignmentsLegacyCacheKey(currentStudentId), null) ||
       readStorageJson(`cached_student_assignments_list_v10_${currentStudentId}`, null) ||
-      readStorageJson(`cached_student_assignments_list_v8_${currentStudentId}`, null) ||
-      readStorageJson(CACHE_KEY_SHARED_ASSIGNMENTS, []);
+      readStorageJson(CACHE_KEY_SHARED_ASSIGNMENTS, null) ||
+      readStorageJson(CACHE_KEY_SHARED_ASSIGNMENTS_LEGACY, []);
     STUDENT_ASG_MEM_CACHE.assignments = Array.isArray(cached) ? cached : [];
     return STUDENT_ASG_MEM_CACHE.assignments;
   });
@@ -357,6 +363,7 @@ const StudentAssignments = () => {
     const cached =
       readStorageJson(getCoursesCacheKey(currentStudentId), null) ||
       readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_courses_list_v10_${currentStudentId}`, null) ||
       readStorageJson(CACHE_KEY_SHARED_COURSES, null) ||
       readStorageJson(CACHE_KEY_SHARED_ENROLLMENTS, []);
     STUDENT_ASG_MEM_CACHE.courses = Array.isArray(cached) ? cached : [];
@@ -462,10 +469,9 @@ const StudentAssignments = () => {
   const fetchAssignments = useCallback(
     async (forceRefresh = false) => {
       if (page === 1 && selectedCourse === 'all') {
-        const cachedAsg = readStorageJson(
-          getAssignmentsCacheKey(currentStudentId),
-          null
-        );
+        const cachedAsg =
+          readStorageJson(getAssignmentsCacheKey(currentStudentId), null) ||
+          readStorageJson(getAssignmentsLegacyCacheKey(currentStudentId), null);
         const cachedMeta = readStorageJson(
           getAssignmentsMetaCacheKey(currentStudentId),
           null
@@ -535,6 +541,10 @@ const StudentAssignments = () => {
 
           safeWriteStudentAsgCache(
             getAssignmentsCacheKey(currentStudentId),
+            list
+          );
+          safeWriteStudentAsgCache(
+            getAssignmentsLegacyCacheKey(currentStudentId),
             list
           );
           safeWriteStudentAsgCache(
@@ -744,9 +754,7 @@ const StudentAssignments = () => {
     formData.append('file', uploadFile);
 
     try {
-      const res = await api.post('/student/assignments/submit', formData, {
-        headers: { 'Content-Type': undefined },
-      });
+      const res = await api.post('/student/assignments/submit', formData);
 
       const rawSub =
         res.data?.submission ||
@@ -772,6 +780,7 @@ const StudentAssignments = () => {
         try {
           sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
+          localStorage.removeItem(`cached_student_scores_list_v14_${currentStudentId}`);
           localStorage.removeItem(`cached_student_scores_list_v10_${currentStudentId}`);
         } catch (err) {}
         return updated;
@@ -959,30 +968,30 @@ const StudentAssignments = () => {
   ];
 
   return (
-    <div className="std-asg-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
+    <div className="std-asg-page max-w-7xl mx-auto px-3 sm:px-5 lg:px-8 space-y-5 sm:space-y-6 lg:space-y-8 pb-28 md:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
       {/* ================================================================== */}
-      {/* 1. MODERN BENTO HERO SECTION                                       */}
+      {/* 1. MODERN BENTO HERO SECTION (Adaptive Phone / iPad / Desktop)     */}
       {/* ================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (8 Columns) */}
-        <div className="lg:col-span-8 relative overflow-hidden rounded-[1.75rem] sm:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-6 sm:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-asg-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
           <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
-          <div className="relative z-10 space-y-3.5">
+          <div className="relative z-10 space-y-3 sm:space-y-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
+              <span className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-[11px] sm:text-xs font-extrabold text-cyan-200 max-w-full">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
-                <span>{studentDeptName}</span>
+                <span className="truncate">{studentDeptName}</span>
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -997,13 +1006,13 @@ const StudentAssignments = () => {
               </span>
             </div>
 
-            <div className="space-y-2 pt-1">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
+            <div className="space-y-1.5 sm:space-y-2 pt-1">
+              <h1 className="text-xl sm:text-2xl md:text-3xl xl:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2 leading-snug">
                 <span>{t('កិច្ចការ និងលំហាត់,', 'Assignments,')}</span>
                 <span className="bg-gradient-to-r from-yellow-300 via-amber-200 to-white bg-clip-text text-transparent">
                   {getActiveStatusTitle()}
                 </span>
-                <CheckBadgeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-yellow-400 shrink-0" />
+                <CheckBadgeIcon className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 text-yellow-400 shrink-0" />
               </h1>
 
               <p className="text-xs sm:text-sm text-blue-100/80 max-w-2xl leading-relaxed font-medium">
@@ -1015,13 +1024,13 @@ const StudentAssignments = () => {
             </div>
           </div>
 
-          <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-6 pt-5 border-t border-white/15">
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
+          <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15">
+            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-emerald-500/25 border border-emerald-300/30 flex items-center justify-center text-emerald-300 shrink-0">
                 <DocumentCheckIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-lg sm:text-xl font-black text-white leading-none">
+                <span className="block text-base sm:text-xl font-black text-white leading-none">
                   {assignmentStats.submitted} / {assignmentStats.total}
                 </span>
                 <span className="block text-[11px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1030,12 +1039,12 @@ const StudentAssignments = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
+            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
                 <ChartBarIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-lg sm:text-xl font-black text-white leading-none">
+                <span className="block text-base sm:text-xl font-black text-white leading-none">
                   {assignmentStats.graded > 0
                     ? `${assignmentStats.avgScorePercent}%`
                     : '—'}
@@ -1048,26 +1057,26 @@ const StudentAssignments = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
-        <div className="lg:col-span-4 std-asg-surface bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
-          <div className="space-y-4">
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (5 Cols on lg, 4 Cols on xl) */}
+        <div className="lg:col-span-5 xl:col-span-4 std-asg-surface bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
+          <div className="space-y-3.5 sm:space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-500/30 flex items-center justify-center shrink-0">
                   <ClipboardDocumentListIcon className="h-5 w-5 stroke-[2.2]" />
                 </div>
-                <div>
-                  <h2 className="std-asg-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight">
+                <div className="min-w-0">
+                  <h2 className="std-asg-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight truncate">
                     {t('តាមដានកិច្ចការតាមស្ថានភាព', 'Filter by Status')}
                   </h2>
-                  <p className="std-asg-text-secondary text-[11px] font-medium text-gray-500 mt-0.5">
+                  <p className="std-asg-text-secondary text-[11px] font-medium text-gray-500 mt-0.5 truncate">
                     {t('ចុចជ្រើសរើសស្ថានភាពដើម្បីច្រោះមើល', 'Select a status to filter tasks')}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3 pt-1">
               {statusSelectorItems.map((item) => {
                 const isSelected = statusFilter === item.id;
                 const StatusIcon = item.icon;
@@ -1078,21 +1087,21 @@ const StudentAssignments = () => {
                     onClick={() =>
                       setStatusFilter(isSelected ? 'all' : item.id)
                     }
-                    className={`group p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-center justify-between gap-2 ${
+                    className={`group p-3 sm:p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-center justify-between gap-2 ${
                       isSelected
                         ? `bg-gradient-to-br ${item.activeGradient} text-white shadow-md -translate-y-0.5`
                         : 'std-asg-subbox bg-gray-50/80 hover:bg-indigo-50/50 border-gray-200/80 hover:border-indigo-300 text-gray-800 hover:-translate-y-0.5'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                       <div
-                        className={`h-9 w-9 rounded-xl border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${
+                        className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${
                           isSelected
                             ? 'bg-white/20 text-white border-white/30'
                             : item.iconStyle
                         }`}
                       >
-                        <StatusIcon className="h-5 w-5 stroke-[2.2]" />
+                        <StatusIcon className="h-4 w-4 sm:h-5 sm:w-5 stroke-[2.2]" />
                       </div>
                       <span
                         className={`text-xs sm:text-sm font-black truncate ${
@@ -1120,7 +1129,7 @@ const StudentAssignments = () => {
             </div>
           </div>
 
-          <div className="std-asg-divider pt-4 mt-4 border-t border-gray-100 flex items-center justify-between text-xs">
+          <div className="std-asg-divider pt-3.5 sm:pt-4 mt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="std-asg-text-secondary font-bold text-gray-500">
               {t('សរុប៖', 'Total:')}{' '}
               <strong className="std-asg-text-primary text-gray-800">
@@ -1143,7 +1152,7 @@ const StudentAssignments = () => {
               </button>
             ) : (
               <span className="font-extrabold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                <SparklesIcon className="h-3.5 w-3.5" />
+                <SparklesIcon className="h-3.5 w-3.5 shrink-0" />
                 <span>{t('បង្ហាញគ្រប់ស្ថានភាព', 'All Shown')}</span>
               </span>
             )}
@@ -1155,12 +1164,15 @@ const StudentAssignments = () => {
       {/* ================================================================== */}
       {/* 2. SEARCH & COURSE FILTER BAR                                      */}
       {/* ================================================================== */}
-      <div className="std-asg-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-3.5 items-center justify-between">
+      <div className="std-asg-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-3.5 sm:p-4 flex flex-col sm:flex-row gap-3 sm:gap-3.5 items-center justify-between">
         <div className="relative w-full sm:max-w-md flex-1">
           <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
           <input
             type="text"
-            placeholder=""
+            placeholder={t(
+              'ស្វែងរកតាមចំណងជើងកិច្ចការ ឬមុខវិជ្ជា...',
+              'Search assignment title or course...'
+            )}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="std-asg-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
@@ -1169,7 +1181,7 @@ const StudentAssignments = () => {
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-1"
             >
               <XMarkIcon className="h-4 w-4" />
             </button>
@@ -1178,7 +1190,7 @@ const StudentAssignments = () => {
 
         <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
           {availableCourses.length > 0 && (
-            <div className="relative w-full sm:w-72 shrink-0">
+            <div className="relative w-full sm:w-64 lg:w-72 shrink-0">
               <BookOpenIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <select
                 value={selectedCourse}
@@ -1208,9 +1220,9 @@ const StudentAssignments = () => {
       {/* 📌 3. ASSIGNMENT CARDS LIST (គ្មាន Skeleton Loading)               */}
       {/* ================================================================== */}
       {filteredAssignments.length === 0 ? (
-        <div className="std-asg-surface bg-white rounded-3xl border border-gray-200/80 shadow-xs p-14 text-center space-y-3">
-          <ClipboardDocumentCheckIcon className="h-16 w-16 mx-auto text-indigo-300" />
-          <h3 className="std-asg-text-primary text-lg font-extrabold text-gray-800">
+        <div className="std-asg-surface bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-xs p-10 sm:p-14 text-center space-y-3">
+          <ClipboardDocumentCheckIcon className="h-14 w-14 sm:h-16 sm:w-16 mx-auto text-indigo-300" />
+          <h3 className="std-asg-text-primary text-base sm:text-lg font-extrabold text-gray-800">
             {searchQuery || selectedCourse !== 'all' || statusFilter !== 'all'
               ? t(
                   'មិនឃើញមានកិច្ចការតាមការស្វែងរកនេះទេ',
@@ -1226,7 +1238,7 @@ const StudentAssignments = () => {
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3.5 sm:space-y-4">
           {filteredAssignments.map((assign) => {
             const submission = assign.resolvedSubmission;
             const isSubmitted = Boolean(submission);
@@ -1248,28 +1260,31 @@ const StudentAssignments = () => {
                 20
             );
 
+            const teacherAttachmentPath =
+              assign.file_path || assign.attachment || assign.document_url || '';
+
             return (
               <div
                 key={assign.id}
-                className="std-asg-card bg-white border border-gray-200/80 hover:border-indigo-400 rounded-[1.5rem] p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6 shadow-2xs hover:shadow-lg transition-all duration-300"
+                className="std-asg-card bg-white border border-gray-200/80 hover:border-indigo-400 rounded-2xl sm:rounded-[1.5rem] p-4 sm:p-5 lg:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6 shadow-2xs hover:shadow-lg transition-all duration-300"
               >
-                <div className="space-y-3 flex-1 min-w-0">
+                <div className="space-y-2.5 sm:space-y-3 flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     {assign.course?.course_code && (
-                      <span className="std-asg-code-pill text-xs font-extrabold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100 uppercase">
+                      <span className="std-asg-code-pill text-[11px] sm:text-xs font-extrabold text-indigo-700 bg-indigo-50 px-2.5 sm:px-3 py-1 rounded-lg border border-indigo-100 uppercase">
                         {assign.course.course_code}
                       </span>
                     )}
 
-                    <span className="std-asg-text-secondary text-xs font-extrabold text-gray-600 flex items-center gap-1">
-                      <BookOpenIcon className="h-3.5 w-3.5 text-indigo-500" />
-                      <span>
+                    <span className="std-asg-text-secondary text-xs font-extrabold text-gray-600 flex items-center gap-1 min-w-0">
+                      <BookOpenIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                      <span className="truncate">
                         {assign.course?.course_name || t('មុខវិជ្ជាសិក្សា', 'Course')}
                       </span>
                     </span>
 
                     <span
-                      className={`text-xs font-extrabold inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border ${
+                      className={`text-[11px] sm:text-xs font-extrabold inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg border ml-auto sm:ml-0 ${
                         isGraded
                           ? 'std-asg-badge-indigo bg-indigo-50 text-indigo-700 border-indigo-200'
                           : isSubmitted
@@ -1281,22 +1296,22 @@ const StudentAssignments = () => {
                     >
                       {isGraded ? (
                         <>
-                          <CheckBadgeIcon className="h-4 w-4" />
+                          <CheckBadgeIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                           <span>{t('ដាក់ពិន្ទុរួច', 'Graded')}</span>
                         </>
                       ) : isSubmitted ? (
                         <>
-                          <CheckCircleIcon className="h-4 w-4" />
+                          <CheckCircleIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                           <span>{t('ប្រគល់រួច', 'Submitted')}</span>
                         </>
                       ) : isOverdue ? (
                         <>
-                          <ExclamationCircleIcon className="h-4 w-4" />
+                          <ExclamationCircleIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                           <span>{t('ហួសកំណត់', 'Overdue')}</span>
                         </>
                       ) : (
                         <>
-                          <ClockIcon className="h-4 w-4" />
+                          <ClockIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                           <span>{t('កំពុងរង់ចាំ', 'Pending')}</span>
                         </>
                       )}
@@ -1304,7 +1319,7 @@ const StudentAssignments = () => {
                   </div>
 
                   <div>
-                    <h3 className="std-asg-text-primary text-lg sm:text-xl font-black text-gray-900 leading-snug">
+                    <h3 className="std-asg-text-primary text-base sm:text-lg lg:text-xl font-black text-gray-900 leading-snug">
                       {assign.title}
                     </h3>
                     {assign.description && (
@@ -1314,7 +1329,7 @@ const StudentAssignments = () => {
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-1 text-xs">
                     <span
                       className={`std-asg-subbox inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold ${
                         isOverdue
@@ -1335,12 +1350,25 @@ const StudentAssignments = () => {
                         {maxScore} {t('ពិន្ទុ', 'pts')}
                       </strong>
                     </span>
+
+                    {teacherAttachmentPath && (
+                      <a
+                        href={getStorageUrl(teacherAttachmentPath)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download
+                        className="std-asg-badge-blue inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-extrabold transition-colors"
+                      >
+                        <DocumentTextIcon className="h-4 w-4 shrink-0" />
+                        <span>{t('ឯកសារលំហាត់គ្រូ', 'Assignment File')}</span>
+                      </a>
+                    )}
                   </div>
                 </div>
 
-                <div className="std-asg-divider lg:w-80 shrink-0 flex flex-col items-stretch lg:items-end justify-center border-t lg:border-t-0 pt-4 lg:pt-0 border-gray-100">
+                <div className="std-asg-divider lg:w-72 xl:w-80 shrink-0 flex flex-col items-stretch lg:items-end justify-center border-t lg:border-t-0 pt-3.5 lg:pt-0 border-gray-100">
                   {isSubmitted ? (
-                    <div className="std-asg-subbox bg-gray-50/90 border border-gray-200/80 p-4 rounded-2xl w-full space-y-2.5 text-xs">
+                    <div className="std-asg-subbox bg-gray-50/90 border border-gray-200/80 p-3.5 sm:p-4 rounded-2xl w-full space-y-2.5 text-xs">
                       <div className="flex items-center justify-between gap-2">
                         <span className="std-asg-text-secondary text-gray-400 font-extrabold uppercase tracking-wider text-[10px]">
                           {t('លទ្ធផលកិច្ចការ', 'Submission Result')}
@@ -1409,7 +1437,7 @@ const StudentAssignments = () => {
                     <button
                       type="button"
                       onClick={() => handleOpenSubmitModal(assign)}
-                      className="w-full lg:w-auto inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs sm:text-sm font-extrabold px-6 py-3.5 rounded-xl shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer"
+                      className="w-full lg:w-auto inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs sm:text-sm font-extrabold px-6 py-3 sm:py-3.5 rounded-xl shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer"
                     >
                       <CloudArrowUpIcon className="h-5 w-5 stroke-[2.2]" />
                       <span>{t('ប្រគល់កិច្ចការ', 'Submit Assignment')}</span>
@@ -1426,17 +1454,17 @@ const StudentAssignments = () => {
       {/* 📌 4. PAGINATION CONTROLS                                          */}
       {/* ================================================================== */}
       {meta.last_page > 1 && (
-        <div className="std-asg-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="std-asg-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <p className="std-asg-text-secondary text-xs font-bold text-gray-600">
             {t('ទំព័រ', 'Page')} {meta.current_page} / {meta.last_page} ({meta.total}{' '}
             {t('កិច្ចការ', 'assignments')})
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={meta.current_page === 1}
-              className="std-asg-code-pill px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-asg-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
             >
               {t('មុន', 'Previous')}
             </button>
@@ -1471,7 +1499,7 @@ const StudentAssignments = () => {
               type="button"
               onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
               disabled={meta.current_page === meta.last_page}
-              className="std-asg-code-pill px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-asg-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
             >
               {t('បន្ទាប់', 'Next')}
             </button>
@@ -1480,27 +1508,27 @@ const StudentAssignments = () => {
       )}
 
       {/* ================================================================== */}
-      {/* 📌 5. SUBMISSION MODAL (ប្រើ createPortal ពេញអេក្រង់ ១០០%)         */}
+      {/* 📌 5. SUBMISSION MODAL (Bottom Sheet on Phone, Centered on iPad/Desktop) */}
       {/* ================================================================== */}
       {submitModalOpen &&
         selectedAssignment &&
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-4 overflow-y-auto animate-fadeIn"
+            className="fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-md p-0 sm:p-4 overflow-y-auto animate-fadeIn"
             onClick={() => {
               setSubmitModalOpen(false);
               setSubmitError('');
             }}
           >
             <div
-              className="std-asg-surface bg-white rounded-[1.75rem] shadow-2xl w-full max-w-lg overflow-hidden border border-gray-200 dark:border-slate-700"
+              className="std-asg-surface bg-white rounded-t-3xl sm:rounded-[1.75rem] shadow-2xl w-full max-w-lg overflow-hidden border border-gray-200 dark:border-slate-700"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="std-asg-modal-bar px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/60">
-                <h2 className="std-asg-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
-                  <span className="std-asg-badge-indigo p-2.5 rounded-xl bg-indigo-100 text-indigo-600 border border-indigo-200">
-                    <CloudArrowUpIcon className="h-6 w-6" />
+              <div className="std-asg-modal-bar px-5 sm:px-6 py-4 sm:py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/60">
+                <h2 className="std-asg-text-primary text-base sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
+                  <span className="std-asg-badge-indigo p-2 sm:p-2.5 rounded-xl bg-indigo-100 text-indigo-600 border border-indigo-200">
+                    <CloudArrowUpIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                   </span>
                   <span>{t('ប្រគល់កិច្ចការសិក្សា', 'Submit Assignment')}</span>
                 </h2>
@@ -1516,7 +1544,7 @@ const StudentAssignments = () => {
                 </button>
               </div>
 
-              <div className="p-6 sm:p-7 space-y-5">
+              <div className="p-5 sm:p-7 space-y-4 sm:space-y-5">
                 {submitError && (
                   <div className="std-asg-badge-rose p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-600">
                     <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
@@ -1539,8 +1567,8 @@ const StudentAssignments = () => {
                   </p>
                 </div>
 
-                <form onSubmit={handleAssignmentSubmit} className="space-y-5">
-                  <div className="std-asg-subbox border-2 border-dashed border-indigo-300 dark:border-slate-600 hover:border-indigo-500 transition bg-indigo-50/30 hover:bg-indigo-50/60 rounded-2xl p-7 text-center cursor-pointer relative">
+                <form onSubmit={handleAssignmentSubmit} className="space-y-4 sm:space-y-5">
+                  <div className="std-asg-subbox border-2 border-dashed border-indigo-300 dark:border-slate-600 hover:border-indigo-500 transition bg-indigo-50/30 hover:bg-indigo-50/60 rounded-2xl p-6 sm:p-7 text-center cursor-pointer relative">
                     <input
                       type="file"
                       required
@@ -1548,8 +1576,8 @@ const StudentAssignments = () => {
                       className="absolute inset-0 opacity-0 cursor-pointer"
                       accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.zip,.rar,.png,.jpg,.jpeg"
                     />
-                    <CloudArrowUpIcon className="h-11 w-11 text-indigo-500 mx-auto mb-2.5" />
-                    <span className="std-asg-text-primary block text-sm font-extrabold text-gray-800 break-all">
+                    <CloudArrowUpIcon className="h-10 w-10 sm:h-11 sm:w-11 text-indigo-500 mx-auto mb-2.5" />
+                    <span className="std-asg-text-primary block text-xs sm:text-sm font-extrabold text-gray-800 break-all">
                       {uploadFile
                         ? uploadFile.name
                         : t(
@@ -1557,7 +1585,7 @@ const StudentAssignments = () => {
                             'Click to select or drag your file here'
                           )}
                     </span>
-                    <span className="std-asg-text-secondary block text-xs text-gray-400 mt-1.5 font-medium">
+                    <span className="std-asg-text-secondary block text-[11px] sm:text-xs text-gray-400 mt-1.5 font-medium">
                       {t(
                         'គាំទ្រឯកសារ PDF, Word, PowerPoint, Excel, រូបភាព ឬ ZIP (រហូតដល់ 10MB)',
                         'Supports PDF, Word, PowerPoint, Excel, Images, or ZIP (up to 10MB)'

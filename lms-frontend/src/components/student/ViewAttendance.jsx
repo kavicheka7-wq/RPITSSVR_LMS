@@ -26,13 +26,19 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Instant Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
-const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v2';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v15';
+const CACHE_KEY_TEACHER_AVATARS_LEGACY = 'cached_student_teacher_avatars_v2';
+const CACHE_KEY_SHARED_ATTENDANCE = 'cached_student_attendance_list_v15';
 
-const getAttListCacheKey = (uid) => `cached_student_attendance_list_v14_${uid}`;
-const getAttSummaryCacheKey = (uid) => `cached_student_attendance_summary_v14_${uid}`;
-const getAttMetaCacheKey = (uid) => `cached_student_attendance_meta_v14_${uid}`;
-const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v14_${uid}`;
-const getCoursesCacheKey = (uid) => `cached_student_courses_list_v10_${uid}`;
+const getAttListCacheKey = (uid) => `cached_student_attendance_list_v15_${uid}`;
+const getAttListLegacyCacheKey = (uid) => `cached_student_attendance_list_v14_${uid}`;
+const getAttSummaryCacheKey = (uid) => `cached_student_attendance_summary_v15_${uid}`;
+const getAttSummaryLegacyCacheKey = (uid) => `cached_student_attendance_summary_v14_${uid}`;
+const getAttMetaCacheKey = (uid) => `cached_student_attendance_meta_v15_${uid}`;
+const getAttMetaLegacyCacheKey = (uid) => `cached_student_attendance_meta_v14_${uid}`;
+const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v15_${uid}`;
+const getDeptCoursesLegacyCacheKey = (uid) => `cached_student_dept_courses_v14_${uid}`;
+const getCoursesCacheKey = (uid) => `cached_student_courses_list_v15_${uid}`;
 
 const DEFAULT_SUMMARY = {
   present: 0,
@@ -78,6 +84,7 @@ const getTeacherAvatarMapSync = () => {
   }
   const stored =
     readStorageJson(CACHE_KEY_TEACHER_AVATARS, null) ||
+    readStorageJson(CACHE_KEY_TEACHER_AVATARS_LEGACY, null) ||
     readStorageJson('cached_student_teacher_avatars_v1', {});
   STUDENT_ATT_MEM_CACHE.teacherAvatarMap =
     stored && typeof stored === 'object' ? stored : {};
@@ -136,7 +143,9 @@ const schedulePersistTeacherAvatars = () => {
   teacherAvatarSaveTimer = setTimeout(() => {
     try {
       const map = getTeacherAvatarMapSync();
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(map));
+      const str = JSON.stringify(map);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
     } catch {}
   }, 150);
 };
@@ -257,7 +266,9 @@ const persistStudentAttendanceFast = (uid, attList, summaryObj, metaObj) => {
   schedulePersistTeacherAvatars();
 
   try {
-    localStorage.setItem(getAttListCacheKey(uid), JSON.stringify(slimList));
+    const slimStr = JSON.stringify(slimList);
+    localStorage.setItem(getAttListCacheKey(uid), slimStr);
+    localStorage.setItem(CACHE_KEY_SHARED_ATTENDANCE, slimStr);
     if (summaryObj) {
       localStorage.setItem(getAttSummaryCacheKey(uid), JSON.stringify(summaryObj));
     }
@@ -303,6 +314,7 @@ const ensureCleanStudentSessionCache = (newUid) => {
     if (prevUid && prevUid !== String(newUid)) {
       const legacySharedKeys = [
         'cached_student_attendance_list_v3',
+        'cached_student_attendance_list_v15',
         'cached_student_attendance_summary_v3',
         'cached_student_attendance_meta_v3',
         'cached_student_dashboard_stats_v8',
@@ -367,9 +379,12 @@ const ViewAttendance = () => {
     }
     const cached =
       readStorageJson(getAttListCacheKey(currentStudentId), null) ||
+      readStorageJson(getAttListLegacyCacheKey(currentStudentId), null) ||
+      readStorageJson(CACHE_KEY_SHARED_ATTENDANCE, null) ||
       readStorageJson(`cached_student_attendance_list_v8_${currentStudentId}`, []);
-    STUDENT_ATT_MEM_CACHE.attendance = cached;
-    return cached;
+    const valid = Array.isArray(cached) ? cached : [];
+    STUDENT_ATT_MEM_CACHE.attendance = valid;
+    return valid;
   });
 
   const [summary, setSummary] = useState(() => {
@@ -378,12 +393,34 @@ const ViewAttendance = () => {
     }
     const cached =
       readStorageJson(getAttSummaryCacheKey(currentStudentId), null) ||
+      readStorageJson(getAttSummaryLegacyCacheKey(currentStudentId), null) ||
       readStorageJson(
         `cached_student_attendance_summary_v8_${currentStudentId}`,
-        DEFAULT_SUMMARY
+        null
       );
-    STUDENT_ATT_MEM_CACHE.summary = cached;
-    return cached;
+    if (cached) {
+      STUDENT_ATT_MEM_CACHE.summary = cached;
+      return cached;
+    }
+    if (Array.isArray(attendance) && attendance.length > 0) {
+      const computed = {
+        present: attendance.filter(
+          (r) => normalizeAttendanceStatus(r?.status) === 'Present'
+        ).length,
+        absent: attendance.filter(
+          (r) => normalizeAttendanceStatus(r?.status) === 'Absent'
+        ).length,
+        permission: attendance.filter(
+          (r) => normalizeAttendanceStatus(r?.status) === 'Permission'
+        ).length,
+        late: attendance.filter(
+          (r) => normalizeAttendanceStatus(r?.status) === 'Late'
+        ).length,
+      };
+      STUDENT_ATT_MEM_CACHE.summary = computed;
+      return computed;
+    }
+    return DEFAULT_SUMMARY;
   });
 
   const [page, setPage] = useState(1);
@@ -394,6 +431,7 @@ const ViewAttendance = () => {
     }
     const cached =
       readStorageJson(getAttMetaCacheKey(currentStudentId), null) ||
+      readStorageJson(getAttMetaLegacyCacheKey(currentStudentId), null) ||
       readStorageJson(
         `cached_student_attendance_meta_v8_${currentStudentId}`,
         DEFAULT_META
@@ -409,13 +447,18 @@ const ViewAttendance = () => {
   // ✅ ទាញបញ្ជីមុខវិជ្ជាដែលមានក្នុង Cache មកទុកជាជំនួយសម្រាប់ផ្គូផ្គងរូបថត និងឈ្មោះគ្រូបង្រៀន
   const cachedCatalogCoursesById = useMemo(() => {
     const map = new Map();
-    const list1 = readStorageJson(getDeptCoursesCacheKey(currentStudentId), []);
-    const list2 = readStorageJson(getCoursesCacheKey(currentStudentId), []);
+    const list1 =
+      readStorageJson(getDeptCoursesCacheKey(currentStudentId), null) ||
+      readStorageJson(getDeptCoursesLegacyCacheKey(currentStudentId), []);
+    const list2 =
+      readStorageJson(getCoursesCacheKey(currentStudentId), null) ||
+      readStorageJson(`cached_student_courses_list_v10_${currentStudentId}`, []);
     [...(Array.isArray(list1) ? list1 : []), ...(Array.isArray(list2) ? list2 : [])].forEach(
       (c) => {
-        const cid = c?.id || c?.course_id;
+        const courseObj = c?.course || c;
+        const cid = c?.course_id || courseObj?.id || c?.id;
         if (cid && !map.has(String(cid))) {
-          map.set(String(cid), c);
+          map.set(String(cid), courseObj);
         }
       }
     );
@@ -429,18 +472,15 @@ const ViewAttendance = () => {
     let isMounted = true;
 
     if (page === 1) {
-      const cachedList = readStorageJson(
-        getAttListCacheKey(currentStudentId),
-        null
-      );
-      const cachedSum = readStorageJson(
-        getAttSummaryCacheKey(currentStudentId),
-        null
-      );
-      const cachedMeta = readStorageJson(
-        getAttMetaCacheKey(currentStudentId),
-        null
-      );
+      const cachedList =
+        readStorageJson(getAttListCacheKey(currentStudentId), null) ||
+        readStorageJson(getAttListLegacyCacheKey(currentStudentId), null);
+      const cachedSum =
+        readStorageJson(getAttSummaryCacheKey(currentStudentId), null) ||
+        readStorageJson(getAttSummaryLegacyCacheKey(currentStudentId), null);
+      const cachedMeta =
+        readStorageJson(getAttMetaCacheKey(currentStudentId), null) ||
+        readStorageJson(getAttMetaLegacyCacheKey(currentStudentId), null);
 
       if (Array.isArray(cachedList) && cachedList.length > 0) {
         setAttendance(cachedList);
@@ -486,6 +526,7 @@ const ViewAttendance = () => {
 
         const rawList =
           response.data?.attendance ||
+          response.data?.data?.data ||
           response.data?.data ||
           (Array.isArray(response.data) ? response.data : []);
         const validList = (Array.isArray(rawList) ? rawList : []).map((r) => ({
@@ -610,7 +651,6 @@ const ViewAttendance = () => {
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
 
-  // ✅ ទាញយកឈ្មោះ និងរូបថតគ្រូបង្រៀនពី RAM Dictionary និង Catalog Fallback ក្នុងល្បឿន 0ms
   const resolveRecordTeacherInfo = useCallback(
     (record) => {
       const course = record?.course || {};
@@ -814,16 +854,21 @@ const ViewAttendance = () => {
     attendance.forEach((rec) => {
       const c = rec.course;
       const cid = c?.id || rec.course_id;
+      const catalogCourse = cid ? cachedCatalogCoursesById.get(String(cid)) : null;
       if (cid && !map.has(String(cid))) {
         map.set(String(cid), {
           id: String(cid),
-          name: c?.course_name || rec.course_name || t('មុខវិជ្ជា', 'Course'),
-          code: c?.course_code || '',
+          name:
+            c?.course_name ||
+            rec.course_name ||
+            catalogCourse?.course_name ||
+            t('មុខវិជ្ជា', 'Course'),
+          code: c?.course_code || catalogCourse?.course_code || '',
         });
       }
     });
     return Array.from(map.values());
-  }, [attendance, t]);
+  }, [attendance, cachedCatalogCoursesById, t]);
 
   const filteredAttendance = useMemo(() => {
     if (!Array.isArray(attendance)) return [];
@@ -841,12 +886,19 @@ const ViewAttendance = () => {
       }
 
       if (!q) return true;
+      const cid = String(rec.course?.id || rec.course_id || '');
+      const catalogCourse = cid ? cachedCatalogCoursesById.get(cid) : null;
       const courseName = (
         rec.course?.course_name ||
         rec.course_name ||
+        catalogCourse?.course_name ||
         ''
       ).toLowerCase();
-      const courseCode = (rec.course?.course_code || '').toLowerCase();
+      const courseCode = (
+        rec.course?.course_code ||
+        catalogCourse?.course_code ||
+        ''
+      ).toLowerCase();
       const teacherMeta = resolveRecordTeacherInfo(rec);
       const teacherName = (teacherMeta.name || '').toLowerCase();
       const dateStr = (rec.attendance_date || '').toLowerCase();
@@ -863,6 +915,7 @@ const ViewAttendance = () => {
     selectedCourse,
     statusFilter,
     searchTerm,
+    cachedCatalogCoursesById,
     resolveRecordTeacherInfo,
   ]);
 
@@ -901,35 +954,35 @@ const ViewAttendance = () => {
     switch (normStatus) {
       case 'Present':
         return (
-          <span className="std-att-badge-emerald inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
-            <CheckCircleIcon className="w-4 h-4 mr-1.5 shrink-0" />
+          <span className="std-att-badge-emerald inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs shrink-0">
+            <CheckCircleIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 shrink-0" />
             {t('វត្តមាន', 'Present')}
           </span>
         );
       case 'Absent':
         return (
-          <span className="std-att-badge-rose inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs">
-            <XCircleIcon className="w-4 h-4 mr-1.5 shrink-0" />
+          <span className="std-att-badge-rose inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs shrink-0">
+            <XCircleIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 shrink-0" />
             {t('អវត្តមាន', 'Absent')}
           </span>
         );
       case 'Permission':
         return (
-          <span className="std-att-badge-blue inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs">
-            <DocumentTextIcon className="w-4 h-4 mr-1.5 shrink-0" />
+          <span className="std-att-badge-blue inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs shrink-0">
+            <DocumentTextIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 shrink-0" />
             {t('ច្បាប់', 'Permission')}
           </span>
         );
       case 'Late':
         return (
-          <span className="std-att-badge-amber inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs">
-            <ClockIcon className="w-4 h-4 mr-1.5 shrink-0" />
+          <span className="std-att-badge-amber inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs shrink-0">
+            <ClockIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-1.5 shrink-0" />
             {t('មកយឺត', 'Late')}
           </span>
         );
       default:
         return (
-          <span className="std-att-code-pill inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-extrabold bg-gray-100 text-gray-700 border border-gray-200">
+          <span className="std-att-code-pill inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-extrabold bg-gray-100 text-gray-700 border border-gray-200 shrink-0">
             {status}
           </span>
         );
@@ -980,30 +1033,30 @@ const ViewAttendance = () => {
   ];
 
   return (
-    <div className="std-att-page max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 pb-28 lg:pb-12 mt-2 md:mt-0 animate-fadeIn">
+    <div className="std-att-page max-w-7xl mx-auto px-3 sm:px-5 lg:px-8 space-y-5 sm:space-y-6 lg:space-y-8 pb-28 md:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
       {/* ================================================================== */}
-      {/* 1. MODERN BENTO HERO SECTION                                       */}
+      {/* 1. MODERN BENTO HERO SECTION (Adaptive Phone / iPad / Desktop)     */}
       {/* ================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (8 Columns) */}
-        <div className="lg:col-span-8 relative overflow-hidden rounded-[1.75rem] sm:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-6 sm:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-att-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
           <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
-          <div className="relative z-10 space-y-3.5">
+          <div className="relative z-10 space-y-3 sm:space-y-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-xs font-extrabold text-cyan-200">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 sm:py-1.5 rounded-full bg-cyan-400/15 border border-cyan-300/30 text-[11px] sm:text-xs font-extrabold text-cyan-200 max-w-full">
                 <AcademicCapIcon className="h-4 w-4 text-cyan-300 shrink-0" />
-                <span>{studentDeptName}</span>
+                <span className="truncate">{studentDeptName}</span>
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full backdrop-blur-md border text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1018,13 +1071,13 @@ const ViewAttendance = () => {
               </span>
             </div>
 
-            <div className="space-y-2 pt-1">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2.5 leading-snug">
+            <div className="space-y-1.5 sm:space-y-2 pt-1">
+              <h1 className="text-xl sm:text-2xl md:text-3xl xl:text-4xl font-extrabold text-white tracking-tight flex flex-wrap items-center gap-2 leading-snug">
                 <span>{t('របាយការណ៍វត្តមាន,', 'Attendance,')}</span>
                 <span className="bg-gradient-to-r from-yellow-300 via-amber-200 to-white bg-clip-text text-transparent">
                   {getActiveStatusTitle()}
                 </span>
-                <CheckBadgeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-yellow-400 shrink-0" />
+                <CheckBadgeIcon className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 text-yellow-400 shrink-0" />
               </h1>
 
               <p className="text-xs sm:text-sm text-blue-100/80 max-w-2xl leading-relaxed font-medium">
@@ -1036,13 +1089,13 @@ const ViewAttendance = () => {
             </div>
           </div>
 
-          <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-6 pt-5 border-t border-white/15">
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
+          <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15">
+            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-blue-500/25 border border-blue-300/30 flex items-center justify-center text-cyan-300 shrink-0">
                 <DocumentCheckIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-lg sm:text-xl font-black text-white leading-none">
+                <span className="block text-base sm:text-xl font-black text-white leading-none">
                   {totalRecordsCount}
                 </span>
                 <span className="block text-[11px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1051,12 +1104,12 @@ const ViewAttendance = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3.5 transition-all">
+            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
                 <ChartBarIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <span className="block text-lg sm:text-xl font-black text-white leading-none">
+                <span className="block text-base sm:text-xl font-black text-white leading-none">
                   {attendanceRate}%
                 </span>
                 <span className="block text-[11px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
@@ -1067,26 +1120,26 @@ const ViewAttendance = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (4 Columns) */}
-        <div className="lg:col-span-4 std-att-surface bg-white rounded-[1.75rem] sm:rounded-[2rem] p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
-          <div className="space-y-4">
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (5 Cols on lg, 4 Cols on xl) */}
+        <div className="lg:col-span-5 xl:col-span-4 std-att-surface bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
+          <div className="space-y-3.5 sm:space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-500/30 flex items-center justify-center shrink-0">
                   <DocumentCheckIcon className="h-5 w-5 stroke-[2.2]" />
                 </div>
-                <div>
-                  <h2 className="std-att-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight">
+                <div className="min-w-0">
+                  <h2 className="std-att-text-primary text-base sm:text-lg font-extrabold text-gray-900 leading-tight truncate">
                     {t('តាមដានវត្តមានតាមស្ថានភាព', 'Filter by Status')}
                   </h2>
-                  <p className="std-att-text-secondary text-[11px] font-medium text-gray-500 mt-0.5">
+                  <p className="std-att-text-secondary text-[11px] font-medium text-gray-500 mt-0.5 truncate">
                     {t('ចុចជ្រើសរើសស្ថានភាពដើម្បីច្រោះមើល', 'Select a status to filter records')}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3 pt-1">
               {statusSelectorItems.map((item) => {
                 const isSelected = statusFilter === item.id;
                 const StatusIcon = item.icon;
@@ -1097,21 +1150,21 @@ const ViewAttendance = () => {
                     onClick={() =>
                       setStatusFilter(isSelected ? 'all' : item.id)
                     }
-                    className={`group p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-center justify-between gap-2 ${
+                    className={`group p-3 sm:p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-center justify-between gap-2 ${
                       isSelected
                         ? `bg-gradient-to-br ${item.activeGradient} text-white shadow-md -translate-y-0.5`
                         : 'std-att-subbox bg-gray-50/80 hover:bg-indigo-50/50 border-gray-200/80 hover:border-indigo-300 text-gray-800 hover:-translate-y-0.5'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                       <div
-                        className={`h-9 w-9 rounded-xl border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${
+                        className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${
                           isSelected
                             ? 'bg-white/20 text-white border-white/30'
                             : item.iconStyle
                         }`}
                       >
-                        <StatusIcon className="h-5 w-5 stroke-[2.2]" />
+                        <StatusIcon className="h-4 w-4 sm:h-5 sm:w-5 stroke-[2.2]" />
                       </div>
                       <span
                         className={`text-xs sm:text-sm font-black truncate ${
@@ -1139,7 +1192,7 @@ const ViewAttendance = () => {
             </div>
           </div>
 
-          <div className="std-att-divider pt-4 mt-4 border-t border-gray-100 flex items-center justify-between text-xs">
+          <div className="std-att-divider pt-3.5 sm:pt-4 mt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="std-att-text-secondary font-bold text-gray-500">
               {t('វត្តមាន៖', 'Present:')}{' '}
               <strong className="std-att-text-primary text-gray-800">
@@ -1162,7 +1215,7 @@ const ViewAttendance = () => {
               </button>
             ) : (
               <span className="font-extrabold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                <SparklesIcon className="h-3.5 w-3.5" />
+                <SparklesIcon className="h-3.5 w-3.5 shrink-0" />
                 <span>{t('បង្ហាញគ្រប់ស្ថានភាព', 'All Shown')}</span>
               </span>
             )}
@@ -1174,7 +1227,7 @@ const ViewAttendance = () => {
       {/* ================================================================== */}
       {/* 2. SEARCH & COURSE FILTER BAR                                      */}
       {/* ================================================================== */}
-      <div className="std-att-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-4 flex flex-col sm:flex-row gap-3.5 items-center justify-between">
+      <div className="std-att-surface bg-white rounded-2xl border border-gray-200/80 shadow-xs p-3.5 sm:p-4 flex flex-col sm:flex-row gap-3 sm:gap-3.5 items-center justify-between">
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto flex-1">
           <div className="relative w-full sm:max-w-xs lg:max-w-sm flex-1">
             <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
@@ -1182,14 +1235,17 @@ const ViewAttendance = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder=""
+              placeholder={t(
+                'ស្វែងរកតាមមុខវិជ្ជា, គ្រូបង្រៀន ឬថ្ងៃខែ...',
+                'Search course, instructor, or date...'
+              )}
               className="std-att-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
             />
             {searchTerm && (
               <button
                 type="button"
                 onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-1"
               >
                 <XMarkIcon className="h-4 w-4" />
               </button>
@@ -1221,15 +1277,15 @@ const ViewAttendance = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 3. DETAILED ATTENDANCE TABLE                                       */}
+      {/* 3. DETAILED ATTENDANCE (Table on iPad/Desktop, Cards on Phone)     */}
       {/* ================================================================== */}
-      <div className="std-att-surface bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
-        <div className="std-att-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <h3 className="std-att-text-primary text-base sm:text-lg font-extrabold text-gray-900">
+      <div className="std-att-surface bg-white rounded-2xl sm:rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
+        <div className="std-att-bar px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+            <h3 className="std-att-text-primary text-base sm:text-lg font-extrabold text-gray-900 truncate">
               {t('ប្រវត្តិវត្តមានលម្អិត', 'Detailed Attendance History')}
             </h3>
-            <span className="std-att-badge-blue px-3 py-1 rounded-lg text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-100">
+            <span className="std-att-badge-blue px-3 py-1 rounded-lg text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-100 shrink-0">
               {filteredAttendance.length} {t('កំណត់ត្រា', 'Records')}
             </span>
           </div>
@@ -1242,33 +1298,34 @@ const ViewAttendance = () => {
                 setStatusFilter('all');
                 setSearchTerm('');
               }}
-              className="std-att-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+              className="std-att-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer shrink-0"
             >
               {t('សម្អាតតម្រងស្វែងរក', 'Reset Filters')}
             </button>
           )}
         </div>
 
-        <div className="overflow-x-auto">
+        {/* 💻 iPad, Laptop & Desktop Table View (`hidden md:block`) */}
+        <div className="hidden md:block overflow-x-auto hide-scrollbar">
           <table className="min-w-full border-collapse">
             <thead className="std-att-thead bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider w-14">
+                <th className="px-4 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider w-14 whitespace-nowrap">
                   {t('ល.រ', 'No')}
                 </th>
-                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap sticky left-0 bg-inherit z-10">
                   {t('មុខវិជ្ជា', 'Course')}
                 </th>
-                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('គ្រូបង្រៀន', 'Instructor')}
                 </th>
-                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('វេនសិក្សា', 'Shift')}
                 </th>
-                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-4 text-left text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('កាលបរិច្ឆេទ', 'Date')}
                 </th>
-                <th className="px-6 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-4 text-center text-[11px] font-extrabold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   {t('ស្ថានភាព', 'Status')}
                 </th>
               </tr>
@@ -1338,7 +1395,7 @@ const ViewAttendance = () => {
                         {(page - 1) * perPage + idx + 1}
                       </td>
 
-                      <td className="px-6 py-4 whitespace-nowrap align-middle">
+                      <td className="px-6 py-4 whitespace-nowrap align-middle sticky left-0 bg-inherit z-10">
                         <div className="flex items-center gap-3">
                           <div className="std-att-badge-indigo h-9 w-9 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center shrink-0">
                             <BookOpenIcon className="h-4 w-4 stroke-[2.2]" />
@@ -1419,19 +1476,143 @@ const ViewAttendance = () => {
           </table>
         </div>
 
+        {/* 📱 Mobile App-Like Cards View (`md:hidden`) */}
+        <div className="md:hidden p-3.5 space-y-3 bg-gray-50/40">
+          {filteredAttendance.length === 0 ? (
+            <div className="std-att-subbox py-12 px-4 text-center bg-white rounded-2xl border border-dashed border-gray-200">
+              <DocumentCheckIcon className="h-14 w-14 text-gray-300 mx-auto mb-2.5" />
+              <p className="std-att-text-primary font-extrabold text-gray-700 text-sm">
+                {searchTerm || selectedCourse !== 'all' || statusFilter !== 'all'
+                  ? t(
+                      'មិនឃើញមានកំណត់ត្រាវត្តមានតាមការច្រោះនេះទេ',
+                      'No matching attendance records found'
+                    )
+                  : t(
+                      'មិនទាន់មានប្រវត្តិវត្តមាននៅឡើយទេ',
+                      'No attendance records found'
+                    )}
+              </p>
+              <p className="std-att-text-secondary text-xs text-gray-400 mt-1">
+                {t(
+                  'ប្រវត្តិវត្តមាននឹងបង្ហាញនៅទីនេះ នៅពេលគ្រូបង្រៀនកត់ត្រាវត្តមានប្រចាំថ្ងៃ។',
+                  'Attendance records will appear here once recorded by your instructor.'
+                )}
+              </p>
+            </div>
+          ) : (
+            filteredAttendance.map((record, idx) => {
+              const teacherMeta = resolveRecordTeacherInfo(record);
+              const avatarKey = `mob_att_t_${record.id || idx}`;
+              const hasTeacherAvatar = Boolean(
+                teacherMeta.image && !failedAvatars[avatarKey]
+              );
+
+              const cid = String(record.course?.id || record.course_id || '');
+              const catalogCourse = cid
+                ? cachedCatalogCoursesById.get(cid)
+                : null;
+
+              const courseName =
+                record.course?.course_name ||
+                record.course_name ||
+                catalogCourse?.course_name ||
+                t('មុខវិជ្ជាសិក្សា', 'Course');
+              const courseCode =
+                record.course?.course_code || catalogCourse?.course_code || '';
+
+              const shiftLabel = getShiftLabel(
+                record.student?.study_shift || record.study_shift
+              );
+              const timeString = resolveRecordTime(record);
+
+              return (
+                <div
+                  key={`mob-att-${record.id || idx}`}
+                  className="std-att-subbox bg-white rounded-2xl border border-gray-200/80 p-3.5 shadow-2xs space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="std-att-badge-indigo h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center shrink-0">
+                        <BookOpenIcon className="h-5 w-5 stroke-[2.2]" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="std-att-text-primary text-sm font-extrabold text-gray-900 truncate">
+                          {courseName}
+                        </h4>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {courseCode && (
+                            <span className="std-att-text-secondary text-[11px] font-bold text-gray-500">
+                              {courseCode}
+                            </span>
+                          )}
+                          <span className="text-gray-300 dark:text-slate-600">•</span>
+                          <span className="std-att-text-secondary text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+                            {shiftLabel}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {getStatusBadge(record.status)}
+                  </div>
+
+                  <div className="std-att-divider pt-2.5 border-t border-gray-100 flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="h-7 w-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-extrabold text-[10px] shrink-0 overflow-hidden shadow-2xs">
+                        {hasTeacherAvatar ? (
+                          <img
+                            src={teacherMeta.image}
+                            alt={teacherMeta.name}
+                            loading="lazy"
+                            className="h-full w-full object-cover rounded-full"
+                            onError={() =>
+                              setFailedAvatars((prev) => ({
+                                ...prev,
+                                [avatarKey]: true,
+                              }))
+                            }
+                          />
+                        ) : (
+                          <span>{teacherMeta.initials}</span>
+                        )}
+                      </div>
+                      <span className="std-att-text-primary font-bold text-gray-800 truncate max-w-[135px]">
+                        {teacherMeta.name}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col items-end shrink-0">
+                      <span className="std-att-text-secondary inline-flex items-center gap-1 text-[11px] font-extrabold text-gray-600">
+                        <CalendarDaysIcon className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                        <span>{formatAttendanceDate(record.attendance_date)}</span>
+                      </span>
+                      {timeString && (
+                        <span className="text-[10px] font-bold flex items-center gap-1 mt-0.5 text-amber-600 dark:text-amber-400">
+                          <ClockIcon className="w-3 h-3" />
+                          {timeString}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
         {/* Pagination Controls */}
         {meta.last_page > 1 && (
-          <div className="std-att-bar px-6 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-gray-50/50">
+          <div className="std-att-bar px-4 sm:px-6 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-gray-50/50">
             <p className="std-att-text-secondary text-xs font-bold text-gray-600">
               {t('ទំព័រ', 'Page')} {meta.current_page} / {meta.last_page} ({meta.total}{' '}
               {t('កំណត់ត្រា', 'records')})
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={meta.current_page === 1}
-                className="std-att-code-pill px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="std-att-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('មុន', 'Previous')}
               </button>
@@ -1466,7 +1647,7 @@ const ViewAttendance = () => {
                 type="button"
                 onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
                 disabled={meta.current_page === meta.last_page}
-                className="std-att-code-pill px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="std-att-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {t('បន្ទាប់', 'Next')}
               </button>
@@ -1482,6 +1663,13 @@ const ViewAttendance = () => {
         .std-att-grid-pattern {
           background-image: radial-gradient(rgba(255, 255, 255, 0.25) 1px, transparent 1px);
           background-size: 20px 20px;
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .hide-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
 
         .std-att-row + .std-att-row > td {
