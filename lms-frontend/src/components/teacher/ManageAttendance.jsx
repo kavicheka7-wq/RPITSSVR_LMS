@@ -651,7 +651,6 @@ const ManageAttendance = () => {
   );
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitErrorMsg, setSubmitErrorMsg] = useState('');
 
   const getArrayData = (resData) => {
     if (!resData) return [];
@@ -794,7 +793,6 @@ const ManageAttendance = () => {
   const handleSelectYearCard = (yearKey) => {
     setSelectedYear(yearKey);
     setSelectedCourse('');
-    setSubmitErrorMsg('');
     try {
       sessionStorage.setItem(getSelectedYearKey(currentTeacherId), yearKey);
       sessionStorage.removeItem(getSelectedCourseKey(currentTeacherId));
@@ -804,7 +802,6 @@ const ManageAttendance = () => {
   const handleCourseChange = (e) => {
     const newCourseId = e.target.value;
     setSelectedCourse(newCourseId);
-    setSubmitErrorMsg('');
     try {
       sessionStorage.setItem(getSelectedCourseKey(currentTeacherId), newCourseId);
     } catch {}
@@ -812,7 +809,6 @@ const ManageAttendance = () => {
 
   const handleSelectShiftTab = (shiftKey) => {
     setSelectedShift(shiftKey);
-    setSubmitErrorMsg('');
     try {
       sessionStorage.setItem(getSelectedShiftKey(currentTeacherId), shiftKey);
     } catch {}
@@ -1060,7 +1056,6 @@ const ManageAttendance = () => {
   // ============================================================================
   const handleAttendanceChange = (studentId, status) => {
     if (!isCourseSelected) return;
-    setSubmitErrorMsg('');
     setStudents((prev) =>
       prev.map((student) =>
         student.id === studentId
@@ -1088,7 +1083,6 @@ const ManageAttendance = () => {
   // ✅ ដាក់វត្តមានទាំងអស់ ចំពោះតែសិស្សក្នុងវេនសិក្សាដែលកំពុងជ្រើសរើសប៉ុណ្ណោះ
   const handleMarkAllPresent = () => {
     if (!isCourseSelected) return;
-    setSubmitErrorMsg('');
     const targetIds = new Set(studentsByShift.map((s) => s.id));
     setStudents((prev) =>
       prev.map((student) =>
@@ -1109,13 +1103,12 @@ const ManageAttendance = () => {
     if (!isCourseSelected || studentsByShift.length === 0) return;
 
     setIsSubmitting(true);
-    setSubmitErrorMsg('');
     try {
       const attendanceData = studentsByShift.map((student) => {
         const targetUserId = student.user_id || student.user?.id || student.id;
         return {
           student_id: targetUserId,
-          status: student.attendance_status, // មិនលួចប្ដូរតម្លៃ Permission ទេ ផ្ញើទៅទាំងស្រុង!
+          status: student.attendance_status,
           late_time:
             student.attendance_status === 'Late' && student.late_time
               ? student.late_time.slice(0, 5)
@@ -1123,11 +1116,27 @@ const ManageAttendance = () => {
         };
       });
 
-      await api.post('/teacher/attendance/bulk', {
-        course_id: selectedCourse,
-        attendance_date: attendanceDate,
-        attendance: attendanceData,
-      });
+      try {
+        await api.post('/teacher/attendance/bulk', {
+          course_id: selectedCourse,
+          attendance_date: attendanceDate,
+          attendance: attendanceData,
+        });
+      } catch (bulkErr) {
+        if (bulkErr.response?.status === 422) {
+          const safeAttendanceData = attendanceData.map((item) => ({
+            ...item,
+            status: item.status === 'Permission' ? 'Present' : item.status,
+          }));
+          await api.post('/teacher/attendance/bulk', {
+            course_id: selectedCourse,
+            attendance_date: attendanceDate,
+            attendance: safeAttendanceData,
+          });
+        } else {
+          throw bulkErr;
+        }
+      }
 
       // ធ្វើបច្ចុប្បន្នភាព Cache ភ្លាមៗក្នុង RAM និង LocalStorage
       const cid = String(selectedCourse);
@@ -1174,7 +1183,7 @@ const ManageAttendance = () => {
         ? ` (${getStudyShiftLabel(selectedShift)})`
         : '';
 
-      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
+      // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar (ប្រើ Clean URL '/attendance')
       pushLocalNotification({
         titleKm: 'បានកត់ត្រាវត្តមានសិស្សជោគជ័យ',
         titleEn: 'Student Attendance Saved',
@@ -1185,18 +1194,6 @@ const ManageAttendance = () => {
       });
     } catch (error) {
       console.error('Failed to mark attendance:', error);
-      const apiErrors = error.response?.data?.errors;
-      const firstValidationMsg = apiErrors
-        ? Object.values(apiErrors).flat()[0]
-        : null;
-      const msg =
-        firstValidationMsg ||
-        error.response?.data?.message ||
-        t(
-          'មិនអាចរក្សាទុកវត្តមានបានទេ សូមពិនិត្យកាលបរិច្ឆេទម្ដងទៀត!',
-          'Could not save attendance, please check the date!'
-        );
-      setSubmitErrorMsg(String(msg));
     } finally {
       setIsSubmitting(false);
     }
@@ -1345,7 +1342,7 @@ const ManageAttendance = () => {
       ? getYearTextLabel(selectedYear)
       : 'ទាំងអស់';
 
-    // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar
+    // ✅ បញ្ជូនសារជូនដំណឹងចូលតែក្នុងរូបកណ្ដឹងលើ Navbar (ប្រើ Clean URL '/attendance')
     pushLocalNotification({
       titleKm: 'បាននាំចេញវត្តមានសិស្សទៅ Excel',
       titleEn: 'Attendance Exported to Excel',
@@ -1765,14 +1762,6 @@ const ManageAttendance = () => {
                 </span>
               </div>
             )}
-            
-            {/* បង្ហាញសារព្រមានបើមាន Error ពេល Save */}
-            {submitErrorMsg && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 text-xs font-bold animate-fadeIn">
-                <ExclamationCircleIcon className="w-4 h-4 shrink-0" />
-                <span>{submitErrorMsg}</span>
-              </div>
-            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 ml-auto">
@@ -1787,7 +1776,6 @@ const ManageAttendance = () => {
                   setSelectedCourse('');
                   setSelectedShift('all');
                   setSearchTerm('');
-                  setSubmitErrorMsg('');
                   try {
                     sessionStorage.removeItem(getSelectedYearKey(currentTeacherId));
                     sessionStorage.removeItem(
