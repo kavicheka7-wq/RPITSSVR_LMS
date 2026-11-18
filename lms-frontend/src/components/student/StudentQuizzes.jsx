@@ -51,7 +51,7 @@ const DEFAULT_META = {
   current_page: 1,
   last_page: 1,
   total: 0,
-  per_page: 15,
+  per_page: 50,
 };
 
 // ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ
@@ -486,7 +486,7 @@ const StudentQuizzes = () => {
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [page, setPage] = useState(1);
-  const [perPage] = useState(15);
+  const [perPage] = useState(50);
   const [meta, setMeta] = useState(() => {
     if (STUDENT_QUIZ_MEM_CACHE.meta) {
       return STUDENT_QUIZ_MEM_CACHE.meta;
@@ -549,6 +549,7 @@ const StudentQuizzes = () => {
 
     try {
       const response = await api.get('/student/courses?all=true');
+      if (response.data?.error_debug) return;
       const raw = response.data?.data ?? response.data ?? [];
       const list = Array.isArray(raw)
         ? raw
@@ -556,15 +557,17 @@ const StudentQuizzes = () => {
         ? raw.data
         : [];
       const slimCourses = stripHeavyQuizDataDeep(list);
-      setCoursesList(slimCourses);
-      STUDENT_QUIZ_MEM_CACHE.courses = slimCourses;
-      STUDENT_QUIZ_MEM_CACHE.lastCoursesSyncedAt = Date.now();
+      if (slimCourses.length > 0 || !STUDENT_QUIZ_MEM_CACHE.courses?.length) {
+        setCoursesList(slimCourses);
+        STUDENT_QUIZ_MEM_CACHE.courses = slimCourses;
+        STUDENT_QUIZ_MEM_CACHE.lastCoursesSyncedAt = Date.now();
 
-      safeWriteStudentQuizCache(
-        getCoursesCacheKey(currentStudentId),
-        slimCourses
-      );
-      safeWriteStudentQuizCache(CACHE_KEY_SHARED_COURSES, slimCourses);
+        safeWriteStudentQuizCache(
+          getCoursesCacheKey(currentStudentId),
+          slimCourses
+        );
+        safeWriteStudentQuizCache(CACHE_KEY_SHARED_COURSES, slimCourses);
+      }
     } catch (e) {
       console.error('Error fetching student courses', e);
     }
@@ -572,7 +575,7 @@ const StudentQuizzes = () => {
 
   const fetchQuizzes = useCallback(
     async (forceRefresh = false) => {
-      if (page === 1 && selectedCourse === 'all') {
+      if (!forceRefresh && page === 1 && selectedCourse === 'all') {
         const cachedQuz = readStorageJson(
           getQuizzesCacheKey(currentStudentId),
           null
@@ -599,7 +602,7 @@ const StudentQuizzes = () => {
         STUDENT_QUIZ_MEM_CACHE.uid === currentStudentId &&
         Array.isArray(STUDENT_QUIZ_MEM_CACHE.quizzes) &&
         STUDENT_QUIZ_MEM_CACHE.quizzes.length > 0 &&
-        now - STUDENT_QUIZ_MEM_CACHE.lastSyncedAt < 5000
+        now - STUDENT_QUIZ_MEM_CACHE.lastSyncedAt < 4000
       ) {
         return;
       }
@@ -623,6 +626,12 @@ const StudentQuizzes = () => {
           params,
           signal: controller.signal,
         });
+
+        // ការពារកុំឱ្យយកបញ្ជីទទេពេលមាន Error ទៅលុបជាន់លើកម្រងសំណួរចាស់ក្នុង Cache
+        if (response.data?.error_debug) {
+          return;
+        }
+
         const rawList = extractValidQuizzesList(response.data);
         const list = stripHeavyQuizDataDeep(rawList);
 
@@ -642,7 +651,9 @@ const StudentQuizzes = () => {
           STUDENT_QUIZ_MEM_CACHE.uid = currentStudentId;
           STUDENT_QUIZ_MEM_CACHE.quizzes = list;
           STUDENT_QUIZ_MEM_CACHE.meta = metaData;
-          STUDENT_QUIZ_MEM_CACHE.lastSyncedAt = Date.now();
+          if (list.length > 0) {
+            STUDENT_QUIZ_MEM_CACHE.lastSyncedAt = Date.now();
+          }
 
           safeWriteStudentQuizCache(
             getQuizzesCacheKey(currentStudentId),
@@ -668,14 +679,43 @@ const StudentQuizzes = () => {
     fetchStudentCourses();
   }, [fetchStudentCourses]);
 
+  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 12 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
+  // (ផ្អាក Auto-Sync ដោយស្វ័យប្រវត្តិនៅពេលសិស្សកំពុងធ្វើតេស្ត ឬកំពុងមើលលទ្ធផល)
   useEffect(() => {
     fetchQuizzes(false);
+
+    const handleVisibilityOrFocus = () => {
+      if (
+        document.visibilityState === 'visible' &&
+        !activeQuizAttempt &&
+        !quizResult
+      ) {
+        fetchQuizzes(true);
+      }
+    };
+
+    const syncInterval = setInterval(() => {
+      if (
+        document.visibilityState === 'visible' &&
+        !activeQuizAttempt &&
+        !quizResult
+      ) {
+        fetchQuizzes(true);
+      }
+    }, 12000);
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
     return () => {
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
     };
-  }, [fetchQuizzes]);
+  }, [fetchQuizzes, activeQuizAttempt, quizResult]);
 
   const availableCourses = useMemo(() => {
     const map = new Map();
@@ -862,6 +902,36 @@ const StudentQuizzes = () => {
     try {
       const response = await api.get(`/student/quizzes/${quiz.id}`);
       const loadedQuiz = response.data?.quiz || quiz;
+      const serverAttempt = response.data?.attempt;
+
+      // ✅ ប្រសិនបើសិស្សធ្លាប់បានប្រឡងចប់រួចហើយនៅលើឧបករណ៍ផ្សេង ឱ្យបង្ហាញផ្ទាំងលទ្ធផល និងចម្លើយភ្លាមៗតែម្ដង
+      if (serverAttempt && serverAttempt.submitted_at) {
+        const totalMarks = formatCleanScore(
+          loadedQuiz?.total_mark || quiz.total_mark || 20,
+          20
+        );
+        const earnedScore = formatCleanScore(serverAttempt.score, 0);
+        const reviewItems = Array.isArray(response.data?.review_items)
+          ? response.data.review_items
+          : [];
+
+        const completedPayload = {
+          quizId: quiz.id,
+          quizTitle: loadedQuiz.title || quiz.title,
+          courseName:
+            loadedQuiz.course?.course_name || quiz.course?.course_name || '',
+          courseCode:
+            loadedQuiz.course?.course_code || quiz.course?.course_code || '',
+          score: earnedScore,
+          total_marks: totalMarks,
+          reviewItems,
+        };
+
+        setQuizResult(completedPayload);
+        fetchQuizzes(true);
+        return;
+      }
+
       setActiveQuizAttempt(loadedQuiz);
       setAttemptAnswers({});
 
@@ -1128,12 +1198,16 @@ const StudentQuizzes = () => {
     try {
       const res = await api.get(`/student/quizzes/${quiz.id}`);
       if (Array.isArray(res.data?.review_items)) {
+        const serverScore = formatCleanScore(
+          res.data?.attempt?.score ?? earnedScore,
+          0
+        );
         const fetchedPayload = {
           quizId: quiz.id,
           quizTitle: quiz.title,
           courseName: quiz.course?.course_name || '',
           courseCode: quiz.course?.course_code || '',
-          score: earnedScore,
+          score: serverScore,
           total_marks: totalMarks,
           reviewItems: res.data.review_items,
         };
@@ -1170,15 +1244,24 @@ const StudentQuizzes = () => {
       .padStart(2, '0')}`;
   };
 
+  // ✅ គណនាស្ថិតិកម្រងសំណួរផ្ទាល់តាមមុខវិជ្ជាដែលសិស្សបានជ្រើសរើស (ឬសរុបទាំងអស់បើជ្រើសរើស 'all')
   const quizStats = useMemo(() => {
-    let total = enrichedQuizzes.length;
+    const targetList =
+      selectedCourse !== 'all'
+        ? enrichedQuizzes.filter(
+            (q) =>
+              String(q.course?.id || q.course_id) === String(selectedCourse)
+          )
+        : enrichedQuizzes;
+
+    let total = targetList.length;
     let completed = 0;
     let available = 0;
     let upcoming = 0;
     let expired = 0;
     let percentSum = 0;
 
-    enrichedQuizzes.forEach((q) => {
+    targetList.forEach((q) => {
       if (q.isCompleted) {
         completed += 1;
         const maxM = Number(q.total_mark || q.total_marks || 20) || 20;
@@ -1204,7 +1287,7 @@ const StudentQuizzes = () => {
       expired,
       avgScorePercent,
     };
-  }, [enrichedQuizzes]);
+  }, [enrichedQuizzes, selectedCourse]);
 
   const filteredQuizzes = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();

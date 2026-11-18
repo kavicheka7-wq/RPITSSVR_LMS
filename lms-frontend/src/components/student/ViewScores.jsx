@@ -561,51 +561,61 @@ const ViewScores = () => {
   }, [currentStudentId]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី `/student/scores` ដោយមិនរាំងស្ទះ UI (0ms Sync)
+  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី `/student/scores` + Real-Time Silent Sync (0ms)
   // ============================================================================
-  useEffect(() => {
-    let isMounted = true;
+  const fetchScores = useCallback(
+    async (forceRefresh = false) => {
+      if (!forceRefresh) {
+        const cachedList =
+          readStorageJson(getScoresCacheKey(currentStudentId), null) ||
+          readStorageJson(getScoresLegacyCacheKey(currentStudentId), null) ||
+          readStorageJson(
+            `cached_student_scores_list_v10_${currentStudentId}`,
+            null
+          ) ||
+          readStorageJson(CACHE_KEY_SHARED_SCORES, null) ||
+          readStorageJson(CACHE_KEY_SHARED_SCORES_LEGACY, null);
 
-    const cachedList =
-      readStorageJson(getScoresCacheKey(currentStudentId), null) ||
-      readStorageJson(getScoresLegacyCacheKey(currentStudentId), null) ||
-      readStorageJson(`cached_student_scores_list_v10_${currentStudentId}`, null) ||
-      readStorageJson(CACHE_KEY_SHARED_SCORES, null) ||
-      readStorageJson(CACHE_KEY_SHARED_SCORES_LEGACY, null);
+        if (Array.isArray(cachedList) && cachedList.length > 0) {
+          setGrades(cachedList);
+          STUDENT_SCORES_MEM_CACHE.grades = cachedList;
+        }
+      }
 
-    if (Array.isArray(cachedList) && cachedList.length > 0) {
-      setGrades(cachedList);
-      STUDENT_SCORES_MEM_CACHE.grades = cachedList;
-    }
+      const now = Date.now();
+      if (
+        !forceRefresh &&
+        STUDENT_SCORES_MEM_CACHE.uid === currentStudentId &&
+        Array.isArray(STUDENT_SCORES_MEM_CACHE.grades) &&
+        STUDENT_SCORES_MEM_CACHE.grades.length > 0 &&
+        now - STUDENT_SCORES_MEM_CACHE.lastSyncedAt < 4000
+      ) {
+        return;
+      }
 
-    const now = Date.now();
-    if (
-      STUDENT_SCORES_MEM_CACHE.uid === currentStudentId &&
-      Array.isArray(STUDENT_SCORES_MEM_CACHE.grades) &&
-      STUDENT_SCORES_MEM_CACHE.grades.length > 0 &&
-      now - STUDENT_SCORES_MEM_CACHE.lastSyncedAt < 5000
-    ) {
-      return;
-    }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    const fetchScores = async () => {
       try {
         const response = await api.get('/student/scores', {
           signal: controller.signal,
         });
-        if (!isMounted) return;
+
+        if (response.data?.error_debug) {
+          return;
+        }
 
         let validList = extractValidScoresArray(response.data);
 
         const cachedEnrollments =
           readStorageJson(getEnrollmentsCacheKey(currentStudentId), null) ||
-          readStorageJson(`cached_student_dashboard_enrollments_v10_${currentStudentId}`, null) ||
+          readStorageJson(
+            `cached_student_dashboard_enrollments_v10_${currentStudentId}`,
+            null
+          ) ||
           readStorageJson('cached_student_dashboard_enrollments_v15', []);
 
         if (Array.isArray(cachedEnrollments) && cachedEnrollments.length > 0) {
@@ -634,9 +644,20 @@ const ViewScores = () => {
           });
         }
 
+        // ការពារកុំឱ្យយកបញ្ជីទទេពេល Server រអាក់រអួល ទៅលុបជាន់លើពិន្ទុចាស់ក្នុង Cache
+        if (
+          validList.length === 0 &&
+          Array.isArray(STUDENT_SCORES_MEM_CACHE.grades) &&
+          STUDENT_SCORES_MEM_CACHE.grades.length > 0
+        ) {
+          return;
+        }
+
         STUDENT_SCORES_MEM_CACHE.uid = currentStudentId;
         STUDENT_SCORES_MEM_CACHE.grades = validList;
-        STUDENT_SCORES_MEM_CACHE.lastSyncedAt = Date.now();
+        if (validList.length > 0) {
+          STUDENT_SCORES_MEM_CACHE.lastSyncedAt = Date.now();
+        }
         setGrades(validList);
 
         persistStudentScoresFast(currentStudentId, validList);
@@ -646,14 +667,39 @@ const ViewScores = () => {
         }
         console.error('Error fetching student scores:', error);
       }
+    },
+    [currentStudentId]
+  );
+
+  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 10 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
+  // ដើម្បីឱ្យពេលគ្រូដាក់ ឬកែពិន្ទុភ្លាម វាលោតបង្ហាញលើអេក្រង់សិស្សដោយស្វ័យប្រវត្តិ!
+  useEffect(() => {
+    fetchScores(false);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchScores(true);
+      }
     };
 
-    fetchScores();
+    const syncInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchScores(true);
+      }
+    }, 10000);
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
     return () => {
-      isMounted = false;
-      controller.abort();
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
-  }, [currentStudentId]);
+  }, [fetchScores]);
 
   // ============================================================================
   // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ព័ត៌មានសិស្ស គ្រូបង្រៀន និងការគណនាពិន្ទុតាមផ្នែកទាំង ៤
@@ -883,9 +929,14 @@ const ViewScores = () => {
     };
   }, [enrichedGrades, filteredGrades, selectedCourse]);
 
+  const targetSummaryGrades = useMemo(
+    () => (selectedCourse !== 'all' ? filteredGrades : enrichedGrades),
+    [selectedCourse, filteredGrades, enrichedGrades]
+  );
+
   const scoredGrades = useMemo(
-    () => enrichedGrades.filter((g) => g.cleanFinal !== null),
-    [enrichedGrades]
+    () => targetSummaryGrades.filter((g) => g.cleanFinal !== null),
+    [targetSummaryGrades]
   );
 
   const averageFinalScore = useMemo(() => {
@@ -1071,7 +1122,7 @@ const ViewScores = () => {
               </div>
               <div className="min-w-0">
                 <span className="block text-base sm:text-xl font-black text-white leading-none">
-                  {passedCoursesCount} / {enrichedGrades.length}
+                  {passedCoursesCount} / {targetSummaryGrades.length}
                 </span>
                 <span className="block text-[11px] sm:text-xs font-bold text-blue-200/90 truncate mt-1">
                   {t('មុខវិជ្ជាប្រឡងជាប់ (≥ 50)', 'Passed Courses (≥ 50)')}
@@ -1141,7 +1192,7 @@ const ViewScores = () => {
             <span className="std-scr-text-secondary font-bold text-gray-500">
               {t('មុខវិជ្ជាសរុប៖', 'Courses:')}{' '}
               <strong className="std-scr-text-primary text-gray-800">
-                {enrichedGrades.length}
+                {targetSummaryGrades.length}
               </strong>{' '}
               • {t('ជាប់៖', 'Passed:')}{' '}
               <strong className="text-emerald-600 dark:text-emerald-400">

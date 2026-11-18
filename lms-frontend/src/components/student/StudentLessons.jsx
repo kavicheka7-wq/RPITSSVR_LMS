@@ -983,7 +983,7 @@ const StudentLessons = () => {
   );
 
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សាពី Backend ដោយមិនរាំងស្ទះ UI (0ms Sync)
+  // 📌 ផ្នែកទី៤៖ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សាពី Backend + Real-Time Silent Sync (0ms)
   // ============================================================================
   const fetchLessons = useCallback(
     async (forceRefresh = false) => {
@@ -1016,7 +1016,7 @@ const StudentLessons = () => {
         cachedForUser.length > 0 &&
         Array.isArray(cachedDeptCrs) &&
         cachedDeptCrs.length > 0 &&
-        now - STUDENT_LESSONS_MEM_CACHE.lastSyncedAt < 5000
+        now - STUDENT_LESSONS_MEM_CACHE.lastSyncedAt < 4000
       ) {
         return;
       }
@@ -1030,30 +1030,35 @@ const StudentLessons = () => {
       try {
         let validLessons = [];
         let validDeptCourses = [];
+        let hadServerError = false;
 
         try {
           const response = await api.get('/student/lessons', {
             signal: controller.signal,
           });
-          const rawData = response.data?.data ?? response.data ?? [];
-          validLessons = Array.isArray(rawData)
-            ? rawData
-            : Array.isArray(rawData?.data)
-            ? rawData.data
-            : [];
-          if (Array.isArray(response.data?.department_courses)) {
-            validDeptCourses = response.data.department_courses;
-          }
-          if (response.data?.student_current_year) {
-            const sy = String(response.data.student_current_year);
-            setApiStudentYear(sy);
-            STUDENT_LESSONS_MEM_CACHE.studentYear = sy;
-            try {
-              localStorage.setItem(
-                getStudentYearCacheKey(currentStudentId),
-                sy
-              );
-            } catch {}
+          if (response.data?.error_debug) {
+            hadServerError = true;
+          } else {
+            const rawData = response.data?.data ?? response.data ?? [];
+            validLessons = Array.isArray(rawData)
+              ? rawData
+              : Array.isArray(rawData?.data)
+              ? rawData.data
+              : [];
+            if (Array.isArray(response.data?.department_courses)) {
+              validDeptCourses = response.data.department_courses;
+            }
+            if (response.data?.student_current_year) {
+              const sy = String(response.data.student_current_year);
+              setApiStudentYear(sy);
+              STUDENT_LESSONS_MEM_CACHE.studentYear = sy;
+              try {
+                localStorage.setItem(
+                  getStudentYearCacheKey(currentStudentId),
+                  sy
+                );
+              } catch {}
+            }
           }
         } catch (primaryErr) {
           if (
@@ -1129,9 +1134,15 @@ const StudentLessons = () => {
           validLessons = nestedLessons.flat();
         }
 
+        if (hadServerError) {
+          return;
+        }
+
         STUDENT_LESSONS_MEM_CACHE.uid = currentStudentId;
         STUDENT_LESSONS_MEM_CACHE.lessons = validLessons;
-        STUDENT_LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
+        if (validLessons.length > 0 || validDeptCourses.length > 0) {
+          STUDENT_LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
+        }
         if (validDeptCourses.length > 0) {
           STUDENT_LESSONS_MEM_CACHE.deptCourses = validDeptCourses;
           setDeptCourses(validDeptCourses);
@@ -1153,14 +1164,35 @@ const StudentLessons = () => {
     [currentStudentId]
   );
 
+  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + ធ្វើបច្ចុប្បន្នភាពដោយស្ងាត់ៗនៅផ្ទៃខាងក្រោយ (Auto-Sync រៀងរាល់ 12 វិនាទី និងពេលចុចលើអេក្រង់)
+  // ដើម្បីឱ្យពេលគ្រូបង្ហោះឯកសារ ឬវីដេអូថ្មី វាលោតចូលអេក្រង់សិស្សភ្លាមៗដោយមិនបាច់ចុចចេញទៅទំព័រផ្សេង!
   useEffect(() => {
     fetchLessons(false);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchLessons(true);
+      }
+    };
+
+    const syncInterval = setInterval(() => {
+      if (document.visibilityState === 'visible' && !playingVideo) {
+        fetchLessons(true);
+      }
+    }, 12000);
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
     return () => {
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
     };
-  }, [fetchLessons]);
+  }, [fetchLessons, playingVideo]);
 
   // ============================================================================
   // 📌 ផ្នែកទី៥៖ មុខងារទាញយកឯកសារមេរៀន (Download File - គាំទ្រ Railway & Base64)
@@ -1170,8 +1202,14 @@ const StudentLessons = () => {
       typeof docOrPath === 'object' && docOrPath !== null
         ? docOrPath.file_data || docOrPath.file_path || ''
         : docOrPath;
-    if (!rawPath || typeof rawPath !== 'string') return;
-    const trimmed = rawPath.trim();
+    const resolvedId =
+      fileId ||
+      (typeof docOrPath === 'object' && docOrPath !== null
+        ? docOrPath.id
+        : null);
+
+    if (!rawPath && !resolvedId) return;
+    const trimmed = typeof rawPath === 'string' ? rawPath.trim() : '';
 
     if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
       const link = document.createElement('a');
@@ -1189,10 +1227,11 @@ const StudentLessons = () => {
     }
 
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
+    const cacheKey = resolvedId ? `id_${resolvedId}` : cleanPath;
 
-    setDownloadingFileId(fileId || rawPath);
+    setDownloadingFileId(resolvedId || rawPath);
     try {
-      const cached = STUDENT_LESSONS_MEM_CACHE.fileCacheByPath[cleanPath];
+      const cached = STUDENT_LESSONS_MEM_CACHE.fileCacheByPath[cacheKey];
       if (cached?.base64) {
         const binaryString = window.atob(cached.base64);
         const bytes = new Uint8Array(binaryString.length);
@@ -1214,10 +1253,13 @@ const StudentLessons = () => {
       }
 
       const res = await api.get('/student/lessons/read-file', {
-        params: { path: cleanPath },
+        params: {
+          path: cleanPath,
+          ...(resolvedId ? { id: resolvedId } : {}),
+        },
       });
       if (res.data?.base64) {
-        STUDENT_LESSONS_MEM_CACHE.fileCacheByPath[cleanPath] = {
+        STUDENT_LESSONS_MEM_CACHE.fileCacheByPath[cacheKey] = {
           base64: res.data.base64,
           mime: res.data.mime_type || 'application/octet-stream',
         };
@@ -1244,7 +1286,9 @@ const StudentLessons = () => {
         api.defaults?.baseURL ||
         'http://localhost:8000/api'
       ).replace(/\/api\/?$/, '');
-      const fallbackUrl = `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
+      const fallbackUrl = `${backendBase}/api/download-file?path=${encodeURIComponent(
+        cleanPath
+      )}${resolvedId ? `&id=${encodeURIComponent(resolvedId)}` : ''}`;
       window.open(fallbackUrl, '_blank');
     } finally {
       setDownloadingFileId(null);
@@ -1279,16 +1323,16 @@ const StudentLessons = () => {
           rawLsnCourse.years_list.length > 0
             ? rawLsnCourse.years_list
             : null) ||
-          (Array.isArray(deptCrs?.years_list) && deptCrs.years_list.length > 0
+          (Array.isArray(deptCrs?.years_list) && deptCrs?.years_list.length > 0
             ? deptCrs.years_list
             : null) ||
           (Array.isArray(l.years_list) && l.years_list.length > 0
             ? l.years_list
             : null),
-        teacher: rawLsnCourse.teacher || deptCrs?.teacher || l.teacher,
+        teacher: deptCrs?.teacher || rawLsnCourse.teacher || l.teacher,
         teacher_profile:
-          rawLsnCourse.teacher_profile ||
           deptCrs?.teacher_profile ||
+          rawLsnCourse.teacher_profile ||
           l.teacher,
       };
 
@@ -1613,6 +1657,8 @@ const StudentLessons = () => {
 
   const handleSelectCourseFolder = (folder) => {
     setSelectedCourseId(String(folder.courseId));
+    // ✅ ទាញទិន្នន័យថ្មីៗដោយស្ងាត់ៗនៅផ្ទៃខាងក្រោយ ពេលសិស្សចុចចូលក្នុងថតមុខវិជ្ជាណាមួយ
+    fetchLessons(true);
     if (folder.docsItems.length === 0 && folder.vidsItems.length > 0) {
       setActiveTab('videos');
     } else {

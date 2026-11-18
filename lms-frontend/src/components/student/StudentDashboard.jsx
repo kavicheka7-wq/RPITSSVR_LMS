@@ -23,7 +23,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (0ms Cache & Instant Background Prefetcher)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (0ms Cache & Smart Staggered Prefetcher)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
 
@@ -36,6 +36,7 @@ const CACHE_KEY_SHARED_ATTENDANCE = 'cached_student_attendance_list_v15';
 const CACHE_KEY_SHARED_LESSONS = 'cached_student_dept_lessons_v15';
 const CACHE_KEY_SHARED_DEPT_COURSES = 'cached_student_dept_courses_all_years_v15';
 const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v15';
+const CACHE_KEY_TEACHER_AVATARS_LEGACY = 'cached_student_teacher_avatars_v2';
 
 const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v15_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v15_${uid}`;
@@ -69,18 +70,88 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ ញែករូបថតគ្រូទុកក្នុង CACHE_KEY_TEACHER_AVATARS រួមតែមួយ ហើយរក្សាទុកបញ្ជីមុខវិជ្ជា/មេរៀនយ៉ាងស្រាលបំផុត (គ្មាន Canvas)
+// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដើម្បីកុំឱ្យពេញ localStorage (QuotaExceededError)
+const compressTeacherAvatar = (dataUrl, callback) => {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
+    callback(dataUrl);
+    return;
+  }
+  if (dataUrl.length < 18000) {
+    callback(dataUrl);
+    return;
+  }
+  try {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const maxSize = 96;
+        let width = img.width || maxSize;
+        let height = img.height || maxSize;
+        if (width > height) {
+          if (width > maxSize) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/webp', 0.78);
+        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+      } catch {
+        callback(dataUrl);
+      }
+    };
+    img.onerror = () => callback(dataUrl);
+    img.src = dataUrl;
+  } catch {
+    callback(dataUrl);
+  }
+};
+
+let teacherAvatarSaveTimer = null;
+const schedulePersistTeacherAvatars = (avatarMap) => {
+  if (teacherAvatarSaveTimer) clearTimeout(teacherAvatarSaveTimer);
+  teacherAvatarSaveTimer = setTimeout(() => {
+    try {
+      const str = JSON.stringify(avatarMap);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
+    } catch {}
+  }, 150);
+};
+
+// ✅ ញែករូបថតគ្រូទុកក្នុង CACHE_KEY_TEACHER_AVATARS រួមតែមួយ ហើយរក្សាទុកបញ្ជីមុខវិជ្ជា/មេរៀនយ៉ាងស្រាលបំផុត
 const saveCoursesAndAvatarsFast = (coursesArr) => {
   if (!Array.isArray(coursesArr)) return [];
-  const avatarMap = readStorageJson(CACHE_KEY_TEACHER_AVATARS, {});
+  const avatarMap =
+    readStorageJson(CACHE_KEY_TEACHER_AVATARS, null) ||
+    readStorageJson(CACHE_KEY_TEACHER_AVATARS_LEGACY, {});
   let mapUpdated = false;
 
   const slimList = coursesArr.map((item) => {
     if (!item || typeof item !== 'object') return item;
     const courseObj = item.course || item;
     const cid = String(item.course_id || courseObj.id || item.id || '');
-    const tch = courseObj.teacher_profile || courseObj.teacher || item.teacher_profile || item.teacher;
+    const tch =
+      courseObj.teacher_profile ||
+      courseObj.teacher ||
+      item.teacher_profile ||
+      item.teacher;
     const tchId = String(tch?.id || tch?.user_id || courseObj.teacher_id || '');
+    const tName = tch?.full_name || tch?.name || courseObj.teacher_name || '';
+    const nameKey =
+      tName && tName !== 'គ្រូបង្រៀន'
+        ? `name_${String(tName).toLowerCase().trim()}`
+        : '';
+
     const rawImg =
       tch?.profile_image_url ||
       tch?.profile_image ||
@@ -88,20 +159,33 @@ const saveCoursesAndAvatarsFast = (coursesArr) => {
       null;
 
     if (rawImg && typeof rawImg === 'string') {
-      if (cid && avatarMap[`crs_${cid}`] !== rawImg) {
+      if (cid && !avatarMap[`crs_${cid}`]) {
         avatarMap[`crs_${cid}`] = rawImg;
         mapUpdated = true;
       }
-      if (tchId && avatarMap[`tch_${tchId}`] !== rawImg) {
+      if (tchId && !avatarMap[`tch_${tchId}`]) {
         avatarMap[`tch_${tchId}`] = rawImg;
         mapUpdated = true;
       }
+      if (nameKey && !avatarMap[nameKey]) {
+        avatarMap[nameKey] = rawImg;
+        mapUpdated = true;
+      }
+
+      compressTeacherAvatar(rawImg, (tinyImg) => {
+        if (tinyImg) {
+          if (cid) avatarMap[`crs_${cid}`] = tinyImg;
+          if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
+          if (nameKey) avatarMap[nameKey] = tinyImg;
+          schedulePersistTeacherAvatars(avatarMap);
+        }
+      });
     }
 
     const isHeavy =
       typeof rawImg === 'string' &&
       rawImg.startsWith('data:') &&
-      rawImg.length > 2000;
+      rawImg.length > 20000;
 
     if (!isHeavy) return item;
 
@@ -115,20 +199,20 @@ const saveCoursesAndAvatarsFast = (coursesArr) => {
 
     const copy = { ...item };
     if (copy.teacher) copy.teacher = cleanPerson(copy.teacher);
-    if (copy.teacher_profile) copy.teacher_profile = cleanPerson(copy.teacher_profile);
+    if (copy.teacher_profile)
+      copy.teacher_profile = cleanPerson(copy.teacher_profile);
     if (copy.course && typeof copy.course === 'object') {
       const cCopy = { ...copy.course };
       if (cCopy.teacher) cCopy.teacher = cleanPerson(cCopy.teacher);
-      if (cCopy.teacher_profile) cCopy.teacher_profile = cleanPerson(cCopy.teacher_profile);
+      if (cCopy.teacher_profile)
+        cCopy.teacher_profile = cleanPerson(cCopy.teacher_profile);
       copy.course = cCopy;
     }
     return copy;
   });
 
   if (mapUpdated) {
-    try {
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, JSON.stringify(avatarMap));
-    } catch {}
+    schedulePersistTeacherAvatars(avatarMap);
   }
 
   return slimList;
@@ -176,6 +260,7 @@ const ensureCleanStudentSessionCache = (newUid) => {
         CACHE_KEY_SHARED_LESSONS,
         CACHE_KEY_SHARED_DEPT_COURSES,
         CACHE_KEY_TEACHER_AVATARS,
+        CACHE_KEY_TEACHER_AVATARS_LEGACY,
       ];
       sharedLocalKeys.forEach((k) => {
         try {
@@ -201,149 +286,109 @@ const extractArrayFromRes = (resData) => {
   return [];
 };
 
-// ✅ ទាញទិន្នន័យគ្រប់ទំព័រទាំងអស់របស់សិស្សទុកមុនភ្លាមៗ
-const prefetchAllStudentPagesData = (
+// ✅ ទាញទិន្នន័យកិច្ចការ និងកម្រងសំណួរសម្រាប់បង្ហាញលើ Dashboard និងទាញទំព័រផ្សេងទុកមុនដោយសន្សំសំចៃបំផុត (ការពារកុំឱ្យស្ទះ Server ពេលសិស្សរាប់ពាន់នាក់ចូលព្រមគ្នា)
+const syncDashboardTasksAndPrefetch = (
   uid,
+  forceRefresh,
   onAssignmentsSynced,
   onQuizzesSynced,
   onCoursesSynced
 ) => {
   const effectiveUid = uid || 'default_student';
-  if (
-    STUDENT_DASH_MEM_CACHE.prefetchedUid === effectiveUid &&
-    Array.isArray(STUDENT_DASH_MEM_CACHE.assignments) &&
-    STUDENT_DASH_MEM_CACHE.assignments.length > 0
-  ) {
-    return;
-  }
-  STUDENT_DASH_MEM_CACHE.prefetchedUid = effectiveUid;
 
-  // ១. ទាញបញ្ជីកិច្ចការសិស្សភ្លាមៗ
+  // ១. ទាញបញ្ជីកិច្ចការសិស្សសម្រាប់បង្ហាញក្នុងកាត «កិច្ចការថ្មីៗ»
   api
-    .get('/student/assignments', { params: { per_page: 20 } })
+    .get('/student/assignments', { params: { per_page: 50 } })
     .then((res) => {
+      if (res.data?.error_debug) return;
       const data = extractArrayFromRes(res.data);
       STUDENT_DASH_MEM_CACHE.assignments = data;
       if (typeof onAssignmentsSynced === 'function') {
         onAssignmentsSynced(data);
       }
       try {
-        localStorage.setItem(getAssignmentsCacheKey(effectiveUid), JSON.stringify(data));
-        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, JSON.stringify(data));
+        const str = JSON.stringify(data);
+        localStorage.setItem(getAssignmentsCacheKey(effectiveUid), str);
+        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
       } catch {}
     })
     .catch(() => {});
 
-  // ២. ទាញបញ្ជីកម្រងសំណួរប្រឡងភ្លាមៗ
+  // ២. ទាញបញ្ជីកម្រងសំណួរប្រឡងសម្រាប់បង្ហាញក្នុងកាត «កម្រងសំណួរថ្មីៗ»
   api
-    .get('/student/quizzes', { params: { per_page: 20 } })
+    .get('/student/quizzes', { params: { per_page: 50 } })
     .then((res) => {
+      if (res.data?.error_debug) return;
       const data = extractArrayFromRes(res.data);
       STUDENT_DASH_MEM_CACHE.quizzes = data;
       if (typeof onQuizzesSynced === 'function') {
         onQuizzesSynced(data);
       }
       try {
-        localStorage.setItem(getQuizzesCacheKey(effectiveUid), JSON.stringify(data));
-        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, JSON.stringify(data));
+        const str = JSON.stringify(data);
+        localStorage.setItem(getQuizzesCacheKey(effectiveUid), str);
+        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
       } catch {}
     })
     .catch(() => {});
 
-  // ៣. ទាញបញ្ជីមុខវិជ្ជា និងមេរៀនទុកមុនសម្រាប់ទំព័រ StudentCourses និង StudentLessons (0ms)
-  setTimeout(() => {
-    api
-      .get('/student/courses', { params: { per_page: 12 } })
-      .then((res) => {
-        const data = extractArrayFromRes(res.data);
-        if (Array.isArray(data) && data.length > 0) {
-          if (typeof onCoursesSynced === 'function') {
-            onCoursesSynced(data);
-          }
-          const slim = saveCoursesAndAvatarsFast(data);
-          try {
-            localStorage.setItem(getCoursesCacheKey(effectiveUid), JSON.stringify(slim));
-            localStorage.setItem(CACHE_KEY_SHARED_COURSES, JSON.stringify(slim));
-          } catch {}
-        }
-      })
-      .catch(() => {});
+  // ៣. Background Prefetch សម្រាប់ទំព័រផ្សេងៗ (ធ្វើតែ ១ ដងគត់ក្នុង ១ Session និងទាញតែទំព័រណាដែលមិនទាន់មានក្នុង Cache ប៉ុណ្ណោះ)
+  if (!forceRefresh && STUDENT_DASH_MEM_CACHE.prefetchedUid !== effectiveUid) {
+    STUDENT_DASH_MEM_CACHE.prefetchedUid = effectiveUid;
 
-    api
-      .get('/student/lessons')
-      .then((res) => {
-        const lessonsData = Array.isArray(res.data?.data)
-          ? res.data.data
-          : Array.isArray(res.data)
-          ? res.data
-          : [];
-        const deptCoursesData = Array.isArray(res.data?.department_courses)
-          ? res.data.department_courses
-          : [];
+    setTimeout(() => {
+      const existingLessons = readStorageJson(
+        getLessonsCacheKey(effectiveUid),
+        null
+      );
+      if (!Array.isArray(existingLessons) || existingLessons.length === 0) {
+        api
+          .get('/student/lessons')
+          .then((res) => {
+            if (res.data?.error_debug) return;
+            const lessonsData = Array.isArray(res.data?.data)
+              ? res.data.data
+              : Array.isArray(res.data)
+              ? res.data
+              : [];
+            const deptCoursesData = Array.isArray(res.data?.department_courses)
+              ? res.data.department_courses
+              : [];
 
-        if (deptCoursesData.length > 0) {
-          const slimDept = saveCoursesAndAvatarsFast(deptCoursesData);
-          try {
-            localStorage.setItem(
-              getDeptCoursesCacheKey(effectiveUid),
-              JSON.stringify(slimDept)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_DEPT_COURSES,
-              JSON.stringify(slimDept)
-            );
-          } catch {}
-        }
-        if (lessonsData.length > 0) {
-          try {
-            localStorage.setItem(
-              getLessonsCacheKey(effectiveUid),
-              JSON.stringify(lessonsData)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_LESSONS,
-              JSON.stringify(lessonsData)
-            );
-          } catch {}
-        }
-        if (res.data?.student_current_year) {
-          try {
-            localStorage.setItem(
-              getStudentYearCacheKey(effectiveUid),
-              String(res.data.student_current_year)
-            );
-          } catch {}
-        }
-      })
-      .catch(() => {});
-
-    api
-      .get('/student/scores')
-      .then((res) => {
-        const data = extractArrayFromRes(res.data);
-        const slim = saveCoursesAndAvatarsFast(data);
-        try {
-          localStorage.setItem(getScoresCacheKey(effectiveUid), JSON.stringify(slim));
-          localStorage.setItem(CACHE_KEY_SHARED_SCORES, JSON.stringify(slim));
-        } catch {}
-      })
-      .catch(() => {});
-
-    api
-      .get('/student/attendance', { params: { per_page: 20 } })
-      .then((res) => {
-        const data = extractArrayFromRes(res.data);
-        const slim = saveCoursesAndAvatarsFast(data);
-        try {
-          localStorage.setItem(getAttendanceCacheKey(effectiveUid), JSON.stringify(slim));
-          localStorage.setItem(
-            CACHE_KEY_SHARED_ATTENDANCE,
-            JSON.stringify(slim)
-          );
-        } catch {}
-      })
-      .catch(() => {});
-  }, 150);
+            if (deptCoursesData.length > 0) {
+              const slimDept = saveCoursesAndAvatarsFast(deptCoursesData);
+              if (typeof onCoursesSynced === 'function') {
+                onCoursesSynced(slimDept);
+              }
+              try {
+                const deptStr = JSON.stringify(slimDept);
+                localStorage.setItem(
+                  getDeptCoursesCacheKey(effectiveUid),
+                  deptStr
+                );
+                localStorage.setItem(CACHE_KEY_SHARED_DEPT_COURSES, deptStr);
+              } catch {}
+            }
+            if (lessonsData.length > 0) {
+              try {
+                const lsnStr = JSON.stringify(lessonsData);
+                localStorage.setItem(getLessonsCacheKey(effectiveUid), lsnStr);
+                localStorage.setItem(CACHE_KEY_SHARED_LESSONS, lsnStr);
+              } catch {}
+            }
+            if (res.data?.student_current_year) {
+              try {
+                localStorage.setItem(
+                  getStudentYearCacheKey(effectiveUid),
+                  String(res.data.student_current_year)
+                );
+              } catch {}
+            }
+          })
+          .catch(() => {});
+      }
+    }, 600);
+  }
 };
 
 const normalizeShiftKey = (shiftVal) => {
@@ -566,23 +611,27 @@ const StudentDashboard = () => {
       const tchProfile = courseInfo.teacher_profile || courseInfo.teacherProfile;
 
       if (tch) {
-        if (tch.full_name) return tch.full_name;
+        if (tch.full_name && tch.full_name !== 'គ្រូបង្រៀន') return tch.full_name;
         if (tch.first_name || tch.last_name) {
           return `${tch.first_name || ''} ${tch.last_name || ''}`.trim();
         }
         if (tch.user?.first_name || tch.user?.last_name) {
           return `${tch.user.first_name || ''} ${tch.user.last_name || ''}`.trim();
         }
-        if (tch.name) return tch.name;
+        if (tch.name && tch.name !== 'គ្រូបង្រៀន') return tch.name;
         if (tch.user?.name) return tch.user.name;
       }
 
       if (tchProfile) {
-        if (tchProfile.full_name) return tchProfile.full_name;
+        if (tchProfile.full_name && tchProfile.full_name !== 'គ្រូបង្រៀន') {
+          return tchProfile.full_name;
+        }
         if (tchProfile.first_name || tchProfile.last_name) {
           return `${tchProfile.first_name || ''} ${tchProfile.last_name || ''}`.trim();
         }
-        if (tchProfile.name) return tchProfile.name;
+        if (tchProfile.name && tchProfile.name !== 'គ្រូបង្រៀន') {
+          return tchProfile.name;
+        }
       }
 
       return courseInfo.teacher_name || t('គ្រូបង្រៀន', 'Instructor');
@@ -634,7 +683,10 @@ const StudentDashboard = () => {
   const masteryInfo = useMemo(() => {
     if (averageScoreNum >= 50) {
       return {
-        label: averageScoreNum >= 85 ? t('និស្សិតឆ្នើម', 'Excellent') : t('និស្សិតសកម្ម', 'Good Standing'),
+        label:
+          averageScoreNum >= 85
+            ? t('និស្សិតឆ្នើម', 'Excellent')
+            : t('និស្សិតសកម្ម', 'Good Standing'),
         statusText: t('ប្រឡងជាប់', 'Passed'),
         desc:
           averageScoreNum >= 85
@@ -652,7 +704,10 @@ const StudentDashboard = () => {
       return {
         label: t('ត្រូវប្រឹងប្រែងបន្ថែម', 'Needs Improvement'),
         statusText: t('ប្រឡងធ្លាក់', 'Failed'),
-        desc: t('សូមព្យាយាមធ្វើកិច្ចការ និងសំណួរខ្លីបន្ថែម', 'Keep practicing assignments & quizzes'),
+        desc: t(
+          'សូមព្យាយាមធ្វើកិច្ចការ និងសំណួរខ្លីបន្ថែម',
+          'Keep practicing assignments & quizzes'
+        ),
         badgeClass:
           'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30',
         statusTextColor: 'text-rose-600 dark:text-rose-400',
@@ -776,17 +831,20 @@ const StudentDashboard = () => {
           id: `course-${courseId || idx}`,
           badge: `${t('មុខវិជ្ជាសិក្សា', 'Course')} • ${credit} ${t('ក្រេឌីត', 'Cr')}`,
           badgeStyle: 'bg-yellow-400/20 text-yellow-300 border-yellow-300/30',
-          meta: `${courseInfo.course_code || 'COURSE'} • ${getTeacherDisplayName(courseInfo)}`,
+          meta: `${courseInfo.course_code || 'COURSE'} • ${getTeacherDisplayName(
+            courseInfo
+          )}`,
           title: courseInfo.course_name || t('មុខវិជ្ជាសិក្សា', 'Course'),
           statusPill: t('កំពុងសិក្សា', 'Enrolled'),
           icon: PlayCircleIcon,
           iconBoxStyle: theme.iconGradient,
-          link: '/lessons',
+          link: courseId ? `/lessons?course_id=${courseId}` : '/lessons',
         });
       });
     }
 
-    const totalAsg = teacherAssignedHomework.length || stats?.total_assignments || 0;
+    const totalAsg =
+      teacherAssignedHomework.length || stats?.total_assignments || 0;
     slides.push({
       id: 'slide-assignments',
       badge: t('កិច្ចការសិស្ស', 'Homework'),
@@ -873,153 +931,189 @@ const StudentDashboard = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ ទាញយកទិន្នន័យដោយឯករាជ្យមិនរង់ចាំគ្នា (Non-Blocking 0ms Sync + Prefetch)
+  // 📌 ផ្នែកទី៥៖ ទាញយកទិន្នន័យដោយឯករាជ្យមិនរង់ចាំគ្នា + Real-Time Silent Sync (0ms)
   // ============================================================================
-  const fetchDashboardData = useCallback(async () => {
-    prefetchAllStudentPagesData(
-      currentStudentId,
-      (asgData) => {
-        setAssignments(asgData);
-      },
-      (qzData) => {
-        setQuizzes(qzData);
-      },
-      (crsData) => {
-        setEnrollments((prev) => (prev.length === 0 ? crsData : prev));
-      }
-    );
+  const fetchDashboardData = useCallback(
+    async (forceRefresh = false) => {
+      syncDashboardTasksAndPrefetch(
+        currentStudentId,
+        forceRefresh,
+        (asgData) => {
+          setAssignments(asgData);
+        },
+        (qzData) => {
+          setQuizzes(qzData);
+        },
+        (crsData) => {
+          setEnrollments((prev) => (prev.length === 0 ? crsData : prev));
+        }
+      );
 
-    const now = Date.now();
-    const cachedSt =
-      STUDENT_DASH_MEM_CACHE.stats ||
-      readStorageJson(getStatsCacheKey(currentStudentId), null);
-    const cachedEnr =
-      STUDENT_DASH_MEM_CACHE.enrollments ||
-      readStorageJson(getEnrollmentsCacheKey(currentStudentId), null);
-    const cachedAsg =
-      STUDENT_DASH_MEM_CACHE.assignments ||
-      readStorageJson(getAssignmentsCacheKey(currentStudentId), null);
-    const cachedQz =
-      STUDENT_DASH_MEM_CACHE.quizzes ||
-      readStorageJson(getQuizzesCacheKey(currentStudentId), null);
+      const now = Date.now();
+      const cachedSt =
+        STUDENT_DASH_MEM_CACHE.stats ||
+        readStorageJson(getStatsCacheKey(currentStudentId), null);
+      const cachedEnr =
+        STUDENT_DASH_MEM_CACHE.enrollments ||
+        readStorageJson(getEnrollmentsCacheKey(currentStudentId), null);
+      const cachedAsg =
+        STUDENT_DASH_MEM_CACHE.assignments ||
+        readStorageJson(getAssignmentsCacheKey(currentStudentId), null);
+      const cachedQz =
+        STUDENT_DASH_MEM_CACHE.quizzes ||
+        readStorageJson(getQuizzesCacheKey(currentStudentId), null);
 
-    if (cachedSt && Object.keys(cachedSt).length > 0) {
-      setStats(cachedSt);
-    }
-    if (Array.isArray(cachedEnr) && cachedEnr.length > 0) {
-      setEnrollments(cachedEnr);
-    }
-    if (Array.isArray(cachedAsg) && cachedAsg.length > 0) {
-      setAssignments(cachedAsg);
-    }
-    if (Array.isArray(cachedQz) && cachedQz.length > 0) {
-      setQuizzes(cachedQz);
-    }
-
-    if (
-      STUDENT_DASH_MEM_CACHE.uid === currentStudentId &&
-      cachedSt &&
-      Number(cachedSt.total_courses) > 0 &&
-      Array.isArray(cachedEnr) &&
-      cachedEnr.length > 0 &&
-      now - STUDENT_DASH_MEM_CACHE.lastSyncedAt < 25000
-    ) {
-      return;
-    }
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    try {
-      const dashRes = await api.get('/student/dashboard', {
-        signal: controller.signal,
-      });
-      const resData = dashRes?.data?.data || dashRes?.data || {};
-
-      const newStats = resData?.stats || {
-        total_courses: 0,
-        average_score: 0,
-        total_assignments: 0,
-        total_quizzes: 0,
-      };
-
-      const rawCourses =
-        resData?.enrollments ||
-        resData?.active_courses ||
-        resData?.courses ||
-        resData?.recent_courses ||
-        [];
-      const validEnrollments = Array.isArray(rawCourses) ? rawCourses : [];
-
-      setStats(newStats);
-      setEnrollments(validEnrollments);
-
-      STUDENT_DASH_MEM_CACHE.uid = currentStudentId;
-      STUDENT_DASH_MEM_CACHE.stats = newStats;
-      STUDENT_DASH_MEM_CACHE.enrollments = validEnrollments;
-      STUDENT_DASH_MEM_CACHE.lastSyncedAt = Date.now();
-
-      if (
-        (!STUDENT_DASH_MEM_CACHE.assignments ||
-          STUDENT_DASH_MEM_CACHE.assignments.length === 0) &&
-        Array.isArray(resData?.recent_activity?.submissions) &&
-        resData.recent_activity.submissions.length > 0
-      ) {
-        const fallbackAsg = resData.recent_activity.submissions.map((sub) => ({
-          ...(sub.assignment || {}),
-          id: sub.assignment_id || sub.assignment?.id || sub.id,
-          title: sub.assignment?.title || 'កិច្ចការសិស្ស',
-          due_date: sub.assignment?.due_date || sub.submitted_at,
-          submission: sub,
-        }));
-        setAssignments((prev) => (prev.length === 0 ? fallbackAsg : prev));
+      if (!forceRefresh) {
+        if (cachedSt && Object.keys(cachedSt).length > 0) {
+          setStats(cachedSt);
+        }
+        if (Array.isArray(cachedEnr) && cachedEnr.length > 0) {
+          setEnrollments(cachedEnr);
+        }
+        if (Array.isArray(cachedAsg) && cachedAsg.length > 0) {
+          setAssignments(cachedAsg);
+        }
+        if (Array.isArray(cachedQz) && cachedQz.length > 0) {
+          setQuizzes(cachedQz);
+        }
       }
 
       if (
-        (!STUDENT_DASH_MEM_CACHE.quizzes ||
-          STUDENT_DASH_MEM_CACHE.quizzes.length === 0) &&
-        Array.isArray(resData?.recent_activity?.quiz_attempts) &&
-        resData.recent_activity.quiz_attempts.length > 0
+        !forceRefresh &&
+        STUDENT_DASH_MEM_CACHE.uid === currentStudentId &&
+        cachedSt &&
+        Number(cachedSt.total_courses) > 0 &&
+        Array.isArray(cachedEnr) &&
+        cachedEnr.length > 0 &&
+        now - STUDENT_DASH_MEM_CACHE.lastSyncedAt < 5000
       ) {
-        const fallbackQz = resData.recent_activity.quiz_attempts.map((att) => ({
-          ...(att.quiz || {}),
-          id: att.quiz_id || att.quiz?.id || att.id,
-          title: att.quiz?.title || 'កម្រងសំណួរប្រឡង',
-          end_date: att.quiz?.end_date || att.submitted_at,
-          attempt: att,
-        }));
-        setQuizzes((prev) => (prev.length === 0 ? fallbackQz : prev));
-      }
-
-      const slimEnrollments = saveCoursesAndAvatarsFast(validEnrollments);
-      try {
-        localStorage.setItem(
-          getStatsCacheKey(currentStudentId),
-          JSON.stringify(newStats)
-        );
-        localStorage.setItem(
-          getEnrollmentsCacheKey(currentStudentId),
-          JSON.stringify(slimEnrollments)
-        );
-        localStorage.setItem(
-          CACHE_KEY_SHARED_ENROLLMENTS,
-          JSON.stringify(slimEnrollments)
-        );
-      } catch (e) {}
-    } catch (error) {
-      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
         return;
       }
-      console.error('Error fetching student dashboard data:', error);
-    }
-  }, [currentStudentId]);
 
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const dashRes = await api.get('/student/dashboard', {
+          signal: controller.signal,
+        });
+        const resData = dashRes?.data?.data || dashRes?.data || {};
+
+        // ការពារកុំឱ្យយកទិន្នន័យទទេពេល Server មាន Error ទៅលុបជាន់លើស្ថិតិចាស់ក្នុង Cache
+        if (resData?.error_debug) {
+          return;
+        }
+
+        const newStats = resData?.stats || {
+          total_courses: 0,
+          average_score: 0,
+          total_assignments: 0,
+          total_quizzes: 0,
+        };
+
+        const rawCourses =
+          resData?.enrollments ||
+          resData?.active_courses ||
+          resData?.courses ||
+          resData?.recent_courses ||
+          [];
+        const validEnrollments = Array.isArray(rawCourses) ? rawCourses : [];
+
+        setStats(newStats);
+        if (validEnrollments.length > 0 || !STUDENT_DASH_MEM_CACHE.enrollments?.length) {
+          setEnrollments(validEnrollments);
+          STUDENT_DASH_MEM_CACHE.enrollments = validEnrollments;
+        }
+
+        STUDENT_DASH_MEM_CACHE.uid = currentStudentId;
+        STUDENT_DASH_MEM_CACHE.stats = newStats;
+        STUDENT_DASH_MEM_CACHE.lastSyncedAt = Date.now();
+
+        if (
+          (!STUDENT_DASH_MEM_CACHE.assignments ||
+            STUDENT_DASH_MEM_CACHE.assignments.length === 0) &&
+          Array.isArray(resData?.recent_activity?.submissions) &&
+          resData.recent_activity.submissions.length > 0
+        ) {
+          const fallbackAsg = resData.recent_activity.submissions.map((sub) => ({
+            ...(sub.assignment || {}),
+            id: sub.assignment_id || sub.assignment?.id || sub.id,
+            title: sub.assignment?.title || 'កិច្ចការសិស្ស',
+            due_date: sub.assignment?.due_date || sub.submitted_at,
+            submission: sub,
+          }));
+          setAssignments((prev) => (prev.length === 0 ? fallbackAsg : prev));
+        }
+
+        if (
+          (!STUDENT_DASH_MEM_CACHE.quizzes ||
+            STUDENT_DASH_MEM_CACHE.quizzes.length === 0) &&
+          Array.isArray(resData?.recent_activity?.quiz_attempts) &&
+          resData.recent_activity.quiz_attempts.length > 0
+        ) {
+          const fallbackQz = resData.recent_activity.quiz_attempts.map((att) => ({
+            ...(att.quiz || {}),
+            id: att.quiz_id || att.quiz?.id || att.id,
+            title: att.quiz?.title || 'កម្រងសំណួរប្រឡង',
+            end_date: att.quiz?.end_date || att.submitted_at,
+            attempt: att,
+          }));
+          setQuizzes((prev) => (prev.length === 0 ? fallbackQz : prev));
+        }
+
+        const slimEnrollments = saveCoursesAndAvatarsFast(validEnrollments);
+        try {
+          localStorage.setItem(
+            getStatsCacheKey(currentStudentId),
+            JSON.stringify(newStats)
+          );
+          if (slimEnrollments.length > 0) {
+            localStorage.setItem(
+              getEnrollmentsCacheKey(currentStudentId),
+              JSON.stringify(slimEnrollments)
+            );
+            localStorage.setItem(
+              CACHE_KEY_SHARED_ENROLLMENTS,
+              JSON.stringify(slimEnrollments)
+            );
+          }
+        } catch (e) {}
+      } catch (error) {
+        if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+          return;
+        }
+        console.error('Error fetching student dashboard data:', error);
+      }
+    },
+    [currentStudentId]
+  );
+
+  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 15 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
   useEffect(() => {
-    fetchDashboardData();
+    fetchDashboardData(false);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDashboardData(true);
+      }
+    };
+
+    const syncInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchDashboardData(true);
+      }
+    }, 15000);
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
     return () => {
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -1463,8 +1557,8 @@ const StudentDashboard = () => {
                 teacherAssignedHomework.slice(0, 4).map((assign, idx) => {
                   const sub = assign.resolvedSubmission;
                   const maxScore = formatCleanScore(
-                    assign.total_score || assign.marks || 100,
-                    100
+                    assign.total_score || assign.marks || 20,
+                    20
                   );
                   const courseName =
                     assign.course?.course_name ||
@@ -1616,8 +1710,8 @@ const StudentDashboard = () => {
                 teacherAssignedQuizzes.slice(0, 4).map((quiz, idx) => {
                   const att = quiz.resolvedAttempt;
                   const totalMark = formatCleanScore(
-                    quiz.total_mark || quiz.total_marks || 100,
-                    100
+                    quiz.total_mark || quiz.total_marks || 20,
+                    20
                   );
                   const courseName =
                     quiz.course?.course_name ||

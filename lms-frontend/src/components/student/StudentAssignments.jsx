@@ -50,7 +50,7 @@ const DEFAULT_META = {
   current_page: 1,
   last_page: 1,
   total: 0,
-  per_page: 15,
+  per_page: 50,
 };
 
 // ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ
@@ -377,7 +377,7 @@ const StudentAssignments = () => {
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [page, setPage] = useState(1);
-  const [perPage] = useState(15);
+  const [perPage] = useState(50);
   const [meta, setMeta] = useState(() => {
     if (STUDENT_ASG_MEM_CACHE.meta) {
       return STUDENT_ASG_MEM_CACHE.meta;
@@ -413,9 +413,20 @@ const StudentAssignments = () => {
     }
   }, [searchParams, location.state]);
 
-  const getStorageUrl = useCallback((path) => {
-    if (!path || typeof path !== 'string') return '#';
-    const trimmed = path.trim();
+  // ✅ គាំទ្រការទាញយកទាំងឯកសារលំហាត់របស់គ្រូ និងឯកសារចម្លើយដែលសិស្សបានប្រគល់លើ Railway (តាម submission_id)
+  const getStorageUrl = useCallback((pathOrSub, submissionId = null) => {
+    const rawPath =
+      typeof pathOrSub === 'object' && pathOrSub !== null
+        ? pathOrSub.file_path || pathOrSub.file_url || ''
+        : pathOrSub;
+    const resolvedSubId =
+      submissionId ||
+      (typeof pathOrSub === 'object' && pathOrSub !== null
+        ? pathOrSub.id
+        : null);
+
+    if (!rawPath || typeof rawPath !== 'string') return '#';
+    const trimmed = rawPath.trim();
     if (!trimmed) return '#';
     if (
       trimmed.startsWith('http://') ||
@@ -432,7 +443,9 @@ const StudentAssignments = () => {
       'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
-    return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
+    return `${backendBase}/api/download-file?path=${encodeURIComponent(
+      cleanPath
+    )}${resolvedSubId ? `&submission_id=${encodeURIComponent(resolvedSubId)}` : ''}`;
   }, []);
 
   const fetchStudentCourses = useCallback(async () => {
@@ -448,6 +461,7 @@ const StudentAssignments = () => {
 
     try {
       const response = await api.get('/student/courses?all=true');
+      if (response.data?.error_debug) return;
       const raw = response.data?.data ?? response.data ?? [];
       const list = Array.isArray(raw)
         ? raw
@@ -455,12 +469,17 @@ const StudentAssignments = () => {
         ? raw.data
         : [];
       const slimCourses = stripHeavyAssignmentDataDeep(list);
-      setCoursesList(slimCourses);
-      STUDENT_ASG_MEM_CACHE.courses = slimCourses;
-      STUDENT_ASG_MEM_CACHE.lastCoursesSyncedAt = Date.now();
+      if (slimCourses.length > 0 || !STUDENT_ASG_MEM_CACHE.courses?.length) {
+        setCoursesList(slimCourses);
+        STUDENT_ASG_MEM_CACHE.courses = slimCourses;
+        STUDENT_ASG_MEM_CACHE.lastCoursesSyncedAt = Date.now();
 
-      safeWriteStudentAsgCache(getCoursesCacheKey(currentStudentId), slimCourses);
-      safeWriteStudentAsgCache(CACHE_KEY_SHARED_COURSES, slimCourses);
+        safeWriteStudentAsgCache(
+          getCoursesCacheKey(currentStudentId),
+          slimCourses
+        );
+        safeWriteStudentAsgCache(CACHE_KEY_SHARED_COURSES, slimCourses);
+      }
     } catch (e) {
       console.error('Error fetching student courses', e);
     }
@@ -468,7 +487,7 @@ const StudentAssignments = () => {
 
   const fetchAssignments = useCallback(
     async (forceRefresh = false) => {
-      if (page === 1 && selectedCourse === 'all') {
+      if (!forceRefresh && page === 1 && selectedCourse === 'all') {
         const cachedAsg =
           readStorageJson(getAssignmentsCacheKey(currentStudentId), null) ||
           readStorageJson(getAssignmentsLegacyCacheKey(currentStudentId), null);
@@ -494,7 +513,7 @@ const StudentAssignments = () => {
         STUDENT_ASG_MEM_CACHE.uid === currentStudentId &&
         Array.isArray(STUDENT_ASG_MEM_CACHE.assignments) &&
         STUDENT_ASG_MEM_CACHE.assignments.length > 0 &&
-        now - STUDENT_ASG_MEM_CACHE.lastSyncedAt < 5000
+        now - STUDENT_ASG_MEM_CACHE.lastSyncedAt < 4000
       ) {
         return;
       }
@@ -518,6 +537,12 @@ const StudentAssignments = () => {
           params,
           signal: controller.signal,
         });
+
+        // ការពារកុំឱ្យយកបញ្ជីទទេពេលមាន Error ទៅលុបជាន់លើកិច្ចការចាស់ក្នុង Cache
+        if (response.data?.error_debug) {
+          return;
+        }
+
         const rawList = extractValidAssignmentsList(response.data);
         const list = stripHeavyAssignmentDataDeep(rawList);
 
@@ -537,7 +562,9 @@ const StudentAssignments = () => {
           STUDENT_ASG_MEM_CACHE.uid = currentStudentId;
           STUDENT_ASG_MEM_CACHE.assignments = list;
           STUDENT_ASG_MEM_CACHE.meta = metaData;
-          STUDENT_ASG_MEM_CACHE.lastSyncedAt = Date.now();
+          if (list.length > 0) {
+            STUDENT_ASG_MEM_CACHE.lastSyncedAt = Date.now();
+          }
 
           safeWriteStudentAsgCache(
             getAssignmentsCacheKey(currentStudentId),
@@ -567,14 +594,35 @@ const StudentAssignments = () => {
     fetchStudentCourses();
   }, [fetchStudentCourses]);
 
+  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 12 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
+  // ដើម្បីឱ្យពេលគ្រូបង្កើតកិច្ចការថ្មី ឬដាក់ពិន្ទុកិច្ចការរួច វាលោតចូលអេក្រង់សិស្សភ្លាមៗដោយស្វ័យប្រវត្តិ!
   useEffect(() => {
     fetchAssignments(false);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && !submitModalOpen) {
+        fetchAssignments(true);
+      }
+    };
+
+    const syncInterval = setInterval(() => {
+      if (document.visibilityState === 'visible' && !submitModalOpen) {
+        fetchAssignments(true);
+      }
+    }, 12000);
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
     return () => {
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
     };
-  }, [fetchAssignments]);
+  }, [fetchAssignments, submitModalOpen]);
 
   const availableCourses = useMemo(() => {
     const map = new Map();
@@ -754,7 +802,10 @@ const StudentAssignments = () => {
     formData.append('file', uploadFile);
 
     try {
-      const res = await api.post('/student/assignments/submit', formData);
+      // ✅ កំណត់ Content-Type: undefined ដើម្បីឱ្យ Browser បង្កើត multipart/form-data boundary ត្រឹមត្រូវលើ Railway
+      const res = await api.post('/student/assignments/submit', formData, {
+        headers: { 'Content-Type': undefined },
+      });
 
       const rawSub =
         res.data?.submission ||
@@ -763,7 +814,7 @@ const StudentAssignments = () => {
           submitted_at: new Date().toISOString(),
           score: null,
           feedback: null,
-          file_path: res.data?.file_path || null,
+          file_path: res.data?.file_path || URL.createObjectURL(uploadFile),
         };
       const newSub = stripHeavyAssignmentDataDeep(rawSub);
 
@@ -780,8 +831,12 @@ const StudentAssignments = () => {
         try {
           sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
-          localStorage.removeItem(`cached_student_scores_list_v14_${currentStudentId}`);
-          localStorage.removeItem(`cached_student_scores_list_v10_${currentStudentId}`);
+          localStorage.removeItem(
+            `cached_student_scores_list_v14_${currentStudentId}`
+          );
+          localStorage.removeItem(
+            `cached_student_scores_list_v10_${currentStudentId}`
+          );
         } catch (err) {}
         return updated;
       });
@@ -817,6 +872,7 @@ const StudentAssignments = () => {
     }
   };
 
+  // ✅ គណនាស្ថិតិកិច្ចការផ្ទាល់តាមមុខវិជ្ជាដែលសិស្សបានជ្រើសរើស (ឬសរុបទាំងអស់បើជ្រើសរើស 'all')
   const assignmentStats = useMemo(() => {
     let total = 0;
     let submitted = 0;
@@ -825,11 +881,19 @@ const StudentAssignments = () => {
     let overdue = 0;
     let earnedPercentSum = 0;
 
-    if (Array.isArray(enrichedAssignments)) {
-      total = enrichedAssignments.length;
+    const targetList =
+      selectedCourse !== 'all'
+        ? enrichedAssignments.filter(
+            (a) =>
+              String(a.course?.id || a.course_id) === String(selectedCourse)
+          )
+        : enrichedAssignments;
+
+    if (Array.isArray(targetList)) {
+      total = targetList.length;
       const nowMs = Date.now();
 
-      enrichedAssignments.forEach((a) => {
+      targetList.forEach((a) => {
         const sub = a.resolvedSubmission;
         const hasSub = Boolean(sub);
         const isGraded =
@@ -874,7 +938,7 @@ const StudentAssignments = () => {
       overdue,
       avgScorePercent,
     };
-  }, [enrichedAssignments]);
+  }, [enrichedAssignments, selectedCourse]);
 
   const filteredAssignments = useMemo(() => {
     if (!Array.isArray(enrichedAssignments)) return [];
@@ -1409,10 +1473,12 @@ const StudentAssignments = () => {
                       {submission.file_path &&
                         (String(submission.file_path).includes('/') ||
                           String(submission.file_path).startsWith('http') ||
-                          String(submission.file_path).startsWith('data:')) && (
+                          String(submission.file_path).startsWith('data:') ||
+                          String(submission.file_path).startsWith('blob:')) && (
                           <div className="std-asg-divider pt-2 border-t border-gray-200/70 flex items-center justify-between gap-2">
                             <a
-                              href={getStorageUrl(submission.file_path)}
+                              href={getStorageUrl(submission, submission.id)}
+                              target="_blank"
                               rel="noopener noreferrer"
                               download
                               className="inline-flex items-center gap-1.5 text-xs font-extrabold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"

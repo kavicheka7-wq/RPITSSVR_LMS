@@ -51,7 +51,7 @@ const DEFAULT_META = {
   current_page: 1,
   last_page: 1,
   total: 0,
-  per_page: 20,
+  per_page: 100,
 };
 
 // ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
@@ -155,7 +155,15 @@ const normalizeAttendanceStatus = (rawStatus) => {
   const s = String(rawStatus || '').trim().toLowerCase();
   if (s === 'present' || s === 'វត្តមាន' || s === 'p') return 'Present';
   if (s === 'absent' || s === 'អវត្តមាន' || s === 'a') return 'Absent';
-  if (s === 'permission' || s === 'excused' || s === 'ច្បាប់' || s === 'លិខិតសុំច្បាប់') return 'Permission';
+  if (
+    s === 'permission' ||
+    s === 'excused' ||
+    s === 'leave' ||
+    s === 'ច្បាប់' ||
+    s === 'លិខិតសុំច្បាប់'
+  ) {
+    return 'Permission';
+  }
   if (s === 'late' || s === 'មកយឺត' || s === 'យឺត' || s === 'l') return 'Late';
   return rawStatus ? String(rawStatus).trim() : 'Present';
 };
@@ -424,7 +432,8 @@ const ViewAttendance = () => {
   });
 
   const [page, setPage] = useState(1);
-  const [perPage] = useState(20);
+  // ✅ ទាញម្ដង 100 កំណត់ត្រា ដើម្បីឱ្យការច្រោះមើលតាមស្ថានភាព (ដូចជា «ច្បាប់») និងតាមមុខវិជ្ជា បង្ហាញគ្រប់កំណត់ត្រាទាំងអស់ភ្លាមៗ
+  const [perPage] = useState(100);
   const [meta, setMeta] = useState(() => {
     if (STUDENT_ATT_MEM_CACHE.meta) {
       return STUDENT_ATT_MEM_CACHE.meta;
@@ -466,54 +475,53 @@ const ViewAttendance = () => {
   }, [currentStudentId]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យនៅផ្ទៃខាងក្រោយដោយមិនរាំងស្ទះ UI (0ms Sync)
+  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យនៅផ្ទៃខាងក្រោយ + Real-Time Silent Sync (0ms)
   // ============================================================================
-  useEffect(() => {
-    let isMounted = true;
+  const fetchAttendance = useCallback(
+    async (forceRefresh = false) => {
+      if (page === 1 && !forceRefresh) {
+        const cachedList =
+          readStorageJson(getAttListCacheKey(currentStudentId), null) ||
+          readStorageJson(getAttListLegacyCacheKey(currentStudentId), null);
+        const cachedSum =
+          readStorageJson(getAttSummaryCacheKey(currentStudentId), null) ||
+          readStorageJson(getAttSummaryLegacyCacheKey(currentStudentId), null);
+        const cachedMeta =
+          readStorageJson(getAttMetaCacheKey(currentStudentId), null) ||
+          readStorageJson(getAttMetaLegacyCacheKey(currentStudentId), null);
 
-    if (page === 1) {
-      const cachedList =
-        readStorageJson(getAttListCacheKey(currentStudentId), null) ||
-        readStorageJson(getAttListLegacyCacheKey(currentStudentId), null);
-      const cachedSum =
-        readStorageJson(getAttSummaryCacheKey(currentStudentId), null) ||
-        readStorageJson(getAttSummaryLegacyCacheKey(currentStudentId), null);
-      const cachedMeta =
-        readStorageJson(getAttMetaCacheKey(currentStudentId), null) ||
-        readStorageJson(getAttMetaLegacyCacheKey(currentStudentId), null);
-
-      if (Array.isArray(cachedList) && cachedList.length > 0) {
-        setAttendance(cachedList);
-        STUDENT_ATT_MEM_CACHE.attendance = cachedList;
+        if (Array.isArray(cachedList) && cachedList.length > 0) {
+          setAttendance(cachedList);
+          STUDENT_ATT_MEM_CACHE.attendance = cachedList;
+        }
+        if (cachedSum) {
+          setSummary(cachedSum);
+          STUDENT_ATT_MEM_CACHE.summary = cachedSum;
+        }
+        if (cachedMeta) {
+          setMeta(cachedMeta);
+          STUDENT_ATT_MEM_CACHE.meta = cachedMeta;
+        }
       }
-      if (cachedSum) {
-        setSummary(cachedSum);
-        STUDENT_ATT_MEM_CACHE.summary = cachedSum;
+
+      const now = Date.now();
+      if (
+        !forceRefresh &&
+        page === 1 &&
+        STUDENT_ATT_MEM_CACHE.uid === currentStudentId &&
+        Array.isArray(STUDENT_ATT_MEM_CACHE.attendance) &&
+        STUDENT_ATT_MEM_CACHE.attendance.length > 0 &&
+        now - STUDENT_ATT_MEM_CACHE.lastSyncedAt < 4000
+      ) {
+        return;
       }
-      if (cachedMeta) {
-        setMeta(cachedMeta);
-        STUDENT_ATT_MEM_CACHE.meta = cachedMeta;
+
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
-    }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-    const now = Date.now();
-    if (
-      page === 1 &&
-      STUDENT_ATT_MEM_CACHE.uid === currentStudentId &&
-      Array.isArray(STUDENT_ATT_MEM_CACHE.attendance) &&
-      STUDENT_ATT_MEM_CACHE.attendance.length > 0 &&
-      now - STUDENT_ATT_MEM_CACHE.lastSyncedAt < 5000
-    ) {
-      return;
-    }
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    const fetchAttendance = async () => {
       try {
         const response = await api.get('/student/attendance', {
           params: {
@@ -522,7 +530,11 @@ const ViewAttendance = () => {
           },
           signal: controller.signal,
         });
-        if (!isMounted) return;
+
+        // ការពារកុំឱ្យយកបញ្ជីទទេពេលមាន Error ទៅលុបជាន់លើប្រវត្តិវត្តមានចាស់ក្នុង Cache
+        if (response.data?.error_debug) {
+          return;
+        }
 
         const rawList =
           response.data?.attendance ||
@@ -566,7 +578,9 @@ const ViewAttendance = () => {
           STUDENT_ATT_MEM_CACHE.attendance = validList;
           STUDENT_ATT_MEM_CACHE.summary = newSummary;
           STUDENT_ATT_MEM_CACHE.meta = newMeta;
-          STUDENT_ATT_MEM_CACHE.lastSyncedAt = Date.now();
+          if (validList.length > 0) {
+            STUDENT_ATT_MEM_CACHE.lastSyncedAt = Date.now();
+          }
         }
 
         setAttendance(validList);
@@ -587,14 +601,39 @@ const ViewAttendance = () => {
         }
         console.error('Error fetching student attendance:', error);
       }
+    },
+    [page, perPage, currentStudentId]
+  );
+
+  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 10 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
+  // ដើម្បីឱ្យពេលគ្រូចុចរក្សាទុក «ច្បាប់» ភ្លាម វាលោតចូលអេក្រង់សិស្សដោយស្វ័យប្រវត្តិ!
+  useEffect(() => {
+    fetchAttendance(false);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAttendance(true);
+      }
     };
 
-    fetchAttendance();
+    const syncInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchAttendance(true);
+      }
+    }, 10000);
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
     return () => {
-      isMounted = false;
-      controller.abort();
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
-  }, [page, perPage, currentStudentId]);
+  }, [fetchAttendance]);
 
   // ============================================================================
   // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់ព័ត៌មានសិស្ស កាលបរិច្ឆេទខ្មែរសុទ្ធ និងការច្រោះទិន្នន័យ
@@ -870,6 +909,31 @@ const ViewAttendance = () => {
     return Array.from(map.values());
   }, [attendance, cachedCatalogCoursesById, t]);
 
+  // ✅ គណនាស្ថិតិវត្តមានផ្ទាល់តាមមុខវិជ្ជាដែលសិស្សបានជ្រើសរើស (ឬសរុបទាំងអស់បើជ្រើសរើស 'all')
+  const displayedSummary = useMemo(() => {
+    if (selectedCourse === 'all') {
+      return summary;
+    }
+    const courseRecs = (attendance || []).filter((rec) => {
+      const cid = rec.course?.id || rec.course_id;
+      return String(cid) === String(selectedCourse);
+    });
+    return {
+      present: courseRecs.filter(
+        (r) => normalizeAttendanceStatus(r.status) === 'Present'
+      ).length,
+      absent: courseRecs.filter(
+        (r) => normalizeAttendanceStatus(r.status) === 'Absent'
+      ).length,
+      permission: courseRecs.filter(
+        (r) => normalizeAttendanceStatus(r.status) === 'Permission'
+      ).length,
+      late: courseRecs.filter(
+        (r) => normalizeAttendanceStatus(r.status) === 'Late'
+      ).length,
+    };
+  }, [selectedCourse, summary, attendance]);
+
   const filteredAttendance = useMemo(() => {
     if (!Array.isArray(attendance)) return [];
     const q = searchTerm.toLowerCase().trim();
@@ -921,24 +985,24 @@ const ViewAttendance = () => {
 
   const totalRecordsCount = useMemo(() => {
     const sum =
-      (Number(summary.present) || 0) +
-      (Number(summary.absent) || 0) +
-      (Number(summary.permission) || 0) +
-      (Number(summary.late) || 0);
-    return sum > 0 ? sum : attendance.length;
-  }, [summary, attendance.length]);
+      (Number(displayedSummary.present) || 0) +
+      (Number(displayedSummary.absent) || 0) +
+      (Number(displayedSummary.permission) || 0) +
+      (Number(displayedSummary.late) || 0);
+    return sum > 0 ? sum : selectedCourse === 'all' ? attendance.length : 0;
+  }, [displayedSummary, selectedCourse, attendance.length]);
 
   const attendanceRate = useMemo(() => {
     if (totalRecordsCount === 0) return 100;
     const attended =
-      (Number(summary.present) || 0) +
-      (Number(summary.late) || 0) +
-      (Number(summary.permission) || 0) * 0.5;
+      (Number(displayedSummary.present) || 0) +
+      (Number(displayedSummary.late) || 0) +
+      (Number(displayedSummary.permission) || 0) * 0.5;
     return Math.min(
       100,
       Math.max(0, Math.round((attended / totalRecordsCount) * 100))
     );
-  }, [summary, totalRecordsCount]);
+  }, [displayedSummary, totalRecordsCount]);
 
   const getActiveStatusTitle = () => {
     if (statusFilter === 'Present') return t('វត្តមានមករៀន', 'Present Records');
@@ -993,7 +1057,7 @@ const ViewAttendance = () => {
     {
       id: 'Present',
       title: t('វត្តមាន', 'Present'),
-      count: summary.present || 0,
+      count: displayedSummary.present || 0,
       icon: CheckCircleIcon,
       iconStyle:
         'bg-emerald-100 text-emerald-600 border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/30',
@@ -1003,7 +1067,7 @@ const ViewAttendance = () => {
     {
       id: 'Absent',
       title: t('អវត្តមាន', 'Absent'),
-      count: summary.absent || 0,
+      count: displayedSummary.absent || 0,
       icon: XCircleIcon,
       iconStyle:
         'bg-rose-100 text-rose-600 border-rose-200 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-500/30',
@@ -1013,7 +1077,7 @@ const ViewAttendance = () => {
     {
       id: 'Permission',
       title: t('ច្បាប់', 'Permission'),
-      count: summary.permission || 0,
+      count: displayedSummary.permission || 0,
       icon: DocumentTextIcon,
       iconStyle:
         'bg-blue-100 text-blue-600 border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/30',
@@ -1023,7 +1087,7 @@ const ViewAttendance = () => {
     {
       id: 'Late',
       title: t('មកយឺត', 'Late'),
-      count: summary.late || 0,
+      count: displayedSummary.late || 0,
       icon: ClockIcon,
       iconStyle:
         'bg-amber-100 text-amber-600 border-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30',
@@ -1196,11 +1260,15 @@ const ViewAttendance = () => {
             <span className="std-att-text-secondary font-bold text-gray-500">
               {t('វត្តមាន៖', 'Present:')}{' '}
               <strong className="std-att-text-primary text-gray-800">
-                {summary.present || 0}
+                {displayedSummary.present || 0}
+              </strong>{' '}
+              • {t('ច្បាប់៖', 'Permission:')}{' '}
+              <strong className="std-att-text-primary text-blue-600 dark:text-blue-400">
+                {displayedSummary.permission || 0}
               </strong>{' '}
               • {t('អវត្តមាន៖', 'Absent:')}{' '}
-              <strong className="std-att-text-primary text-gray-800">
-                {summary.absent || 0}
+              <strong className="std-att-text-primary text-rose-600 dark:text-rose-400">
+                {displayedSummary.absent || 0}
               </strong>
             </span>
 
