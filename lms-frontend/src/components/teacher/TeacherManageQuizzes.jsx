@@ -318,7 +318,10 @@ const isStudentEnrolledInCourse = (student, courseId, courseMap) => {
   if (Array.isArray(mappedIds)) {
     return (
       mappedIds.includes(Number(student.id)) ||
-      mappedIds.includes(String(student.id))
+      mappedIds.includes(String(student.id)) ||
+      (student.user_id &&
+        (mappedIds.includes(Number(student.user_id)) ||
+          mappedIds.includes(String(student.user_id))))
     );
   }
 
@@ -636,19 +639,19 @@ export default function TeacherManageQuizzes() {
       null
     );
 
-    if (Array.isArray(cachedQuz)) {
+    if (Array.isArray(cachedQuz) && cachedQuz.length > 0) {
       setQuizzes(cachedQuz);
       QUIZZES_MEM_CACHE.quizzes = cachedQuz;
     }
-    if (Array.isArray(cachedCrs)) {
+    if (Array.isArray(cachedCrs) && cachedCrs.length > 0) {
       setCourses(cachedCrs);
       QUIZZES_MEM_CACHE.courses = cachedCrs;
     }
-    if (Array.isArray(cachedStd)) {
+    if (Array.isArray(cachedStd) && cachedStd.length > 0) {
       setAllStudents(cachedStd);
       QUIZZES_MEM_CACHE.allStudents = cachedStd;
     }
-    if (cachedMap) {
+    if (cachedMap && Object.keys(cachedMap).length > 0) {
       setCourseMap(cachedMap);
       QUIZZES_MEM_CACHE.courseMap = cachedMap;
     }
@@ -657,7 +660,9 @@ export default function TeacherManageQuizzes() {
     if (
       QUIZZES_MEM_CACHE.uid === currentTeacherId &&
       Array.isArray(QUIZZES_MEM_CACHE.quizzes) &&
+      QUIZZES_MEM_CACHE.quizzes.length > 0 &&
       Array.isArray(QUIZZES_MEM_CACHE.courses) &&
+      QUIZZES_MEM_CACHE.courses.length > 0 &&
       now - QUIZZES_MEM_CACHE.lastSyncedAt < 25000
     ) {
       return;
@@ -667,12 +672,14 @@ export default function TeacherManageQuizzes() {
     api
       .get('/teacher/quizzes')
       .then((quzRes) => {
-        if (!isMounted) return;
-        const rawQuz = quzRes.data?.data || quzRes.data || [];
+        if (!isMounted || quzRes.data?.error_debug) return;
+        const rawQuz = quzRes.data?.data ?? quzRes.data ?? [];
         const validQuizzes = Array.isArray(rawQuz) ? rawQuz : [];
         setQuizzes(validQuizzes);
         QUIZZES_MEM_CACHE.quizzes = validQuizzes;
-        QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
+        if (validQuizzes.length > 0) {
+          QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
+        }
         try {
           const str = JSON.stringify(validQuizzes);
           sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
@@ -688,17 +695,19 @@ export default function TeacherManageQuizzes() {
     api
       .get('/teacher/courses')
       .then((crsRes) => {
-        if (!isMounted) return;
-        const rawCrs = crsRes.data?.data || crsRes.data || [];
+        if (!isMounted || crsRes.data?.error_debug) return;
+        const rawCrs = crsRes.data?.data ?? crsRes.data ?? [];
         const validCourses = Array.isArray(rawCrs) ? rawCrs : [];
-        setCourses(validCourses);
-        QUIZZES_MEM_CACHE.courses = validCourses;
-        try {
-          const str = JSON.stringify(validCourses);
-          sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
-          localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
-        } catch (e) {}
+        if (validCourses.length > 0 || !QUIZZES_MEM_CACHE.courses?.length) {
+          setCourses(validCourses);
+          QUIZZES_MEM_CACHE.courses = validCourses;
+          try {
+            const str = JSON.stringify(validCourses);
+            sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+            localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+            localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
+          } catch (e) {}
+        }
       })
       .catch(() => {});
 
@@ -710,25 +719,30 @@ export default function TeacherManageQuizzes() {
       api
         .get('/teacher/students')
         .then((stdRes) => {
-          if (!isMounted) return;
-          const rawStd = stdRes.data?.data || stdRes.data || [];
+          if (!isMounted || stdRes.data?.error_debug) return;
+          const rawStd = stdRes.data?.data ?? stdRes.data ?? [];
           const validStudents = Array.isArray(rawStd) ? rawStd : [];
-          setAllStudents(validStudents);
-          QUIZZES_MEM_CACHE.allStudents = validStudents;
-          try {
-            const slimStr = JSON.stringify(
-              stripHeavyStudentsForCache(validStudents)
-            );
-            sessionStorage.setItem(
-              getStudentsCacheKey(currentTeacherId),
-              slimStr
-            );
-            localStorage.setItem(
-              getStudentsCacheKey(currentTeacherId),
-              slimStr
-            );
-            localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
-          } catch (e) {}
+          if (
+            validStudents.length > 0 ||
+            !QUIZZES_MEM_CACHE.allStudents?.length
+          ) {
+            setAllStudents(validStudents);
+            QUIZZES_MEM_CACHE.allStudents = validStudents;
+            try {
+              const slimStr = JSON.stringify(
+                stripHeavyStudentsForCache(validStudents)
+              );
+              sessionStorage.setItem(
+                getStudentsCacheKey(currentTeacherId),
+                slimStr
+              );
+              localStorage.setItem(
+                getStudentsCacheKey(currentTeacherId),
+                slimStr
+              );
+              localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
+            } catch (e) {}
+          }
 
           if (stdRes.data?.course_students_map) {
             setCourseMap(stdRes.data.course_students_map);
@@ -758,11 +772,14 @@ export default function TeacherManageQuizzes() {
   const fetchQuizzes = async () => {
     try {
       const response = await api.get('/teacher/quizzes');
-      const quizzesData = response.data?.data || response.data || [];
+      if (response.data?.error_debug) return;
+      const quizzesData = response.data?.data ?? response.data ?? [];
       const validQuizzes = Array.isArray(quizzesData) ? quizzesData : [];
       setQuizzes(validQuizzes);
       QUIZZES_MEM_CACHE.quizzes = validQuizzes;
-      QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
+      if (validQuizzes.length > 0) {
+        QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
+      }
       try {
         const str = JSON.stringify(validQuizzes);
         sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
@@ -775,7 +792,7 @@ export default function TeacherManageQuizzes() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា និងវេនសិក្សារបស់មុខវិជ្ជានីមួយៗ
+  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា (Primary Year តែមួយគត់) និងវេនសិក្សារបស់មុខវិជ្ជា
   // ============================================================================
   const isSpecificShiftSelected =
     selectedShift !== 'all' && selectedShift !== '';
@@ -803,11 +820,30 @@ export default function TeacherManageQuizzes() {
     return norm || shift || '—';
   };
 
-  // ✅ គណនាឆ្នាំសិក្សា និងវេនសិក្សា (ចន្ទ-សុក្រ vs សៅរ៍-អាទិត្យ) សម្រាប់មុខវិជ្ជានីមួយៗ
+  // ✅ គណនាឆ្នាំគោលតែមួយគត់ (Primary Year) និងវេនសិក្សា សម្រាប់មុខវិជ្ជានីមួយៗ (ព្រមទាំងស្រង់ពី quiz.course ជា Fallback)
   const enrichedCourses = useMemo(() => {
-    if (!Array.isArray(courses)) return [];
+    const courseById = new Map();
 
-    return courses.map((course) => {
+    if (Array.isArray(courses)) {
+      courses.forEach((c) => {
+        if (c && c.id != null) {
+          courseById.set(String(c.id), c);
+        }
+      });
+    }
+
+    if (Array.isArray(quizzes)) {
+      quizzes.forEach((quz) => {
+        if (quz?.course && quz.course.id != null) {
+          const cid = String(quz.course.id);
+          if (!courseById.has(cid)) {
+            courseById.set(cid, quz.course);
+          }
+        }
+      });
+    }
+
+    return Array.from(courseById.values()).map((course) => {
       const cid = String(course.id);
       const enrolledList = (allStudents || []).filter((s) =>
         isStudentEnrolledInCourse(s, cid, courseMap)
@@ -827,15 +863,23 @@ export default function TeacherManageQuizzes() {
         }
       });
 
-      let sortedYears = Object.keys(yearFreq).sort();
+      // ✅ ទី១៖ ទាញយកឆ្នាំសិក្សាពីឈ្មោះ ឬកូដមុខវិជ្ជាមុនគេ (ឧទាហរណ៍៖ "Y1" ឬ "ឆ្នាំទី១")
+      let primaryYear = detectStudentYearNum({
+        batch_year: `${course.course_name || ''} ${course.course_code || ''} ${
+          course.description || ''
+        } ${course.year || ''}`,
+      });
 
-      if (sortedYears.length === 0) {
-        const fromCourseText = detectStudentYearNum({
-          batch_year: `${course.course_name || ''} ${
-            course.description || ''
-          } ${course.year || ''}`,
-        });
-        if (fromCourseText) sortedYears = [fromCourseText];
+      // ✅ ទី២៖ បើមុខវិជ្ជាគ្មានបញ្ជាក់ឆ្នាំទេ យកឆ្នាំដែលមានសិស្សចុះឈ្មោះរៀនច្រើនជាងគេបំផុត
+      if (!primaryYear) {
+        const sortedYears = Object.keys(yearFreq);
+        if (sortedYears.length > 0) {
+          primaryYear = sortedYears.reduce((a, b) =>
+            yearFreq[a] >= yearFreq[b] ? a : b
+          );
+        } else {
+          primaryYear = '1';
+        }
       }
 
       if (shiftsSet.size === 0) {
@@ -854,24 +898,15 @@ export default function TeacherManageQuizzes() {
         }
       }
 
-      let primaryYear = 'other';
-      if (sortedYears.length === 1) {
-        primaryYear = sortedYears[0];
-      } else if (sortedYears.length > 1) {
-        primaryYear = sortedYears.reduce((a, b) =>
-          yearFreq[a] >= yearFreq[b] ? a : b
-        );
-      }
-
       return {
         ...course,
         enrolledCount: enrolledList.length,
-        yearsList: sortedYears,
+        primaryYear: String(primaryYear),
+        yearsList: [String(primaryYear)],
         shiftsList: Array.from(shiftsSet),
-        primaryYear,
       };
     });
-  }, [courses, allStudents, courseMap]);
+  }, [courses, quizzes, allStudents, courseMap]);
 
   // ✅ អនុគមន៍ពិនិត្យថាតើកម្រងសំណួរមួយត្រូវនឹងវេនសិក្សាដែលបានជ្រើសរើសឬអត់
   const doesQuizHaveShift = useCallback(
@@ -879,13 +914,9 @@ export default function TeacherManageQuizzes() {
       if (!targetShiftKey || targetShiftKey === 'all') return true;
       const cid = String(quiz?.course_id || '');
 
-      const enrolledInCourse = (allStudents || []).filter((s) => {
-        if (!isStudentEnrolledInCourse(s, cid, courseMap)) return false;
-        if (selectedYear !== 'all' && selectedYear !== '') {
-          return detectStudentYearNum(s) === String(selectedYear);
-        }
-        return true;
-      });
+      const enrolledInCourse = (allStudents || []).filter((s) =>
+        isStudentEnrolledInCourse(s, cid, courseMap)
+      );
 
       if (enrolledInCourse.length > 0) {
         return enrolledInCourse.some(
@@ -896,36 +927,22 @@ export default function TeacherManageQuizzes() {
       const courseShifts = matchedCourseObj?.shiftsList || ['Monday-Friday'];
       return courseShifts.includes(targetShiftKey);
     },
-    [allStudents, courseMap, selectedYear]
+    [allStudents, courseMap]
   );
 
-  // ✅ អនុគមន៍ទាញយកមុខវិជ្ជាសម្រាប់ឆ្នាំណាមួយជាក់លាក់
+  // ✅ អនុគមន៍ទាញយកមុខវិជ្ជាសម្រាប់ឆ្នាំណាមួយជាក់លាក់ (តាម Primary Year តែមួយគត់)
   const getCoursesForYearKey = useCallback(
     (yearKey) => {
       if (!yearKey || yearKey === 'all') return enrichedCourses;
       const targetYear = String(yearKey);
 
-      const studentsInThisYear = (allStudents || []).filter(
-        (s) => detectStudentYearNum(s) === targetYear
+      const matched = enrichedCourses.filter(
+        (course) => String(course.primaryYear) === targetYear
       );
-
-      const matched = enrichedCourses.filter((course) => {
-        if (
-          studentsInThisYear.some((s) =>
-            isStudentEnrolledInCourse(s, course.id, courseMap)
-          )
-        ) {
-          return true;
-        }
-        return (
-          Array.isArray(course.yearsList) &&
-          course.yearsList.includes(targetYear)
-        );
-      });
 
       return matched.length > 0 ? matched : enrichedCourses;
     },
-    [enrichedCourses, allStudents, courseMap]
+    [enrichedCourses]
   );
 
   // ✅ ច្រោះមុខវិជ្ជាតាមឆ្នាំសិក្សាដែលបានជ្រើសរើសលើកាត
@@ -956,11 +973,7 @@ export default function TeacherManageQuizzes() {
       const currentCourseObj = enrichedCourses.find(
         (c) => String(c.id) === String(editingQuiz.course_id)
       );
-      if (
-        currentCourseObj &&
-        currentCourseObj.primaryYear &&
-        currentCourseObj.primaryYear !== 'other'
-      ) {
+      if (currentCourseObj && currentCourseObj.primaryYear) {
         return getCoursesForYearKey(currentCourseObj.primaryYear);
       }
     }
@@ -968,7 +981,7 @@ export default function TeacherManageQuizzes() {
     return enrichedCourses;
   }, [selectedYear, editingQuiz, enrichedCourses, getCoursesForYearKey]);
 
-  // ✅ គណនាចំនួនកម្រងសំណួរសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) សម្រាប់បង្ហាញលើកាតទាំង ៥
+  // ✅ គណនាចំនួនកម្រងសំណួរសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) ដោយមិនឱ្យស្ទួនកាតដាច់ខាត
   const quizYearCounts = useMemo(() => {
     const counts = { all: 0, '1': 0, '2': 0, '3': 0, '4': 0 };
     if (!Array.isArray(quizzes)) return counts;
@@ -978,10 +991,18 @@ export default function TeacherManageQuizzes() {
       const matchedCourse = enrichedCourses.find(
         (c) => String(c.id) === String(quz.course_id)
       );
-      if (matchedCourse && Array.isArray(matchedCourse.yearsList)) {
-        matchedCourse.yearsList.forEach((y) => {
-          if (counts[y] !== undefined) counts[y] += 1;
-        });
+      const py = matchedCourse?.primaryYear
+        ? String(matchedCourse.primaryYear)
+        : detectStudentYearNum({
+            batch_year: `${quz.course?.course_name || ''} ${
+              quz.course?.course_code || ''
+            } ${quz.title || ''}`,
+          }) || '1';
+
+      if (counts[py] !== undefined) {
+        counts[py] += 1;
+      } else {
+        counts['1'] += 1;
       }
     });
     return counts;
@@ -995,7 +1016,7 @@ export default function TeacherManageQuizzes() {
     );
   }, [selectedYear, selectedCourse, enrichedCourses]);
 
-  // ✅ ច្រោះកម្រងសំណួរតាមឆ្នាំសិក្សា និងមុខវិជ្ជា (មុនពេលច្រោះតាមវេនសិក្សា)
+  // ✅ ច្រោះកម្រងសំណួរតាមឆ្នាំសិក្សា (Primary Year តែមួយគត់) និងមុខវិជ្ជា
   const quizzesByYearAndCourse = useMemo(() => {
     if (!Array.isArray(quizzes)) return [];
 
@@ -1005,11 +1026,17 @@ export default function TeacherManageQuizzes() {
       );
 
       if (selectedYear !== 'all') {
-        const hasYear =
-          matchedCourse &&
-          Array.isArray(matchedCourse.yearsList) &&
-          matchedCourse.yearsList.includes(String(selectedYear));
-        if (!hasYear) return false;
+        const quizPrimaryYear = matchedCourse?.primaryYear
+          ? String(matchedCourse.primaryYear)
+          : detectStudentYearNum({
+              batch_year: `${quiz.course?.course_name || ''} ${
+                quiz.course?.course_code || ''
+              } ${quiz.title || ''}`,
+            }) || '1';
+
+        if (String(quizPrimaryYear) !== String(selectedYear)) {
+          return false;
+        }
       }
 
       if (
@@ -1299,7 +1326,7 @@ export default function TeacherManageQuizzes() {
       end_date: exactEndStr,
     };
 
-    const targetCourse = courses.find(
+    const targetCourse = enrichedCourses.find(
       (c) => String(c.id) === String(formData.course_id)
     );
     const courseName = targetCourse?.course_name || '';
@@ -1627,6 +1654,21 @@ export default function TeacherManageQuizzes() {
           )
         );
       }
+
+      // ✅ សម្អាត Cache ពិន្ទុរួមនៃមុខវិជ្ជា ដើម្បីឱ្យទំព័រគ្រប់គ្រងពិន្ទុចាប់យកពិន្ទុប្រឡងថ្មីភ្លាមៗ
+      if (viewingQuiz.course_id) {
+        const scoreKeysToClear = [
+          `cached_teacher_course_scores_v8_${currentTeacherId}_${viewingQuiz.course_id}`,
+          `cached_teacher_course_scores_v9_${currentTeacherId}_${viewingQuiz.course_id}`,
+        ];
+        scoreKeysToClear.forEach((k) => {
+          try {
+            sessionStorage.removeItem(k);
+            localStorage.removeItem(k);
+          } catch {}
+        });
+      }
+
       setEditingAttemptId(null);
       setManualAttemptScore('');
 
@@ -1798,7 +1840,9 @@ export default function TeacherManageQuizzes() {
       return;
     }
 
-    const courseObj = courses.find((c) => String(c.id) === String(targetCourse));
+    const courseObj = enrichedCourses.find(
+      (c) => String(c.id) === String(targetCourse)
+    );
 
     setIsImporting(true);
     try {

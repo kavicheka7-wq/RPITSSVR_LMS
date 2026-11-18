@@ -330,7 +330,10 @@ const isStudentEnrolledInCourse = (student, courseId, courseMap) => {
   if (Array.isArray(mappedIds)) {
     return (
       mappedIds.includes(Number(student.id)) ||
-      mappedIds.includes(String(student.id))
+      mappedIds.includes(String(student.id)) ||
+      (student.user_id &&
+        (mappedIds.includes(Number(student.user_id)) ||
+          mappedIds.includes(String(student.user_id))))
     );
   }
 
@@ -594,19 +597,19 @@ export default function TeacherManageAssignments() {
       null
     );
 
-    if (Array.isArray(cachedAsg)) {
+    if (Array.isArray(cachedAsg) && cachedAsg.length > 0) {
       setAssignments(cachedAsg);
       ASSIGNMENTS_MEM_CACHE.assignments = cachedAsg;
     }
-    if (Array.isArray(cachedCrs)) {
+    if (Array.isArray(cachedCrs) && cachedCrs.length > 0) {
       setCourses(cachedCrs);
       ASSIGNMENTS_MEM_CACHE.courses = cachedCrs;
     }
-    if (Array.isArray(cachedStd)) {
+    if (Array.isArray(cachedStd) && cachedStd.length > 0) {
       setAllStudents(cachedStd);
       ASSIGNMENTS_MEM_CACHE.allStudents = cachedStd;
     }
-    if (cachedMap) {
+    if (cachedMap && Object.keys(cachedMap).length > 0) {
       setCourseMap(cachedMap);
       ASSIGNMENTS_MEM_CACHE.courseMap = cachedMap;
     }
@@ -615,7 +618,9 @@ export default function TeacherManageAssignments() {
     if (
       ASSIGNMENTS_MEM_CACHE.uid === currentTeacherId &&
       Array.isArray(ASSIGNMENTS_MEM_CACHE.assignments) &&
+      ASSIGNMENTS_MEM_CACHE.assignments.length > 0 &&
       Array.isArray(ASSIGNMENTS_MEM_CACHE.courses) &&
+      ASSIGNMENTS_MEM_CACHE.courses.length > 0 &&
       now - ASSIGNMENTS_MEM_CACHE.lastSyncedAt < 25000
     ) {
       return;
@@ -625,12 +630,14 @@ export default function TeacherManageAssignments() {
     api
       .get('/teacher/assignments')
       .then((asgRes) => {
-        if (!isMounted) return;
-        const rawAsg = asgRes.data?.data || asgRes.data || [];
+        if (!isMounted || asgRes.data?.error_debug) return;
+        const rawAsg = asgRes.data?.data ?? asgRes.data ?? [];
         const validAssignments = Array.isArray(rawAsg) ? rawAsg : [];
         setAssignments(validAssignments);
         ASSIGNMENTS_MEM_CACHE.assignments = validAssignments;
-        ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
+        if (validAssignments.length > 0) {
+          ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
+        }
         try {
           const str = JSON.stringify(validAssignments);
           sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
@@ -646,21 +653,23 @@ export default function TeacherManageAssignments() {
     api
       .get('/teacher/courses')
       .then((crsRes) => {
-        if (!isMounted) return;
-        const rawCrs = crsRes.data?.data || crsRes.data || [];
+        if (!isMounted || crsRes.data?.error_debug) return;
+        const rawCrs = crsRes.data?.data ?? crsRes.data ?? [];
         const validCourses = Array.isArray(rawCrs) ? rawCrs : [];
-        setCourses(validCourses);
-        ASSIGNMENTS_MEM_CACHE.courses = validCourses;
-        try {
-          const str = JSON.stringify(validCourses);
-          sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
-          localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
-        } catch (e) {}
+        if (validCourses.length > 0 || !ASSIGNMENTS_MEM_CACHE.courses?.length) {
+          setCourses(validCourses);
+          ASSIGNMENTS_MEM_CACHE.courses = validCourses;
+          try {
+            const str = JSON.stringify(validCourses);
+            sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+            localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+            localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
+          } catch (e) {}
+        }
       })
       .catch(() => {});
 
-    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ (សម្អាតទិន្នន័យធ្ងន់មុនពេល Save ចូល localStorage)
+    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ
     if (
       !Array.isArray(ASSIGNMENTS_MEM_CACHE.allStudents) ||
       ASSIGNMENTS_MEM_CACHE.allStudents.length === 0
@@ -668,25 +677,30 @@ export default function TeacherManageAssignments() {
       api
         .get('/teacher/students')
         .then((stdRes) => {
-          if (!isMounted) return;
-          const rawStd = stdRes.data?.data || stdRes.data || [];
+          if (!isMounted || stdRes.data?.error_debug) return;
+          const rawStd = stdRes.data?.data ?? stdRes.data ?? [];
           const validStudents = Array.isArray(rawStd) ? rawStd : [];
-          setAllStudents(validStudents);
-          ASSIGNMENTS_MEM_CACHE.allStudents = validStudents;
-          try {
-            const slimStr = JSON.stringify(
-              stripHeavyStudentsForCache(validStudents)
-            );
-            sessionStorage.setItem(
-              getStudentsCacheKey(currentTeacherId),
-              slimStr
-            );
-            localStorage.setItem(
-              getStudentsCacheKey(currentTeacherId),
-              slimStr
-            );
-            localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
-          } catch (e) {}
+          if (
+            validStudents.length > 0 ||
+            !ASSIGNMENTS_MEM_CACHE.allStudents?.length
+          ) {
+            setAllStudents(validStudents);
+            ASSIGNMENTS_MEM_CACHE.allStudents = validStudents;
+            try {
+              const slimStr = JSON.stringify(
+                stripHeavyStudentsForCache(validStudents)
+              );
+              sessionStorage.setItem(
+                getStudentsCacheKey(currentTeacherId),
+                slimStr
+              );
+              localStorage.setItem(
+                getStudentsCacheKey(currentTeacherId),
+                slimStr
+              );
+              localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
+            } catch (e) {}
+          }
 
           if (stdRes.data?.course_students_map) {
             setCourseMap(stdRes.data.course_students_map);
@@ -716,13 +730,16 @@ export default function TeacherManageAssignments() {
   const fetchAssignments = async () => {
     try {
       const response = await api.get('/teacher/assignments');
-      const assignmentsData = response.data?.data || response.data || [];
+      if (response.data?.error_debug) return;
+      const assignmentsData = response.data?.data ?? response.data ?? [];
       const validAssignments = Array.isArray(assignmentsData)
         ? assignmentsData
         : [];
       setAssignments(validAssignments);
       ASSIGNMENTS_MEM_CACHE.assignments = validAssignments;
-      ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
+      if (validAssignments.length > 0) {
+        ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
+      }
       try {
         const str = JSON.stringify(validAssignments);
         sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
@@ -735,7 +752,7 @@ export default function TeacherManageAssignments() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា និងវេនសិក្សារបស់មុខវិជ្ជានីមួយៗ
+  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា (Primary Year តែមួយគត់) និងវេនសិក្សារបស់មុខវិជ្ជា
   // ============================================================================
   const isSpecificShiftSelected =
     selectedShift !== 'all' && selectedShift !== '';
@@ -763,11 +780,30 @@ export default function TeacherManageAssignments() {
     return norm || shift || '—';
   };
 
-  // ✅ គណនាឆ្នាំសិក្សា និងវេនសិក្សា (ចន្ទ-សុក្រ vs សៅរ៍-អាទិត្យ) សម្រាប់មុខវិជ្ជានីមួយៗ
+  // ✅ គណនាឆ្នាំគោលតែមួយគត់ (Primary Year) និងវេនសិក្សា សម្រាប់មុខវិជ្ជានីមួយៗ (ព្រមទាំងស្រង់ពី assignment.course ជា Fallback)
   const enrichedCourses = useMemo(() => {
-    if (!Array.isArray(courses)) return [];
+    const courseById = new Map();
 
-    return courses.map((course) => {
+    if (Array.isArray(courses)) {
+      courses.forEach((c) => {
+        if (c && c.id != null) {
+          courseById.set(String(c.id), c);
+        }
+      });
+    }
+
+    if (Array.isArray(assignments)) {
+      assignments.forEach((asg) => {
+        if (asg?.course && asg.course.id != null) {
+          const cid = String(asg.course.id);
+          if (!courseById.has(cid)) {
+            courseById.set(cid, asg.course);
+          }
+        }
+      });
+    }
+
+    return Array.from(courseById.values()).map((course) => {
       const cid = String(course.id);
       const enrolledList = (allStudents || []).filter((s) =>
         isStudentEnrolledInCourse(s, cid, courseMap)
@@ -787,15 +823,23 @@ export default function TeacherManageAssignments() {
         }
       });
 
-      let sortedYears = Object.keys(yearFreq).sort();
+      // ✅ ទី១៖ ទាញយកឆ្នាំសិក្សាពីឈ្មោះ ឬកូដមុខវិជ្ជាមុនគេ (ឧទាហរណ៍៖ "Y1" ឬ "ឆ្នាំទី១")
+      let primaryYear = detectStudentYearNum({
+        batch_year: `${course.course_name || ''} ${course.course_code || ''} ${
+          course.description || ''
+        } ${course.year || ''}`,
+      });
 
-      if (sortedYears.length === 0) {
-        const fromCourseText = detectStudentYearNum({
-          batch_year: `${course.course_name || ''} ${
-            course.description || ''
-          } ${course.year || ''}`,
-        });
-        if (fromCourseText) sortedYears = [fromCourseText];
+      // ✅ ទី២៖ បើមុខវិជ្ជាគ្មានបញ្ជាក់ឆ្នាំទេ យកឆ្នាំដែលមានសិស្សចុះឈ្មោះរៀនច្រើនជាងគេបំផុត
+      if (!primaryYear) {
+        const sortedYears = Object.keys(yearFreq);
+        if (sortedYears.length > 0) {
+          primaryYear = sortedYears.reduce((a, b) =>
+            yearFreq[a] >= yearFreq[b] ? a : b
+          );
+        } else {
+          primaryYear = '1';
+        }
       }
 
       if (shiftsSet.size === 0) {
@@ -814,24 +858,15 @@ export default function TeacherManageAssignments() {
         }
       }
 
-      let primaryYear = 'other';
-      if (sortedYears.length === 1) {
-        primaryYear = sortedYears[0];
-      } else if (sortedYears.length > 1) {
-        primaryYear = sortedYears.reduce((a, b) =>
-          yearFreq[a] >= yearFreq[b] ? a : b
-        );
-      }
-
       return {
         ...course,
         enrolledCount: enrolledList.length,
-        yearsList: sortedYears,
+        primaryYear: String(primaryYear),
+        yearsList: [String(primaryYear)],
         shiftsList: Array.from(shiftsSet),
-        primaryYear,
       };
     });
-  }, [courses, allStudents, courseMap]);
+  }, [courses, assignments, allStudents, courseMap]);
 
   // ✅ អនុគមន៍ពិនិត្យថាតើកិច្ចការមួយត្រូវនឹងវេនសិក្សាដែលបានជ្រើសរើសឬអត់
   const doesAssignmentHaveShift = useCallback(
@@ -839,13 +874,9 @@ export default function TeacherManageAssignments() {
       if (!targetShiftKey || targetShiftKey === 'all') return true;
       const cid = String(assignment?.course_id || '');
 
-      const enrolledInCourse = (allStudents || []).filter((s) => {
-        if (!isStudentEnrolledInCourse(s, cid, courseMap)) return false;
-        if (selectedYear !== 'all' && selectedYear !== '') {
-          return detectStudentYearNum(s) === String(selectedYear);
-        }
-        return true;
-      });
+      const enrolledInCourse = (allStudents || []).filter((s) =>
+        isStudentEnrolledInCourse(s, cid, courseMap)
+      );
 
       if (enrolledInCourse.length > 0) {
         return enrolledInCourse.some(
@@ -856,36 +887,22 @@ export default function TeacherManageAssignments() {
       const courseShifts = matchedCourseObj?.shiftsList || ['Monday-Friday'];
       return courseShifts.includes(targetShiftKey);
     },
-    [allStudents, courseMap, selectedYear]
+    [allStudents, courseMap]
   );
 
-  // ✅ អនុគមន៍ទាញយកមុខវិជ្ជាសម្រាប់ឆ្នាំណាមួយជាក់លាក់
+  // ✅ អនុគមន៍ទាញយកមុខវិជ្ជាសម្រាប់ឆ្នាំណាមួយជាក់លាក់ (តាម Primary Year តែមួយគត់)
   const getCoursesForYearKey = useCallback(
     (yearKey) => {
       if (!yearKey || yearKey === 'all') return enrichedCourses;
       const targetYear = String(yearKey);
 
-      const studentsInThisYear = (allStudents || []).filter(
-        (s) => detectStudentYearNum(s) === targetYear
+      const matched = enrichedCourses.filter(
+        (course) => String(course.primaryYear) === targetYear
       );
-
-      const matched = enrichedCourses.filter((course) => {
-        if (
-          studentsInThisYear.some((s) =>
-            isStudentEnrolledInCourse(s, course.id, courseMap)
-          )
-        ) {
-          return true;
-        }
-        return (
-          Array.isArray(course.yearsList) &&
-          course.yearsList.includes(targetYear)
-        );
-      });
 
       return matched.length > 0 ? matched : enrichedCourses;
     },
-    [enrichedCourses, allStudents, courseMap]
+    [enrichedCourses]
   );
 
   // ✅ ច្រោះមុខវិជ្ជាតាមឆ្នាំសិក្សាដែលបានជ្រើសរើសលើកាត
@@ -916,11 +933,7 @@ export default function TeacherManageAssignments() {
       const currentCourseObj = enrichedCourses.find(
         (c) => String(c.id) === String(editingAssignment.course_id)
       );
-      if (
-        currentCourseObj &&
-        currentCourseObj.primaryYear &&
-        currentCourseObj.primaryYear !== 'other'
-      ) {
+      if (currentCourseObj && currentCourseObj.primaryYear) {
         return getCoursesForYearKey(currentCourseObj.primaryYear);
       }
     }
@@ -928,7 +941,7 @@ export default function TeacherManageAssignments() {
     return enrichedCourses;
   }, [selectedYear, editingAssignment, enrichedCourses, getCoursesForYearKey]);
 
-  // ✅ គណនាចំនួនកិច្ចការសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) សម្រាប់បង្ហាញលើកាតទាំង ៥
+  // ✅ គណនាចំនួនកិច្ចការសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) ដោយមិនឱ្យស្ទួនកាតដាច់ខាត
   const assignmentYearCounts = useMemo(() => {
     const counts = { all: 0, '1': 0, '2': 0, '3': 0, '4': 0 };
     if (!Array.isArray(assignments)) return counts;
@@ -938,10 +951,18 @@ export default function TeacherManageAssignments() {
       const matchedCourse = enrichedCourses.find(
         (c) => String(c.id) === String(asg.course_id)
       );
-      if (matchedCourse && Array.isArray(matchedCourse.yearsList)) {
-        matchedCourse.yearsList.forEach((y) => {
-          if (counts[y] !== undefined) counts[y] += 1;
-        });
+      const py = matchedCourse?.primaryYear
+        ? String(matchedCourse.primaryYear)
+        : detectStudentYearNum({
+            batch_year: `${asg.course?.course_name || ''} ${
+              asg.course?.course_code || ''
+            } ${asg.title || ''}`,
+          }) || '1';
+
+      if (counts[py] !== undefined) {
+        counts[py] += 1;
+      } else {
+        counts['1'] += 1;
       }
     });
     return counts;
@@ -955,7 +976,7 @@ export default function TeacherManageAssignments() {
     );
   }, [selectedYear, selectedCourse, enrichedCourses]);
 
-  // ✅ ច្រោះកិច្ចការតាមឆ្នាំសិក្សា និងមុខវិជ្ជា (មុនពេលច្រោះតាមវេនសិក្សា)
+  // ✅ ច្រោះកិច្ចការតាមឆ្នាំសិក្សា (Primary Year តែមួយគត់) និងមុខវិជ្ជា
   const assignmentsByYearAndCourse = useMemo(() => {
     if (!Array.isArray(assignments)) return [];
 
@@ -965,11 +986,17 @@ export default function TeacherManageAssignments() {
       );
 
       if (selectedYear !== 'all') {
-        const hasYear =
-          matchedCourse &&
-          Array.isArray(matchedCourse.yearsList) &&
-          matchedCourse.yearsList.includes(String(selectedYear));
-        if (!hasYear) return false;
+        const asgPrimaryYear = matchedCourse?.primaryYear
+          ? String(matchedCourse.primaryYear)
+          : detectStudentYearNum({
+              batch_year: `${assignment.course?.course_name || ''} ${
+                assignment.course?.course_code || ''
+              } ${assignment.title || ''}`,
+            }) || '1';
+
+        if (String(asgPrimaryYear) !== String(selectedYear)) {
+          return false;
+        }
       }
 
       if (
@@ -1163,7 +1190,7 @@ export default function TeacherManageAssignments() {
       total_score: parseFloat(formData.total_score) || 20,
     };
 
-    const targetCourse = courses.find(
+    const targetCourse = enrichedCourses.find(
       (c) => String(c.id) === String(formData.course_id)
     );
     const courseName = targetCourse?.course_name || '';
@@ -1445,7 +1472,6 @@ export default function TeacherManageAssignments() {
               getSubmissionsCacheKey(currentTeacherId, viewingAssignment.id),
               slimSubsStr
             );
-            // សម្អាត Cache ពិន្ទុរួមនៃមុខវិជ្ជានេះទាំងក្នុង sessionStorage និង localStorage ដើម្បីឱ្យទំព័រ TeacherManageGrades ចាប់យកពិន្ទុកិច្ចការថ្មីភ្លាមៗ
             if (viewingAssignment.course_id) {
               const scoreKeysToClear = [
                 `cached_teacher_course_scores_v8_${currentTeacherId}_${viewingAssignment.course_id}`,
@@ -1484,9 +1510,16 @@ export default function TeacherManageAssignments() {
   // ============================================================================
   // 📌 ផ្នែកទី៥៖ អនុគមន៍ជំនួយ និងការនាំចេញឯកសារ Excel (.xlsx)
   // ============================================================================
-  const getFileUrl = (filePath) => {
-    if (!filePath || typeof filePath !== 'string') return '#';
-    const trimmed = filePath.trim();
+  const getFileUrl = (fileOrSub) => {
+    const rawPath =
+      typeof fileOrSub === 'object' && fileOrSub !== null
+        ? fileOrSub.file_path || fileOrSub.file_url || ''
+        : fileOrSub;
+    const subId =
+      typeof fileOrSub === 'object' && fileOrSub !== null ? fileOrSub.id : null;
+
+    if (!rawPath || typeof rawPath !== 'string') return '#';
+    const trimmed = rawPath.trim();
     if (!trimmed) return '#';
     if (
       trimmed.startsWith('http://') ||
@@ -1503,7 +1536,9 @@ export default function TeacherManageAssignments() {
       'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
-    return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}`;
+    return `${backendBase}/api/download-file?path=${encodeURIComponent(
+      cleanPath
+    )}${subId ? `&submission_id=${encodeURIComponent(subId)}` : ''}`;
   };
 
   // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
@@ -1999,7 +2034,6 @@ export default function TeacherManageAssignments() {
       <div className="asg-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col xl:flex-row gap-4 items-center justify-between">
         {/* ផ្នែកខាងឆ្វេង៖ Search Input + ប្រអប់ជ្រើសរើសមុខវិជ្ជា */}
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full xl:w-auto flex-1">
-          {/* Search Input */}
           <div className="relative w-full sm:max-w-xs lg:max-w-sm flex-1">
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
@@ -2023,7 +2057,6 @@ export default function TeacherManageAssignments() {
             )}
           </div>
 
-          {/* ✅ ជ្រើសរើសមុខវិជ្ជា (បង្ហាញតែពេលចុចលើកាតឆ្នាំ ១-៤ និងប្រើ font-medium មិនឱ្យដិតពេក) */}
           {selectedYear !== 'all' && visibleCoursesForSelectedYear.length > 0 && (
             <div className="relative w-full sm:w-64 lg:w-72 shrink-0 animate-fadeIn">
               <BookOpenIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -2263,7 +2296,6 @@ export default function TeacherManageAssignments() {
                             matchedCourse?.course_name ||
                             t('គ្មានមុខវិជ្ជា', 'No course')}
                         </div>
-                        {/* ✅ បង្ហាញផ្លាកវេនសិក្សាតែនៅពេលស្ថិតក្នុង «គ្រប់វេនសិក្សា» ប៉ុណ្ណោះ */}
                         {!isSpecificShiftSelected && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {courseShifts.map((shKey) => {
@@ -2479,7 +2511,6 @@ export default function TeacherManageAssignments() {
                         )}
                       </div>
 
-                      {/* ប្រអប់ច្រោះតាមវេនសិក្សាក្នុង Modal */}
                       <select
                         value={submissionShiftFilter}
                         onChange={(e) =>
@@ -2713,8 +2744,10 @@ export default function TeacherManageAssignments() {
                                   <td className="px-4 py-3.5 whitespace-nowrap text-center">
                                     {sub.file_path ? (
                                       <a
-                                        href={getFileUrl(sub.file_path)}
-                                        download
+                                        href={getFileUrl(sub)}
+                                        download={sub.original_filename || true}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
                                         className="asg-pill-indigo inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-all cursor-pointer"
                                       >
                                         <ArrowDownTrayIcon className="h-3.5 w-3.5" />

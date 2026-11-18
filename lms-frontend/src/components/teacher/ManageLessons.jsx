@@ -482,19 +482,19 @@ export default function ManageLessons() {
     const cachedStd = readStorageJson(getStudentsCacheKey(currentTeacherId), null);
     const cachedMap = readStorageJson(getCourseMapCacheKey(currentTeacherId), null);
 
-    if (Array.isArray(cachedLsn)) {
+    if (Array.isArray(cachedLsn) && cachedLsn.length > 0) {
       setLessons(cachedLsn);
       LESSONS_MEM_CACHE.lessons = cachedLsn;
     }
-    if (Array.isArray(cachedCrs)) {
+    if (Array.isArray(cachedCrs) && cachedCrs.length > 0) {
       setCourses(cachedCrs);
       LESSONS_MEM_CACHE.courses = cachedCrs;
     }
-    if (Array.isArray(cachedStd)) {
+    if (Array.isArray(cachedStd) && cachedStd.length > 0) {
       setAllStudents(cachedStd);
       LESSONS_MEM_CACHE.allStudents = cachedStd;
     }
-    if (cachedMap) {
+    if (cachedMap && Object.keys(cachedMap).length > 0) {
       setCourseMap(cachedMap);
       LESSONS_MEM_CACHE.courseMap = cachedMap;
     }
@@ -505,6 +505,7 @@ export default function ManageLessons() {
       Array.isArray(LESSONS_MEM_CACHE.lessons) &&
       LESSONS_MEM_CACHE.lessons.length > 0 &&
       Array.isArray(LESSONS_MEM_CACHE.courses) &&
+      LESSONS_MEM_CACHE.courses.length > 0 &&
       now - LESSONS_MEM_CACHE.lastSyncedAt < 25000
     ) {
       return;
@@ -516,11 +517,11 @@ export default function ManageLessons() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    // ១. ទាញមេរៀនមុនគេ
+    // ១. ទាញមេរៀនមុនគេ (ការពារកុំឱ្យយកបញ្ជីទទេពេលមាន Error ទៅលុបជាន់លើ Cache ចាស់)
     api
       .get('/teacher/lessons', { signal: controller.signal })
       .then((lsnRes) => {
-        if (!isMounted) return;
+        if (!isMounted || lsnRes.data?.error_debug) return;
         const rawLsn = lsnRes.data?.data ?? lsnRes.data ?? [];
         const listLsn = Array.isArray(rawLsn)
           ? rawLsn
@@ -529,7 +530,9 @@ export default function ManageLessons() {
           : [];
         setLessons(listLsn);
         LESSONS_MEM_CACHE.lessons = listLsn;
-        LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
+        if (listLsn.length > 0) {
+          LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
+        }
         safeSaveLessonsCache(currentTeacherId, listLsn);
       })
       .catch((err) => {
@@ -541,16 +544,18 @@ export default function ManageLessons() {
     api
       .get('/teacher/courses', { signal: controller.signal })
       .then((crsRes) => {
-        if (!isMounted) return;
+        if (!isMounted || crsRes.data?.error_debug) return;
         const rawCrs = crsRes.data?.data ?? crsRes.data ?? [];
         const validCourses = Array.isArray(rawCrs)
           ? rawCrs
           : Array.isArray(rawCrs?.data)
           ? rawCrs.data
           : [];
-        setCourses(validCourses);
-        LESSONS_MEM_CACHE.courses = validCourses;
-        safeSaveCoursesCache(currentTeacherId, validCourses);
+        if (validCourses.length > 0 || !LESSONS_MEM_CACHE.courses?.length) {
+          setCourses(validCourses);
+          LESSONS_MEM_CACHE.courses = validCourses;
+          safeSaveCoursesCache(currentTeacherId, validCourses);
+        }
       })
       .catch(() => {});
 
@@ -562,7 +567,7 @@ export default function ManageLessons() {
       api
         .get('/teacher/students', { signal: controller.signal })
         .then((stdRes) => {
-          if (!isMounted) return;
+          if (!isMounted || stdRes.data?.error_debug) return;
           const rawStd = stdRes.data?.data ?? stdRes.data ?? [];
           const listStd = Array.isArray(rawStd)
             ? rawStd
@@ -570,9 +575,11 @@ export default function ManageLessons() {
             ? rawStd.data
             : [];
           const validStudents = stripHeavyDataFromStudents(listStd);
-          setAllStudents(validStudents);
-          LESSONS_MEM_CACHE.allStudents = validStudents;
-          safeSaveStudentsCache(currentTeacherId, validStudents);
+          if (validStudents.length > 0 || !LESSONS_MEM_CACHE.allStudents?.length) {
+            setAllStudents(validStudents);
+            LESSONS_MEM_CACHE.allStudents = validStudents;
+            safeSaveStudentsCache(currentTeacherId, validStudents);
+          }
 
           if (stdRes.data?.course_students_map) {
             setCourseMap(stdRes.data.course_students_map);
@@ -603,6 +610,7 @@ export default function ManageLessons() {
   const fetchLessons = async () => {
     try {
       const response = await api.get('/teacher/lessons');
+      if (response.data?.error_debug) return;
       const rawData = response.data?.data ?? response.data ?? [];
       const lessonsData = Array.isArray(rawData)
         ? rawData
@@ -611,7 +619,9 @@ export default function ManageLessons() {
         : [];
       setLessons(lessonsData);
       LESSONS_MEM_CACHE.lessons = lessonsData;
-      LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
+      if (lessonsData.length > 0) {
+        LESSONS_MEM_CACHE.lastSyncedAt = Date.now();
+      }
       safeSaveLessonsCache(currentTeacherId, lessonsData);
     } catch (error) {
       console.error('Error fetching lessons:', error);
@@ -622,9 +632,30 @@ export default function ManageLessons() {
   // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សារបស់មុខវិជ្ជានីមួយៗ និងកាតឆ្នាំទាំង ៥ (កំណត់ឆ្នាំតែមួយគត់)
   // ============================================================================
   const enrichedCourses = useMemo(() => {
-    if (!Array.isArray(courses)) return [];
+    const courseById = new Map();
 
-    return courses.map((course) => {
+    // ១. បញ្ចូលមុខវិជ្ជាពី state courses
+    if (Array.isArray(courses)) {
+      courses.forEach((c) => {
+        if (c && c.id != null) {
+          courseById.set(String(c.id), c);
+        }
+      });
+    }
+
+    // ២. Fallback៖ បើ API /teacher/courses គាំង ឬមិនទាន់មកដល់ ស្រង់យកមុខវិជ្ជាចេញពី lesson.course ផ្ទាល់តែម្ដង!
+    if (Array.isArray(lessons)) {
+      lessons.forEach((lsn) => {
+        if (lsn?.course && lsn.course.id != null) {
+          const cid = String(lsn.course.id);
+          if (!courseById.has(cid)) {
+            courseById.set(cid, lsn.course);
+          }
+        }
+      });
+    }
+
+    return Array.from(courseById.values()).map((course) => {
       const cid = String(course.id);
       const enrolledList = (allStudents || []).filter((s) =>
         isStudentEnrolledInCourse(s, cid, courseMap)
@@ -651,7 +682,7 @@ export default function ManageLessons() {
             yearFreq[a] >= yearFreq[b] ? a : b
           );
         } else {
-          primaryYear = '1'; // Default ឆ្នាំទី១ បើទាន់មានសិស្ស
+          primaryYear = '1'; // Default ឆ្នាំទី១ បើមិនទាន់មានសិស្ស
         }
       }
 
@@ -661,7 +692,7 @@ export default function ManageLessons() {
         primaryYear: String(primaryYear),
       };
     });
-  }, [courses, allStudents, courseMap]);
+  }, [courses, lessons, allStudents, courseMap]);
 
   // ✅ អនុគមន៍ទាញយកមុខវិជ្ជាសម្រាប់ឆ្នាំណាមួយជាក់លាក់
   const getCoursesForYearKey = useCallback(
@@ -714,7 +745,7 @@ export default function ManageLessons() {
     return enrichedCourses;
   }, [selectedYear, editingLesson, enrichedCourses, getCoursesForYearKey]);
 
-  // គណនាមេរៀនសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) សម្រាប់កាតទាំង ៥ ដោយមិនឱ្យស្ទួន
+  // គណនាមេរៀនសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) សម្រាប់កាតទាំង ៥ ដោយមិនឱ្យស្ទួន និងមិនឱ្យបាត់មេរៀន
   const lessonYearCounts = useMemo(() => {
     const counts = { all: 0, '1': 0, '2': 0, '3': 0, '4': 0 };
     if (!Array.isArray(lessons)) return counts;
@@ -724,10 +755,16 @@ export default function ManageLessons() {
       const matchedCourse = enrichedCourses.find(
         (c) => String(c.id) === String(lsn.course_id)
       );
-      // ✅ រាប់មេរៀនបញ្ចូលតែក្នុងឆ្នាំគោល (primaryYear) តែមួយគត់ ដើម្បីកុំឱ្យស្ទួនកាត
-      if (matchedCourse && matchedCourse.primaryYear) {
-        const py = String(matchedCourse.primaryYear);
-        if (counts[py] !== undefined) counts[py] += 1;
+      const py = matchedCourse?.primaryYear
+        ? String(matchedCourse.primaryYear)
+        : detectStudentYearNum({
+            batch_year: `${lsn.course?.course_name || ''} ${lsn.course?.course_code || ''} ${lsn.title || ''}`,
+          }) || '1';
+
+      if (counts[py] !== undefined) {
+        counts[py] += 1;
+      } else {
+        counts['1'] += 1;
       }
     });
     return counts;
@@ -917,7 +954,7 @@ export default function ManageLessons() {
       return;
     }
 
-    const targetCourse = courses.find(
+    const targetCourse = enrichedCourses.find(
       (c) => String(c.id) === String(formData.course_id)
     );
     const courseName = targetCourse?.course_name || '';
@@ -1449,7 +1486,13 @@ export default function ManageLessons() {
 
         // ១. ច្រោះតាមកាតឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) ដោយផ្អែកលើ Primary Year តែមួយគត់
         if (selectedYear !== 'all') {
-          if (matchedCourse && String(matchedCourse.primaryYear) !== String(selectedYear)) {
+          const lessonPrimaryYear = matchedCourse?.primaryYear
+            ? String(matchedCourse.primaryYear)
+            : detectStudentYearNum({
+                batch_year: `${lesson.course?.course_name || ''} ${lesson.course?.course_code || ''} ${lesson.title || ''}`,
+              }) || '1';
+
+          if (String(lessonPrimaryYear) !== String(selectedYear)) {
             return false;
           }
         }
@@ -1909,7 +1952,7 @@ export default function ManageLessons() {
                 const videosCount = lesson.videos?.length || 0;
                 const matchedCourse =
                   lesson.course ||
-                  courses.find((c) => String(c.id) === String(lesson.course_id));
+                  enrichedCourses.find((c) => String(c.id) === String(lesson.course_id));
 
                 return (
                   <div

@@ -23,6 +23,8 @@ class TeacherLessonController extends Controller
 {
     private static ?array $cachedFileColumns = null;
     private static bool $schemaChecked = false;
+    private ?Teacher $resolvedTeacher = null;
+    private bool $teacherLookedUp = false;
 
     /**
      * ✅ ពិនិត្យ និងបង្កើតជួរឈរ file_data / mime_type តែ ១ ដងគត់ (មិនឆែកគ្រប់ Request ឱ្យយឺតទេ)
@@ -102,6 +104,45 @@ class TeacherLessonController extends Controller
     }
 
     /**
+     * ទាញយកកំណត់ត្រាគ្រូបង្រៀន និងភ្ជាប់ user_id ដោយស្វ័យប្រវត្តិបើមិនទាន់មាន
+     */
+    private function getTeacherRecord(): ?Teacher
+    {
+        if ($this->teacherLookedUp) {
+            return $this->resolvedTeacher;
+        }
+
+        $user = Auth::user();
+        if (!$user) {
+            $this->teacherLookedUp = true;
+            return null;
+        }
+
+        $teacher = ($user->relationLoaded('teacher') && $user->teacher)
+            ? $user->teacher
+            : Teacher::select('id', 'user_id', 'department_id', 'email')->where('user_id', $user->id)->first();
+
+        if (!$teacher && !empty($user->email)) {
+            $teacher = Teacher::select('id', 'user_id', 'department_id', 'email')
+                ->whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($user->email))])
+                ->first();
+
+            if ($teacher && empty($teacher->user_id)) {
+                try {
+                    DB::table('teachers')->where('id', $teacher->id)->update(['user_id' => $user->id]);
+                    $teacher->user_id = $user->id;
+                } catch (\Throwable $e) {
+                }
+            }
+        }
+
+        $this->resolvedTeacher = $teacher;
+        $this->teacherLookedUp = true;
+
+        return $teacher;
+    }
+
+    /**
      * ទាញយកបញ្ជី ID ទាំងអស់របស់គ្រូបង្រៀន (ទាំង teachers.id និង users.id)
      */
     private function resolveTeacherIds(): array
@@ -111,16 +152,11 @@ class TeacherLessonController extends Controller
             return [];
         }
 
-        $teacher = ($user->relationLoaded('teacher') && $user->teacher)
-            ? $user->teacher
-            : Teacher::select('id', 'user_id', 'email')->where('user_id', $user->id)->first();
-
-        if (!$teacher && !empty($user->email)) {
-            $teacher = Teacher::select('id', 'user_id', 'email')->where('email', $user->email)->first();
-        }
+        $teacher = $this->getTeacherRecord();
 
         return array_values(array_unique(array_filter([
             $teacher ? (int) $teacher->id : null,
+            ($teacher && $teacher->user_id) ? (int) $teacher->user_id : null,
             (int) $user->id,
         ])));
     }
@@ -137,7 +173,22 @@ class TeacherLessonController extends Controller
 
     private function checkCourseOwnership($courseId)
     {
-        return $this->getTeacherCoursesQuery()->findOrFail($courseId);
+        $course = $this->getTeacherCoursesQuery()->find($courseId);
+        if ($course) {
+            return $course;
+        }
+
+        // Fallback៖ បើមុខវិជ្ជាស្ថិតក្នុងដេប៉ាតឺម៉ង់របស់គ្រូ ឬគ្រូធ្លាប់បង្កើតមេរៀនក្នុងមុខវិជ្ជានេះ អនុញ្ញាតឱ្យប្រើបាន
+        $teacher = $this->getTeacherRecord();
+        $fallbackCourse = Course::findOrFail($courseId);
+        if (
+            ($teacher && $teacher->department_id && (int) $fallbackCourse->department_id === (int) $teacher->department_id) ||
+            Lesson::where('course_id', $courseId)->where('created_by', Auth::id())->exists()
+        ) {
+            return $fallbackCourse;
+        }
+
+        throw (new ModelNotFoundException())->setModel(Course::class, [$courseId]);
     }
 
     private function ensureLessonAccess(Lesson $lesson): void
@@ -150,31 +201,39 @@ class TeacherLessonController extends Controller
         $isOwnerCourse = in_array((int) $lesson->course_id, $courseIds, true);
 
         if (!$isOwnerCourse) {
+            $teacher = $this->getTeacherRecord();
+            if ($teacher && $teacher->department_id) {
+                $courseDeptId = Course::where('id', $lesson->course_id)->value('department_id');
+                if ((int) $courseDeptId === (int) $teacher->department_id) {
+                    return;
+                }
+            }
             throw (new ModelNotFoundException())->setModel(Lesson::class, [$lesson->id]);
         }
     }
 
     /**
-     * Get all lessons for the teacher's courses
+     * ✅ Get all lessons for the teacher's courses (ទាញយកទាំងមេរៀនតាមមុខវិជ្ជារបស់គ្រូ និងមេរៀនដែលគ្រូបានបង្កើតផ្ទាល់ដៃជានិច្ច)
      * GET /teacher/lessons
      */
     public function index(Request $request)
     {
         try {
-            $courseIds = $this->getTeacherCoursesQuery()->pluck('id');
-
-            if ($courseIds->isEmpty()) {
-                return response()->json([
-                    'data' => [],
-                    'total' => 0,
-                    'message' => 'អ្នកមិនទាន់មានមុខវិជ្ជាបង្រៀននៅឡើយទេ',
-                ]);
-            }
+            $userId = Auth::id();
+            $courseIds = $this->getTeacherCoursesQuery()->pluck('id')->map(fn ($id) => (int) $id)->all();
 
             $query = Lesson::with($this->lessonRelations())
-                ->where(function ($q) use ($courseIds) {
-                    $q->whereIn('course_id', $courseIds)
-                      ->orWhere('created_by', Auth::id());
+                ->where(function ($q) use ($courseIds, $userId) {
+                    if (!empty($courseIds)) {
+                        $q->whereIn('course_id', $courseIds);
+                        if ($userId) {
+                            $q->orWhere('created_by', $userId);
+                        }
+                    } elseif ($userId) {
+                        $q->where('created_by', $userId);
+                    } else {
+                        $q->whereRaw('1 = 0');
+                    }
                 });
 
             // Filter by specific course if provided
@@ -191,7 +250,7 @@ class TeacherLessonController extends Controller
                 });
             }
 
-            $query->orderBy('lesson_order');
+            $query->orderBy('lesson_order')->orderBy('id', 'asc');
 
             // Support server-side pagination if requested
             if ($request->has('per_page') || $request->has('page')) {
@@ -215,7 +274,7 @@ class TeacherLessonController extends Controller
                 'total' => $lessons->count(),
                 'message' => 'បានទាញយកបញ្ជីមេរៀនដោយជោគជ័យ',
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Error fetching lessons: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យមេរៀន',
@@ -251,7 +310,7 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'រកមិនឃើញមុខវិជ្ជានេះទេ ឬអ្នកមិនមានសិទ្ធិចូលមើល',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Error fetching lessons by course: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យមេរៀន',
@@ -298,7 +357,7 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'អ្នកមិនមានសិទ្ធិបង្កើតមេរៀនក្នុងមុខវិជ្ជានេះទេ',
             ], 403);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Lesson store error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការបង្កើតមេរៀន',
@@ -349,7 +408,7 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'រកមិនឃើញមេរៀននេះទេ ឬអ្នកមិនមានសិទ្ធិកែប្រែ',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Lesson update error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការកែប្រែមេរៀន',
@@ -402,7 +461,7 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'រកមិនឃើញមេរៀននេះទេ',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Lesson delete error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការលុបមេរៀន',
@@ -503,7 +562,7 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'រកមិនឃើញមេរៀននេះទេ',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('File upload error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការផ្ទុកឡើងឯកសារ',
@@ -540,7 +599,7 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'រកមិនឃើញឯកសារនេះទេ',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('File delete error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការលុបឯកសារ',
@@ -601,7 +660,7 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'រកមិនឃើញមេរៀននេះទេ',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Video upload error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការផ្ទុកឡើងវីដេអូ',
@@ -639,7 +698,7 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'រកមិនឃើញវីដេអូនេះទេ',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Video delete error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការលុបវីដេអូ',
@@ -667,7 +726,7 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'រកមិនឃើញមេរៀននេះទេ',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Lesson show error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យមេរៀន',
@@ -704,7 +763,7 @@ class TeacherLessonController extends Controller
                 'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
                 'errors' => $e->errors(),
             ], 422);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Lesson reorder error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការរៀបចំលំដាប់មេរៀន',
