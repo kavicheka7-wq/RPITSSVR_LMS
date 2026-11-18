@@ -32,7 +32,6 @@ class AdminTeacherController extends Controller
             return null;
         }
 
-        // បង្រួមទំហំរូបភាពឱ្យតូចល្មម (Max 240x240px) ប្រសិនបើ Server មាន GD Extension
         if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
             $srcImg = @imagecreatefromstring($contents);
             if ($srcImg !== false) {
@@ -76,6 +75,59 @@ class AdminTeacherController extends Controller
     }
 
     /**
+     * ✅ បង្រួមរូបថតគ្រូចាស់ៗក្នុង Database ដែលមានទំហំធំពេក (> 20KB) ឱ្យស្រាលបំផុត និងទុកក្នុង Cache
+     */
+    private function compressExistingTeacherAvatarIfHeavy(?string $rawImage, int $teacherId): ?string
+    {
+        if (!$rawImage) {
+            return null;
+        }
+        $trimmed = trim($rawImage);
+        if ($trimmed === '' || strlen($trimmed) <= 20000 || !str_starts_with($trimmed, 'data:image')) {
+            return $trimmed ?: null;
+        }
+
+        $cacheKey = 'adm_tch_avatar_v1_' . $teacherId . '_' . md5(substr($trimmed, 0, 100) . strlen($trimmed));
+
+        return Cache::remember($cacheKey, 86400, function () use ($trimmed) {
+            if (!preg_match('/^data:([^;]+);base64,(.+)$/s', $trimmed, $m)) {
+                return $trimmed;
+            }
+            $binary = base64_decode(preg_replace('/\s+/', '', $m[2]));
+            if (!$binary || !function_exists('imagecreatefromstring')) {
+                return $trimmed;
+            }
+            try {
+                $src = @imagecreatefromstring($binary);
+                if ($src !== false) {
+                    $w = imagesx($src);
+                    $h = imagesy($src);
+                    $maxDim = 120;
+                    $newW = $w > $h ? $maxDim : max(1, (int) round(($w * $maxDim) / $h));
+                    $newH = $w > $h ? max(1, (int) round(($h * $maxDim) / $w)) : $maxDim;
+
+                    $dst = imagecreatetruecolor($newW, $newH);
+                    $white = imagecolorallocate($dst, 255, 255, 255);
+                    imagefilledrectangle($dst, 0, 0, $newW, $newH, $white);
+                    imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $w, $h);
+
+                    ob_start();
+                    imagejpeg($dst, null, 80);
+                    $out = ob_get_clean();
+                    imagedestroy($src);
+                    imagedestroy($dst);
+
+                    if ($out && strlen($out) < strlen($binary)) {
+                        return 'data:image/jpeg;base64,' . base64_encode($out);
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+            return $trimmed;
+        });
+    }
+
+    /**
      * រៀបចំទិន្នន័យគ្រូបង្រៀនដោយភ្ជាប់រូបភាពពី user (បើខ្វះ) រួចលុបរូបភាពស្ទួនក្នុង relation user ចេញដើម្បីឱ្យ JSON ស្រាលជាងមុន 2 ដង
      */
     private function deduplicateTeacherAvatar($teacher)
@@ -85,6 +137,9 @@ class AdminTeacherController extends Controller
         }
         if (empty($teacher->profile_image) && !empty($teacher->user?->profile_image)) {
             $teacher->profile_image = $teacher->user->profile_image;
+        }
+        if (!empty($teacher->profile_image)) {
+            $teacher->profile_image = $this->compressExistingTeacherAvatarIfHeavy($teacher->profile_image, (int) $teacher->id);
         }
         if ($teacher->relationLoaded('user') && $teacher->user) {
             unset($teacher->user->profile_image);
@@ -110,19 +165,16 @@ class AdminTeacherController extends Controller
             return null;
         }
 
-        // បម្លែងលេខខ្មែរ (០-៩) ទៅជាលេខសากล (0-9)
         $str = str_replace(
             ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'],
             ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
             $str
         );
 
-        // 1. ករណីជាលេខ Serial Date របស់ Excel (ឧទាហរណ៍ 38472)
         if (is_numeric($str) && (float) $str > 1000 && (float) $str < 100000) {
             return gmdate('Y-m-d', ((int) round((float) $str) - 25569) * 86400);
         }
 
-        // 2. ករណីទម្រង់ DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (ឧទាហរណ៍ 30-04-2005)
         if (preg_match('/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/', $str, $m)) {
             $first = (int) $m[1];
             $second = (int) $m[2];
@@ -134,7 +186,6 @@ class AdminTeacherController extends Controller
             }
         }
 
-        // 3. ករណីទម្រង់ YYYY-MM-DD ឬ YYYY/MM/DD
         if (preg_match('/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})/', $str, $m)) {
             if (checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
                 return sprintf('%04d-%02d-%02d', (int) $m[1], (int) $m[2], (int) $m[3]);
@@ -156,10 +207,10 @@ class AdminTeacherController extends Controller
     {
         $perPage = max(1, min(500, (int) ($request->per_page ?? 15)));
 
-        // ✅ select columns ចាំបាច់ និងទាញយក profile_image ពី user ផងដែរ
+        // ✅ មិនទាញ profile_image ស្ទួនពីតារាង users ទេ ដើម្បីកាត់បន្ថយការប្រើប្រាស់ RAM ៥០%
         $query = Teacher::with([
             'department:id,department_name',
-            'user:id,status,email,profile_image',
+            'user:id,status,email',
             'role:id,role_name',
         ])->select([
             'id', 'user_id', 'role_id', 'department_id',
@@ -191,8 +242,23 @@ class AdminTeacherController extends Controller
 
         $teachers = $query->orderBy('first_name')->paginate($perPage);
 
-        // ✅ ភ្ជាប់រូបភាព និងលុបរូបភាពស្ទួនក្នុង user ចេញ ដើម្បីឱ្យទាញទិន្នន័យលឿនបំផុត
-        $items = collect($teachers->items())->map(function ($teacher) {
+        $missingImgUserIds = collect($teachers->items())
+            ->filter(fn ($t) => empty($t->profile_image) && !empty($t->user_id))
+            ->pluck('user_id')
+            ->unique()
+            ->values()
+            ->all();
+
+        $fallbackAvatars = !empty($missingImgUserIds)
+            ? User::whereIn('id', $missingImgUserIds)
+                ->whereNotNull('profile_image')
+                ->pluck('profile_image', 'id')
+            : collect();
+
+        $items = collect($teachers->items())->map(function ($teacher) use ($fallbackAvatars) {
+            if (empty($teacher->profile_image) && isset($fallbackAvatars[$teacher->user_id])) {
+                $teacher->profile_image = $fallbackAvatars[$teacher->user_id];
+            }
             return $this->deduplicateTeacherAvatar($teacher);
         })->all();
 
@@ -278,7 +344,7 @@ class AdminTeacherController extends Controller
                 'profile_image' => $profileImagePath,
             ]);
 
-            $loaded = $teacher->load(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+            $loaded = $teacher->load(['department:id,department_name', 'user:id,status,email', 'role:id,role_name']);
             return $this->deduplicateTeacherAvatar($loaded);
         });
 
@@ -399,7 +465,7 @@ class AdminTeacherController extends Controller
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
-        $freshTeacher = $teacher->fresh(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+        $freshTeacher = $teacher->fresh(['department:id,department_name', 'user:id,status,email', 'role:id,role_name']);
         $this->deduplicateTeacherAvatar($freshTeacher);
 
         return response()->json([
@@ -450,7 +516,7 @@ class AdminTeacherController extends Controller
             $teachers = [];
             Teacher::with([
                 'department:id,department_name',
-                'user:id,status,email,profile_image',
+                'user:id,status,email',
                 'role:id,role_name',
             ])
                 ->select([
@@ -461,7 +527,23 @@ class AdminTeacherController extends Controller
                 ])
                 ->orderBy('first_name')
                 ->chunk(500, function ($chunk) use (&$teachers) {
+                    $missingUserIds = $chunk
+                        ->filter(fn ($t) => empty($t->profile_image) && !empty($t->user_id))
+                        ->pluck('user_id')
+                        ->unique()
+                        ->values()
+                        ->all();
+
+                    $fallbackAvatars = !empty($missingUserIds)
+                        ? User::whereIn('id', $missingUserIds)
+                            ->whereNotNull('profile_image')
+                            ->pluck('profile_image', 'id')
+                        : collect();
+
                     foreach ($chunk as $teacher) {
+                        if (empty($teacher->profile_image) && isset($fallbackAvatars[$teacher->user_id])) {
+                            $teacher->profile_image = $fallbackAvatars[$teacher->user_id];
+                        }
                         $teachers[] = $this->deduplicateTeacherAvatar($teacher);
                     }
                 });
@@ -483,7 +565,6 @@ class AdminTeacherController extends Controller
 
         return response()->stream(function () {
             $handle = fopen('php://output', 'w');
-            // Write UTF-8 BOM so Microsoft Excel correctly renders Khmer Unicode characters
             fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
 
             fputcsv($handle, [
@@ -565,7 +646,6 @@ class AdminTeacherController extends Controller
         $skipped = [];
 
         DB::transaction(function () use ($request, $teacherRoleId, &$importedCount, &$skipped) {
-            // ✅ ទាញ Emails ដែលមានរួច ក្នុង Query តែម្តង
             $emails = collect($request->teachers)
                 ->pluck('email')
                 ->filter()
@@ -594,7 +674,7 @@ class AdminTeacherController extends Controller
 
                 $password = !empty($item['password']) ? $item['password'] : '12345678';
                 $gender = in_array($item['gender'] ?? '', ['Male', 'Female', 'Other']) ? $item['gender'] : null;
-                $employmentType = in_array($item['employment_type'] ?? '', ['Full-time', 'Part-time', 'Contract'])
+                $employmentType = in_array($item['employment_type'] ?? '', ['Full-time', 'Part-time,Contract', 'Part-time', 'Contract'])
                     ? $item['employment_type']
                     : 'Full-time';
                 $status = in_array($item['status'] ?? '', ['active', 'inactive']) ? $item['status'] : 'active';
@@ -647,9 +727,6 @@ class AdminTeacherController extends Controller
         ]);
     }
 
-    /**
-     * Generate unique teacher code (ការពារមិនឱ្យស្ទួនលេខកូដពេលធ្លាប់លុបគ្រូចាស់)
-     */
     private function generateTeacherCode(): string
     {
         $year = date('Y');

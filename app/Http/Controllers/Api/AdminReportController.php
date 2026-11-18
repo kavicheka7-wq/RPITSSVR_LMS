@@ -27,7 +27,6 @@ class AdminReportController extends Controller
      */
     public function getOverviewReport(Request $request)
     {
-        // ✅ ប្រើ Cache សម្រាប់ Overview Report (៥ នាទី)
         $data = Cache::remember('admin_overview_report', 300, function () {
             $studentRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%student%'])->first();
             $teacherRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%teacher%'])->first();
@@ -51,7 +50,6 @@ class AdminReportController extends Controller
             $totalLessons = Lesson::count();
             $totalAssignments = Assignment::count();
 
-            // ✅ ប្រើ Query តែម្តងសម្រាប់ Attendance Rate
             $attendanceStats = Attendance::selectRaw("
                 COUNT(*) as total,
                 SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
@@ -69,7 +67,6 @@ class AdminReportController extends Controller
                 ? min(100, round(($effectiveAttended / $totalAttendances) * 100, 1))
                 : 100;
 
-            // ✅ ប្រើ withCount ជំនួស get() + map()
             $departments = Department::withCount(['courses', 'students', 'teachers'])->get();
             $departmentDistribution = $departments->map(function ($dept) {
                 return [
@@ -82,7 +79,6 @@ class AdminReportController extends Controller
                 ];
             });
 
-            // Recent 6 Months Enrollment Trend
             $enrollmentTrend = Enrollment::select(
                 DB::raw("DATE_FORMAT(created_at, '%Y-%m') as month"),
                 DB::raw('COUNT(*) as count')
@@ -122,7 +118,6 @@ class AdminReportController extends Controller
      */
     public function getEnrollmentReport(Request $request)
     {
-        // ✅ បង្កើត Base Query តែម្តង រួច Clone សម្រាប់រាប់ និង Paginate
         $baseQuery = Enrollment::query();
 
         if ($request->filled('department_id')) {
@@ -162,32 +157,41 @@ class AdminReportController extends Controller
             });
         }
 
-        // ✅ រាប់ដោយប្រើ clone (មិនទាញទិន្នន័យទាំងអស់ចូល Memory)
+        // ✅ រាប់ចំនួនសរុបទាំង ៤ ស្ថានភាពក្នុង Query តែ ១ ដងគត់ (លឿនជាងមុន ៤ ដង)
+        $summaryRow = (clone $baseQuery)->selectRaw("
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'active' OR status IS NULL OR status = '' THEN 1 ELSE 0 END) as active,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN status IN ('dropped', 'inactive', 'cancelled') THEN 1 ELSE 0 END) as dropped
+        ")->first();
+
         $summary = [
-            'total' => (int) (clone $baseQuery)->count(),
-            'active' => (int) (clone $baseQuery)->where('status', 'active')->count(),
-            'completed' => (int) (clone $baseQuery)->where('status', 'completed')->count(),
-            'dropped' => (int) (clone $baseQuery)->whereIn('status', ['dropped', 'inactive', 'cancelled'])->count(),
+            'total' => (int) ($summaryRow->total ?? 0),
+            'active' => (int) ($summaryRow->active ?? 0),
+            'completed' => (int) ($summaryRow->completed ?? 0),
+            'dropped' => (int) ($summaryRow->dropped ?? 0),
         ];
 
         $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
 
-        // ✅ បន្ថែម 'gender' ចូលទៅក្នុង select របស់ user(student)
+        // ✅ មិនទាញ profile_image ស្ទួនពីតារាង users ទេ (ទាញតែពីតារាង students ខាងក្រោមដើម្បីសន្សំសំចៃ RAM)
         $paginated = $baseQuery
             ->with([
-                'student:id,first_name,last_name,email,gender,profile_image',
+                'student:id,first_name,last_name,email,gender',
                 'course:id,course_name,course_code,department_id',
                 'course.department:id,department_name',
             ])
             ->orderBy('created_at', 'desc')
             ->paginate($perPage);
 
-        // ✅ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1) ហើយថែម gender 
-        $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter();
-        $studentProfiles = Student::whereIn('user_id', $studentIds)
-            ->select('id', 'user_id', 'student_code', 'gender', 'batch_year', 'study_shift', 'profile_image')
-            ->get()
-            ->keyBy('user_id');
+        $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter()->values()->all();
+        $studentProfiles = !empty($studentIds)
+            ? Student::whereIn('user_id', $studentIds)
+                ->orWhereIn('id', $studentIds)
+                ->select('id', 'user_id', 'student_code', 'gender', 'batch_year', 'study_shift', 'profile_image')
+                ->get()
+                ->keyBy('user_id')
+            : collect();
 
         $items = collect($paginated->items())->map(function ($enr) use ($studentProfiles) {
             $studentUser = $enr->student;
@@ -210,8 +214,8 @@ class AdminReportController extends Controller
                     ? trim(($studentUser->first_name ?? '') . ' ' . ($studentUser->last_name ?? ''))
                     : 'N/A',
                 'student_code' => $studentProfile->student_code ?? ('STD-' . $enr->student_id),
-                'student_image' => $studentProfile->profile_image ?? $studentUser->profile_image ?? null,
-                'gender' => $studentProfile->gender ?? $studentUser->gender ?? null, // ✅ បញ្ជូន Gender ទៅ Frontend
+                'student_image' => $studentProfile->profile_image ?? null,
+                'gender' => $studentProfile->gender ?? $studentUser->gender ?? null,
                 'batch_year' => $studentProfile->batch_year ?? null,
                 'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
                 'email' => $studentUser->email ?? 'N/A',
@@ -240,7 +244,6 @@ class AdminReportController extends Controller
      */
     public function getAttendanceReport(Request $request)
     {
-        // ✅ បង្កើត Base Query តែម្តង
         $baseQuery = Attendance::query();
 
         if ($request->filled('department_id')) {
@@ -261,7 +264,6 @@ class AdminReportController extends Controller
             $baseQuery->whereDate('attendance_date', '<=', $request->date_to);
         }
 
-        // ✅ ប្រើ Query តែម្តងសម្រាប់ Summary ទាំងអស់
         $summaryRaw = (clone $baseQuery)->selectRaw("
             COUNT(*) as total_records,
             SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
@@ -281,7 +283,7 @@ class AdminReportController extends Controller
             ? min(100, round(($effectiveAttended / $totalRecords) * 100, 1))
             : 100;
 
-        $coursesQuery = Course::with(['department:id,department_name', 'teacher'])
+        $coursesQuery = Course::with(['department:id,department_name', 'teacher:id,first_name,last_name,email,profile_image'])
             ->when($request->filled('department_id'), function ($q) use ($request) {
                 $q->where('department_id', $request->department_id);
             })
@@ -289,7 +291,6 @@ class AdminReportController extends Controller
                 $q->where('courses.id', $request->course_id);
             });
 
-        // បង្កើត Subquery សម្រាប់ Attendance Counts
         $attendanceSubquery = Attendance::selectRaw("
             course_id,
             COUNT(*) as total,
@@ -306,12 +307,7 @@ class AdminReportController extends Controller
             $attendanceSubquery->whereDate('attendance_date', '<=', $request->date_to);
         }
 
-        // ទាញបញ្ជីគ្រូបង្រៀនពីតារាង teachers ទុកផ្គូផ្គងរូបថត និងឈ្មោះបន្ថែមក្នុង Query តែម្តង
-        $teachersByUserId = Teacher::select('id', 'user_id', 'first_name', 'last_name', 'profile_image')
-            ->get()
-            ->keyBy('user_id');
-
-        $courseBreakdown = $coursesQuery
+        $coursesResult = $coursesQuery
             ->leftJoinSub($attendanceSubquery, 'att_stats', function ($join) {
                 $join->on('courses.id', '=', 'att_stats.course_id');
             })
@@ -327,51 +323,62 @@ class AdminReportController extends Controller
                 DB::raw('COALESCE(att_stats.late, 0) as late'),
                 DB::raw('COALESCE(att_stats.permission, 0) as permission'),
             ])
-            ->get()
-            ->map(function ($course) use ($teachersByUserId) {
-                $cTotal = (int) $course->total;
-                $cPresent = (int) $course->present;
-                $cAbsent = (int) $course->absent;
-                $cLate = (int) $course->late;
-                $cPermission = (int) $course->permission;
+            ->get();
 
-                $cEffective = $cPresent + $cLate + ($cPermission * 0.5);
-                $cRate = $cTotal > 0 ? min(100, round(($cEffective / $cTotal) * 100, 1)) : 100;
+        // ✅ ទាញតែគ្រូណាដែលពាក់ព័ន្ធនឹងមុខវិជ្ជាទាំងនេះប៉ុណ្ណោះ (មិនទាញគ្រូទូទាំងសាលាទាំងអស់ចូល RAM ទេ)
+        $relevantTeacherIds = $coursesResult->pluck('teacher_id')->filter()->unique()->values()->all();
+        $teachersByUserId = !empty($relevantTeacherIds)
+            ? Teacher::select('id', 'user_id', 'first_name', 'last_name', 'profile_image')
+                ->whereIn('user_id', $relevantTeacherIds)
+                ->orWhereIn('id', $relevantTeacherIds)
+                ->get()
+                ->keyBy('user_id')
+            : collect();
 
-                $relTeacher = $course->teacher;
-                $extTeacher = $teachersByUserId->get($course->teacher_id);
+        $courseBreakdown = $coursesResult->map(function ($course) use ($teachersByUserId) {
+            $cTotal = (int) $course->total;
+            $cPresent = (int) $course->present;
+            $cAbsent = (int) $course->absent;
+            $cLate = (int) $course->late;
+            $cPermission = (int) $course->permission;
 
-                $teacherName = $relTeacher
-                    ? trim(($relTeacher->first_name ?? '') . ' ' . ($relTeacher->last_name ?? ''))
-                    : null;
+            $cEffective = $cPresent + $cLate + ($cPermission * 0.5);
+            $cRate = $cTotal > 0 ? min(100, round(($cEffective / $cTotal) * 100, 1)) : 100;
 
-                if (!$teacherName && $extTeacher) {
-                    $teacherName = trim(($extTeacher->first_name ?? '') . ' ' . ($extTeacher->last_name ?? ''));
-                }
+            $relTeacher = $course->teacher;
+            $extTeacher = $teachersByUserId->get($course->teacher_id);
 
-                if (!$teacherName && isset($relTeacher->name)) {
-                    $teacherName = $relTeacher->name;
-                }
+            $teacherName = $relTeacher
+                ? trim(($relTeacher->first_name ?? '') . ' ' . ($relTeacher->last_name ?? ''))
+                : null;
 
-                $teacherImage = $relTeacher->profile_image
-                    ?? $extTeacher?->profile_image
-                    ?? null;
+            if (!$teacherName && $extTeacher) {
+                $teacherName = trim(($extTeacher->first_name ?? '') . ' ' . ($extTeacher->last_name ?? ''));
+            }
 
-                return [
-                    'course_id' => $course->id,
-                    'course_name' => $course->course_name,
-                    'course_code' => $course->course_code,
-                    'department_name' => $course->department->department_name ?? 'N/A',
-                    'teacher_name' => $teacherName ?: 'មិនស្គាល់គ្រូបង្រៀន',
-                    'teacher_image' => $teacherImage,
-                    'total' => $cTotal,
-                    'present' => $cPresent,
-                    'absent' => $cAbsent,
-                    'late' => $cLate,
-                    'permission' => $cPermission,
-                    'rate' => $cRate,
-                ];
-            });
+            if (!$teacherName && isset($relTeacher->name)) {
+                $teacherName = $relTeacher->name;
+            }
+
+            $teacherImage = $relTeacher->profile_image
+                ?? $extTeacher?->profile_image
+                ?? null;
+
+            return [
+                'course_id' => $course->id,
+                'course_name' => $course->course_name,
+                'course_code' => $course->course_code,
+                'department_name' => $course->department->department_name ?? 'N/A',
+                'teacher_name' => $teacherName ?: 'មិនស្គាល់គ្រូបង្រៀន',
+                'teacher_image' => $teacherImage,
+                'total' => $cTotal,
+                'present' => $cPresent,
+                'absent' => $cAbsent,
+                'late' => $cLate,
+                'permission' => $cPermission,
+                'rate' => $cRate,
+            ];
+        });
 
         return response()->json([
             'summary' => [
@@ -391,7 +398,6 @@ class AdminReportController extends Controller
      */
     public function getAcademicReport(Request $request)
     {
-        // ✅ បង្កើត Base Query តែម្តង
         $baseQuery = Grade::query();
 
         if ($request->filled('department_id')) {
@@ -427,13 +433,17 @@ class AdminReportController extends Controller
             });
         }
 
-        $hasMidtermCol = Schema::hasColumn('grades', 'midterm_score');
-        $hasExamCol = Schema::hasColumn('grades', 'exam_score');
+        // ✅ ចងចាំការឆែកជួរឈរក្នុង Cache ដើម្បីកុំឱ្យរត់ Query ទៅឆែក information_schema រាល់ពេលហៅ API
+        $gradeCols = Cache::remember('lms_grades_optional_cols_v1', 86400, function () {
+            return [
+                'midterm' => Schema::hasColumn('grades', 'midterm_score'),
+                'exam' => Schema::hasColumn('grades', 'exam_score'),
+            ];
+        });
 
-        $midtermAvgSelect = $hasMidtermCol ? 'AVG(midterm_score) as avg_midterm,' : '0 as avg_midterm,';
-        $examAvgSelect = $hasExamCol ? 'AVG(exam_score) as avg_exam,' : '0 as avg_exam,';
+        $midtermAvgSelect = !empty($gradeCols['midterm']) ? 'AVG(midterm_score) as avg_midterm,' : '0 as avg_midterm,';
+        $examAvgSelect = !empty($gradeCols['exam']) ? 'AVG(exam_score) as avg_exam,' : '0 as avg_exam,';
 
-        // ✅ ប្រើ Query តែម្តងសម្រាប់ Summary ទាំងអស់ (គាំទ្រទាំងនិទ្ទេស A+, B+, C+ និង Passed/Failed)
         $summaryRaw = (clone $baseQuery)->selectRaw("
             COUNT(*) as total_graded,
             AVG(assignment_score) as avg_assignment,
@@ -452,22 +462,24 @@ class AdminReportController extends Controller
 
         $perPage = max(1, min(200, (int) ($request->per_page ?? 50)));
 
-        // ✅ បន្ថែម 'gender' ចូលទៅក្នុង select របស់ user(student)
+        // ✅ មិនទាញ profile_image ស្ទួនពីតារាង users ទេ
         $paginated = (clone $baseQuery)
             ->with([
-                'student:id,first_name,last_name,email,gender,profile_image',
+                'student:id,first_name,last_name,email,gender',
                 'course:id,course_name,course_code,department_id',
                 'course.department:id,department_name',
             ])
             ->orderBy('id', 'desc')
             ->paginate($perPage);
 
-        // ✅ ទាញ Student Profiles ទាំងអស់ក្នុង Query តែម្តង (ជៀសវាង N+1) ហើយថែម gender 
-        $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter();
-        $studentProfiles = Student::whereIn('user_id', $studentIds)
-            ->select('id', 'user_id', 'student_code', 'gender', 'batch_year', 'study_shift', 'profile_image')
-            ->get()
-            ->keyBy('user_id');
+        $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter()->values()->all();
+        $studentProfiles = !empty($studentIds)
+            ? Student::whereIn('user_id', $studentIds)
+                ->orWhereIn('id', $studentIds)
+                ->select('id', 'user_id', 'student_code', 'gender', 'batch_year', 'study_shift', 'profile_image')
+                ->get()
+                ->keyBy('user_id')
+            : collect();
 
         $gradeList = collect($paginated->items())->map(function ($g) use ($studentProfiles) {
             $studentUser = $g->student;
@@ -480,8 +492,8 @@ class AdminReportController extends Controller
                     ? trim(($studentUser->first_name ?? '') . ' ' . ($studentUser->last_name ?? ''))
                     : 'N/A',
                 'student_code' => $studentProfile->student_code ?? ('STD-' . $g->student_id),
-                'student_image' => $studentProfile->profile_image ?? $studentUser->profile_image ?? null,
-                'gender' => $studentProfile->gender ?? $studentUser->gender ?? null, // ✅ បញ្ជូន Gender ទៅ Frontend
+                'student_image' => $studentProfile->profile_image ?? null,
+                'gender' => $studentProfile->gender ?? $studentUser->gender ?? null,
                 'batch_year' => $studentProfile->batch_year ?? null,
                 'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
                 'course_name' => $g->course->course_name ?? 'N/A',

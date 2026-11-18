@@ -78,6 +78,59 @@ class AdminStudentController extends Controller
     }
 
     /**
+     * ✅ បង្រួមរូបថតសិស្សចាស់ៗក្នុង Database ដែលមានទំហំធំពេក (> 20KB) ឱ្យស្រាលបំផុត និងទុកក្នុង Cache
+     */
+    private function compressExistingAvatarIfHeavy(?string $rawImage, int $studentId): ?string
+    {
+        if (!$rawImage) {
+            return null;
+        }
+        $trimmed = trim($rawImage);
+        if ($trimmed === '' || strlen($trimmed) <= 20000 || !str_starts_with($trimmed, 'data:image')) {
+            return $trimmed ?: null;
+        }
+
+        $cacheKey = 'adm_std_avatar_v1_' . $studentId . '_' . md5(substr($trimmed, 0, 100) . strlen($trimmed));
+
+        return Cache::remember($cacheKey, 86400, function () use ($trimmed) {
+            if (!preg_match('/^data:([^;]+);base64,(.+)$/s', $trimmed, $m)) {
+                return $trimmed;
+            }
+            $binary = base64_decode(preg_replace('/\s+/', '', $m[2]));
+            if (!$binary || !function_exists('imagecreatefromstring')) {
+                return $trimmed;
+            }
+            try {
+                $src = @imagecreatefromstring($binary);
+                if ($src !== false) {
+                    $w = imagesx($src);
+                    $h = imagesy($src);
+                    $maxDim = 120;
+                    $newW = $w > $h ? $maxDim : max(1, (int) round(($w * $maxDim) / $h));
+                    $newH = $w > $h ? max(1, (int) round(($h * $maxDim) / $w)) : $maxDim;
+
+                    $dst = imagecreatetruecolor($newW, $newH);
+                    $white = imagecolorallocate($dst, 255, 255, 255);
+                    imagefilledrectangle($dst, 0, 0, $newW, $newH, $white);
+                    imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $w, $h);
+
+                    ob_start();
+                    imagejpeg($dst, null, 80);
+                    $out = ob_get_clean();
+                    imagedestroy($src);
+                    imagedestroy($dst);
+
+                    if ($out && strlen($out) < strlen($binary)) {
+                        return 'data:image/jpeg;base64,' . base64_encode($out);
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+            return $trimmed;
+        });
+    }
+
+    /**
      * រៀបចំទិន្នន័យសិស្សដោយភ្ជាប់រូបភាពពី user (បើខ្វះ) រួចលុបរូបភាពស្ទួនក្នុង relation user ចេញដើម្បីឱ្យ JSON ស្រាលជាងមុន 2 ដង
      */
     private function deduplicateStudentAvatar($student)
@@ -87,6 +140,9 @@ class AdminStudentController extends Controller
         }
         if (empty($student->profile_image) && !empty($student->user?->profile_image)) {
             $student->profile_image = $student->user->profile_image;
+        }
+        if (!empty($student->profile_image)) {
+            $student->profile_image = $this->compressExistingAvatarIfHeavy($student->profile_image, (int) $student->id);
         }
         if ($student->relationLoaded('user') && $student->user) {
             unset($student->user->profile_image);
@@ -167,7 +223,6 @@ class AdminStudentController extends Controller
             return $enrollments;
         }
 
-        // ✅ ទាញយកទាំងឈ្មោះ និង profile_image ពីតារាង teachers ក្នុង Query តែ ១ ដង
         $teacherRecords = DB::table('teachers')
             ->whereIn('id', $teacherIds)
             ->orWhereIn('user_id', $teacherIds)
@@ -194,7 +249,6 @@ class AdminStudentController extends Controller
             ->values()
             ->all();
 
-        // ✅ ទាញយកទាំងឈ្មោះ និង profile_image ពីតារាង users (เผื่อរូបថតស្ថិតក្នុងតារាង users)
         $userRecords = !empty($allUserIds)
             ? DB::table('users')
                 ->whereIn('id', $allUserIds)
@@ -252,9 +306,10 @@ class AdminStudentController extends Controller
         $perPage = max(1, min(500, (int) $request->input('per_page', 15)));
         $search = trim((string) $request->input('search', ''));
 
+        // ✅ មិនទាញ profile_image ស្ទួនពីតារាង users ទេ ដើម្បីកាត់បន្ថយការប្រើប្រាស់ RAM ៥០% ពេលទាញសិស្សរាប់រយនាក់
         $query = Student::with([
             'department:id,department_name',
-            'user:id,status,email,profile_image',
+            'user:id,status,email',
             'role:id,role_name',
         ])->select([
             'id', 'user_id', 'role_id', 'department_id',
@@ -305,7 +360,24 @@ class AdminStudentController extends Controller
 
         $students = $query->orderBy('id', 'desc')->paginate($perPage);
 
-        $items = collect($students->items())->map(function ($student) {
+        // ទាញ profile_image ពីតារាង users តែចំពោះសិស្សណាដែលក្នុងតារាង students គ្មានរូបប៉ុណ្ណោះ
+        $missingImgUserIds = collect($students->items())
+            ->filter(fn ($s) => empty($s->profile_image) && !empty($s->user_id))
+            ->pluck('user_id')
+            ->unique()
+            ->values()
+            ->all();
+
+        $fallbackAvatars = !empty($missingImgUserIds)
+            ? User::whereIn('id', $missingImgUserIds)
+                ->whereNotNull('profile_image')
+                ->pluck('profile_image', 'id')
+            : collect();
+
+        $items = collect($students->items())->map(function ($student) use ($fallbackAvatars) {
+            if (empty($student->profile_image) && isset($fallbackAvatars[$student->user_id])) {
+                $student->profile_image = $fallbackAvatars[$student->user_id];
+            }
             return $this->deduplicateStudentAvatar($student);
         })->all();
 
@@ -388,7 +460,7 @@ class AdminStudentController extends Controller
                 'profile_image' => $profileImagePath,
             ]);
 
-            $loaded = $student->load(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+            $loaded = $student->load(['department:id,department_name', 'user:id,status,email', 'role:id,role_name']);
             return $this->deduplicateStudentAvatar($loaded);
         });
 
@@ -497,7 +569,7 @@ class AdminStudentController extends Controller
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
-        $freshStudent = $student->fresh(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+        $freshStudent = $student->fresh(['department:id,department_name', 'user:id,status,email', 'role:id,role_name']);
         $this->deduplicateStudentAvatar($freshStudent);
 
         return response()->json([
@@ -534,9 +606,6 @@ class AdminStudentController extends Controller
         ]);
     }
 
-    /**
-     * ✅ ទាញយកបញ្ជីមុខវិជ្ជាដែលសិស្សបានចុះឈ្មោះ (គាំទ្រទាំង student->user_id និង student->id)
-     */
     public function getEnrollments(Student $student)
     {
         try {
@@ -559,17 +628,15 @@ class AdminStudentController extends Controller
                 'data' => $enrollments,
                 'message' => 'បានទាញយកបញ្ជីការចុះឈ្មោះដោយជោគជ័យ',
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Error fetching student enrollments: ' . $e->getMessage());
             return response()->json([
+                'data' => [],
                 'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យចុះឈ្មោះ',
             ], 500);
         }
     }
 
-    /**
-     * ✅ ចុះឈ្មោះមុខវិជ្ជាជូនសិស្សដោយប្រើ Batch Insert (លឿនបំផុត 0ms) និងបញ្ជូនបញ្ជីសរុបត្រឡប់ទៅវិញភ្លាមៗ
-     */
     public function enrollStudent(Request $request, Student $student)
     {
         try {
@@ -629,7 +696,7 @@ class AdminStudentController extends Controller
                 'message' => 'សូមពិនិត្យទិន្នន័យដែលបានបញ្ចូល',
                 'errors' => $e->errors(),
             ], 422);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Error enrolling student: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការចុះឈ្មោះមុខវិជ្ជាឱ្យសិស្ស: ' . $e->getMessage(),
@@ -637,17 +704,13 @@ class AdminStudentController extends Controller
         }
     }
 
-    /**
-     * Get all students for export without pagination
-     * GET /admin/students/export-all
-     */
     public function exportAll(Request $request)
     {
         if ($request->query('format') === 'json') {
             $students = [];
             Student::with([
                 'department:id,department_name',
-                'user:id,status,email,profile_image',
+                'user:id,status,email',
                 'role:id,role_name',
             ])
                 ->select([
@@ -659,7 +722,23 @@ class AdminStudentController extends Controller
                 ])
                 ->orderBy('id', 'asc')
                 ->chunk(500, function ($chunk) use (&$students) {
+                    $missingUserIds = $chunk
+                        ->filter(fn ($s) => empty($s->profile_image) && !empty($s->user_id))
+                        ->pluck('user_id')
+                        ->unique()
+                        ->values()
+                        ->all();
+
+                    $fallbackAvatars = !empty($missingUserIds)
+                        ? User::whereIn('id', $missingUserIds)
+                            ->whereNotNull('profile_image')
+                            ->pluck('profile_image', 'id')
+                        : collect();
+
                     foreach ($chunk as $student) {
+                        if (empty($student->profile_image) && isset($fallbackAvatars[$student->user_id])) {
+                            $student->profile_image = $fallbackAvatars[$student->user_id];
+                        }
                         $students[] = $this->deduplicateStudentAvatar($student);
                     }
                 });
@@ -745,10 +824,6 @@ class AdminStudentController extends Controller
         }, 200, $headers);
     }
 
-    /**
-     * Import multiple students
-     * POST /admin/students/import
-     */
     public function import(Request $request)
     {
         $request->validate([
@@ -849,9 +924,6 @@ class AdminStudentController extends Controller
         ]);
     }
 
-    /**
-     * បង្កើតអត្តលេខសិស្សដោយស្វ័យប្រវត្តិដោយមិនឱ្យស្ទួនគ្នាដាច់ខាត
-     */
     private function generateStudentCode(): string
     {
         $year = date('Y');
@@ -864,9 +936,6 @@ class AdminStudentController extends Controller
         return $code;
     }
 
-    /**
-     * ដំឡើងថ្នាក់សិស្ស (Bulk Promote Students)
-     */
     public function promoteStudents(Request $request)
     {
         $request->validate([
@@ -894,7 +963,7 @@ class AdminStudentController extends Controller
                 'message' => "បានដំឡើងថ្នាក់សិស្សចំនួន {$promotedCount} នាក់ ទៅកាន់ «{$request->target_year}» ដោយជោគជ័យ។",
                 'promoted_count' => $promotedCount,
             ], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('ការដំឡើងថ្នាក់សិស្សបរាជ័យ៖ ' . $e->getMessage());
 
@@ -905,9 +974,6 @@ class AdminStudentController extends Controller
         }
     }
 
-    /**
-     * ដកការចុះឈ្មោះមុខវិជ្ជាចេញពីសិស្ស (Unenroll Course)
-     */
     public function unenrollStudent(Student $student, $courseId)
     {
         try {
@@ -933,7 +999,7 @@ class AdminStudentController extends Controller
                 'success' => true,
                 'message' => 'បានលុបមុខវិជ្ជាចេញពីសិស្សដោយជោគជ័យ',
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Error unenrolling student course: ' . $e->getMessage());
 
             return response()->json([

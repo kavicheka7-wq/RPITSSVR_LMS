@@ -18,11 +18,63 @@ use Illuminate\Validation\Rule;
 
 class AdminController extends Controller
 {
+    /**
+     * ✅ បង្រួមរូបថត Base64 ធំៗឱ្យមកទំហំតូចល្មម (~4KB) និងរក្សាទុកក្នុង Cache ការពារកុំឱ្យគាំង RAM
+     */
+    private function compressAvatarIfHeavy(?string $rawImage, int $userId): ?string
+    {
+        if (!$rawImage) {
+            return null;
+        }
+        $trimmed = trim($rawImage);
+        if ($trimmed === '' || strlen($trimmed) <= 18000 || !str_starts_with($trimmed, 'data:image')) {
+            return $trimmed ?: null;
+        }
+
+        $cacheKey = 'adm_usr_avatar_v1_' . $userId . '_' . md5(substr($trimmed, 0, 100) . strlen($trimmed));
+
+        return Cache::remember($cacheKey, 86400, function () use ($trimmed) {
+            if (!preg_match('/^data:([^;]+);base64,(.+)$/s', $trimmed, $m)) {
+                return $trimmed;
+            }
+            $binary = base64_decode(preg_replace('/\s+/', '', $m[2]));
+            if (!$binary || !function_exists('imagecreatefromstring')) {
+                return $trimmed;
+            }
+            try {
+                $src = @imagecreatefromstring($binary);
+                if ($src !== false) {
+                    $w = imagesx($src);
+                    $h = imagesy($src);
+                    $maxDim = 96;
+                    $newW = $w > $h ? $maxDim : max(1, (int) round(($w * $maxDim) / $h));
+                    $newH = $w > $h ? max(1, (int) round(($h * $maxDim) / $w)) : $maxDim;
+
+                    $dst = imagecreatetruecolor($newW, $newH);
+                    $white = imagecolorallocate($dst, 255, 255, 255);
+                    imagefilledrectangle($dst, 0, 0, $newW, $newH, $white);
+                    imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $w, $h);
+
+                    ob_start();
+                    imagejpeg($dst, null, 78);
+                    $out = ob_get_clean();
+                    imagedestroy($src);
+                    imagedestroy($dst);
+
+                    if ($out && strlen($out) < strlen($binary)) {
+                        return 'data:image/jpeg;base64,' . base64_encode($out);
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+            return $trimmed;
+        });
+    }
+
     // --- User Management ---
 
     public function getUsers(Request $request)
     {
-        // ✅ បន្ថែម profile_image និងការស្វែងរកគ្រប់ជ្រុងជ្រោយ (ឈ្មោះ អ៊ីមែល ទូរស័ព្ទ និង filter តាម role_id)
         $query = User::with(['role:id,role_name'])
             ->select([
                 'id',
@@ -59,6 +111,13 @@ class AdminController extends Controller
         $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
         $users = $query->orderBy('id', 'desc')->paginate($perPage);
 
+        $users->getCollection()->transform(function ($u) {
+            if (!empty($u->profile_image)) {
+                $u->profile_image = $this->compressAvatarIfHeavy($u->profile_image, (int) $u->id);
+            }
+            return $u;
+        });
+
         return response()->json($users);
     }
 
@@ -84,7 +143,6 @@ class AdminController extends Controller
         $user = User::create($validated);
         $user->load('role:id,role_name');
 
-        // ✅ លុប Cache ពេលបង្កើត User ថ្មី
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
@@ -128,7 +186,6 @@ class AdminController extends Controller
         $user->update($validated);
         $user->load('role:id,role_name');
 
-        // ✅ ធ្វើបច្ចុប្បន្នភាពឈ្មោះ និងអ៊ីមែលក្នុងតារាង Teacher ឬ Student ប្រសិនបើមានភ្ជាប់គ្នា
         if ($user->teacher) {
             $user->teacher->update(array_filter([
                 'first_name' => $validated['first_name'] ?? null,
@@ -149,9 +206,9 @@ class AdminController extends Controller
             ], fn ($v) => !is_null($v)));
         }
 
-        // ✅ លុប Cache ពេលកែប្រែ User
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
+        Cache::forget('lms_auth_user_payload_' . $user->id);
 
         return response()->json([
             'user' => $user,
@@ -163,7 +220,6 @@ class AdminController extends Controller
     {
         $user = User::with('role')->findOrFail($id);
 
-        // ✅ ១. ការពារមិនឱ្យ Admin លុបគណនីខ្លួនឯងដែលកំពុងប្រើប្រាស់
         $currentAuthId = $request->user()?->id ?? auth()->id();
         if ($currentAuthId && (int) $currentAuthId === (int) $user->id) {
             return response()->json([
@@ -171,7 +227,6 @@ class AdminController extends Controller
             ], 422);
         }
 
-        // ✅ ២. ការពារមិនឱ្យលុបគណនី Admin ចុងក្រោយគេក្នុងប្រព័ន្ធ
         $isUserAdmin = (int) $user->role_id === 1 ||
             stripos((string) ($user->role?->role_name ?? ''), 'admin') !== false;
 
@@ -190,7 +245,6 @@ class AdminController extends Controller
             $user->delete();
         });
 
-        // ✅ លុប Cache ពេលលុប User
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
 
@@ -203,7 +257,6 @@ class AdminController extends Controller
 
     public function getStats()
     {
-        // ✅ Cache Time ៥ នាទី (៣០០ វិនាទី) និងគាំទ្រការរាប់ចំនួនគ្រប់ករណី
         $stats = Cache::remember('admin_dashboard_stats', 300, function () {
             $adminRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%admin%'])->first();
             $teacherRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%teacher%'])->first();
