@@ -663,12 +663,141 @@ class StudentController extends Controller
                 }
             }
 
-            $avgScore = Grade::whereIn('student_id', $studentIds)
-                ->whereNotNull('final_score')
-                ->avg('final_score');
+            // ✅ គណនាពិន្ទុមធ្យមភាគពីពិន្ទុកិច្ចការដែលគ្រូបានដាក់ (assignment_submissions) ពិន្ទុសំណួរប្រឡង និងតារាង grades
+            $courseIds = $coursesList->pluck('id')->filter()->values();
+            $grades = Grade::whereIn('student_id', $studentIds)->get()->keyBy('course_id');
 
-            if ($avgScore !== null) {
-                $stats['average_score'] = round((float) $avgScore, 2);
+            $allAssignments = $courseIds->isNotEmpty()
+                ? Assignment::select('id', 'course_id', 'total_score')
+                    ->whereIn('course_id', $courseIds)
+                    ->get()
+                : collect();
+            $allAssignIds = $allAssignments->pluck('id');
+
+            $gradedSubmissions = $allAssignIds->isNotEmpty()
+                ? AssignmentSubmission::select('id', 'assignment_id', 'student_id', 'score')
+                    ->whereIn('assignment_id', $allAssignIds)
+                    ->whereIn('student_id', $studentIds)
+                    ->whereNotNull('score')
+                    ->get()
+                    ->groupBy('assignment_id')
+                : collect();
+
+            $quizQuery = $courseIds->isNotEmpty()
+                ? Quiz::select('id', 'course_id', 'total_mark')->whereIn('course_id', $courseIds)
+                : null;
+            if ($quizQuery && $this->hasQuestionsMarkColumn()) {
+                $quizQuery->withSum('questions as questions_total_mark', 'mark');
+            }
+            $allQuizzes = $quizQuery ? $quizQuery->get() : collect();
+            $allQuizIds = $allQuizzes->pluck('id');
+
+            $gradedAttempts = $allQuizIds->isNotEmpty()
+                ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score')
+                    ->whereIn('quiz_id', $allQuizIds)
+                    ->whereIn('student_id', $studentIds)
+                    ->whereNotNull('score')
+                    ->whereNotNull('submitted_at')
+                    ->get()
+                    ->groupBy('quiz_id')
+                : collect();
+
+            // ១. គណនាភាគរយពិន្ទុកិច្ចការដែលគ្រូបានដាក់ឱ្យសិស្សផ្ទាល់
+            $assignEarned = 0;
+            $assignMax = 0;
+            foreach ($allAssignments as $asg) {
+                $subs = $gradedSubmissions->get($asg->id, collect());
+                if ($subs->isNotEmpty()) {
+                    $maxS = (float) ($asg->total_score ?? 20);
+                    if ($maxS > 0) {
+                        $assignEarned += (float) $subs->max('score');
+                        $assignMax += $maxS;
+                    }
+                }
+            }
+
+            // ២. គណនាភាគរយពិន្ទុប្រឡងកម្រងសំណួរ
+            $quizEarned = 0;
+            $quizMax = 0;
+            foreach ($allQuizzes as $qz) {
+                $atts = $gradedAttempts->get($qz->id, collect());
+                if ($atts->isNotEmpty()) {
+                    $maxM = (float) ($qz->total_mark ?? $qz->questions_total_mark ?? 20);
+                    if ($maxM > 0) {
+                        $quizEarned += (float) $atts->max('score');
+                        $quizMax += $maxM;
+                    }
+                }
+            }
+
+            // ៣. គណនាពិន្ទុរួមពីតារាង grades ឬពីពិន្ទុកិច្ចការ/កម្រងសំណួរដែលគ្រូបានដាក់
+            $courseScoresList = [];
+            foreach ($coursesList as $crs) {
+                $g = $grades->get($crs->id);
+                if ($g && $g->final_score !== null && (float) $g->final_score > 0) {
+                    $courseScoresList[] = (float) $g->final_score;
+                    continue;
+                }
+
+                // គណនាតាមផ្នែកដែលគ្រូបានដាក់ក្នុងមុខវិជ្ជានេះ
+                $cAssigns = $allAssignments->where('course_id', $crs->id);
+                $cEarnedA = 0;
+                $cMaxA = 0;
+                foreach ($cAssigns as $ca) {
+                    $sList = $gradedSubmissions->get($ca->id, collect());
+                    if ($sList->isNotEmpty()) {
+                        $m = (float) ($ca->total_score ?? 20);
+                        if ($m > 0) {
+                            $cEarnedA += (float) $sList->max('score');
+                            $cMaxA += $m;
+                        }
+                    }
+                }
+                $autoA = $cMaxA > 0 ? round(($cEarnedA / $cMaxA) * 100, 2) : null;
+
+                $cQuizzes = $allQuizzes->where('course_id', $crs->id);
+                $cEarnedQ = 0;
+                $cMaxQ = 0;
+                foreach ($cQuizzes as $cq) {
+                    $aList = $gradedAttempts->get($cq->id, collect());
+                    if ($aList->isNotEmpty()) {
+                        $m = (float) ($cq->total_mark ?? $cq->questions_total_mark ?? 20);
+                        if ($m > 0) {
+                            $cEarnedQ += (float) $aList->max('score');
+                            $cMaxQ += $m;
+                        }
+                    }
+                }
+                $autoQ = $cMaxQ > 0 ? round(($cEarnedQ / $cMaxQ) * 100, 2) : null;
+
+                $aScore = ($g && $g->assignment_score !== null) ? (float) $g->assignment_score : $autoA;
+                $qScore = ($g && $g->quiz_score !== null) ? (float) $g->quiz_score : $autoQ;
+                $mScore = ($g && $g->midterm_score !== null) ? (float) $g->midterm_score : null;
+                $eScore = ($g && isset($g->exam_score) && $g->exam_score !== null) ? (float) $g->exam_score : null;
+
+                // បើគ្រូបានដាក់ពិន្ទុកិច្ចការ យើងគណនាភាគរយឱ្យលោតឡើងភ្លាមៗ
+                if ($aScore !== null && $mScore === null && $eScore === null && $qScore === null) {
+                    $courseScoresList[] = $aScore;
+                } else {
+                    $wSum = 0;
+                    $wTotal = 0;
+                    if ($aScore !== null) { $wSum += $aScore * 0.20; $wTotal += 0.20; }
+                    if ($qScore !== null) { $wSum += $qScore * 0.20; $wTotal += 0.20; }
+                    if ($mScore !== null) { $wSum += $mScore * 0.25; $wTotal += 0.25; }
+                    if ($eScore !== null) { $wSum += $eScore * 0.35; $wTotal += 0.35; }
+
+                    if ($wTotal > 0) {
+                        $courseScoresList[] = round($wSum / $wTotal, 2);
+                    }
+                }
+            }
+
+            if ($assignMax > 0 && empty($courseScoresList)) {
+                $stats['average_score'] = round(($assignEarned / $assignMax) * 100, 2);
+            } elseif (!empty($courseScoresList)) {
+                $stats['average_score'] = round(array_sum($courseScoresList) / count($courseScoresList), 2);
+            } elseif ($quizMax > 0) {
+                $stats['average_score'] = round(($quizEarned / $quizMax) * 100, 2);
             }
 
             return response()->json([

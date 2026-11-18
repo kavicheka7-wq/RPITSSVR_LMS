@@ -56,6 +56,7 @@ const STUDENT_DASH_MEM_CACHE = {
   enrollments: null,
   assignments: null,
   quizzes: null,
+  scores: null,
   lastSyncedAt: 0,
   prefetchedUid: null,
 };
@@ -286,17 +287,18 @@ const extractArrayFromRes = (resData) => {
   return [];
 };
 
-// ✅ ទាញទិន្នន័យកិច្ចការ និងកម្រងសំណួរសម្រាប់បង្ហាញលើ Dashboard និងទាញទំព័រផ្សេងទុកមុនដោយសន្សំសំចៃបំផុត (ការពារកុំឱ្យស្ទះ Server ពេលសិស្សរាប់ពាន់នាក់ចូលព្រមគ្នា)
+// ✅ ទាញទិន្នន័យកិច្ចការ, កម្រងសំណួរ និងពិន្ទុសម្រាប់បង្ហាញលើ Dashboard
 const syncDashboardTasksAndPrefetch = (
   uid,
   forceRefresh,
   onAssignmentsSynced,
   onQuizzesSynced,
-  onCoursesSynced
+  onCoursesSynced,
+  onScoresSynced
 ) => {
   const effectiveUid = uid || 'default_student';
 
-  // ១. ទាញបញ្ជីកិច្ចការសិស្សសម្រាប់បង្ហាញក្នុងកាត «កិច្ចការថ្មីៗ»
+  // ១. ទាញបញ្ជីកិច្ចការសិស្សសម្រាប់បង្ហាញក្នុងកាត «កិច្ចការថ្មីៗ» និងគណនា % ពិន្ទុកិច្ចការ
   api
     .get('/student/assignments', { params: { per_page: 50 } })
     .then((res) => {
@@ -332,7 +334,26 @@ const syncDashboardTasksAndPrefetch = (
     })
     .catch(() => {});
 
-  // ៣. Background Prefetch សម្រាប់ទំព័រផ្សេងៗ (ធ្វើតែ ១ ដងគត់ក្នុង ១ Session និងទាញតែទំព័រណាដែលមិនទាន់មានក្នុង Cache ប៉ុណ្ណោះ)
+  // ៣. ទាញពិន្ទុតាមមុខវិជ្ជា (ដើម្បីគណនាភាគរយទឹករលកឱ្យត្រូវ ១០០%)
+  api
+    .get('/student/scores')
+    .then((res) => {
+      if (res.data?.error_debug) return;
+      const data = extractArrayFromRes(res.data);
+      const slim = saveCoursesAndAvatarsFast(data);
+      STUDENT_DASH_MEM_CACHE.scores = slim;
+      if (typeof onScoresSynced === 'function') {
+        onScoresSynced(slim);
+      }
+      try {
+        const str = JSON.stringify(slim);
+        localStorage.setItem(getScoresCacheKey(effectiveUid), str);
+        localStorage.setItem(CACHE_KEY_SHARED_SCORES, str);
+      } catch {}
+    })
+    .catch(() => {});
+
+  // ៤. Background Prefetch សម្រាប់ទំព័រមេរៀន (ធ្វើតែ ១ ដងគត់ក្នុង ១ Session បើមិនទាន់មានក្នុង Cache)
   if (!forceRefresh && STUDENT_DASH_MEM_CACHE.prefetchedUid !== effectiveUid) {
     STUDENT_DASH_MEM_CACHE.prefetchedUid = effectiveUid;
 
@@ -483,6 +504,7 @@ const StudentDashboard = () => {
     STUDENT_DASH_MEM_CACHE.enrollments = null;
     STUDENT_DASH_MEM_CACHE.assignments = null;
     STUDENT_DASH_MEM_CACHE.quizzes = null;
+    STUDENT_DASH_MEM_CACHE.scores = null;
     STUDENT_DASH_MEM_CACHE.lastSyncedAt = 0;
     STUDENT_DASH_MEM_CACHE.prefetchedUid = null;
   }
@@ -542,6 +564,23 @@ const StudentDashboard = () => {
       readStorageJson(CACHE_KEY_SHARED_QUIZZES, []);
     if (Array.isArray(cached) && cached.length > 0) {
       STUDENT_DASH_MEM_CACHE.quizzes = cached;
+      return cached;
+    }
+    return [];
+  });
+
+  const [scoresList, setScoresList] = useState(() => {
+    if (
+      Array.isArray(STUDENT_DASH_MEM_CACHE.scores) &&
+      STUDENT_DASH_MEM_CACHE.scores.length > 0
+    ) {
+      return STUDENT_DASH_MEM_CACHE.scores;
+    }
+    const cached =
+      readStorageJson(getScoresCacheKey(currentStudentId), null) ||
+      readStorageJson(CACHE_KEY_SHARED_SCORES, []);
+    if (Array.isArray(cached) && cached.length > 0) {
+      STUDENT_DASH_MEM_CACHE.scores = cached;
       return cached;
     }
     return [];
@@ -675,60 +714,6 @@ const StudentDashboard = () => {
     [language]
   );
 
-  const averageScoreNum = useMemo(() => {
-    const raw = Number(stats?.average_score || 0);
-    return Math.min(100, Math.max(0, Math.round(raw)));
-  }, [stats]);
-
-  const masteryInfo = useMemo(() => {
-    if (averageScoreNum >= 50) {
-      return {
-        label:
-          averageScoreNum >= 85
-            ? t('និស្សិតឆ្នើម', 'Excellent')
-            : t('និស្សិតសកម្ម', 'Good Standing'),
-        statusText: t('ប្រឡងជាប់', 'Passed'),
-        desc:
-          averageScoreNum >= 85
-            ? t('លទ្ធផលសិក្សាល្អប្រសើរណាស់', 'Outstanding Performance')
-            : t('កំពុងដំណើរការសិក្សាបានល្អ', 'Good Academic Progress'),
-        badgeClass:
-          'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
-        statusTextColor: 'text-emerald-600 dark:text-emerald-400',
-        ringColor: '#10b981',
-        waveFrontColor: 'rgba(16, 185, 129, 0.78)',
-        waveBackColor: 'rgba(52, 211, 153, 0.45)',
-      };
-    }
-    if (averageScoreNum > 0) {
-      return {
-        label: t('ត្រូវប្រឹងប្រែងបន្ថែម', 'Needs Improvement'),
-        statusText: t('ប្រឡងធ្លាក់', 'Failed'),
-        desc: t(
-          'សូមព្យាយាមធ្វើកិច្ចការ និងសំណួរខ្លីបន្ថែម',
-          'Keep practicing assignments & quizzes'
-        ),
-        badgeClass:
-          'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30',
-        statusTextColor: 'text-rose-600 dark:text-rose-400',
-        ringColor: '#f43f5e',
-        waveFrontColor: 'rgba(244, 63, 94, 0.78)',
-        waveBackColor: 'rgba(251, 113, 133, 0.45)',
-      };
-    }
-    return {
-      label: t('និស្សិតកំពុងសិក្សា', 'Active Student'),
-      statusText: t('រង់ចាំពិន្ទុ', 'Pending'),
-      desc: t('បន្តចូលរៀន និងធ្វើលំហាត់បន្ថែម', 'Keep studying & practicing'),
-      badgeClass:
-        'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30',
-      statusTextColor: 'text-indigo-600 dark:text-indigo-400',
-      ringColor: '#6366f1',
-      waveFrontColor: 'rgba(99, 102, 241, 0.72)',
-      waveBackColor: 'rgba(129, 140, 248, 0.42)',
-    };
-  }, [averageScoreNum, t]);
-
   const enrichedEnrollments = useMemo(() => {
     if (!Array.isArray(enrollments)) return [];
     return enrollments.map((item, idx) => ({
@@ -796,6 +781,139 @@ const StudentDashboard = () => {
       return new Date(b.start_date || 0) - new Date(a.start_date || 0);
     });
   }, [quizzes]);
+
+  // ✅ គណនាភាគរយពិន្ទុពីកិច្ចការដែលគ្រូបានដាក់ឱ្យសិស្ស (និងពិន្ទុក្នុងតារាងពិន្ទុ) ដើម្បីឱ្យលោត % និងទឹករលកឡើងតាមពិន្ទុគ្រូដាក់ភ្លាមៗ!
+  const averageScoreNum = useMemo(() => {
+    // ១. គណនាភាគរយពីពិន្ទុកិច្ចការដែលគ្រូបានដាក់ឱ្យសិស្សផ្ទាល់ (teacherAssignedHomework)
+    let gradedAssignEarned = 0;
+    let gradedAssignMax = 0;
+    teacherAssignedHomework.forEach((a) => {
+      if (a.isGraded && a.resolvedSubmission) {
+        const sc = Number(a.resolvedSubmission.score);
+        const mx =
+          Number(
+            a.total_score ||
+              a.total_marks ||
+              a.marks ||
+              a.total_mark ||
+              a.max_score ||
+              20
+          ) || 20;
+        if (!isNaN(sc) && mx > 0) {
+          gradedAssignEarned += sc;
+          gradedAssignMax += mx;
+        }
+      }
+    });
+
+    if (gradedAssignMax > 0) {
+      const assignPercent = Math.round(
+        (gradedAssignEarned / gradedAssignMax) * 100
+      );
+      return Math.min(100, Math.max(0, assignPercent));
+    }
+
+    // ២. បើនៅក្នុងតារាងពិន្ទុ (/student/scores) មានពិន្ទុកិច្ចការ ឬពិន្ទុសរុបដែលគ្រូដាក់
+    if (Array.isArray(scoresList) && scoresList.length > 0) {
+      const validCourseScores = [];
+      scoresList.forEach((row) => {
+        const aScore =
+          row?.assignment_score ?? row?.auto_assignment_score ?? null;
+        const fScore = row?.final_score ?? null;
+        if (aScore !== null && aScore !== '' && !isNaN(Number(aScore))) {
+          validCourseScores.push(Number(aScore));
+        } else if (fScore !== null && fScore !== '' && !isNaN(Number(fScore))) {
+          validCourseScores.push(Number(fScore));
+        }
+      });
+      if (validCourseScores.length > 0) {
+        const avg =
+          validCourseScores.reduce((acc, v) => acc + v, 0) /
+          validCourseScores.length;
+        return Math.min(100, Math.max(0, Math.round(avg)));
+      }
+    }
+
+    // ៣. បើមានពី stats.average_score របស់ Backend
+    const rawStatAvg = Number(stats?.average_score || 0);
+    if (rawStatAvg > 0) {
+      return Math.min(100, Math.max(0, Math.round(rawStatAvg)));
+    }
+
+    // ៤. បើមានពិន្ទុប្រឡងកម្រងសំណួរ (Quizzes)
+    let gradedQuizEarned = 0;
+    let gradedQuizMax = 0;
+    teacherAssignedQuizzes.forEach((q) => {
+      if (
+        q.isDone &&
+        q.resolvedAttempt?.score !== null &&
+        q.resolvedAttempt?.score !== undefined
+      ) {
+        const sc = Number(q.resolvedAttempt.score);
+        const mx = Number(q.total_mark || q.total_marks || 20) || 20;
+        if (!isNaN(sc) && mx > 0) {
+          gradedQuizEarned += sc;
+          gradedQuizMax += mx;
+        }
+      }
+    });
+
+    if (gradedQuizMax > 0) {
+      const quizPercent = Math.round((gradedQuizEarned / gradedQuizMax) * 100);
+      return Math.min(100, Math.max(0, quizPercent));
+    }
+
+    return 0;
+  }, [teacherAssignedHomework, scoresList, stats, teacherAssignedQuizzes]);
+
+  const masteryInfo = useMemo(() => {
+    if (averageScoreNum >= 50) {
+      return {
+        label:
+          averageScoreNum >= 85
+            ? t('និស្សិតឆ្នើម', 'Excellent')
+            : t('និស្សិតសកម្ម', 'Good Standing'),
+        statusText: t('ប្រឡងជាប់', 'Passed'),
+        desc:
+          averageScoreNum >= 85
+            ? t('លទ្ធផលសិក្សាល្អប្រសើរណាស់', 'Outstanding Performance')
+            : t('កំពុងដំណើរការសិក្សាបានល្អ', 'Good Academic Progress'),
+        badgeClass:
+          'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
+        statusTextColor: 'text-emerald-600 dark:text-emerald-400',
+        ringColor: '#10b981',
+        waveFrontColor: 'rgba(16, 185, 129, 0.78)',
+        waveBackColor: 'rgba(52, 211, 153, 0.45)',
+      };
+    }
+    if (averageScoreNum > 0) {
+      return {
+        label: t('ត្រូវប្រឹងប្រែងបន្ថែម', 'Needs Improvement'),
+        statusText: t('ប្រឡងធ្លាក់', 'Failed'),
+        desc: t(
+          'សូមព្យាយាមធ្វើកិច្ចការ និងសំណួរខ្លីបន្ថែម',
+          'Keep practicing assignments & quizzes'
+        ),
+        badgeClass:
+          'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30',
+        statusTextColor: 'text-rose-600 dark:text-rose-400',
+        ringColor: '#f43f5e',
+        waveFrontColor: 'rgba(244, 63, 94, 0.78)',
+        waveBackColor: 'rgba(251, 113, 133, 0.45)',
+      };
+    }
+    return {
+      label: t('និស្សិតកំពុងសិក្សា', 'Active Student'),
+      statusText: t('រង់ចាំពិន្ទុ', 'Pending'),
+      desc: t('បន្តចូលរៀន និងធ្វើលំហាត់បន្ថែម', 'Keep studying & practicing'),
+      badgeClass:
+        'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30',
+      statusTextColor: 'text-indigo-600 dark:text-indigo-400',
+      ringColor: '#6366f1',
+      waveFrontColor: 'rgba(99, 102, 241, 0.72)',
+      waveBackColor: 'rgba(129, 140, 248, 0.42)',
+    };
+  }, [averageScoreNum, t]);
 
   const doneHomeworkCount = useMemo(
     () => teacherAssignedHomework.filter((a) => a.isDone).length,
@@ -946,6 +1064,9 @@ const StudentDashboard = () => {
         },
         (crsData) => {
           setEnrollments((prev) => (prev.length === 0 ? crsData : prev));
+        },
+        (scrData) => {
+          setScoresList(scrData);
         }
       );
 
@@ -1002,7 +1123,6 @@ const StudentDashboard = () => {
         });
         const resData = dashRes?.data?.data || dashRes?.data || {};
 
-        // ការពារកុំឱ្យយកទិន្នន័យទទេពេល Server មាន Error ទៅលុបជាន់លើស្ថិតិចាស់ក្នុង Cache
         if (resData?.error_debug) {
           return;
         }
@@ -1023,7 +1143,10 @@ const StudentDashboard = () => {
         const validEnrollments = Array.isArray(rawCourses) ? rawCourses : [];
 
         setStats(newStats);
-        if (validEnrollments.length > 0 || !STUDENT_DASH_MEM_CACHE.enrollments?.length) {
+        if (
+          validEnrollments.length > 0 ||
+          !STUDENT_DASH_MEM_CACHE.enrollments?.length
+        ) {
           setEnrollments(validEnrollments);
           STUDENT_DASH_MEM_CACHE.enrollments = validEnrollments;
         }
@@ -1043,6 +1166,7 @@ const StudentDashboard = () => {
             id: sub.assignment_id || sub.assignment?.id || sub.id,
             title: sub.assignment?.title || 'កិច្ចការសិស្ស',
             due_date: sub.assignment?.due_date || sub.submitted_at,
+            total_score: sub.assignment?.total_score ?? 20,
             submission: sub,
           }));
           setAssignments((prev) => (prev.length === 0 ? fallbackAsg : prev));
@@ -1059,6 +1183,7 @@ const StudentDashboard = () => {
             id: att.quiz_id || att.quiz?.id || att.id,
             title: att.quiz?.title || 'កម្រងសំណួរប្រឡង',
             end_date: att.quiz?.end_date || att.submitted_at,
+            total_mark: att.quiz?.total_mark ?? 20,
             attempt: att,
           }));
           setQuizzes((prev) => (prev.length === 0 ? fallbackQz : prev));
@@ -1091,7 +1216,7 @@ const StudentDashboard = () => {
     [currentStudentId]
   );
 
-  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 15 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
+  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 12 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
   useEffect(() => {
     fetchDashboardData(false);
 
@@ -1105,7 +1230,7 @@ const StudentDashboard = () => {
       if (document.visibilityState === 'visible') {
         fetchDashboardData(true);
       }
-    }, 15000);
+    }, 12000);
 
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
@@ -1136,14 +1261,8 @@ const StudentDashboard = () => {
       ? Math.round((totalCompletedActivities / totalActivitiesCount) * 100)
       : 0;
 
-  const liquidLevelPercent = useMemo(() => {
-    if (averageScoreNum > 0) return Math.min(100, Math.max(12, averageScoreNum));
-    if (activityCompletionPercent > 0) {
-      return Math.min(100, Math.max(14, activityCompletionPercent));
-    }
-    return 14;
-  }, [averageScoreNum, activityCompletionPercent]);
-
+  // ✅ សំខាន់បំផុត៖ ឱ្យកម្ពស់ទឹករលកក្នុងរង្វង់ឡើងតាមលេខ % នៃពិន្ទុដែលគ្រូបានដាក់ឱ្យសិស្ស ១០០% (បើ 0% គឺទឹក 0%, បើ 80% គឺទឹកឡើងដល់ 80%)
+  const liquidLevelPercent = averageScoreNum;
   const isLiquidDarkText = liquidLevelPercent < 55;
 
   const statCards = [
@@ -1372,19 +1491,21 @@ const StudentDashboard = () => {
           <div className="my-4 sm:my-5 flex items-center justify-center gap-4 sm:gap-5">
             <div className="relative w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center shrink-0">
               <div className="std-liquid-inner absolute inset-[8px] sm:inset-[9px] rounded-full overflow-hidden bg-slate-100/90 dark:bg-slate-900/90 z-0 shadow-inner">
-                <div
-                  className="absolute bottom-0 left-0 right-0 transition-all duration-1000 ease-out"
-                  style={{ height: `${liquidLevelPercent}%` }}
-                >
+                {liquidLevelPercent > 0 && (
                   <div
-                    className="std-liquid-wave-back absolute left-1/2 w-[220%] pb-[220%] rounded-[43%]"
-                    style={{ backgroundColor: masteryInfo.waveBackColor }}
-                  />
-                  <div
-                    className="std-liquid-wave-front absolute left-1/2 w-[220%] pb-[220%] rounded-[40%]"
-                    style={{ backgroundColor: masteryInfo.waveFrontColor }}
-                  />
-                </div>
+                    className="absolute bottom-0 left-0 right-0 transition-all duration-1000 ease-out"
+                    style={{ height: `${liquidLevelPercent}%` }}
+                  >
+                    <div
+                      className="std-liquid-wave-back absolute left-1/2 w-[220%] pb-[220%] rounded-[43%]"
+                      style={{ backgroundColor: masteryInfo.waveBackColor }}
+                    />
+                    <div
+                      className="std-liquid-wave-front absolute left-1/2 w-[220%] pb-[220%] rounded-[40%]"
+                      style={{ backgroundColor: masteryInfo.waveFrontColor }}
+                    />
+                  </div>
+                )}
               </div>
 
               <svg
