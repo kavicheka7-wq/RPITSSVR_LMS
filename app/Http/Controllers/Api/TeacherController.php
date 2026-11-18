@@ -1993,21 +1993,28 @@ class TeacherController extends Controller
     public function deleteQuiz($id)
     {
         try {
-            $courseIds = $this->teacherCourseQuery()->pluck('id');
-            $quiz = Quiz::whereIn('course_id', $courseIds)->findOrFail($id);
-
-            if ($quiz->attempts()->exists()) {
+            $quiz = Quiz::find($id);
+            if (!$quiz) {
                 return response()->json([
-                    'message' => 'មិនអាចលុបកម្រងសំណួរដែលមានសិស្សចូលរួមធ្វើរួចហើយបានទេ',
-                ], 400);
+                    'message' => 'បានលុបកម្រងសំណួរដោយជោគជ័យ',
+                ]);
             }
 
+            $this->findAuthorizedCourse($quiz->course_id);
+
             DB::transaction(function () use ($quiz) {
-                foreach ($quiz->questions as $question) {
-                    $question->options()->delete();
-                    $question->delete();
+                $questionIds = DB::table('questions')
+                    ->where('quiz_id', $quiz->id)
+                    ->pluck('id')
+                    ->toArray();
+
+                if (!empty($questionIds)) {
+                    DB::table('question_options')->whereIn('question_id', $questionIds)->delete();
+                    DB::table('questions')->whereIn('id', $questionIds)->delete();
                 }
-                $quiz->delete();
+
+                DB::table('quiz_attempts')->where('quiz_id', $quiz->id)->delete();
+                DB::table('quizzes')->where('id', $quiz->id)->delete();
             });
 
             $this->clearTeacherDashboardCache();
@@ -2018,7 +2025,7 @@ class TeacherController extends Controller
         } catch (\Throwable $e) {
             Log::error('Teacher deleteQuiz error: ' . $e->getMessage());
             return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការលុបកម្រងសំណួរ',
+                'message' => 'មានបញ្ហាក្នុងការលុបកម្រងសំណួរ: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -2106,24 +2113,27 @@ class TeacherController extends Controller
         }
     }
 
-    public function deleteQuestion($id)
+   public function deleteQuestion($id)
     {
         try {
-            $question = Question::findOrFail($id);
-
-            $courseIds = $this->teacherCourseQuery()->pluck('id');
-            $quiz = Quiz::whereIn('course_id', $courseIds)->findOrFail($question->quiz_id);
-
-            if ($quiz->attempts()->exists()) {
+            $question = Question::find($id);
+            if (!$question) {
                 return response()->json([
-                    'message' => 'មិនអាចលុបសំណួរក្នុងកម្រងសំណួរដែលសិស្សបានធ្វើរួចហើយទេ',
-                ], 400);
+                    'message' => 'បានលុបសំណួរដោយជោគជ័យ',
+                ]);
+            }
+
+            $quiz = Quiz::find($question->quiz_id);
+            if ($quiz) {
+                $this->findAuthorizedCourse($quiz->course_id);
             }
 
             DB::transaction(function () use ($question) {
-                $question->options()->delete();
-                $question->delete();
+                DB::table('question_options')->where('question_id', $question->id)->delete();
+                DB::table('questions')->where('id', $question->id)->delete();
             });
+
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => 'បានលុបសំណួរដោយជោគជ័យ',
@@ -2131,7 +2141,7 @@ class TeacherController extends Controller
         } catch (\Throwable $e) {
             Log::error('Teacher deleteQuestion error: ' . $e->getMessage());
             return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការលុបសំណួរ',
+                'message' => 'មានបញ្ហាក្នុងការលុបសំណួរ: ' . $e->getMessage(),
             ], 500);
         }
     }

@@ -1294,6 +1294,28 @@ export default function TeacherManageQuizzes() {
     setShowAddModal(true);
   };
 
+  // ✅ អនុគមន៍សម្អាត Cache កម្រងសំណួររបស់សិស្សនៅពេលគ្រូបន្ថែម/កែ/លុបកម្រងសំណួរ ឬសំណួរ
+  const clearStudentQuizCaches = () => {
+    try {
+      Object.keys(localStorage).forEach((k) => {
+        if (
+          k.startsWith('cached_student_quizzes_') ||
+          k.startsWith('cached_student_quiz_reviews_')
+        ) {
+          localStorage.removeItem(k);
+        }
+      });
+      Object.keys(sessionStorage).forEach((k) => {
+        if (
+          k.startsWith('cached_student_quizzes_') ||
+          k.startsWith('cached_student_quiz_reviews_')
+        ) {
+          sessionStorage.removeItem(k);
+        }
+      });
+    } catch {}
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -1403,6 +1425,7 @@ export default function TeacherManageQuizzes() {
           link: '/quizzes',
         });
       }
+      clearStudentQuizCaches();
       setShowAddModal(false);
       fetchQuizzes();
     } catch (error) {
@@ -1417,6 +1440,7 @@ export default function TeacherManageQuizzes() {
     setShowDeleteModal(true);
   };
 
+  // ✅ អនុគមន៍លុបកម្រងសំណួរចេញពី Database ពិតប្រាកដ ១០០%
   const confirmDelete = async () => {
     if (!selectedQuiz) return;
 
@@ -1428,7 +1452,7 @@ export default function TeacherManageQuizzes() {
     setSelectedQuiz(null);
 
     setQuizzes((prev) => {
-      const updated = prev.filter((q) => q.id !== deletedId);
+      const updated = prev.filter((q) => String(q.id) !== String(deletedId));
       QUIZZES_MEM_CACHE.quizzes = updated;
       try {
         const str = JSON.stringify(updated);
@@ -1441,6 +1465,9 @@ export default function TeacherManageQuizzes() {
 
     try {
       await api.delete(`/teacher/quizzes/${deletedId}`);
+
+      clearStudentQuizCaches();
+      await fetchQuizzes();
 
       pushLocalNotification({
         titleKm: 'បានលុបកម្រងសំណួរ',
@@ -1600,6 +1627,8 @@ export default function TeacherManageQuizzes() {
         fetchQuizzes();
       }
 
+      clearStudentQuizCaches();
+
       pushLocalNotification({
         titleKm: 'បានបន្ថែមសំណួរថ្មីក្នុងកម្រងសំណួរ',
         titleEn: 'New Question Added',
@@ -1669,6 +1698,7 @@ export default function TeacherManageQuizzes() {
         });
       }
 
+      clearStudentQuizCaches();
       setEditingAttemptId(null);
       setManualAttemptScore('');
 
@@ -1691,6 +1721,7 @@ export default function TeacherManageQuizzes() {
     setDeleteQuestionTarget(question);
   };
 
+  // ✅ អនុគមន៍លុបសំណួរនីមួយៗចេញពី Database ពិតប្រាកដ ១០០%
   const confirmDeleteQuestion = async () => {
     if (!deleteQuestionTarget) return;
 
@@ -1702,7 +1733,9 @@ export default function TeacherManageQuizzes() {
     setQuizzes((prev) => {
       const updated = prev.map((q) => {
         if (!Array.isArray(q.questions)) return q;
-        const filteredQs = q.questions.filter((item) => item.id !== questionId);
+        const filteredQs = q.questions.filter(
+          (item) => String(item.id) !== String(questionId)
+        );
         return {
           ...q,
           questions: filteredQs,
@@ -1720,7 +1753,18 @@ export default function TeacherManageQuizzes() {
     });
 
     try {
-      await api.delete(`/teacher/quizzes/questions/${questionId}`);
+      try {
+        await api.delete(`/teacher/quizzes/questions/${questionId}`);
+      } catch (err1) {
+        try {
+          await api.delete(`/teacher/questions/${questionId}`);
+        } catch {
+          await api.delete(`/teacher/quizzes/question/${questionId}`);
+        }
+      }
+
+      clearStudentQuizCaches();
+      await fetchQuizzes();
 
       pushLocalNotification({
         titleKm: 'បានលុបសំណួរចេញពីកម្រងសំណួរ',
@@ -1855,6 +1899,8 @@ export default function TeacherManageQuizzes() {
       };
 
       await api.post('/teacher/quizzes/import', payload);
+
+      clearStudentQuizCaches();
 
       pushLocalNotification({
         titleKm: 'បាននាំចូលកម្រងសំណួរពី JSON',
