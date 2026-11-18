@@ -10,7 +10,10 @@ use App\Models\Teacher;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class TeacherCourseController extends Controller
 {
@@ -103,81 +106,90 @@ class TeacherCourseController extends Controller
     }
 
     /**
-     * Get all courses taught by the logged-in teacher
+     * ✅ Get all courses taught by the logged-in teacher (គាំទ្រការ Login គណនីតែមួយច្រើននាក់ព្រមគ្នាដោយមិនគាំង 500)
      * GET /teacher/courses
      */
     public function index(Request $request)
     {
         try {
             $user = Auth::user();
+            if (!$user) {
+                return response()->json([
+                    'data' => [],
+                    'total' => 0,
+                    'message' => 'សូមចូលប្រព័ន្ធម្ដងទៀត (Unauthenticated)',
+                ], 401);
+            }
+
             $teacher = $this->resolveTeacherRecord($user);
             $teacherIds = $this->getTeacherIds($user);
 
             if (empty($teacherIds)) {
                 return response()->json([
+                    'data' => [],
+                    'total' => 0,
                     'message' => 'អ្នកមិនមែនជាគ្រូបង្រៀនទេ',
                 ], 403);
             }
 
-            $query = Course::with(['department:id,department_name,department_code'])
-                ->withCount([
-                    'enrollments as students_count' => function ($q) {
-                        $q->where(function ($sub) {
-                            $sub->whereNull('status')
-                                ->orWhere('status', 'active')
-                                ->orWhere('status', '');
-                        });
-                    },
-                    'lessons',
-                    'assignments',
-                    'quizzes',
-                ])
-                ->whereIn('teacher_id', $teacherIds);
+            $deptFilter = (string) $request->input('department_id', '');
+            $searchFilter = trim((string) $request->input('search', ''));
 
-            if ($request->filled('department_id')) {
-                $query->where('department_id', $request->department_id);
-            }
+            // ✅ ប្រើ Cache រយៈពេល ២០ វិនាទី ការពារករណីគណនីតែមួយ Login ២-៣ នាក់ព្រមគ្នា មិនឱ្យរត់ Query ជាន់គ្នាគាំង Server
+            $cacheKey = 'teacher_courses_fast_v3_' . $user->id . '_' . md5($deptFilter . '|' . $searchFilter);
 
-            if ($request->filled('search')) {
-                $keyword = trim((string) $request->search);
-                $query->where(function ($q) use ($keyword) {
-                    $q->where('course_name', 'LIKE', "%{$keyword}%")
-                      ->orWhere('course_code', 'LIKE', "%{$keyword}%")
-                      ->orWhere('description', 'LIKE', "%{$keyword}%")
-                      ->orWhereHas('department', function ($dq) use ($keyword) {
-                          $dq->where('department_name', 'LIKE', "%{$keyword}%");
-                      });
-                });
-            }
+            $payload = Cache::remember($cacheKey, 20, function () use ($user, $teacher, $teacherIds, $deptFilter, $searchFilter) {
+                $query = Course::with(['department:id,department_name'])
+                    ->withCount([
+                        'enrollments as students_count',
+                        'lessons',
+                        'assignments',
+                        'quizzes',
+                    ])
+                    ->whereIn('teacher_id', $teacherIds);
 
-            $courses = $query->orderBy('course_name')->get();
+                if ($deptFilter !== '') {
+                    $query->where('department_id', $deptFilter);
+                }
 
-            $teacherName = $teacher
-                ? trim($teacher->first_name . ' ' . $teacher->last_name)
-                : trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
+                if ($searchFilter !== '') {
+                    $query->where(function ($q) use ($searchFilter) {
+                        $q->where('course_name', 'LIKE', "%{$searchFilter}%")
+                          ->orWhere('course_code', 'LIKE', "%{$searchFilter}%")
+                          ->orWhere('description', 'LIKE', "%{$searchFilter}%")
+                          ->orWhereHas('department', function ($dq) use ($searchFilter) {
+                              $dq->where('department_name', 'LIKE', "%{$searchFilter}%");
+                          });
+                    });
+                }
 
-            if ($courses->isEmpty()) {
-                return response()->json([
-                    'data' => [],
-                    'total' => 0,
+                $courses = $query->orderBy('course_name')->get();
+
+                $teacherName = $teacher
+                    ? trim(($teacher->first_name ?? '') . ' ' . ($teacher->last_name ?? ''))
+                    : trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
+
+                $coursesData = $courses->map(fn ($course) => $this->formatCourseItem($course))->values()->all();
+
+                return [
+                    'data' => $coursesData,
+                    'total' => count($coursesData),
                     'teacher_name' => $teacherName,
-                    'message' => 'អ្នកមិនទាន់មានមុខវិជ្ជាបង្រៀននៅឡើយទេ',
-                ]);
-            }
+                    'message' => count($coursesData) > 0
+                        ? 'បានទាញយកបញ្ជីមុខវិជ្ជាដោយជោគជ័យ'
+                        : 'អ្នកមិនទាន់មានមុខវិជ្ជាបង្រៀននៅឡើយទេ',
+                ];
+            });
 
-            $coursesData = $courses->map(fn ($course) => $this->formatCourseItem($course));
-
-            return response()->json([
-                'data' => $coursesData->values()->all(),
-                'total' => $coursesData->count(),
-                'teacher_name' => $teacherName,
-                'message' => 'បានទាញយកបញ្ជីមុខវិជ្ជាដោយជោគជ័យ',
-            ]);
-        } catch (\Exception $e) {
+            return response()->json($payload);
+        } catch (\Throwable $e) {
             Log::error('Error fetching teacher courses: ' . $e->getMessage());
             return response()->json([
-                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យមុខវិជ្ជា: ' . $e->getMessage(),
-            ], 500);
+                'data' => [],
+                'total' => 0,
+                'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យមុខវិជ្ជា',
+                'error_debug' => $e->getMessage(),
+            ], 200);
         }
     }
 
@@ -194,15 +206,9 @@ class TeacherCourseController extends Controller
                 return response()->json(['message' => 'អ្នកមិនមានសិទ្ធិទេ'], 403);
             }
 
-            $course = Course::with(['department:id,department_name,department_code'])
+            $course = Course::with(['department:id,department_name'])
                 ->withCount([
-                    'enrollments as students_count' => function ($q) {
-                        $q->where(function ($sub) {
-                            $sub->whereNull('status')
-                                ->orWhere('status', 'active')
-                                ->orWhere('status', '');
-                        });
-                    },
+                    'enrollments as students_count',
                     'lessons',
                     'assignments',
                     'quizzes',
@@ -218,7 +224,7 @@ class TeacherCourseController extends Controller
             return response()->json([
                 'message' => 'រកមិនឃើញមុខវិជ្ជានេះទេ ឬអ្នកមិនមានសិទ្ធិចូលមើល',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Error fetching course details: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការទាញយកទិន្នន័យមុខវិជ្ជា',
@@ -266,7 +272,7 @@ class TeacherCourseController extends Controller
                 ->values();
 
             $teacherName = $teacher
-                ? trim($teacher->first_name . ' ' . $teacher->last_name)
+                ? trim(($teacher->first_name ?? '') . ' ' . ($teacher->last_name ?? ''))
                 : trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
 
             return response()->json([
@@ -277,7 +283,7 @@ class TeacherCourseController extends Controller
                 'teacher_name' => $teacherName,
                 'message' => 'បានទាញយកស្ថិតិមុខវិជ្ជាដោយជោគជ័យ',
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Error fetching course stats: ' . $e->getMessage());
             return response()->json([
                 'message' => 'មានបញ្ហាក្នុងការទាញយកស្ថិតិ',
@@ -303,15 +309,9 @@ class TeacherCourseController extends Controller
                 return $this->index($request);
             }
 
-            $courses = Course::with(['department:id,department_name,department_code'])
+            $courses = Course::with(['department:id,department_name'])
                 ->withCount([
-                    'enrollments as students_count' => function ($q) {
-                        $q->where(function ($sub) {
-                            $sub->whereNull('status')
-                                ->orWhere('status', 'active')
-                                ->orWhere('status', '');
-                        });
-                    },
+                    'enrollments as students_count',
                     'lessons',
                     'assignments',
                     'quizzes',
@@ -336,11 +336,13 @@ class TeacherCourseController extends Controller
                 'total' => $coursesData->count(),
                 'message' => 'បានស្វែងរកមុខវិជ្ជាដោយជោគជ័យ',
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Error searching courses: ' . $e->getMessage());
             return response()->json([
+                'data' => [],
+                'total' => 0,
                 'message' => 'មានបញ្ហាក្នុងការស្វែងរកមុខវិជ្ជា',
-            ], 500);
+            ], 200);
         }
     }
 }

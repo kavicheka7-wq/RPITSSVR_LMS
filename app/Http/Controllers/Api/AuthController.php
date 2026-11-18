@@ -21,6 +21,20 @@ use Illuminate\Validation\ValidationException;
 class AuthController extends Controller
 {
     /**
+     * ✅ HELPER METHOD: ឆែកជួរឈរ telegram_chat_id ក្នុងតារាង users ដោយប្រើ Cache (មិនរត់ Query ឆែក Schema គ្រប់ពេល)
+     */
+    private function hasTelegramChatIdColumn(): bool
+    {
+        return (bool) Cache::remember('lms_users_has_tg_chat_id_col_v1', 86400, function () {
+            try {
+                return Schema::hasColumn('users', 'telegram_chat_id');
+            } catch (\Throwable $e) {
+                return false;
+            }
+        });
+    }
+
+    /**
      * ✅ HELPER METHOD: រៀបចំទម្រង់ទិន្នន័យ User, Teacher និង Student ឱ្យពេញលេញ និងស្រាលបំផុត (Slim Payload)
      */
     private function buildUserAndTeacherPayload(User $user)
@@ -246,7 +260,7 @@ class AuthController extends Controller
 
         // ២. ប្រសិនបើក្នុងតារាង users មានគណនីផ្សេងប្រើប្រាស់ telegram_chat_id នេះស្ទួនគ្នា ត្រូវលុបចេញពីគណនីផ្សេងទាំងអស់
         try {
-            if (Schema::hasColumn('users', 'telegram_chat_id')) {
+            if ($this->hasTelegramChatIdColumn()) {
                 $duplicateUsers = User::where('telegram_chat_id', $cleanChatId)
                     ->where('id', '!=', $user->id)
                     ->pluck('id');
@@ -295,7 +309,7 @@ class AuthController extends Controller
         Cache::forget('lms_auth_user_payload_' . $user->id);
 
         try {
-            if (Schema::hasColumn('users', 'telegram_chat_id')) {
+            if ($this->hasTelegramChatIdColumn()) {
                 $user->forceFill(['telegram_chat_id' => null])->save();
             }
         } catch (\Exception $e) {
@@ -417,15 +431,21 @@ class AuthController extends Controller
 
     /**
      * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ដោយរហ័ស និងមានសុវត្ថិភាពខ្ពស់បំផុត
+     * (គាំទ្រការប្រើលេខកូដ OTP រួមគ្នា ប្រសិនបើមានមនុស្ស ២ នាក់ចុច Login គណនីតែមួយក្នុងពេលដំណាលគ្នា)
      */
-    private function generateAndSendOtp(User $user, Request $request, string $purpose = '2fa'): array
+    private function generateAndSendOtp(User $user, Request $request, string $purpose = '2fa', bool $forceNewOtp = false): array
     {
-        $otp = (string) random_int(100000, 999999);
         $prefix = $purpose === 'reset' ? 'lms_pwd_reset_otp_' : 'lms_2fa_otp_';
         $attemptPrefix = $purpose === 'reset' ? 'lms_pwd_reset_attempts_' : 'lms_2fa_attempts_';
 
         $cacheKey = $prefix . $user->id;
         $attemptKey = $attemptPrefix . $user->id;
+
+        // ✅ ប្រសិនបើមានអ្នកទី ២ ចុច Login គណនីដូចគ្នា ក្នុងពេលដែល OTP ចាស់មិនទាន់ផុតកំណត់ ឱ្យប្រើលេខកូដដដែល ដើម្បីកុំឱ្យលេខកូដអ្នកទី ១ ក្លាយជាខុស!
+        $existingOtp = !$forceNewOtp ? Cache::get($cacheKey) : null;
+        $otp = ($existingOtp && preg_match('/^\d{6}$/', (string) $existingOtp))
+            ? (string) $existingOtp
+            : (string) random_int(100000, 999999);
 
         Cache::put($cacheKey, $otp, now()->addMinutes(5));
         Cache::forget($attemptKey);
@@ -726,9 +746,6 @@ class AuthController extends Controller
             return response()->json(['linked' => false, 'message' => 'រកមិនឃើញគណនីនេះទេ'], 404);
         }
 
-        // ✅ អនុញ្ញាតឱ្យភ្ជាប់/ផ្ដាច់ Telegram បានក្នុង ២ ករណីសុវត្ថិភាព៖
-        // ករណីទី ១៖ ម្ចាស់គណនីបាន Login ចូលក្នុងប្រព័ន្ធរួចហើយ និងកំពុងចុចពីក្នុង Navbar Settings (មាន Sanctum Bearer Token ត្រឹមត្រូវ)
-        // ករណីទី ២៖ ម្ចាស់គណនីទើបតែវាយ Email + Password ត្រឹមត្រូវនៅលើឧបករណ៍នេះ (Active 2FA Session)
         $loggedInUser = auth('sanctum')->user();
         $isAuthenticatedOwner = $loggedInUser && (int) $loggedInUser->id === (int) $user->id;
 
@@ -749,9 +766,8 @@ class AuthController extends Controller
         if ($request->input('action') === 'unlink') {
             $this->unlinkUserTelegramChatId($user);
 
-            // បើចុចផ្ដាច់ពីលើអេក្រង់ Login (កំពុងរង់ចាំវាយកូដ 2FA) ឱ្យផ្ញើកូដ ៦ ខ្ទង់ថ្មីទៅកាន់ Email ភ្លាមៗ
             if ($isVerified2faSession && !$isAuthenticatedOwner) {
-                $otpResult = $this->generateAndSendOtp($user, $request, '2fa');
+                $otpResult = $this->generateAndSendOtp($user, $request, '2fa', true);
                 return response()->json([
                     'linked' => false,
                     'telegram_sent' => false,
@@ -761,7 +777,6 @@ class AuthController extends Controller
                 ]);
             }
 
-            // បើចុចផ្ដាច់ចេញពីក្នុង Navbar (Settings Modal) គ្រាន់តែផ្ដាច់ធម្មតា និងបង្កើត Link ថ្មីទុកឱ្យភ្ជាប់ម្ដងទៀត
             return response()->json([
                 'linked' => false,
                 'telegram_sent' => false,
@@ -807,7 +822,6 @@ class AuthController extends Controller
                         continue;
                     }
 
-                    // មិនទទួលយកសារ /start ចាស់ៗដែលលើសពី ១០ នាទីមុនឡើយ
                     if ($msgDate > 0 && (now()->timestamp - $msgDate) > 600) {
                         continue;
                     }
@@ -839,7 +853,6 @@ class AuthController extends Controller
                         Cache::forever('lms_tg_processed_update_' . $matchedUpdateId, true);
                     }
 
-                    // ✅ រក្សាទុក Chat ID ថ្មី និងលុប Chat ID នេះចេញពីគណនីផ្សេងទៀតដែលធ្លាប់ប្រើជាន់គ្នា
                     $this->saveUserTelegramChatId($user, $matchedChatId);
 
                     if ($expectedToken) {
@@ -847,7 +860,6 @@ class AuthController extends Controller
                     }
                     Cache::forget('lms_tg_user_link_token_' . $user->id);
 
-                    // ✅ អនុញ្ញាតឱ្យបាញ់កូដចូល Telegram តែសម្រាប់ការ Login (2FA) ប៉ុណ្ណោះ
                     $pending2faOtp = Cache::get('lms_2fa_otp_' . $user->id);
                     $sentOtpNow = false;
 
@@ -974,7 +986,6 @@ class AuthController extends Controller
         Cache::forget($lockoutKey);
 
         $deviceHash = $this->getDeviceFingerprint($request);
-        // ✅ កត់ត្រាថាឧបករណ៍នេះពិតជាបានវាយ Password របស់គណនីនេះត្រឹមត្រូវ (មានសុពលភាព ១០ នាទីសម្រាប់ភ្ជាប់ Telegram)
         Cache::put('lms_2fa_verified_password_device_' . $user->id, $deviceHash, now()->addMinutes(10));
 
         $trustedDevices = Cache::get('lms_trusted_devices_' . $user->id, []);
@@ -983,7 +994,7 @@ class AuthController extends Controller
         $savedPinHash = Cache::get('lms_security_pin_' . $user->id);
         $hasSecurityPin = !empty($savedPinHash);
 
-        $otpResult = $this->generateAndSendOtp($user, $request, '2fa');
+        $otpResult = $this->generateAndSendOtp($user, $request, '2fa', false);
 
         if ($otpResult['telegram_sent'] && $otpResult['mail_sent']) {
             $statusMessage = 'លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់ត្រូវបានផ្ញើទៅកាន់ទាំង Telegram និងអ៊ីមែលរបស់អ្នកហើយ!';
@@ -1014,7 +1025,7 @@ class AuthController extends Controller
         ]);
     }
 
-    // ✅ ជំហានទី ២៖ ផ្ទៀងផ្ទាត់លេខកូដ OTP ៦ ខ្ទង់
+    // ✅ ជំហានទី ២៖ ផ្ទៀងផ្ទាត់លេខកូដ OTP ៦ ខ្ទង់ (គាំទ្រការប្រើគណនីតែមួយ ២-៣ នាក់ក្នុងពេលតែមួយដោយមិនទាត់គ្នាចេញ)
     public function verifyTwoFactor(Request $request)
     {
         $request->validate([
@@ -1092,15 +1103,21 @@ class AuthController extends Controller
             Cache::put('lms_trusted_devices_' . $user->id, $trustedDevices, now()->addDays(30));
         }
 
-        Cache::forget($cacheKey);
+        // ✅ រក្សាទុក OTP រយៈពេល ៣០ វិនាទីទៀត ការពារករណីមនុស្ស ២ នាក់វាយលេខកូដដំណាលគ្នា មិនឱ្យអ្នកទី ២ ជាប់ OTP Expired
+        Cache::put($cacheKey, $cachedOtp, now()->addSeconds(30));
         Cache::forget($attemptKey);
         Cache::forget($otpLockoutKey);
         Cache::forget('lms_2fa_verified_password_device_' . $user->id);
         Cache::forget('lms_auth_user_payload_' . $user->id);
 
-        $shouldLogoutOthers = $request->boolean('logout_other_devices', true);
-        if ($shouldLogoutOthers) {
+        // ✅ សំខាន់បំផុត៖ មិនលុប Token របស់ឧបករណ៍ផ្សេងដែលកំពុងប្រើគណនីរួមគ្នាឡើយ (លុបតែ Token ចាស់ៗដែលលើសពី 7 ថ្ងៃ)
+        if ($request->boolean('logout_other_devices', false)) {
             $user->tokens()->delete();
+        } else {
+            try {
+                $user->tokens()->where('created_at', '<', now()->subDays(7))->delete();
+            } catch (\Throwable $e) {
+            }
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;
@@ -1147,7 +1164,7 @@ class AuthController extends Controller
 
         Cache::put($resendLimitKey, $resendCount + 1, now()->addMinutes(10));
 
-        $otpResult = $this->generateAndSendOtp($user, $request, '2fa');
+        $otpResult = $this->generateAndSendOtp($user, $request, '2fa', true);
 
         if ($otpResult['telegram_sent'] && $otpResult['mail_sent']) {
             $resendMsg = 'បានផ្ញើលេខកូដ ៦ ខ្ទង់ថ្មីទៅកាន់ទាំង Telegram និងអ៊ីមែលរបស់អ្នកម្ដងទៀតហើយ!';
@@ -1213,7 +1230,7 @@ class AuthController extends Controller
         }
         Cache::put($resendLimitKey, $resendCount + 1, now()->addMinutes(10));
 
-        $otpResult = $this->generateAndSendOtp($user, $request, 'reset');
+        $otpResult = $this->generateAndSendOtp($user, $request, 'reset', false);
 
         if ($otpResult['telegram_sent'] && $otpResult['mail_sent']) {
             $msg = 'លេខកូដ ៦ ខ្ទង់សម្រាប់កំណត់ពាក្យសម្ងាត់ថ្មីត្រូវបានផ្ញើទៅកាន់ទាំង Telegram និងអ៊ីមែលរបស់អ្នកហើយ!';
@@ -1233,7 +1250,6 @@ class AuthController extends Controller
             'mail_error' => $otpResult['mail_error'] ?? null,
             'telegram_sent' => $otpResult['telegram_sent'],
             'telegram_linked' => $otpResult['telegram_linked'],
-            // ✅ សុវត្ថិភាព៖ មិនបញ្ជូន telegram_link_url នៅក្នុង Forgot Password ដាច់ខាត!
             'telegram_link_url' => null,
             'dev_otp' => null,
             'message' => $msg,
