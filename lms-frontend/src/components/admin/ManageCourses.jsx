@@ -27,20 +27,39 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// 📌 ផ្នែកទី ១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនី Admin ម្នាក់ៗ (User-Scoped 0ms Cache)
+// 📌 ផ្នែកទី ១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (Unified 0ms Cache v15)
 // ============================================================================
-const CACHE_KEY_SHARED_COURSES = 'cached_admin_courses_list';
-const CACHE_KEY_LEGACY_COURSES = 'cached_admin_courses_page1';
-const CACHE_KEY_LEGACY_META = 'cached_admin_courses_meta';
-const CACHE_KEY_SHARED_DEPTS = 'cached_admin_departments_list';
-const CACHE_KEY_SHARED_TEACHERS = 'cached_admin_teachers_list';
+const CACHE_KEY_SHARED_COURSES = 'cached_admin_courses_list_v15';
+const CACHE_KEY_SHARED_META = 'cached_admin_courses_meta_v15';
+const CACHE_KEY_SHARED_DEPTS = 'cached_admin_departments_list_v15';
+const CACHE_KEY_SHARED_TEACHERS = 'cached_admin_teachers_list_v15';
 
-const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v8_${uid}`;
-const getCoursesMetaCacheKey = (uid) => `cached_admin_courses_meta_v8_${uid}`;
-const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v8_${uid}`;
-const getTeachersCacheKey = (uid) => `cached_admin_teachers_list_v8_${uid}`;
+const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v15_${uid}`;
+const getCoursesMetaCacheKey = (uid) => `cached_admin_courses_meta_v15_${uid}`;
+const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v15_${uid}`;
+const getTeachersCacheKey = (uid) => `cached_admin_teachers_list_v15_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ
+// ✅ សម្អាត Cache ចាស់ៗពីជំនាន់មុនដែលធ្លាប់ជាប់មុខវិជ្ជាតែ ១ ចោលតែម្ដង
+let legacyCoursesCacheCleaned = false;
+const cleanupStaleLegacyCourseCachesOnce = () => {
+  if (legacyCoursesCacheCleaned) return;
+  legacyCoursesCacheCleaned = true;
+  const staleKeys = [
+    'cached_admin_courses_list',
+    'cached_admin_courses_page1',
+    'cached_admin_courses_meta',
+    'cached_admin_courses_list_v8_default_admin',
+    'cached_admin_courses_meta_v8_default_admin',
+  ];
+  staleKeys.forEach((k) => {
+    try {
+      sessionStorage.removeItem(k);
+      localStorage.removeItem(k);
+    } catch {}
+  });
+};
+
+// ✅ Global Memory Cache
 const ADMIN_COURSES_MEM_CACHE = {
   uid: null,
   courses: null,
@@ -54,39 +73,45 @@ const ADMIN_COURSES_MEM_CACHE = {
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
-      sessionStorage.getItem(key) || localStorage.getItem(key);
+      localStorage.getItem(key) || sessionStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ សម្អាតរូបភាព Base64 ចេញមុនពេលរក្សាទុកក្នុង localStorage ដើម្បីឱ្យលឿន 0ms និងមិនពេញទំហំផ្ទុក
+// ✅ សម្អាតទាំង profile_image និង profile_image_url (Base64 ធំៗ) ចេញមុនពេលរក្សាទុកក្នុង Storage ការពារ QuotaExceededError ១០០%
 const stripHeavyImages = (list) => {
-  if (!Array.isArray(list)) return list;
+  if (!Array.isArray(list)) return [];
   return list.map((item) => {
     if (!item || typeof item !== 'object') return item;
     const copy = { ...item };
-    if (copy.profile_image && String(copy.profile_image).startsWith('data:')) {
-      delete copy.profile_image;
+    delete copy.profile_image;
+    delete copy.profile_image_url;
+
+    if (copy.user && typeof copy.user === 'object') {
+      const uCopy = { ...copy.user };
+      delete uCopy.profile_image;
+      delete uCopy.profile_image_url;
+      copy.user = uCopy;
     }
     if (copy.teacher && typeof copy.teacher === 'object') {
-      copy.teacher = { ...copy.teacher };
-      if (
-        copy.teacher.profile_image &&
-        String(copy.teacher.profile_image).startsWith('data:')
-      ) {
-        delete copy.teacher.profile_image;
+      const tCopy = { ...copy.teacher };
+      delete tCopy.profile_image;
+      delete tCopy.profile_image_url;
+      if (tCopy.user && typeof tCopy.user === 'object') {
+        const tuCopy = { ...tCopy.user };
+        delete tuCopy.profile_image;
+        delete tuCopy.profile_image_url;
+        tCopy.user = tuCopy;
       }
+      copy.teacher = tCopy;
     }
     if (copy.teacher_profile && typeof copy.teacher_profile === 'object') {
-      copy.teacher_profile = { ...copy.teacher_profile };
-      if (
-        copy.teacher_profile.profile_image &&
-        String(copy.teacher_profile.profile_image).startsWith('data:')
-      ) {
-        delete copy.teacher_profile.profile_image;
-      }
+      const tpCopy = { ...copy.teacher_profile };
+      delete tpCopy.profile_image;
+      delete tpCopy.profile_image_url;
+      copy.teacher_profile = tpCopy;
     }
     return copy;
   });
@@ -101,6 +126,23 @@ const safeWriteStorage = (key, value) => {
     } catch {}
     localStorage.setItem(key, str);
   } catch {}
+};
+
+// ✅ រក្សាទុកបញ្ជីមុខវិជ្ជាទៅគ្រប់ Key ទាំងអស់ ដើម្បីឱ្យពេលចុចចេញហើយចូលមកវិញ បង្ហាញគ្រប់មុខវិជ្ជាទាំងអស់ភ្លាមៗក្នុង 0ms
+const persistCoursesToAllCaches = (uid, coursesList, metaObj = null) => {
+  const cleanList = stripHeavyImages(coursesList);
+  ADMIN_COURSES_MEM_CACHE.uid = uid;
+  ADMIN_COURSES_MEM_CACHE.courses = cleanList;
+  safeWriteStorage(getCoursesCacheKey(uid), cleanList);
+  safeWriteStorage(getCoursesCacheKey('default_admin'), cleanList);
+  safeWriteStorage(CACHE_KEY_SHARED_COURSES, cleanList);
+
+  if (metaObj) {
+    ADMIN_COURSES_MEM_CACHE.meta = metaObj;
+    safeWriteStorage(getCoursesMetaCacheKey(uid), metaObj);
+    safeWriteStorage(getCoursesMetaCacheKey('default_admin'), metaObj);
+    safeWriteStorage(CACHE_KEY_SHARED_META, metaObj);
+  }
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -179,7 +221,12 @@ const getDepartmentDisplayName = (deptObjOrName) => {
 
 const getTeacherFullName = (teacher) => {
   if (!teacher) return '';
-  return `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim();
+  return (
+    `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim() ||
+    teacher.full_name ||
+    teacher.name ||
+    ''
+  );
 };
 
 // ✅ ផ្គូផ្គងគ្រូបង្រៀនពីមុខវិជ្ជា ទោះបីជា course.teacher_id រក្សាទុកជា teachers.id ឬ users.id ក៏ដោយ
@@ -187,13 +234,17 @@ const resolveCourseTeacher = (course, teachersList = []) => {
   if (!course) return null;
   if (
     course.teacher_profile &&
-    (course.teacher_profile.first_name || course.teacher_profile.last_name)
+    (course.teacher_profile.first_name ||
+      course.teacher_profile.last_name ||
+      course.teacher_profile.full_name)
   ) {
     return course.teacher_profile;
   }
   if (
     course.teacher &&
-    (course.teacher.first_name || course.teacher.last_name)
+    (course.teacher.first_name ||
+      course.teacher.last_name ||
+      course.teacher.full_name)
   ) {
     return course.teacher;
   }
@@ -206,6 +257,9 @@ const resolveCourseTeacher = (course, teachersList = []) => {
         (tItem.user_id && String(tItem.user_id) === String(rawTid))
     );
     if (found) return found;
+  }
+  if (course.teacher_name) {
+    return { full_name: course.teacher_name, name: course.teacher_name };
   }
   return null;
 };
@@ -274,14 +328,19 @@ const pushLocalNotification = (notif) => {
 // 📌 ផ្នែកទី ២៖ COMPONENT គោលសម្រាប់គ្រប់គ្រងមុខវិជ្ជា (ManageCourses)
 // ============================================================================
 const ManageCourses = () => {
+  cleanupStaleLegacyCourseCachesOnce();
+
   const { t } = useLanguage();
   const { user } = useAuth();
 
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
 
+  // ✅ ប្រសិនបើ currentAdminId ប្ដូរពី 'default_admin' ទៅ ID ពិតប្រាកដ មិនត្រូវលុប Memory Cache ចោលទេ!
   if (
     ADMIN_COURSES_MEM_CACHE.uid &&
-    ADMIN_COURSES_MEM_CACHE.uid !== currentAdminId
+    ADMIN_COURSES_MEM_CACHE.uid !== currentAdminId &&
+    ADMIN_COURSES_MEM_CACHE.uid !== 'default_admin' &&
+    currentAdminId !== 'default_admin'
   ) {
     ADMIN_COURSES_MEM_CACHE.courses = null;
     ADMIN_COURSES_MEM_CACHE.meta = null;
@@ -292,16 +351,19 @@ const ManageCourses = () => {
   }
   ADMIN_COURSES_MEM_CACHE.uid = currentAdminId;
 
-  // ✅ ១. អានទិន្នន័យពី Cache មកបង្ហាញភ្លាមៗក្នុង 0 វិនាទី (គ្មាន Skeleton Loading)
+  // ✅ ១. អានទិន្នន័យពី Cache ថ្មីមកបង្ហាញភ្លាមៗក្នុង 0 វិនាទី (គ្មានការជាប់មុខវិជ្ជា ១ ចាស់ទៀតឡើយ)
   const [courses, setCourses] = useState(() => {
-    if (Array.isArray(ADMIN_COURSES_MEM_CACHE.courses)) {
+    if (
+      Array.isArray(ADMIN_COURSES_MEM_CACHE.courses) &&
+      ADMIN_COURSES_MEM_CACHE.courses.length > 0
+    ) {
       return ADMIN_COURSES_MEM_CACHE.courses;
     }
     const cached =
       readStorageJson(getCoursesCacheKey(currentAdminId), null) ||
       readStorageJson(CACHE_KEY_SHARED_COURSES, null) ||
-      readStorageJson(CACHE_KEY_LEGACY_COURSES, []);
-    if (Array.isArray(cached)) {
+      readStorageJson(getCoursesCacheKey('default_admin'), []);
+    if (Array.isArray(cached) && cached.length > 0) {
       ADMIN_COURSES_MEM_CACHE.courses = cached;
       return cached;
     }
@@ -309,13 +371,16 @@ const ManageCourses = () => {
   });
 
   const [departments, setDepartments] = useState(() => {
-    if (Array.isArray(ADMIN_COURSES_MEM_CACHE.departments)) {
+    if (
+      Array.isArray(ADMIN_COURSES_MEM_CACHE.departments) &&
+      ADMIN_COURSES_MEM_CACHE.departments.length > 0
+    ) {
       return ADMIN_COURSES_MEM_CACHE.departments;
     }
     const cached =
       readStorageJson(getDeptsCacheKey(currentAdminId), null) ||
       readStorageJson(CACHE_KEY_SHARED_DEPTS, []);
-    if (Array.isArray(cached)) {
+    if (Array.isArray(cached) && cached.length > 0) {
       ADMIN_COURSES_MEM_CACHE.departments = cached;
       return cached;
     }
@@ -323,13 +388,16 @@ const ManageCourses = () => {
   });
 
   const [teachers, setTeachers] = useState(() => {
-    if (Array.isArray(ADMIN_COURSES_MEM_CACHE.teachers)) {
+    if (
+      Array.isArray(ADMIN_COURSES_MEM_CACHE.teachers) &&
+      ADMIN_COURSES_MEM_CACHE.teachers.length > 0
+    ) {
       return ADMIN_COURSES_MEM_CACHE.teachers;
     }
     const cached =
       readStorageJson(getTeachersCacheKey(currentAdminId), null) ||
       readStorageJson(CACHE_KEY_SHARED_TEACHERS, []);
-    if (Array.isArray(cached)) {
+    if (Array.isArray(cached) && cached.length > 0) {
       ADMIN_COURSES_MEM_CACHE.teachers = cached;
       return cached;
     }
@@ -365,7 +433,7 @@ const ManageCourses = () => {
     if (ADMIN_COURSES_MEM_CACHE.meta) return ADMIN_COURSES_MEM_CACHE.meta;
     const cached =
       readStorageJson(getCoursesMetaCacheKey(currentAdminId), null) ||
-      readStorageJson(CACHE_KEY_LEGACY_META, null);
+      readStorageJson(CACHE_KEY_SHARED_META, null);
     if (cached) {
       ADMIN_COURSES_MEM_CACHE.meta = cached;
       return cached;
@@ -620,34 +688,28 @@ const ManageCourses = () => {
 
   useEffect(() => {
     fetchDepartments();
-    if (
-      Array.isArray(ADMIN_COURSES_MEM_CACHE.teachers) &&
-      ADMIN_COURSES_MEM_CACHE.teachers.length > 0
-    ) {
-      const t = setTimeout(() => fetchTeachers(false), 300);
-      return () => clearTimeout(t);
-    } else {
-      fetchTeachers(false);
-    }
+    // ពន្យារពេលទាញបញ្ជីគ្រូបន្តិច ដើម្បីឱ្យ API `/admin/courses` មកដល់មុនក្នុង 0ms ដោយគ្មានការដណ្ដើម Connection គ្នា
+    const t = setTimeout(() => fetchTeachers(false), 250);
+    return () => clearTimeout(t);
   }, [fetchDepartments, fetchTeachers]);
 
   const fetchCourses = useCallback(
     async (forceRefresh = false) => {
       if (page === 1 && !debouncedSearch && !forceRefresh) {
-        const cachedList = readStorageJson(
-          getCoursesCacheKey(currentAdminId),
-          null
-        );
+        const cachedList =
+          ADMIN_COURSES_MEM_CACHE.courses ||
+          readStorageJson(getCoursesCacheKey(currentAdminId), null) ||
+          readStorageJson(CACHE_KEY_SHARED_COURSES, null);
+
         if (Array.isArray(cachedList) && cachedList.length > 0) {
           setCourses(cachedList);
           ADMIN_COURSES_MEM_CACHE.courses = cachedList;
         }
         const now = Date.now();
         if (
-          ADMIN_COURSES_MEM_CACHE.uid === currentAdminId &&
           Array.isArray(ADMIN_COURSES_MEM_CACHE.courses) &&
           ADMIN_COURSES_MEM_CACHE.courses.length > 0 &&
-          now - ADMIN_COURSES_MEM_CACHE.lastSyncedAt < 25000
+          now - ADMIN_COURSES_MEM_CACHE.lastSyncedAt < 10000
         ) {
           return;
         }
@@ -668,7 +730,7 @@ const ManageCourses = () => {
           },
           signal: controller.signal,
         });
-        const data = response.data?.data || response.data || [];
+        const data = response.data?.data ?? response.data ?? [];
 
         let fetchedCourses = [];
         let newMeta = {
@@ -678,12 +740,12 @@ const ManageCourses = () => {
           per_page: perPage,
         };
 
-        if (data.data && Array.isArray(data.data)) {
+        if (data && data.data && Array.isArray(data.data)) {
           fetchedCourses = data.data;
           newMeta = {
             current_page: data.current_page || 1,
             last_page: data.last_page || 1,
-            total: data.total || 0,
+            total: data.total ?? data.data.length,
             per_page: data.per_page || perPage,
           };
         } else if (Array.isArray(data)) {
@@ -701,13 +763,8 @@ const ManageCourses = () => {
         setMeta(newMeta);
 
         if (page === 1 && !debouncedSearch) {
-          ADMIN_COURSES_MEM_CACHE.uid = currentAdminId;
-          ADMIN_COURSES_MEM_CACHE.courses = lightCourses;
-          ADMIN_COURSES_MEM_CACHE.meta = newMeta;
           ADMIN_COURSES_MEM_CACHE.lastSyncedAt = Date.now();
-          safeWriteStorage(getCoursesCacheKey(currentAdminId), lightCourses);
-          safeWriteStorage(CACHE_KEY_SHARED_COURSES, lightCourses);
-          safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
+          persistCoursesToAllCaches(currentAdminId, lightCourses, newMeta);
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
@@ -804,13 +861,11 @@ const ManageCourses = () => {
         };
 
         setCourses((prev) => {
-          const newList = prev.map((c) =>
-            c.id === editingCourse.id ? updatedCourse : c
+          const newList = stripHeavyImages(
+            prev.map((c) => (c.id === editingCourse.id ? updatedCourse : c))
           );
           if (page === 1 && !debouncedSearch) {
-            ADMIN_COURSES_MEM_CACHE.courses = newList;
-            safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
-            safeWriteStorage(CACHE_KEY_SHARED_COURSES, newList);
+            persistCoursesToAllCaches(currentAdminId, newList);
           }
           return newList;
         });
@@ -836,20 +891,18 @@ const ManageCourses = () => {
           teacher: serverData?.teacher || matchedTeacher || null,
         };
 
+        const newMeta = { ...meta, total: (meta.total || 0) + 1 };
+        setMeta(newMeta);
+
         setCourses((prev) => {
-          const newList = [newCourse, ...prev].slice(0, perPage);
+          const newList = stripHeavyImages([newCourse, ...prev]).slice(
+            0,
+            perPage
+          );
           if (page === 1 && !debouncedSearch) {
-            ADMIN_COURSES_MEM_CACHE.courses = newList;
-            safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
-            safeWriteStorage(CACHE_KEY_SHARED_COURSES, newList);
+            persistCoursesToAllCaches(currentAdminId, newList, newMeta);
           }
           return newList;
-        });
-        setMeta((prev) => {
-          const newMeta = { ...prev, total: (prev.total || 0) + 1 };
-          ADMIN_COURSES_MEM_CACHE.meta = newMeta;
-          safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
-          return newMeta;
         });
 
         pushLocalNotification({
@@ -902,25 +955,25 @@ const ManageCourses = () => {
     setShowDeleteModal(false);
     setCourseToDelete(null);
 
+    const newMeta = {
+      ...meta,
+      total: Math.max(0, (meta.total || 1) - 1),
+    };
+    setMeta(newMeta);
+
     setCourses((prev) => {
-      const newList = prev.filter((c) => c.id !== deletedId);
+      const newList = prev.filter((c) => String(c.id) !== String(deletedId));
       if (page === 1 && !debouncedSearch) {
-        ADMIN_COURSES_MEM_CACHE.courses = newList;
-        safeWriteStorage(getCoursesCacheKey(currentAdminId), newList);
-        safeWriteStorage(CACHE_KEY_SHARED_COURSES, newList);
+        persistCoursesToAllCaches(currentAdminId, newList, newMeta);
       }
       return newList;
-    });
-    setMeta((prev) => {
-      const newMeta = { ...prev, total: Math.max(0, (prev.total || 1) - 1) };
-      ADMIN_COURSES_MEM_CACHE.meta = newMeta;
-      safeWriteStorage(getCoursesMetaCacheKey(currentAdminId), newMeta);
-      return newMeta;
     });
 
     try {
       await api.delete(`/admin/courses/${deletedId}`);
       clearCoursesCache();
+      await fetchCourses(true);
+
       pushLocalNotification({
         titleKm: 'បានលុបមុខវិជ្ជាចេញពីប្រព័ន្ធ',
         titleEn: 'Course Deleted',
@@ -933,8 +986,7 @@ const ManageCourses = () => {
       console.error('Delete course error:', error);
       setCourses(previousCourses);
       setMeta(previousMeta);
-      ADMIN_COURSES_MEM_CACHE.courses = previousCourses;
-      ADMIN_COURSES_MEM_CACHE.meta = previousMeta;
+      persistCoursesToAllCaches(currentAdminId, previousCourses, previousMeta);
     } finally {
       setIsDeleting(false);
     }
@@ -1367,14 +1419,6 @@ const ManageCourses = () => {
       ).length;
 
       clearCoursesCache();
-      try {
-        sessionStorage.removeItem(getCoursesCacheKey(currentAdminId));
-        localStorage.removeItem(getCoursesCacheKey(currentAdminId));
-        localStorage.removeItem(getCoursesMetaCacheKey(currentAdminId));
-        localStorage.removeItem(CACHE_KEY_SHARED_COURSES);
-        localStorage.removeItem(CACHE_KEY_LEGACY_COURSES);
-        localStorage.removeItem(CACHE_KEY_LEGACY_META);
-      } catch (e) {}
 
       if (successCount > 0) {
         pushLocalNotification({
@@ -1390,7 +1434,7 @@ const ManageCourses = () => {
       setShowImportModal(false);
       setImportPreview([]);
       setSelectedFileName('');
-      fetchCourses(true);
+      await fetchCourses(true);
     } catch (error) {
       console.error('Import courses error:', error);
       setImportError(

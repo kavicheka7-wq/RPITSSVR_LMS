@@ -21,7 +21,7 @@ use Illuminate\Validation\ValidationException;
 class CourseController extends Controller
 {
     /**
-     * ✅ ផ្គូផ្គង និងបំពេញព័ត៌មានគ្រូបង្រៀន (ទាំងឈ្មោះ និងរូបថត profile_image) សម្រាប់បញ្ជីមុខវិជ្ជា ក្នុងល្បឿនលឿនបំផុត (O(1) Map Lookup)
+     * ✅ ផ្គូផ្គង និងបំពេញព័ត៌មានគ្រូបង្រៀនសម្រាប់បញ្ជីមុខវិជ្ជា ក្នុងល្បឿនលឿនបំផុត (O(1) Map Lookup ដោយមិនទាញ Base64 ធំៗឱ្យយឺត API)
      */
     private function attachTeacherDetailsToCollection($courses)
     {
@@ -35,7 +35,7 @@ class CourseController extends Controller
             return $courses;
         }
 
-        // ✅ ទាញយកព័ត៌មានគ្រូ និង profile_image ពីតារាង teachers ក្នុង Query តែ ១ ដង
+        // ✅ ទាញយកតែជួរឈរឈ្មោះ និងព័ត៌មានគ្រូពីតារាង teachers ក្នុង Query តែ ១ ដង (មិនទាញ profile_image Base64 ធំៗទេ)
         $teachersById = Teacher::whereIn('id', $teacherIds)
             ->orWhereIn('user_id', $teacherIds)
             ->select([
@@ -48,7 +48,6 @@ class CourseController extends Controller
                 'phone',
                 'department_id',
                 'specialization',
-                'profile_image',
             ])
             ->get();
 
@@ -62,10 +61,9 @@ class CourseController extends Controller
             ->values()
             ->all();
 
-        // ✅ ទាញយកព័ត៌មាន និង profile_image ពីតារាង users (សម្រាប់បំពេញបន្ថែមប្រសិនបើក្នុងតារាង teachers គ្មានរូប)
         $usersMap = !empty($userIdsToFetch)
             ? User::whereIn('id', $userIdsToFetch)
-                ->select(['id', 'first_name', 'last_name', 'email', 'phone', 'profile_image'])
+                ->select(['id', 'first_name', 'last_name', 'email', 'phone'])
                 ->get()
                 ->keyBy('id')
             : collect();
@@ -83,17 +81,11 @@ class CourseController extends Controller
             $lastName = trim((string) ($tProfile->last_name ?? $uProfile->last_name ?? ''));
             $fullName = trim($firstName . ' ' . $lastName) ?: ($tProfile->email ?? $uProfile->email ?? '');
 
-            $avatar = !empty($tProfile?->profile_image)
-                ? $tProfile->profile_image
-                : ($uProfile->profile_image ?? null);
-
             $teacherObject = $tProfile ? clone $tProfile : clone $uProfile;
             $teacherObject->first_name = $firstName;
             $teacherObject->last_name = $lastName;
             $teacherObject->name = $fullName;
             $teacherObject->full_name = $fullName;
-            $teacherObject->profile_image = $avatar;
-            $teacherObject->profile_image_url = $avatar;
 
             $course->setRelation('teacher', $teacherObject);
             $course->setAttribute('teacher_profile', $teacherObject);
@@ -162,7 +154,6 @@ class CourseController extends Controller
     public function index(Request $request)
     {
         try {
-            // ✅ ប្រើ with(['department:id,department_name']) ស្រាលបំផុត ហើយភ្ជាប់គ្រូតាម attachTeacherDetailsToCollection
             $query = Course::with([
                 'department:id,department_name',
             ])
@@ -193,7 +184,6 @@ class CourseController extends Controller
                 $query->whereIn('teacher_id', $possibleIds);
             }
 
-            // ✅ បន្ថែម Search
             if ($request->filled('search')) {
                 $search = trim($request->search);
                 $matchedTeacherIds = Teacher::where('first_name', 'like', "%{$search}%")
@@ -222,7 +212,6 @@ class CourseController extends Controller
                 });
             }
 
-            // ✅ Option សម្រាប់ទាញយកទាំងអស់ (សម្រាប់ Dropdown/Select)
             if ($request->boolean('all')) {
                 $courses = $query->orderBy('course_name')->get();
                 $this->attachTeacherDetailsToCollection($courses);
@@ -233,7 +222,7 @@ class CourseController extends Controller
                 ]);
             }
 
-            $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
+            $perPage = max(1, min(200, (int) ($request->per_page ?? 200)));
             $courses = $query->orderBy('id', 'desc')->paginate($perPage);
 
             $items = $courses->items();
@@ -398,14 +387,14 @@ class CourseController extends Controller
     public function destroy(Course $course)
     {
         try {
-            if ($course->enrollments()->exists()) {
-                return response()->json([
-                    'message' => 'មិនអាចលុបមុខវិជ្ជាដែលមានសិស្សចុះឈ្មោះរៀនបានទេ',
-                ], 400);
-            }
-
             $courseName = $course->course_name;
-            $course->delete();
+
+            DB::transaction(function () use ($course) {
+                DB::table('enrollments')->where('course_id', $course->id)->delete();
+                DB::table('attendances')->where('course_id', $course->id)->delete();
+                DB::table('grades')->where('course_id', $course->id)->delete();
+                $course->delete();
+            });
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
@@ -553,7 +542,7 @@ class CourseController extends Controller
                 return $this->index($request);
             }
 
-            $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
+            $perPage = max(1, min(200, (int) ($request->per_page ?? 200)));
 
             $courses = Course::with(['department:id,department_name'])
                 ->withCount('enrollments')
