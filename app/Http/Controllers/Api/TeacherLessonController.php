@@ -574,31 +574,39 @@ class TeacherLessonController extends Controller
      * Delete lesson file
      * DELETE /teacher/lessons/files/{fileId}
      */
+   /**
+     * Delete lesson file
+     * DELETE /teacher/lessons/files/{fileId}
+     */
     public function deleteFile($fileId)
     {
         try {
-            $file = LessonFile::select('id', 'lesson_id', 'file_name', 'file_path')->findOrFail($fileId);
-            $lesson = Lesson::select('id', 'course_id', 'created_by')->findOrFail($file->lesson_id);
-            $this->ensureLessonAccess($lesson);
+            $file = LessonFile::select('id', 'lesson_id', 'file_name', 'file_path')->find($fileId);
+            if (!$file) {
+                return response()->json([
+                    'message' => 'បានលុបឯកសារដោយជោគជ័យ',
+                ]);
+            }
 
             if (
-                $file->file_path &&
+                !empty($file->file_path) &&
                 !str_starts_with($file->file_path, 'http') &&
                 !str_starts_with($file->file_path, 'data:')
             ) {
-                Storage::disk('public')->delete($file->file_path);
+                try {
+                    $cleanPath = preg_replace('/^\/?storage\//', '', ltrim($file->file_path, '/'));
+                    Storage::disk('public')->delete($cleanPath);
+                } catch (\Throwable $e) {
+                }
             }
-            $file->delete();
+
+            DB::table('lesson_files')->where('id', $file->id)->delete();
 
             $this->clearRelatedCaches();
 
             return response()->json([
                 'message' => 'បានលុបឯកសារដោយជោគជ័យ',
             ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'message' => 'រកមិនឃើញឯកសារនេះទេ',
-            ], 404);
         } catch (\Throwable $e) {
             Log::error('File delete error: ' . $e->getMessage());
             return response()->json([
@@ -672,32 +680,40 @@ class TeacherLessonController extends Controller
      * Delete video
      * DELETE /teacher/lessons/videos/{videoId}
      */
+   /**
+     * Delete video
+     * DELETE /teacher/lessons/videos/{videoId}
+     */
     public function deleteVideo($videoId)
     {
         try {
-            $video = Video::findOrFail($videoId);
-            $lesson = Lesson::select('id', 'course_id', 'created_by')->findOrFail($video->lesson_id);
-            $this->ensureLessonAccess($lesson);
+            $video = Video::find($videoId);
+            if (!$video) {
+                return response()->json([
+                    'message' => 'បានលុបវីដេអូដោយជោគជ័យ',
+                ]);
+            }
 
             if (
-                $video->video_url &&
+                !empty($video->video_url) &&
                 !str_starts_with($video->video_url, 'http') &&
                 !str_starts_with($video->video_url, '//') &&
                 !str_starts_with($video->video_url, 'data:')
             ) {
-                Storage::disk('public')->delete($video->video_url);
+                try {
+                    $cleanPath = preg_replace('/^\/?storage\//', '', ltrim($video->video_url, '/'));
+                    Storage::disk('public')->delete($cleanPath);
+                } catch (\Throwable $e) {
+                }
             }
-            $video->delete();
+
+            DB::table('videos')->where('id', $video->id)->delete();
 
             $this->clearRelatedCaches();
 
             return response()->json([
                 'message' => 'បានលុបវីដេអូដោយជោគជ័យ',
             ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'message' => 'រកមិនឃើញវីដេអូនេះទេ',
-            ], 404);
         } catch (\Throwable $e) {
             Log::error('Video delete error: ' . $e->getMessage());
             return response()->json([

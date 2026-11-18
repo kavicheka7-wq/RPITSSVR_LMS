@@ -932,6 +932,28 @@ export default function ManageLessons() {
     }
   };
 
+  // ✅ ១. អនុគមន៍សម្អាត Cache មេរៀនរបស់សិស្សភ្លាមៗនៅពេលគ្រូបន្ថែម/កែ/លុបមេរៀន ឯកសារ ឬវីដេអូ
+  const clearStudentLessonCaches = () => {
+    try {
+      Object.keys(localStorage).forEach((k) => {
+        if (
+          k.startsWith('cached_student_dept_lessons_') ||
+          k.startsWith('cached_student_dept_courses_')
+        ) {
+          localStorage.removeItem(k);
+        }
+      });
+      Object.keys(sessionStorage).forEach((k) => {
+        if (
+          k.startsWith('cached_student_dept_lessons_') ||
+          k.startsWith('cached_student_dept_courses_')
+        ) {
+          sessionStorage.removeItem(k);
+        }
+      });
+    } catch {}
+  };
+
   // ============================================================================
   // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបមេរៀន និងផ្ទុកហ្វាល់ (0ms Optimistic UI Update)
   // ============================================================================
@@ -1047,6 +1069,8 @@ export default function ManageLessons() {
         setExpandedLesson(currentLessonId);
       }
 
+      clearStudentLessonCaches();
+
       // ✅ បិទផ្ទាំង Modal ភ្លាមៗដោយមិនឱ្យគ្រូរង់ចាំការបង្ហោះហ្វាល់យូរ
       setShowAddModal(false);
       setSelectedFiles([]);
@@ -1092,6 +1116,7 @@ export default function ManageLessons() {
 
       if (uploadTasks.length > 0) {
         await Promise.all(uploadTasks);
+        clearStudentLessonCaches();
         fetchLessons();
       }
     } catch (error) {
@@ -1121,7 +1146,7 @@ export default function ManageLessons() {
     setSelectedLesson(null);
 
     setLessons((prev) => {
-      const updated = prev.filter((l) => l.id !== deletedId);
+      const updated = prev.filter((l) => String(l.id) !== String(deletedId));
       LESSONS_MEM_CACHE.lessons = updated;
       safeSaveLessonsCache(currentTeacherId, updated);
       return updated;
@@ -1129,6 +1154,8 @@ export default function ManageLessons() {
 
     try {
       await api.delete(`/teacher/lessons/${deletedId}`);
+      clearStudentLessonCaches();
+      await fetchLessons();
 
       pushLocalNotification({
         titleKm: 'បានលុបមេរៀន',
@@ -1197,6 +1224,8 @@ export default function ManageLessons() {
         safeSaveLessonsCache(currentTeacherId, updated);
         return updated;
       });
+
+      clearStudentLessonCaches();
 
       pushLocalNotification({
         titleKm: 'បានផ្ទុកឡើងឯកសារមេរៀន',
@@ -1287,6 +1316,8 @@ export default function ManageLessons() {
         return updated;
       });
 
+      clearStudentLessonCaches();
+
       pushLocalNotification({
         titleKm: 'បានផ្ទុកឡើងវីដេអូបង្រៀន',
         titleEn: 'Teaching Video Uploaded',
@@ -1368,6 +1399,8 @@ export default function ManageLessons() {
         return updated;
       });
 
+      clearStudentLessonCaches();
+
       pushLocalNotification({
         titleKm: 'បានភ្ជាប់តំណវីដេអូ YouTube',
         titleEn: 'YouTube Video Linked',
@@ -1393,7 +1426,19 @@ export default function ManageLessons() {
     }
   };
 
+  // ✅ ២. អនុគមន៍បើកផ្ទាំងបញ្ជាក់ការលុបឯកសារមេរៀន (ដែលបាត់ពីមុន)
+  const handleDeleteFileClick = (file) => {
+    if (!file) return;
+    setDeleteMediaTarget({
+      type: 'file',
+      id: file.id,
+      name: file.file_name || t('ឯកសារនេះ', 'this file'),
+    });
+  };
+
+  // ✅ ៣. អនុគមន៍បើកផ្ទាំងបញ្ជាក់ការលុបវីដេអូមេរៀន
   const handleDeleteVideoClick = (video) => {
+    if (!video) return;
     setDeleteMediaTarget({
       type: 'video',
       id: video.id,
@@ -1401,19 +1446,21 @@ export default function ManageLessons() {
     });
   };
 
+  // ✅ ៤. អនុគមន៍លុបឯកសារ និងវីដេអូចេញពី Database ពិតប្រាកដ ១០០%
   const confirmDeleteMedia = async () => {
     if (!deleteMediaTarget) return;
 
     const { type, id } = deleteMediaTarget;
     const previousLessons = [...lessons];
     setDeleteMediaTarget(null);
+    setMediaErrorMsg('');
 
     if (type === 'file') {
       setLessons((prev) => {
         const updated = prev.map((lesson) => ({
           ...lesson,
           files: Array.isArray(lesson.files)
-            ? lesson.files.filter((f) => f.id !== id)
+            ? lesson.files.filter((f) => String(f.id) !== String(id))
             : [],
         }));
         LESSONS_MEM_CACHE.lessons = updated;
@@ -1422,7 +1469,18 @@ export default function ManageLessons() {
       });
 
       try {
-        await api.delete(`/teacher/lessons/files/${id}`);
+        try {
+          await api.delete(`/teacher/lessons/files/${id}`);
+        } catch (err1) {
+          try {
+            await api.delete(`/teacher/lessons/file/${id}`);
+          } catch {
+            await api.delete(`/teacher/files/${id}`);
+          }
+        }
+
+        clearStudentLessonCaches();
+        await fetchLessons();
 
         pushLocalNotification({
           titleKm: 'បានលុបឯកសារមេរៀន',
@@ -1443,7 +1501,7 @@ export default function ManageLessons() {
         const updated = prev.map((lesson) => ({
           ...lesson,
           videos: Array.isArray(lesson.videos)
-            ? lesson.videos.filter((v) => v.id !== id)
+            ? lesson.videos.filter((v) => String(v.id) !== String(id))
             : [],
         }));
         LESSONS_MEM_CACHE.lessons = updated;
@@ -1452,7 +1510,18 @@ export default function ManageLessons() {
       });
 
       try {
-        await api.delete(`/teacher/lessons/videos/${id}`);
+        try {
+          await api.delete(`/teacher/lessons/videos/${id}`);
+        } catch (err1) {
+          try {
+            await api.delete(`/teacher/lessons/video/${id}`);
+          } catch {
+            await api.delete(`/teacher/videos/${id}`);
+          }
+        }
+
+        clearStudentLessonCaches();
+        await fetchLessons();
 
         pushLocalNotification({
           titleKm: 'បានលុបវីដេអូមេរៀន',

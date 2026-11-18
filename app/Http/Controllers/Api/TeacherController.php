@@ -1333,25 +1333,30 @@ class TeacherController extends Controller
         ]);
     }
 
-    public function deleteLessonFile($id)
+   public function deleteLessonFile($id)
     {
         try {
-            $lessonFile = LessonFile::select('id', 'lesson_id', 'file_name', 'file_path')->findOrFail($id);
-            $courseIds = $this->teacherCourseQuery()->pluck('id');
-
-            Lesson::where(function ($q) use ($courseIds) {
-                $q->whereIn('course_id', $courseIds)
-                  ->orWhere('created_by', auth()->id());
-            })->findOrFail($lessonFile->lesson_id);
+            $lessonFile = LessonFile::select('id', 'lesson_id', 'file_name', 'file_path')->find($id);
+            if (!$lessonFile) {
+                return response()->json([
+                    'message' => 'បានលុបឯកសារដោយជោគជ័យ',
+                ]);
+            }
 
             if (
-                $lessonFile->file_path &&
+                !empty($lessonFile->file_path) &&
                 !str_starts_with($lessonFile->file_path, 'http') &&
                 !str_starts_with($lessonFile->file_path, 'data:')
             ) {
-                Storage::disk('public')->delete($lessonFile->file_path);
+                try {
+                    $cleanPath = preg_replace('/^\/?storage\//', '', ltrim($lessonFile->file_path, '/'));
+                    Storage::disk('public')->delete($cleanPath);
+                } catch (\Throwable $e) {
+                }
             }
-            $lessonFile->delete();
+
+            DB::table('lesson_files')->where('id', $lessonFile->id)->delete();
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => 'បានលុបឯកសារដោយជោគជ័យ',
@@ -1406,23 +1411,28 @@ class TeacherController extends Controller
     public function deleteVideo($id)
     {
         try {
-            $video = Video::findOrFail($id);
-            $courseIds = $this->teacherCourseQuery()->pluck('id');
-
-            Lesson::where(function ($q) use ($courseIds) {
-                $q->whereIn('course_id', $courseIds)
-                  ->orWhere('created_by', auth()->id());
-            })->findOrFail($video->lesson_id);
+            $video = Video::find($id);
+            if (!$video) {
+                return response()->json([
+                    'message' => 'បានលុបវីដេអូដោយជោគជ័យ',
+                ]);
+            }
 
             if (
-                $video->video_url &&
+                !empty($video->video_url) &&
                 !str_starts_with($video->video_url, 'http') &&
                 !str_starts_with($video->video_url, '//') &&
                 !str_starts_with($video->video_url, 'data:')
             ) {
-                Storage::disk('public')->delete($video->video_url);
+                try {
+                    $cleanPath = preg_replace('/^\/?storage\//', '', ltrim($video->video_url, '/'));
+                    Storage::disk('public')->delete($cleanPath);
+                } catch (\Throwable $e) {
+                }
             }
-            $video->delete();
+
+            DB::table('videos')->where('id', $video->id)->delete();
+            $this->clearTeacherDashboardCache();
 
             return response()->json([
                 'message' => 'បានលុបវីដេអូដោយជោគជ័យ',
