@@ -1054,7 +1054,7 @@ const Login = () => {
         {/* 📌 ផ្នែកខាងស្ដាំ៖ ប្រអប់ Login, 2FA, និង កំណត់ពាក្យសម្ងាត់ឡើងវិញដោយខ្លួនឯង */}
         <div className="lg:col-span-5 flex justify-center lg:justify-end">
           <div
-            className={`relative w-full max-w-[400px] rounded-[1.75rem] backdrop-blur-2xl border p-6 sm:p-7 overflow-hidden transition-colors duration-200 ${
+            className={`relative w-full max-w-[400px] rounded-[1.75rem] backdrop-blur-2xl border p-5 sm:p-7 overflow-hidden transition-colors duration-200 ${
               isDarkMode
                 ? 'bg-white/[0.08] border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.5)]'
                 : 'bg-white/95 border-white shadow-[0_20px_50px_rgba(15,23,42,0.12)]'
@@ -1379,13 +1379,22 @@ const Login = () => {
                   <div className="relative mb-2.5">
                     <div className="absolute -inset-1.5 bg-gradient-to-r from-amber-400 to-indigo-500 rounded-2xl blur opacity-40"></div>
                     <div
-                      className={`relative h-13 w-13 rounded-2xl border flex items-center justify-center shadow-md ${
+                      className={`relative h-14 w-14 rounded-2xl border p-1.5 flex items-center justify-center shadow-md ${
                         isDarkMode
                           ? 'bg-slate-900/90 border-amber-400/30 text-amber-300'
                           : 'bg-amber-50 border-amber-200 text-amber-600'
                       }`}
                     >
-                      <KeyIcon className="h-7 w-7 stroke-[2]" />
+                      {!logoFailed ? (
+                        <img
+                          src={logo}
+                          alt="RPITSSVR Logo"
+                          className="h-full w-full object-contain"
+                          onError={() => setLogoFailed(true)}
+                        />
+                      ) : (
+                        <KeyIcon className="h-7 w-7 stroke-[2]" />
+                      )}
                     </div>
                   </div>
 
@@ -1519,13 +1528,22 @@ const Login = () => {
                   <div className="relative mb-2">
                     <div className="absolute -inset-1.5 bg-gradient-to-r from-emerald-500 to-indigo-500 rounded-2xl blur opacity-40"></div>
                     <div
-                      className={`relative h-13 w-13 rounded-2xl border flex items-center justify-center shadow-md ${
+                      className={`relative h-14 w-14 rounded-2xl border p-1.5 flex items-center justify-center shadow-md ${
                         isDarkMode
                           ? 'bg-slate-900/90 border-emerald-400/30 text-emerald-400'
                           : 'bg-emerald-50 border-emerald-200 text-emerald-600'
                       }`}
                     >
-                      <LockClosedIcon className="h-7 w-7 stroke-[2]" />
+                      {!logoFailed ? (
+                        <img
+                          src={logo}
+                          alt="RPITSSVR Logo"
+                          className="h-full w-full object-contain"
+                          onError={() => setLogoFailed(true)}
+                        />
+                      ) : (
+                        <LockClosedIcon className="h-7 w-7 stroke-[2]" />
+                      )}
                     </div>
                   </div>
 
@@ -1699,9 +1717,9 @@ const Login = () => {
               </div>
             ) : (
               /* ============================================================
-                 ✅ ផ្ទាំងវាយលេខកូដ ៦ ខ្ទង់ (Zero-Trust Security៖ មិនអនុញ្ញាតឱ្យអ្នកដទៃភ្ជាប់ Telegram ថ្មីលើអេក្រង់ Login ឡើយ)
+                 ✅ ផ្ទាំងវាយលេខកូដ ៦ ខ្ទង់ (មាន Logo សាលា + ទំហំលេខសមរម្យស្អាតលើ Phone, Tablet, iPad, Laptop & Desktop)
               ============================================================= */
-              <div className="relative z-10 space-y-5">
+              <div className="relative z-10 space-y-4 sm:space-y-5">
                 <div className="flex flex-col items-center text-center">
                   <div className="relative mb-2.5">
                     <div
@@ -1714,7 +1732,7 @@ const Login = () => {
                       }`}
                     ></div>
                     <div
-                      className={`relative h-13 w-13 rounded-2xl border flex items-center justify-center shadow-md transition-colors duration-200 ${
+                      className={`relative h-14 w-14 rounded-2xl border p-1.5 flex items-center justify-center shadow-md transition-colors duration-200 ${
                         otpError
                           ? isDarkMode
                             ? 'bg-rose-950/90 border-rose-500 text-rose-400'
@@ -1725,15 +1743,33 @@ const Login = () => {
                             : 'bg-emerald-50 border-emerald-400 text-emerald-600'
                           : isDarkMode
                           ? 'bg-slate-900/90 border-emerald-400/30 text-emerald-400'
-                          : 'bg-emerald-50 border-emerald-200 text-emerald-600'
+                          : 'bg-white border-emerald-200 text-emerald-600'
                       }`}
                     >
-                      <ShieldCheckIcon className="h-7 w-7 stroke-[2]" />
+                      {!logoFailed ? (
+                        <img
+                          src={logo}
+                          alt="RPITSSVR Logo"
+                          className="h-full w-full object-contain"
+                          onError={() => setLogoFailed(true)}
+                        />
+                      ) : (
+                        <ShieldCheckIcon className="h-7 w-7 stroke-[2]" />
+                      )}
+                      <span
+                        className={`absolute -bottom-1 -right-1 h-5 w-5 rounded-full flex items-center justify-center border shadow-2xs ${
+                          otpError
+                            ? 'bg-rose-600 text-white border-rose-400'
+                            : 'bg-emerald-500 text-white border-white dark:border-slate-900'
+                        }`}
+                      >
+                        <ShieldCheckIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+                      </span>
                     </div>
                   </div>
 
                   <h2
-                    className={`text-lg sm:text-xl font-black tracking-wide ${
+                    className={`text-base sm:text-xl font-black tracking-wide ${
                       isDarkMode ? 'text-white' : 'text-slate-900'
                     }`}
                   >
@@ -1793,10 +1829,10 @@ const Login = () => {
                   </div>
                 </div>
 
-                {/* ប្រអប់វាយលេខកូដទាំង ៦ ខ្ទង់ */}
+                {/* ប្រអប់វាយលេខកូដទាំង ៦ ខ្ទង់ (ទំហំសមរម្យស្អាតលើគ្រប់អេក្រង់ Phone / iPad / Desktop) */}
                 <div className="py-1">
                   <div
-                    className={`flex items-center justify-center gap-2 sm:gap-2.5 ${
+                    className={`grid grid-cols-6 gap-1.5 sm:gap-2 max-w-[290px] sm:max-w-[320px] mx-auto ${
                       otpError ? 'otp-error-shake' : ''
                     }`}
                     onPaste={handleOtpPaste}
@@ -1820,7 +1856,7 @@ const Login = () => {
                             ? { animationDelay: `${idx * 75}ms` }
                             : undefined
                         }
-                        className={`w-11 h-12 sm:w-12 sm:h-13 text-center text-xl sm:text-2xl font-black rounded-xl border-2 focus:outline-none focus:ring-4 transition-all duration-150 ${
+                        className={`w-full h-11 sm:h-12 text-center text-base sm:text-lg font-extrabold rounded-xl border-2 focus:outline-none focus:ring-3 transition-all duration-150 ${
                           loading
                             ? isDarkMode
                               ? 'otp-verifying-wave bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
@@ -1851,7 +1887,6 @@ const Login = () => {
                   )}
                 </div>
 
-                {/* ✅ ប្រសិនបើគណនីនេះជាប់ Telegram ចាស់ខុសម្ចាស់ (ក្នុងជំហាន Login) អនុញ្ញាតឱ្យចុចផ្ដាច់ Telegram ហើយប្ដូរមកទទួលកូដតាម Email ម្ចាស់គណនីផ្ទាល់ */}
                 {step === 'otp' && telegramLinked && (
                   <div className="pt-0.5 text-center">
                     <button
