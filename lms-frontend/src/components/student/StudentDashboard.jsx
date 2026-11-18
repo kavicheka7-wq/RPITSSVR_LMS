@@ -298,7 +298,7 @@ const syncDashboardTasksAndPrefetch = (
 ) => {
   const effectiveUid = uid || 'default_student';
 
-  // ១. ទាញបញ្ជីកិច្ចការសិស្សសម្រាប់បង្ហាញក្នុងកាត «កិច្ចការថ្មីៗ» និងគណនា % ពិន្ទុកិច្ចការ
+  // ១. ទាញបញ្ជីកិច្ចការសិស្សសម្រាប់បង្ហាញក្នុងកាត «កិច្ចការថ្មីៗ» និងបូកពិន្ទុកិច្ចការនីមួយៗ
   api
     .get('/student/assignments', { params: { per_page: 50 } })
     .then((res) => {
@@ -334,7 +334,7 @@ const syncDashboardTasksAndPrefetch = (
     })
     .catch(() => {});
 
-  // ៣. ទាញពិន្ទុតាមមុខវិជ្ជា (ដើម្បីគណនាភាគរយទឹករលកឱ្យត្រូវ ១០០%)
+  // ៣. ទាញពិន្ទុតាមមុខវិជ្ជា (រួមមានពិន្ទុកិច្ចការ + សំណួរខ្លី + ប្រឡងពាក់កណ្ដាលឆមាសលើក្រដាសក្រៅ + ប្រឡងបញ្ចប់លើក្រដាសក្រៅ ដែលគ្រូបានចុចរក្សាទុក)
   api
     .get('/student/scores')
     .then((res) => {
@@ -438,6 +438,16 @@ const formatCleanScore = (val, fallback = 0) => {
   if (val === null || val === undefined || val === '') return fallback;
   const num = Number(val);
   return isNaN(num) ? val : Math.round(num * 100) / 100;
+};
+
+const toWeightedPoints = (rawPercent100, maxWeightPts) => {
+  if (rawPercent100 === null || rawPercent100 === undefined || rawPercent100 === '') {
+    return null;
+  }
+  const num = Number(rawPercent100);
+  if (isNaN(num)) return null;
+  const pts = (num * maxWeightPts) / 100;
+  return Math.min(maxWeightPts, Math.max(0, Math.round(pts * 100) / 100));
 };
 
 const resolveStudentSubmission = (assign) => {
@@ -782,13 +792,15 @@ const StudentDashboard = () => {
     });
   }, [quizzes]);
 
-  // ✅ គណនាភាគរយពិន្ទុពីកិច្ចការដែលគ្រូបានដាក់ឱ្យសិស្ស (និងពិន្ទុក្នុងតារាងពិន្ទុ) ដើម្បីឱ្យលោត % និងទឹករលកឡើងតាមពិន្ទុគ្រូដាក់ភ្លាមៗ!
-  const averageScoreNum = useMemo(() => {
-    // ១. គណនាភាគរយពីពិន្ទុកិច្ចការដែលគ្រូបានដាក់ឱ្យសិស្សផ្ទាល់ (teacherAssignedHomework)
-    let gradedAssignEarned = 0;
-    let gradedAssignMax = 0;
+  // ============================================================================
+  // 📌 គណនាបូកពិន្ទុសរុបតាមផ្នែកដែលគ្រូបានដាក់ និងចុចរក្សាទុក (កិច្ចការ 20% + សំណួរខ្លី 20% + ពាក់កណ្ដាលឆមាស 25% + ប្រឡងឆមាស 35%)
+  // ============================================================================
+  const scoreSummary = useMemo(() => {
+    // ១. គណនាពិន្ទុកិច្ចការនីមួយៗដែលគ្រូបានដាក់ និងរក្សាទុក តាមមុខវិជ្ជានីមួយៗ
+    const assignByCourse = new Map();
     teacherAssignedHomework.forEach((a) => {
       if (a.isGraded && a.resolvedSubmission) {
+        const cid = String(a.course_id || a.course?.id || 'default');
         const sc = Number(a.resolvedSubmission.score);
         const mx =
           Number(
@@ -800,82 +812,181 @@ const StudentDashboard = () => {
               20
           ) || 20;
         if (!isNaN(sc) && mx > 0) {
-          gradedAssignEarned += sc;
-          gradedAssignMax += mx;
+          const cur = assignByCourse.get(cid) || { earned: 0, max: 0 };
+          cur.earned += sc;
+          cur.max += mx;
+          assignByCourse.set(cid, cur);
         }
       }
     });
 
-    if (gradedAssignMax > 0) {
-      const assignPercent = Math.round(
-        (gradedAssignEarned / gradedAssignMax) * 100
-      );
-      return Math.min(100, Math.max(0, assignPercent));
-    }
-
-    // ២. បើនៅក្នុងតារាងពិន្ទុ (/student/scores) មានពិន្ទុកិច្ចការ ឬពិន្ទុសរុបដែលគ្រូដាក់
-    if (Array.isArray(scoresList) && scoresList.length > 0) {
-      const validCourseScores = [];
-      scoresList.forEach((row) => {
-        const aScore =
-          row?.assignment_score ?? row?.auto_assignment_score ?? null;
-        const fScore = row?.final_score ?? null;
-        if (aScore !== null && aScore !== '' && !isNaN(Number(aScore))) {
-          validCourseScores.push(Number(aScore));
-        } else if (fScore !== null && fScore !== '' && !isNaN(Number(fScore))) {
-          validCourseScores.push(Number(fScore));
-        }
-      });
-      if (validCourseScores.length > 0) {
-        const avg =
-          validCourseScores.reduce((acc, v) => acc + v, 0) /
-          validCourseScores.length;
-        return Math.min(100, Math.max(0, Math.round(avg)));
-      }
-    }
-
-    // ៣. បើមានពី stats.average_score របស់ Backend
-    const rawStatAvg = Number(stats?.average_score || 0);
-    if (rawStatAvg > 0) {
-      return Math.min(100, Math.max(0, Math.round(rawStatAvg)));
-    }
-
-    // ៤. បើមានពិន្ទុប្រឡងកម្រងសំណួរ (Quizzes)
-    let gradedQuizEarned = 0;
-    let gradedQuizMax = 0;
+    // ២. គណនាពិន្ទុសំណួរខ្លីនីមួយៗដែលមាន តាមមុខវិជ្ជានីមួយៗ
+    const quizByCourse = new Map();
     teacherAssignedQuizzes.forEach((q) => {
       if (
         q.isDone &&
         q.resolvedAttempt?.score !== null &&
-        q.resolvedAttempt?.score !== undefined
+        q.resolvedAttempt?.score !== undefined &&
+        q.resolvedAttempt?.score !== ''
       ) {
+        const cid = String(q.course_id || q.course?.id || 'default');
         const sc = Number(q.resolvedAttempt.score);
         const mx = Number(q.total_mark || q.total_marks || 20) || 20;
         if (!isNaN(sc) && mx > 0) {
-          gradedQuizEarned += sc;
-          gradedQuizMax += mx;
+          const cur = quizByCourse.get(cid) || { earned: 0, max: 0 };
+          cur.earned += sc;
+          cur.max += mx;
+          quizByCourse.set(cid, cur);
         }
       }
     });
 
-    if (gradedQuizMax > 0) {
-      const quizPercent = Math.round((gradedQuizEarned / gradedQuizMax) * 100);
-      return Math.min(100, Math.max(0, quizPercent));
+    // ៣. បូកបញ្ចូលគ្នាជាមួយពិន្ទុក្នុងតារាងពិន្ទុ (/student/scores ដែលមានពាក់កណ្ដាលឆមាស 25% និងប្រឡងឆមាស 35% លើក្រដាសក្រៅ)
+    const courseIdsSet = new Set();
+    if (Array.isArray(scoresList)) {
+      scoresList.forEach((r) => {
+        const cid = String(r?.course_id || r?.course?.id || '');
+        if (cid) courseIdsSet.add(cid);
+      });
+    }
+    assignByCourse.forEach((_, cid) => courseIdsSet.add(cid));
+    quizByCourse.forEach((_, cid) => courseIdsSet.add(cid));
+
+    const accumulatedCourses = [];
+    let hasFullExamCount = 0;
+
+    courseIdsSet.forEach((cid) => {
+      const scoreRow = Array.isArray(scoresList)
+        ? scoresList.find(
+            (r) => String(r?.course_id || r?.course?.id || '') === cid
+          )
+        : null;
+
+      const liveAssign = assignByCourse.get(cid);
+      const liveAssign100 =
+        liveAssign && liveAssign.max > 0
+          ? (liveAssign.earned / liveAssign.max) * 100
+          : null;
+
+      const liveQuiz = quizByCourse.get(cid);
+      const liveQuiz100 =
+        liveQuiz && liveQuiz.max > 0
+          ? (liveQuiz.earned / liveQuiz.max) * 100
+          : null;
+
+      const assignRaw100 =
+        scoreRow?.assignment_score ??
+        scoreRow?.auto_assignment_score ??
+        liveAssign100;
+      const quizRaw100 =
+        scoreRow?.quiz_score ?? scoreRow?.auto_quiz_score ?? liveQuiz100;
+      const midtermRaw100 = scoreRow?.midterm_score ?? null;
+      const examRaw100 = scoreRow?.exam_score ?? null;
+
+      // បម្លែងជាពិន្ទុពិតប្រាកដតាមផ្នែក៖ កិច្ចការ (20ពិន្ទុ), សំណួរខ្លី (20ពិន្ទុ), ពាក់កណ្ដាលឆមាស (25ពិន្ទុ), ប្រឡងឆមាស (35ពិន្ទុ)
+      const assignPts20 = toWeightedPoints(assignRaw100, 20);
+      const quizPts20 = toWeightedPoints(quizRaw100, 20);
+      const midtermPts25 = toWeightedPoints(midtermRaw100, 25);
+      const examPts35 = toWeightedPoints(examRaw100, 35);
+
+      const gradedParts = [
+        assignPts20,
+        quizPts20,
+        midtermPts25,
+        examPts35,
+      ].filter((v) => v !== null);
+
+      if (gradedParts.length > 0) {
+        const totalPts =
+          Math.round(gradedParts.reduce((a, b) => a + b, 0) * 100) / 100;
+        accumulatedCourses.push(totalPts);
+        if (midtermPts25 !== null && examPts35 !== null) {
+          hasFullExamCount += 1;
+        }
+      } else if (
+        scoreRow?.final_score !== null &&
+        scoreRow?.final_score !== undefined &&
+        scoreRow?.final_score !== ''
+      ) {
+        const fNum = Number(scoreRow.final_score);
+        if (!isNaN(fNum)) {
+          accumulatedCourses.push(Math.round(fNum * 100) / 100);
+          hasFullExamCount += 1;
+        }
+      }
+    });
+
+    if (accumulatedCourses.length > 0) {
+      const avgPts =
+        Math.round(
+          (accumulatedCourses.reduce((a, b) => a + b, 0) /
+            accumulatedCourses.length) *
+            10
+        ) / 10;
+      return {
+        hasAnyGradedScore: true,
+        isAllExamsComplete: hasFullExamCount === accumulatedCourses.length,
+        totalPoints: Math.min(100, Math.max(0, avgPts)),
+        percentInt: Math.min(100, Math.max(0, Math.round(avgPts))),
+      };
     }
 
-    return 0;
-  }, [teacherAssignedHomework, scoresList, stats, teacherAssignedQuizzes]);
+    const fallbackBackendAvg = Number(stats?.average_score || 0);
+    if (fallbackBackendAvg > 0) {
+      return {
+        hasAnyGradedScore: true,
+        isAllExamsComplete: false,
+        totalPoints: Math.min(
+          100,
+          Math.max(0, Math.round(fallbackBackendAvg * 10) / 10)
+        ),
+        percentInt: Math.min(100, Math.max(0, Math.round(fallbackBackendAvg))),
+      };
+    }
+
+    return {
+      hasAnyGradedScore: false,
+      isAllExamsComplete: false,
+      totalPoints: 0,
+      percentInt: 0,
+    };
+  }, [teacherAssignedHomework, teacherAssignedQuizzes, scoresList, stats]);
+
+  const averageScoreNum = scoreSummary.percentInt;
+  const exactTotalPoints = scoreSummary.totalPoints;
 
   const masteryInfo = useMemo(() => {
-    if (averageScoreNum >= 50) {
+    // ១. ករណីគ្រូមិនទាន់បានដាក់ពិន្ទុ និងចុចរក្សាទុកណាមួយសោះ (0%)
+    if (!scoreSummary.hasAnyGradedScore) {
+      return {
+        label: t('និស្សិតកំពុងសិក្សា', 'Active Student'),
+        statusText: t('រង់ចាំពិន្ទុ', 'Pending'),
+        desc: t(
+          'រង់ចាំគ្រូដាក់ពិន្ទុកិច្ចការ និងរក្សាទុកពិន្ទុ',
+          'Waiting for instructor to grade & save scores'
+        ),
+        badgeClass:
+          'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30',
+        statusTextColor: 'text-indigo-600 dark:text-indigo-400',
+        ringColor: '#6366f1',
+        waveFrontColor: 'rgba(99, 102, 241, 0.72)',
+        waveBackColor: 'rgba(129, 140, 248, 0.42)',
+      };
+    }
+
+    // ២. ករណីពិន្ទុបូកសរុបបានចាប់ពី 50 ពិន្ទុ (50%) ឡើងទៅ
+    if (exactTotalPoints >= 50) {
       return {
         label:
-          averageScoreNum >= 85
+          exactTotalPoints >= 85
             ? t('និស្សិតឆ្នើម', 'Excellent')
             : t('និស្សិតសកម្ម', 'Good Standing'),
-        statusText: t('ប្រឡងជាប់', 'Passed'),
+        statusText: `${t('ប្រឡងជាប់', 'Passed')} (${exactTotalPoints} ${t(
+          'ពិន្ទុ',
+          'pts'
+        )})`,
         desc:
-          averageScoreNum >= 85
+          exactTotalPoints >= 85
             ? t('លទ្ធផលសិក្សាល្អប្រសើរណាស់', 'Outstanding Performance')
             : t('កំពុងដំណើរការសិក្សាបានល្អ', 'Good Academic Progress'),
         badgeClass:
@@ -886,34 +997,44 @@ const StudentDashboard = () => {
         waveBackColor: 'rgba(52, 211, 153, 0.45)',
       };
     }
-    if (averageScoreNum > 0) {
+
+    // ៣. ករណីគ្រូបានដាក់ពិន្ទុកិច្ចការ/សំណួរខ្លីខ្លះហើយ តែមិនទាន់បញ្ចូលពិន្ទុប្រឡងក្រដាសក្រៅ (ពាក់កណ្ដាលឆមាស និងឆមាស) គ្រប់ 100%
+    if (!scoreSummary.isAllExamsComplete) {
       return {
-        label: t('ត្រូវប្រឹងប្រែងបន្ថែម', 'Needs Improvement'),
-        statusText: t('ប្រឡងធ្លាក់', 'Failed'),
+        label: t('កំពុងសន្សំពិន្ទុ', 'In Progress'),
+        statusText: `${exactTotalPoints} / 100 ${t('ពិន្ទុ', 'pts')}`,
         desc: t(
-          'សូមព្យាយាមធ្វើកិច្ចការ និងសំណួរខ្លីបន្ថែម',
-          'Keep practicing assignments & quizzes'
+          'ពិន្ទុបច្ចុប្បន្ន (រង់ចាំបូកបន្ថែមពិន្ទុប្រឡងពាក់កណ្ដាលឆមាស និងឆមាស)',
+          'Current points (awaiting midterm & final exam scores)'
         ),
         badgeClass:
-          'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30',
-        statusTextColor: 'text-rose-600 dark:text-rose-400',
-        ringColor: '#f43f5e',
-        waveFrontColor: 'rgba(244, 63, 94, 0.78)',
-        waveBackColor: 'rgba(251, 113, 133, 0.45)',
+          'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30',
+        statusTextColor: 'text-blue-600 dark:text-blue-400',
+        ringColor: '#3b82f6',
+        waveFrontColor: 'rgba(59, 130, 246, 0.76)',
+        waveBackColor: 'rgba(96, 165, 250, 0.45)',
       };
     }
+
+    // ៤. ករណីគ្រូបញ្ចូលគ្រប់ផ្នែកទាំងអស់ហើយ ប៉ុន្តែពិន្ទុសរុបតិចជាង 50 ពិន្ទុ
     return {
-      label: t('និស្សិតកំពុងសិក្សា', 'Active Student'),
-      statusText: t('រង់ចាំពិន្ទុ', 'Pending'),
-      desc: t('បន្តចូលរៀន និងធ្វើលំហាត់បន្ថែម', 'Keep studying & practicing'),
+      label: t('ត្រូវប្រឹងប្រែងបន្ថែម', 'Needs Improvement'),
+      statusText: `${t('ប្រឡងធ្លាក់', 'Failed')} (${exactTotalPoints} ${t(
+        'ពិន្ទុ',
+        'pts'
+      )})`,
+      desc: t(
+        'សូមព្យាយាមធ្វើកិច្ចការ និងសំណួរខ្លីបន្ថែម',
+        'Keep practicing assignments & quizzes'
+      ),
       badgeClass:
-        'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30',
-      statusTextColor: 'text-indigo-600 dark:text-indigo-400',
-      ringColor: '#6366f1',
-      waveFrontColor: 'rgba(99, 102, 241, 0.72)',
-      waveBackColor: 'rgba(129, 140, 248, 0.42)',
+        'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30',
+      statusTextColor: 'text-rose-600 dark:text-rose-400',
+      ringColor: '#f43f5e',
+      waveFrontColor: 'rgba(244, 63, 94, 0.78)',
+      waveBackColor: 'rgba(251, 113, 133, 0.45)',
     };
-  }, [averageScoreNum, t]);
+  }, [scoreSummary, exactTotalPoints, t]);
 
   const doneHomeworkCount = useMemo(
     () => teacherAssignedHomework.filter((a) => a.isDone).length,
@@ -1003,7 +1124,7 @@ const StudentDashboard = () => {
         '«TVET ជំនាញពិត ជីវិតប្រសើរ! រៀនឱ្យចប់ ឱ្យចេះ ឱ្យមានការងារ»',
         '“TVET Real Skills, Better Life! Study to Finish, to Know, to Get a Job”'
       ),
-      statusPill: `${averageScoreNum} / 100 ${t('ពិន្ទុ', 'pts')}`,
+      statusPill: `${exactTotalPoints} / 100 ${t('ពិន្ទុ', 'pts')}`,
       icon: ChartBarIcon,
       iconBoxStyle: 'from-cyan-400 to-blue-500 text-slate-950',
       link: '/grades',
@@ -1017,7 +1138,7 @@ const StudentDashboard = () => {
     teacherAssignedQuizzes.length,
     doneHomeworkCount,
     doneQuizzesCount,
-    averageScoreNum,
+    exactTotalPoints,
     getTeacherDisplayName,
     t,
   ]);
@@ -1261,7 +1382,7 @@ const StudentDashboard = () => {
       ? Math.round((totalCompletedActivities / totalActivitiesCount) * 100)
       : 0;
 
-  // ✅ សំខាន់បំផុត៖ ឱ្យកម្ពស់ទឹករលកក្នុងរង្វង់ឡើងតាមលេខ % នៃពិន្ទុដែលគ្រូបានដាក់ឱ្យសិស្ស ១០០% (បើ 0% គឺទឹក 0%, បើ 80% គឺទឹកឡើងដល់ 80%)
+  // ✅ ឱ្យកម្ពស់ទឹករលកក្នុងរង្វង់ឡើងតាមលេខ % នៃពិន្ទុបូកសរុបដែលគ្រូបានដាក់ និងរក្សាទុក ១០០%
   const liquidLevelPercent = averageScoreNum;
   const isLiquidDarkText = liquidLevelPercent < 55;
 

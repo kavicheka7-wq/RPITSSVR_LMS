@@ -602,7 +602,7 @@ class StudentController extends Controller
         });
     }
 
-    // Dashboard
+ // Dashboard
     public function dashboard()
     {
         try {
@@ -663,7 +663,7 @@ class StudentController extends Controller
                 }
             }
 
-            // ✅ គណនាពិន្ទុមធ្យមភាគពីពិន្ទុកិច្ចការដែលគ្រូបានដាក់ (assignment_submissions) ពិន្ទុសំណួរប្រឡង និងតារាង grades
+            // ✅ គណនាពិន្ទុបូកបញ្ចូលគ្នាតាមផ្នែកដែលគ្រូបានដាក់ និងរក្សាទុក (កិច្ចការ 20% + សំណួរខ្លី 20% + ពាក់កណ្ដាលឆមាស 25% + ប្រឡងឆមាស 35% = 100 ពិន្ទុ)
             $courseIds = $coursesList->pluck('id')->filter()->values();
             $grades = Grade::whereIn('student_id', $studentIds)->get()->keyBy('course_id');
 
@@ -671,7 +671,7 @@ class StudentController extends Controller
                 ? Assignment::select('id', 'course_id', 'total_score')
                     ->whereIn('course_id', $courseIds)
                     ->get()
-                : collect();
+                    : collect();
             $allAssignIds = $allAssignments->pluck('id');
 
             $gradedSubmissions = $allAssignIds->isNotEmpty()
@@ -702,102 +702,73 @@ class StudentController extends Controller
                     ->groupBy('quiz_id')
                 : collect();
 
-            // ១. គណនាភាគរយពិន្ទុកិច្ចការដែលគ្រូបានដាក់ឱ្យសិស្សផ្ទាល់
-            $assignEarned = 0;
-            $assignMax = 0;
-            foreach ($allAssignments as $asg) {
-                $subs = $gradedSubmissions->get($asg->id, collect());
-                if ($subs->isNotEmpty()) {
-                    $maxS = (float) ($asg->total_score ?? 20);
-                    if ($maxS > 0) {
-                        $assignEarned += (float) $subs->max('score');
-                        $assignMax += $maxS;
-                    }
-                }
-            }
+            $courseAccumulatedScores = [];
 
-            // ២. គណនាភាគរយពិន្ទុប្រឡងកម្រងសំណួរ
-            $quizEarned = 0;
-            $quizMax = 0;
-            foreach ($allQuizzes as $qz) {
-                $atts = $gradedAttempts->get($qz->id, collect());
-                if ($atts->isNotEmpty()) {
-                    $maxM = (float) ($qz->total_mark ?? $qz->questions_total_mark ?? 20);
-                    if ($maxM > 0) {
-                        $quizEarned += (float) $atts->max('score');
-                        $quizMax += $maxM;
-                    }
-                }
-            }
-
-            // ៣. គណនាពិន្ទុរួមពីតារាង grades ឬពីពិន្ទុកិច្ចការ/កម្រងសំណួរដែលគ្រូបានដាក់
-            $courseScoresList = [];
             foreach ($coursesList as $crs) {
                 $g = $grades->get($crs->id);
-                if ($g && $g->final_score !== null && (float) $g->final_score > 0) {
-                    $courseScoresList[] = (float) $g->final_score;
-                    continue;
-                }
 
-                // គណនាតាមផ្នែកដែលគ្រូបានដាក់ក្នុងមុខវិជ្ជានេះ
+                // ១. បូកពិន្ទុកិច្ចការនីមួយៗដែលគ្រូបានដាក់ និងរក្សាទុក (គិតជាពិន្ទុក្នុងចំណោម 20 ពិន្ទុ)
                 $cAssigns = $allAssignments->where('course_id', $crs->id);
-                $cEarnedA = 0;
-                $cMaxA = 0;
+                $earnedA = 0;
+                $maxA = 0;
+                $hasGradedA = false;
                 foreach ($cAssigns as $ca) {
-                    $sList = $gradedSubmissions->get($ca->id, collect());
-                    if ($sList->isNotEmpty()) {
+                    $subs = $gradedSubmissions->get($ca->id, collect());
+                    if ($subs->isNotEmpty()) {
                         $m = (float) ($ca->total_score ?? 20);
                         if ($m > 0) {
-                            $cEarnedA += (float) $sList->max('score');
-                            $cMaxA += $m;
+                            $earnedA += (float) $subs->max('score');
+                            $maxA += $m;
+                            $hasGradedA = true;
                         }
                     }
                 }
-                $autoA = $cMaxA > 0 ? round(($cEarnedA / $cMaxA) * 100, 2) : null;
+                $autoAssign100 = ($hasGradedA && $maxA > 0) ? round(($earnedA / $maxA) * 100, 2) : null;
+                $assign100 = ($g && $g->assignment_score !== null) ? (float) $g->assignment_score : $autoAssign100;
+                $assignPts20 = $assign100 !== null ? round(($assign100 * 20) / 100, 2) : null;
 
+                // ២. បូកពិន្ទុសំណួរខ្លីដែលមាន (គិតជាពិន្ទុក្នុងចំណោម 20 ពិន្ទុ)
                 $cQuizzes = $allQuizzes->where('course_id', $crs->id);
-                $cEarnedQ = 0;
-                $cMaxQ = 0;
+                $earnedQ = 0;
+                $maxQ = 0;
+                $hasGradedQ = false;
                 foreach ($cQuizzes as $cq) {
-                    $aList = $gradedAttempts->get($cq->id, collect());
-                    if ($aList->isNotEmpty()) {
+                    $atts = $gradedAttempts->get($cq->id, collect());
+                    if ($atts->isNotEmpty()) {
                         $m = (float) ($cq->total_mark ?? $cq->questions_total_mark ?? 20);
                         if ($m > 0) {
-                            $cEarnedQ += (float) $aList->max('score');
-                            $cMaxQ += $m;
+                            $earnedQ += (float) $atts->max('score');
+                            $maxQ += $m;
+                            $hasGradedQ = true;
                         }
                     }
                 }
-                $autoQ = $cMaxQ > 0 ? round(($cEarnedQ / $cMaxQ) * 100, 2) : null;
+                $autoQuiz100 = ($hasGradedQ && $maxQ > 0) ? round(($earnedQ / $maxQ) * 100, 2) : null;
+                $quiz100 = ($g && $g->quiz_score !== null) ? (float) $g->quiz_score : $autoQuiz100;
+                $quizPts20 = $quiz100 !== null ? round(($quiz100 * 20) / 100, 2) : null;
 
-                $aScore = ($g && $g->assignment_score !== null) ? (float) $g->assignment_score : $autoA;
-                $qScore = ($g && $g->quiz_score !== null) ? (float) $g->quiz_score : $autoQ;
-                $mScore = ($g && $g->midterm_score !== null) ? (float) $g->midterm_score : null;
-                $eScore = ($g && isset($g->exam_score) && $g->exam_score !== null) ? (float) $g->exam_score : null;
+                // ៣. ពិន្ទុប្រឡងពាក់កណ្ដាលឆមាសលើក្រដាសក្រៅ (25 ពិន្ទុ) ពេលគ្រូបញ្ចូលហើយចុចរក្សាទុក
+                $midterm100 = ($g && $g->midterm_score !== null) ? (float) $g->midterm_score : null;
+                $midtermPts25 = $midterm100 !== null ? round(($midterm100 * 25) / 100, 2) : null;
 
-                // បើគ្រូបានដាក់ពិន្ទុកិច្ចការ យើងគណនាភាគរយឱ្យលោតឡើងភ្លាមៗ
-                if ($aScore !== null && $mScore === null && $eScore === null && $qScore === null) {
-                    $courseScoresList[] = $aScore;
-                } else {
-                    $wSum = 0;
-                    $wTotal = 0;
-                    if ($aScore !== null) { $wSum += $aScore * 0.20; $wTotal += 0.20; }
-                    if ($qScore !== null) { $wSum += $qScore * 0.20; $wTotal += 0.20; }
-                    if ($mScore !== null) { $wSum += $mScore * 0.25; $wTotal += 0.25; }
-                    if ($eScore !== null) { $wSum += $eScore * 0.35; $wTotal += 0.35; }
+                // ៤. ពិន្ទុប្រឡងឆមាស/បញ្ចប់លើក្រដាសក្រៅ (35 ពិន្ទុ) ពេលគ្រូបញ្ចូលហើយចុចរក្សាទុក
+                $exam100 = ($g && isset($g->exam_score) && $g->exam_score !== null) ? (float) $g->exam_score : null;
+                $examPts35 = $exam100 !== null ? round(($exam100 * 35) / 100, 2) : null;
 
-                    if ($wTotal > 0) {
-                        $courseScoresList[] = round($wSum / $wTotal, 2);
-                    }
+                $parts = array_filter([$assignPts20, $quizPts20, $midtermPts25, $examPts35], fn ($v) => $v !== null);
+
+                if (!empty($parts)) {
+                    $courseAccumulatedScores[] = round(array_sum($parts), 2);
+                } elseif ($g && $g->final_score !== null) {
+                    $courseAccumulatedScores[] = round((float) $g->final_score, 2);
                 }
             }
 
-            if ($assignMax > 0 && empty($courseScoresList)) {
-                $stats['average_score'] = round(($assignEarned / $assignMax) * 100, 2);
-            } elseif (!empty($courseScoresList)) {
-                $stats['average_score'] = round(array_sum($courseScoresList) / count($courseScoresList), 2);
-            } elseif ($quizMax > 0) {
-                $stats['average_score'] = round(($quizEarned / $quizMax) * 100, 2);
+            if (!empty($courseAccumulatedScores)) {
+                $stats['average_score'] = round(
+                    array_sum($courseAccumulatedScores) / count($courseAccumulatedScores),
+                    2
+                );
             }
 
             return response()->json([
