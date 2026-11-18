@@ -515,7 +515,19 @@ class AuthController extends Controller
             'UTF-8'
         );
 
-        $formattedOtp = implode(' ', str_split($otp));
+        // ✅ រៀបចំប្រអប់លេខកូដទាំង ៦ ខ្ទង់ឱ្យសមរម្យ ស្អាត និងនៅចំកណ្ដាលជានិច្ចគ្រប់អេក្រង់ (Phone, Tablet, iPad, Laptop & Desktop) មិនឱ្យរីកធំហៀរចេញក្រៅដាច់ខាត!
+        $digitsArray = str_split((string) $otp);
+        $otpBoxesHtml = '';
+        foreach ($digitsArray as $d) {
+            $safeDigit = htmlspecialchars((string) $d, ENT_QUOTES, 'UTF-8');
+            $otpBoxesHtml .= "
+                <td style='padding: 0 3px;'>
+                    <div style='width: 36px; height: 44px; line-height: 44px; background-color: rgba(255, 255, 255, 0.09); border: 1.5px solid rgba(253, 224, 71, 0.55); border-radius: 10px; color: #fde047; font-size: 20px; font-weight: 800; font-family: \"Courier New\", Courier, monospace; text-align: center; box-sizing: border-box;'>
+                        {$safeDigit}
+                    </div>
+                </td>
+            ";
+        }
 
         $htmlContent = "
         <!DOCTYPE html>
@@ -524,75 +536,77 @@ class AuthController extends Controller
             <meta charset='UTF-8'>
             <meta name='viewport' content='width=device-width, initial-scale=1.0'>
         </head>
-        <body style='margin: 0; padding: 16px 10px; background-color: #f1f5f9; font-family: \"Kantumruy Pro\", \"Battambang\", \"Khmer OS Siemreap\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Arial, sans-serif; color: #1e293b;'>
-            <div style='max-width: 520px; margin: 0 auto; background-color: #ffffff; border-radius: 24px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);'>
+        <body style='margin: 0; padding: 14px 8px; background-color: #f1f5f9; font-family: \"Kantumruy Pro\", \"Battambang\", \"Khmer OS Siemreap\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Arial, sans-serif; color: #1e293b; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;'>
+            <div style='max-width: 480px; margin: 0 auto; background-color: #ffffff; border-radius: 22px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);'>
                 
-                <!-- ក្បាលសំបុត្រផ្លូវការរបស់វិទ្យាស្ថាន -->
-                <div style='background: linear-gradient(135deg, #1e3a8a 0%, #312e81 55%, #4338ca 100%); padding: 26px 18px; text-align: center; border-bottom: 4px solid #f59e0b;'>
-                    <div style='margin: 0 auto 12px auto; width: 72px; height: 72px; background-color: #ffffff; border-radius: 18px; padding: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); border: 2px solid rgba(253, 224, 71, 0.65);'>
-                        <img src='{$logoUrl}' alt='RPITSSVR Logo' width='60' height='60' style='width: 60px; height: 60px; object-fit: contain; display: block; margin: 0 auto; border: 0;' />
+                <!-- ក្បាលសំបុត្រផ្លូវការរបស់វិទ្យាស្ថាន + រូប Logo -->
+                <div style='background: linear-gradient(135deg, #1e3a8a 0%, #312e81 55%, #4338ca 100%); padding: 22px 16px; text-align: center; border-bottom: 4px solid #f59e0b;'>
+                    <div style='margin: 0 auto 10px auto; width: 64px; height: 64px; background-color: #ffffff; border-radius: 16px; padding: 6px; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25); border: 2px solid rgba(253, 224, 71, 0.65); box-sizing: border-box;'>
+                        <img src='{$logoUrl}' alt='RPITSSVR' width='48' height='48' style='width: 48px; height: 48px; object-fit: contain; display: block; margin: 0 auto; border: 0; font-size: 10px; color: #1e3a8a; font-weight: bold;' />
                     </div>
 
-                    <div style='display: inline-block; padding: 5px 14px; background-color: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; color: #fde047; font-size: 11.5px; font-weight: bold; margin-bottom: 10px;'>
+                    <div style='display: inline-block; padding: 4px 12px; background-color: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; color: #fde047; font-size: 11px; font-weight: bold; margin-bottom: 8px;'>
                         ប្រព័ន្ធគ្រប់គ្រងការសិក្សាតាមអនឡាញ • RPITSSVR LMS
                     </div>
-                    <div style='margin: 0; color: #ffffff; font-size: 17px; font-weight: 800; line-height: 1.65;'>
-                        <div style='white-space: nowrap;'>វិទ្យាស្ថានពហុបច្ចេកទេស</div>
-                        <div style='color: #fde047; white-space: nowrap;'>ភូមិភាគតេជោសែនស្វាយរៀង</div>
+                    <div style='margin: 0; color: #ffffff; font-size: 16px; font-weight: 800; line-height: 1.6;'>
+                        <div>វិទ្យាស្ថានពហុបច្ចេកទេស</div>
+                        <div style='color: #fde047;'>ភូមិភាគតេជោសែនស្វាយរៀង</div>
                     </div>
-                    <p style='margin: 6px 0 0 0; color: #c7d2fe; font-size: 11px; font-weight: 600; letter-spacing: 0.3px;'>
+                    <p style='margin: 5px 0 0 0; color: #c7d2fe; font-size: 10.5px; font-weight: 600; letter-spacing: 0.3px;'>
                         Regional Polytechnic Institute Techo Sen Svay Rieng
                     </p>
                 </div>
 
                 <!-- ខ្លឹមសារសំបុត្រ -->
-                <div style='padding: 24px 20px;'>
-                    <div style='margin-bottom: 16px; padding: 9px 14px; background-color: #eef2ff; border-left: 4px solid #4f46e5; border-radius: 8px; color: #312e81; font-size: 13px; font-weight: bold;'>
+                <div style='padding: 20px 16px;'>
+                    <div style='margin-bottom: 14px; padding: 9px 12px; background-color: #eef2ff; border-left: 4px solid #4f46e5; border-radius: 8px; color: #312e81; font-size: 12.5px; font-weight: bold; line-height: 1.5;'>
                         {$badgeTitle}
                     </div>
 
-                    <p style='margin: 0 0 10px 0; font-size: 14.5px; color: #0f172a; line-height: 1.6;'>
-                        គោរពជូន <strong>{$fullName}</strong> <span style='color: #4f46e5; font-size: 12.5px; font-weight: bold;'>({$roleKh})</span>,
+                    <p style='margin: 0 0 8px 0; font-size: 14px; color: #0f172a; line-height: 1.6;'>
+                        គោរពជូន <strong>{$fullName}</strong> <span style='color: #4f46e5; font-size: 12px; font-weight: bold;'>({$roleKh})</span>,
                     </p>
 
-                    <p style='margin: 0 0 20px 0; font-size: 13.5px; color: #475569; line-height: 1.7;'>
+                    <p style='margin: 0 0 18px 0; font-size: 13px; color: #475569; line-height: 1.65;'>
                         {$purposeDescription}
                     </p>
 
-                    <!-- ប្រអប់លេខកូដ ៦ ខ្ទង់ -->
-                    <div style='margin: 22px 0; padding: 24px 14px; background: linear-gradient(145deg, #0f172a 0%, #1e1b4b 100%); border: 2px solid #4f46e5; border-radius: 20px; text-align: center; box-shadow: 0 10px 25px rgba(49, 46, 129, 0.2);'>
-                        <div style='font-size: 12px; font-weight: bold; color: #cbd5e1; margin-bottom: 14px;'>
+                    <!-- ប្រអប់លេខកូដ ៦ ខ្ទង់ (Responsive 100% លើ Phone, Tablet, iPad, Laptop & Desktop មិនហៀរចេញក្រៅ) -->
+                    <div style='margin: 18px 0; padding: 18px 10px; background: linear-gradient(145deg, #0f172a 0%, #1e1b4b 100%); border: 2px solid #4f46e5; border-radius: 18px; text-align: center; box-shadow: 0 8px 20px rgba(49, 46, 129, 0.18); box-sizing: border-box;'>
+                        <div style='font-size: 12px; font-weight: bold; color: #e2e8f0; margin-bottom: 12px; line-height: 1.4;'>
                             🔑 លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់របស់អ្នកគឺ៖
                         </div>
-                        <div style='display: inline-block; background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(253, 224, 71, 0.4); border-radius: 14px; padding: 12px 22px; margin-bottom: 14px;'>
-                            <span style='font-size: 28px; font-weight: 900; letter-spacing: 4px; color: #fde047; font-family: \"Courier New\", Courier, monospace; white-space: nowrap; display: inline-block; line-height: 1.2;'>
-                                {$formattedOtp}
-                            </span>
-                        </div>
-                        <div style='font-size: 12px; color: #38bdf8; font-weight: bold;'>
+
+                        <table role='presentation' cellspacing='0' cellpadding='0' border='0' align='center' style='margin: 0 auto 12px auto; border-collapse: collapse;'>
+                            <tr>
+                                {$otpBoxesHtml}
+                            </tr>
+                        </table>
+
+                        <div style='font-size: 11.5px; color: #38bdf8; font-weight: bold; line-height: 1.4;'>
                             ⏳ សុពលភាពប្រើប្រាស់៖ ៥ នាទី
                         </div>
                     </div>
 
                     <!-- តារាងព័ត៌មានលម្អិតនៃការចូលប្រព័ន្ធ -->
-                    <div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px 16px; margin-bottom: 18px; font-size: 12px; color: #334155; line-height: 1.85;'>
-                        <div style='font-weight: bold; color: #0f172a; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px;'>
+                    <div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; font-size: 12px; color: #334155; line-height: 1.8;'>
+                        <div style='font-weight: bold; color: #0f172a; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;'>
                             📋 ព័ត៌មានលម្អិតនៃការស្នើសុំ៖
                         </div>
-                        <div><strong>📧 អ៊ីមែលគណនី៖</strong> {$safeEmail}</div>
+                        <div style='word-break: break-all;'><strong>📧 អ៊ីមែលគណនី៖</strong> {$safeEmail}</div>
                         <div><strong>🕒 កាលបរិច្ឆេទ និងម៉ោង៖</strong> {$timeNow}</div>
                         <div><strong>🌐 អាសយដ្ឋាន IP៖</strong> {$ipAddress}</div>
-                        <div><strong>💻 ឧបករណ៍៖</strong> {$userAgent}</div>
+                        <div style='word-break: break-word;'><strong>💻 ឧបករណ៍៖</strong> {$userAgent}</div>
                     </div>
 
                     <!-- សារព្រមានសុវត្ថិភាព -->
-                    <div style='padding: 12px 14px; background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 12px; color: #be123c; font-size: 11.5px; font-weight: bold; line-height: 1.6;'>
+                    <div style='padding: 11px 13px; background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 12px; color: #be123c; font-size: 11.5px; font-weight: bold; line-height: 1.6;'>
                         ⚠️ សម្គាល់សុវត្ថិភាព៖ ប្រសិនបើអ្នកមិនបានធ្វើការស្នើសុំនេះទេ សូមរក្សាលេខកូដនេះជាសម្ងាត់ និងកុំប្រាប់ទៅអ្នកដទៃដាច់ខាត!
                     </div>
                 </div>
 
                 <!-- ផ្នែកខាងក្រោម (Footer) -->
-                <div style='background-color: #0f172a; padding: 18px 16px; text-align: center; color: #94a3b8; font-size: 11px; line-height: 1.65;'>
+                <div style='background-color: #0f172a; padding: 16px 14px; text-align: center; color: #94a3b8; font-size: 11px; line-height: 1.6;'>
                     <div style='color: #fde047; font-weight: bold; margin-bottom: 4px;'>
                         «TVET ជំនាញពិត ជីវិតប្រសើរ! រៀនឱ្យចប់ ឱ្យចេះ ឱ្យមានការងារ»
                     </div>
