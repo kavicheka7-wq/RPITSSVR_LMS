@@ -64,6 +64,44 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
+// ✅ រៀបចំទម្រង់ពាក្យ Status ឱ្យត្រឹមត្រូវជានិច្ច (Present, Absent, Permission, Late)
+const normalizeAttendanceStatus = (rawStatus) => {
+  const s = String(rawStatus || '')
+    .trim()
+    .toLowerCase();
+  if (
+    s === 'permission' ||
+    s === 'excused' ||
+    s === 'leave' ||
+    s === 'ច្បាប់'
+  ) {
+    return 'Permission';
+  }
+  if (s === 'absent' || s === 'អវត្តមាន') {
+    return 'Absent';
+  }
+  if (s === 'late' || s === 'យឺត' || s === 'មកយឺត') {
+    return 'Late';
+  }
+  return 'Present';
+};
+
+// ✅ សម្អាត Cache វត្តមាននៅខាងគណនីសិស្ស នៅពេលគ្រូកត់ត្រាវត្តមានថ្មី
+const clearStudentAttendanceCaches = () => {
+  try {
+    [sessionStorage, localStorage].forEach((storage) => {
+      const keysToRemove = [];
+      for (let i = 0; i < storage.length; i++) {
+        const k = storage.key(i);
+        if (k && k.includes('student_attendance')) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach((k) => storage.removeItem(k));
+    });
+  } catch {}
+};
+
 // ✅ អានតារាងរូបភាពសិស្ស (Avatar Dictionary) ពី RAM ឬ Storage ភ្លាមៗក្នុង 0ms
 const getAvatarMapSync = () => {
   if (
@@ -215,7 +253,7 @@ const slimAttendanceRecords = (records) => {
     course_id: rec.course_id,
     student_id: rec.student_id,
     attendance_date: rec.attendance_date,
-    status: rec.status,
+    status: normalizeAttendanceStatus(rec.status),
     late_time: rec.late_time || null,
   }));
 };
@@ -368,7 +406,10 @@ const isStudentEnrolledInCourse = (student, courseId, courseMap) => {
   if (Array.isArray(mappedIds)) {
     return (
       mappedIds.includes(Number(student.id)) ||
-      mappedIds.includes(String(student.id))
+      mappedIds.includes(String(student.id)) ||
+      (student.user_id &&
+        (mappedIds.includes(Number(student.user_id)) ||
+          mappedIds.includes(String(student.user_id))))
     );
   }
 
@@ -388,7 +429,11 @@ const isStudentEnrolledInAnyTeacherCourse = (student, courseMap) => {
     return Object.values(courseMap).some(
       (arr) =>
         Array.isArray(arr) &&
-        (arr.includes(Number(student.id)) || arr.includes(String(student.id)))
+        (arr.includes(Number(student.id)) ||
+          arr.includes(String(student.id)) ||
+          (student.user_id &&
+            (arr.includes(Number(student.user_id)) ||
+              arr.includes(String(student.user_id)))))
     );
   }
   return false;
@@ -483,11 +528,20 @@ const buildCourseStudentListSync = (
   const avatarMap = getAvatarMapSync();
 
   return sortStudentsOldestFirst(targetStudents).map((student) => {
-    const targetUserId = student.user_id || student.user?.id || student.id;
-    const matched = recordsForDate.find(
-      (rec) =>
-        String(rec.student_id) === String(targetUserId) ||
-        String(rec.student_id) === String(student.id)
+    const candidateIds = new Set(
+      [
+        student.id,
+        student.user_id,
+        student.user?.id,
+        student.student_id,
+        student.student?.id,
+      ]
+        .filter((v) => v !== null && v !== undefined)
+        .map((v) => String(v))
+    );
+
+    const matched = recordsForDate.find((rec) =>
+      candidateIds.has(String(rec.student_id))
     );
 
     const resolvedAvatar =
@@ -504,7 +558,9 @@ const buildCourseStudentListSync = (
         student,
         courseMap
       ),
-      attendance_status: matched?.status || 'Present',
+      attendance_status: matched
+        ? normalizeAttendanceStatus(matched.status)
+        : 'Present',
       late_time: matched?.late_time ? matched.late_time.slice(0, 5) : '',
     };
   });
@@ -1037,7 +1093,7 @@ const ManageAttendance = () => {
   const attendanceSummary = useMemo(() => {
     const counts = { Present: 0, Absent: 0, Permission: 0, Late: 0 };
     studentsByShift.forEach((s) => {
-      const st = s.attendance_status || 'Present';
+      const st = normalizeAttendanceStatus(s.attendance_status);
       if (counts[st] !== undefined) counts[st] += 1;
     });
     return counts;
@@ -1097,7 +1153,7 @@ const ManageAttendance = () => {
     );
   };
 
-  // ✅ រក្សាទុកវត្តមានតាមវេនសិក្សាដែលកំពុងបង្ហាញ
+  // ✅ រក្សាទុកវត្តមានតាមវេនសិក្សាដែលកំពុងបង្ហាញ (រក្សាទុក Permission / ច្បាប់ ពិតប្រាកដ ១០០%)
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!isCourseSelected || studentsByShift.length === 0) return;
@@ -1105,38 +1161,25 @@ const ManageAttendance = () => {
     setIsSubmitting(true);
     try {
       const attendanceData = studentsByShift.map((student) => {
-        const targetUserId = student.user_id || student.user?.id || student.id;
+        const targetUserId = Number(
+          student.user_id || student.user?.id || student.id
+        );
+        const cleanStatus = normalizeAttendanceStatus(student.attendance_status);
         return {
           student_id: targetUserId,
-          status: student.attendance_status,
+          status: cleanStatus,
           late_time:
-            student.attendance_status === 'Late' && student.late_time
-              ? student.late_time.slice(0, 5)
+            cleanStatus === 'Late' && student.late_time
+              ? String(student.late_time).slice(0, 5)
               : null,
         };
       });
 
-      try {
-        await api.post('/teacher/attendance/bulk', {
-          course_id: selectedCourse,
-          attendance_date: attendanceDate,
-          attendance: attendanceData,
-        });
-      } catch (bulkErr) {
-        if (bulkErr.response?.status === 422) {
-          const safeAttendanceData = attendanceData.map((item) => ({
-            ...item,
-            status: item.status === 'Permission' ? 'Present' : item.status,
-          }));
-          await api.post('/teacher/attendance/bulk', {
-            course_id: selectedCourse,
-            attendance_date: attendanceDate,
-            attendance: safeAttendanceData,
-          });
-        } else {
-          throw bulkErr;
-        }
-      }
+      await api.post('/teacher/attendance/bulk', {
+        course_id: selectedCourse,
+        attendance_date: attendanceDate,
+        attendance: attendanceData,
+      });
 
       // ធ្វើបច្ចុប្បន្នភាព Cache ភ្លាមៗក្នុង RAM និង LocalStorage
       const cid = String(selectedCourse);
@@ -1156,12 +1199,12 @@ const ManageAttendance = () => {
         return !savedStudentIds.has(String(rec.student_id));
       });
 
-      const newRecordsForDate = studentsByShift.map((s) => ({
+      const newRecordsForDate = attendanceData.map((item) => ({
         course_id: Number(selectedCourse),
-        student_id: s.user_id || s.user?.id || s.id,
+        student_id: item.student_id,
         attendance_date: attendanceDate,
-        status: s.attendance_status,
-        late_time: s.attendance_status === 'Late' ? s.late_time : null,
+        status: item.status,
+        late_time: item.late_time,
       }));
       const updatedCourseHistory = [...newRecordsForDate, ...remainingHistory];
 
@@ -1178,6 +1221,9 @@ const ManageAttendance = () => {
         } catch {}
         return next;
       });
+
+      // ✅ សម្អាត Cache វត្តមាននៅខាងសិស្សដើម្បីឱ្យសិស្សឃើញ «ច្បាប់» ភ្លាមៗ
+      clearStudentAttendanceCaches();
 
       const shiftNoteKm = isSpecificShiftSelected
         ? ` (${getStudyShiftLabel(selectedShift)})`
@@ -1285,6 +1331,7 @@ const ManageAttendance = () => {
         student,
         courseMap
       );
+      const normStatus = normalizeAttendanceStatus(student.attendance_status);
 
       return {
         'ល.រ': idx + 1,
@@ -1300,10 +1347,10 @@ const ManageAttendance = () => {
           : t('មិនទាន់ចុះឈ្មោះមុខវិជ្ជា', 'Not enrolled in course'),
         'កាលបរិច្ឆេទ': attendanceDate,
         'ស្ថានភាពវត្តមាន': isCourseSelected
-          ? statusLabelKm[student.attendance_status] || student.attendance_status
+          ? statusLabelKm[normStatus] || normStatus
           : '—',
         'ម៉ោងមកដល់':
-          isCourseSelected && student.attendance_status === 'Late'
+          isCourseSelected && normStatus === 'Late'
             ? student.late_time || '—'
             : '—',
       };
@@ -1888,7 +1935,7 @@ const ManageAttendance = () => {
                         ? (nameParts[0][0] + nameParts[1][0]).toUpperCase()
                         : (studentName[0] || 'S').toUpperCase();
                     const currentStatus = isCourseSelected
-                      ? student.attendance_status
+                      ? normalizeAttendanceStatus(student.attendance_status)
                       : '';
                     const isFemale = isFemaleGender(student.gender);
                     const isWeekend =
@@ -2125,7 +2172,7 @@ const ManageAttendance = () => {
                 ? (nameParts[0][0] + nameParts[1][0]).toUpperCase()
                 : (studentName[0] || 'S').toUpperCase();
             const currentStatus = isCourseSelected
-              ? student.attendance_status
+              ? normalizeAttendanceStatus(student.attendance_status)
               : '';
             const isWeekend =
               normalizeShiftKey(student.study_shift) === 'Saturday-Sunday';

@@ -77,6 +77,40 @@ class TeacherController extends Controller
         }
     }
 
+    /**
+     * ✅ HELPER: ធានាថាតារាង attendances គាំទ្រស្ថានភាព 'Permission' (ច្បាប់) ១០០% ទោះបីជា Database ចាស់ប្រើ ENUM ក៏ដោយ
+     */
+    private function ensureAttendanceStatusSupportsPermission(): void
+    {
+        Cache::rememberForever('lms_attendance_status_varchar_ready_v1', function () {
+            try {
+                if (Schema::hasTable('attendances') && Schema::hasColumn('attendances', 'status')) {
+                    DB::statement("ALTER TABLE attendances MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'Present'");
+                }
+            } catch (\Throwable $e) {
+            }
+            return true;
+        });
+    }
+
+    /**
+     * ✅ HELPER: រៀបចំទម្រង់ពាក្យ Status ឱ្យត្រឹមត្រូវ (Present, Absent, Permission, Late)
+     */
+    private function normalizeAttendanceStatusValue($rawStatus): string
+    {
+        $s = strtolower(trim((string) $rawStatus));
+        if ($s === 'permission' || $s === 'excused' || $s === 'leave' || $s === 'ច្បាប់') {
+            return 'Permission';
+        }
+        if ($s === 'absent' || $s === 'អវត្តមាន') {
+            return 'Absent';
+        }
+        if ($s === 'late' || $s === 'យឺត' || $s === 'មកយឺត') {
+            return 'Late';
+        }
+        return 'Present';
+    }
+
     // --- Dashboard ---
     public function dashboard()
     {
@@ -613,25 +647,68 @@ class TeacherController extends Controller
     {
         $validated = $request->validate([
             'course_id' => 'required|exists:courses,id',
-            'student_id' => 'required|exists:users,id',
-            'status' => 'required|in:Present,Absent,Late,Permission',
-            'late_time' => 'nullable|date_format:H:i',
+            'student_id' => 'required|integer',
+            'status' => 'required|string',
+            'late_time' => 'nullable|string',
             'attendance_date' => 'required|date',
         ]);
 
         $this->teacherCourseQuery()->findOrFail($validated['course_id']);
+        $this->ensureAttendanceStatusSupportsPermission();
 
-        $attendance = Attendance::updateOrCreate(
-            [
-                'student_id' => $validated['student_id'],
-                'course_id' => $validated['course_id'],
-                'attendance_date' => $validated['attendance_date'],
-            ],
-            [
-                'status' => $validated['status'],
-                'late_time' => $validated['late_time'] ?? null,
-            ]
-        );
+        $normalizedStatus = $this->normalizeAttendanceStatusValue($validated['status']);
+        $lateTime = ($normalizedStatus === 'Late' && !empty($validated['late_time']))
+            ? substr(trim((string) $validated['late_time']), 0, 5)
+            : null;
+
+        $rawStudentId = (int) $validated['student_id'];
+        $studentProfile = Student::where('id', $rawStudentId)->orWhere('user_id', $rawStudentId)->first();
+        $resolvedUserId = ($studentProfile && !empty($studentProfile->user_id))
+            ? (int) $studentProfile->user_id
+            : $rawStudentId;
+
+        $possibleIds = array_values(array_unique(array_filter([
+            $rawStudentId,
+            $resolvedUserId,
+            $studentProfile ? (int) $studentProfile->id : null,
+        ])));
+
+        try {
+            $existing = Attendance::where('course_id', $validated['course_id'])
+                ->where('attendance_date', $validated['attendance_date'])
+                ->whereIn('student_id', $possibleIds)
+                ->first();
+
+            if ($existing) {
+                $existing->update([
+                    'student_id' => $resolvedUserId,
+                    'status' => $normalizedStatus,
+                    'late_time' => $lateTime,
+                ]);
+                $attendance = $existing;
+            } else {
+                $attendance = Attendance::create([
+                    'student_id' => $resolvedUserId,
+                    'course_id' => $validated['course_id'],
+                    'attendance_date' => $validated['attendance_date'],
+                    'status' => $normalizedStatus,
+                    'late_time' => $lateTime,
+                ]);
+            }
+        } catch (\Illuminate\Database\QueryException $qe) {
+            DB::statement("ALTER TABLE attendances MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'Present'");
+            $attendance = Attendance::updateOrCreate(
+                [
+                    'student_id' => $resolvedUserId,
+                    'course_id' => $validated['course_id'],
+                    'attendance_date' => $validated['attendance_date'],
+                ],
+                [
+                    'status' => $normalizedStatus,
+                    'late_time' => $lateTime,
+                ]
+            );
+        }
 
         Cache::forget('admin_overview_report');
         $this->clearTeacherDashboardCache();
@@ -648,28 +725,82 @@ class TeacherController extends Controller
             'course_id' => 'required|exists:courses,id',
             'attendance_date' => 'required|date',
             'attendance' => 'required|array',
-            'attendance.*.student_id' => 'required|exists:users,id',
-            'attendance.*.status' => 'required|in:Present,Absent,Late,Permission',
-            'attendance.*.late_time' => 'nullable|date_format:H:i',
+            'attendance.*.student_id' => 'required|integer',
+            'attendance.*.status' => 'required|string',
+            'attendance.*.late_time' => 'nullable|string',
         ]);
 
         $this->teacherCourseQuery()->findOrFail($validated['course_id']);
+        $this->ensureAttendanceStatusSupportsPermission();
 
-        DB::transaction(function () use ($validated) {
-            foreach ($validated['attendance'] as $item) {
-                Attendance::updateOrCreate(
-                    [
-                        'student_id' => $item['student_id'],
-                        'course_id' => $validated['course_id'],
-                        'attendance_date' => $validated['attendance_date'],
-                    ],
-                    [
-                        'status' => $item['status'],
-                        'late_time' => $item['late_time'] ?? null,
-                    ]
-                );
-            }
-        });
+        $rawIds = collect($validated['attendance'])
+            ->pluck('student_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $matchedStudents = !empty($rawIds)
+            ? Student::select('id', 'user_id')
+                ->whereIn('id', $rawIds)
+                ->orWhereIn('user_id', $rawIds)
+                ->get()
+            : collect();
+
+        $studentsById = $matchedStudents->keyBy('id');
+        $studentsByUserId = $matchedStudents->whereNotNull('user_id')->keyBy('user_id');
+
+        $saveAttendanceBatch = function () use ($validated, $studentsById, $studentsByUserId) {
+            DB::transaction(function () use ($validated, $studentsById, $studentsByUserId) {
+                foreach ($validated['attendance'] as $item) {
+                    $rawId = (int) $item['student_id'];
+                    $stuRecord = $studentsByUserId->get($rawId) ?? $studentsById->get($rawId);
+                    $resolvedUserId = ($stuRecord && !empty($stuRecord->user_id))
+                        ? (int) $stuRecord->user_id
+                        : $rawId;
+
+                    $possibleIds = array_values(array_unique(array_filter([
+                        $rawId,
+                        $resolvedUserId,
+                        $stuRecord ? (int) $stuRecord->id : null,
+                    ])));
+
+                    $normalizedStatus = $this->normalizeAttendanceStatusValue($item['status'] ?? 'Present');
+                    $lateTime = ($normalizedStatus === 'Late' && !empty($item['late_time']))
+                        ? substr(trim((string) $item['late_time']), 0, 5)
+                        : null;
+
+                    $existing = Attendance::where('course_id', $validated['course_id'])
+                        ->where('attendance_date', $validated['attendance_date'])
+                        ->whereIn('student_id', $possibleIds)
+                        ->first();
+
+                    if ($existing) {
+                        $existing->update([
+                            'student_id' => $resolvedUserId,
+                            'status' => $normalizedStatus,
+                            'late_time' => $lateTime,
+                        ]);
+                    } else {
+                        Attendance::create([
+                            'student_id' => $resolvedUserId,
+                            'course_id' => $validated['course_id'],
+                            'attendance_date' => $validated['attendance_date'],
+                            'status' => $normalizedStatus,
+                            'late_time' => $lateTime,
+                        ]);
+                    }
+                }
+            });
+        };
+
+        try {
+            $saveAttendanceBatch();
+        } catch (\Illuminate\Database\QueryException $qe) {
+            DB::statement("ALTER TABLE attendances MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'Present'");
+            $saveAttendanceBatch();
+        }
 
         Cache::forget('admin_overview_report');
         $this->clearTeacherDashboardCache();
