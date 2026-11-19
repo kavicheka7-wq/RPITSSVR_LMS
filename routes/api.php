@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\TeacherStudentController;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
@@ -45,7 +46,7 @@ Route::post('/forgot-password/verify-otp', [AuthController::class, 'verifyPasswo
 Route::post('/forgot-password/reset', [AuthController::class, 'resetPasswordWithOtp']);
 Route::post('/check-telegram-link', [AuthController::class, 'checkTelegramLink']);
 
-// ✅ Check file existence route (Secured against Path Traversal '../' + Railway DB Base64 fallback)
+// ✅ Check file existence route (Secured against Path Traversal '../' + Cached Schema Checks + Railway DB Base64 fallback)
 Route::get('/check-file-exists', function (Request $request) {
     $path = trim((string) $request->query('path', ''));
     $fileId = $request->query('id');
@@ -60,7 +61,7 @@ Route::get('/check-file-exists', function (Request $request) {
 
     $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', urldecode($path));
     $cleanPath = ltrim($cleanPath, '/\\');
-    $fileNameOnly = basename($cleanPath);
+    $fileNameOnly = $cleanPath ? basename($cleanPath) : '';
 
     $exists = ($cleanPath && (
         Storage::disk('public')->exists($cleanPath) ||
@@ -68,7 +69,16 @@ Route::get('/check-file-exists', function (Request $request) {
         file_exists(public_path('storage/' . $cleanPath))
     ));
 
-    if (!$exists && Schema::hasTable('lesson_files') && Schema::hasColumn('lesson_files', 'file_data')) {
+    $schemaMeta = Cache::remember('lms_file_tables_schema_v1', 86400, function () {
+        return [
+            'lesson_files' => Schema::hasTable('lesson_files'),
+            'lesson_files_data' => Schema::hasTable('lesson_files') && Schema::hasColumn('lesson_files', 'file_data'),
+            'assignment_submissions' => Schema::hasTable('assignment_submissions'),
+            'assignment_submissions_data' => Schema::hasTable('assignment_submissions') && Schema::hasColumn('assignment_submissions', 'file_data'),
+        ];
+    });
+
+    if (!$exists && $schemaMeta['lesson_files_data']) {
         $exists = DB::table('lesson_files')
             ->where(function ($q) use ($cleanPath, $fileNameOnly, $fileId) {
                 if ($fileId) {
@@ -77,15 +87,17 @@ Route::get('/check-file-exists', function (Request $request) {
                 if ($cleanPath) {
                     $q->orWhere('file_path', $cleanPath)
                       ->orWhere('file_path', 'storage/' . $cleanPath)
-                      ->orWhere('file_path', '/storage/' . $cleanPath)
-                      ->orWhere('file_path', 'like', '%' . $fileNameOnly);
+                      ->orWhere('file_path', '/storage/' . $cleanPath);
+                    if (strlen($fileNameOnly) >= 3) {
+                        $q->orWhere('file_path', 'like', '%' . $fileNameOnly);
+                    }
                 }
             })
             ->whereNotNull('file_data')
             ->exists();
     }
 
-    if (!$exists && Schema::hasTable('assignment_submissions') && Schema::hasColumn('assignment_submissions', 'file_data')) {
+    if (!$exists && $schemaMeta['assignment_submissions_data']) {
         $exists = DB::table('assignment_submissions')
             ->where(function ($q) use ($cleanPath, $fileNameOnly, $fileId) {
                 if ($fileId) {
@@ -94,8 +106,10 @@ Route::get('/check-file-exists', function (Request $request) {
                 if ($cleanPath) {
                     $q->orWhere('file_path', $cleanPath)
                       ->orWhere('file_path', 'storage/' . $cleanPath)
-                      ->orWhere('file_path', '/storage/' . $cleanPath)
-                      ->orWhere('file_path', 'like', '%' . $fileNameOnly);
+                      ->orWhere('file_path', '/storage/' . $cleanPath);
+                    if (strlen($fileNameOnly) >= 3) {
+                        $q->orWhere('file_path', 'like', '%' . $fileNameOnly);
+                    }
                 }
             })
             ->whereNotNull('file_data')
@@ -105,7 +119,7 @@ Route::get('/check-file-exists', function (Request $request) {
     return response()->json(['exists' => (bool) $exists]);
 });
 
-// ✅ Download file route (Secured against Path Traversal '../' + Railway DB Base64 fallback)
+// ✅ Download file route (Secured against Path Traversal '../' + Cached Schema Checks + Railway DB Base64 fallback)
 Route::get('/download-file', function (Request $request) {
     $path = trim((string) $request->query('path', ''));
     $fileId = $request->query('id');
@@ -118,7 +132,7 @@ Route::get('/download-file', function (Request $request) {
 
     $cleanPath = preg_replace('/^(\/?storage\/|\/?public\/)+/', '', urldecode($path));
     $cleanPath = ltrim($cleanPath, '/\\');
-    $fileNameOnly = basename($cleanPath);
+    $fileNameOnly = $cleanPath ? basename($cleanPath) : '';
 
     $fullPath = null;
     if ($cleanPath) {
@@ -139,12 +153,21 @@ Route::get('/download-file', function (Request $request) {
         ]);
     }
 
-    // ✅ Fallback សម្រាប់ Railway៖ ទាញយកពីជួរឈរ file_data ក្នុងតារាង lesson_files ឬ assignment_submissions ប្រសិនបើហ្វាល់លើ Disk ត្រូវបានលុបពេល Redeploy
+    // ✅ Fallback សម្រាប់ Railway៖ ទាញយកពីជួរឈរ file_data ក្នុងតារាង lesson_files ឬ assignment_submissions
+    $schemaMeta = Cache::remember('lms_file_tables_schema_v1', 86400, function () {
+        return [
+            'lesson_files' => Schema::hasTable('lesson_files'),
+            'lesson_files_data' => Schema::hasTable('lesson_files') && Schema::hasColumn('lesson_files', 'file_data'),
+            'assignment_submissions' => Schema::hasTable('assignment_submissions'),
+            'assignment_submissions_data' => Schema::hasTable('assignment_submissions') && Schema::hasColumn('assignment_submissions', 'file_data'),
+        ];
+    });
+
     $dbBase64 = null;
     $dbFileName = $fileNameOnly ?: 'downloaded-file';
     $dbMimeType = 'application/octet-stream';
 
-    if (Schema::hasTable('lesson_files')) {
+    if ($schemaMeta['lesson_files']) {
         $q = DB::table('lesson_files');
         $lessonFile = null;
 
@@ -153,10 +176,14 @@ Route::get('/download-file', function (Request $request) {
         }
         if (!$lessonFile && $cleanPath) {
             $lessonFile = (clone $q)
-                ->where('file_path', $cleanPath)
-                ->orWhere('file_path', 'storage/' . $cleanPath)
-                ->orWhere('file_path', '/storage/' . $cleanPath)
-                ->orWhere('file_path', 'like', '%' . $fileNameOnly)
+                ->where(function ($sub) use ($cleanPath, $fileNameOnly) {
+                    $sub->where('file_path', $cleanPath)
+                        ->orWhere('file_path', 'storage/' . $cleanPath)
+                        ->orWhere('file_path', '/storage/' . $cleanPath);
+                    if (strlen($fileNameOnly) >= 3) {
+                        $sub->orWhere('file_path', 'like', '%' . $fileNameOnly);
+                    }
+                })
                 ->first();
         }
 
@@ -176,7 +203,7 @@ Route::get('/download-file', function (Request $request) {
         }
     }
 
-    if (!$dbBase64 && Schema::hasTable('assignment_submissions')) {
+    if (!$dbBase64 && $schemaMeta['assignment_submissions']) {
         $q = DB::table('assignment_submissions');
         $subFile = null;
 
@@ -185,10 +212,14 @@ Route::get('/download-file', function (Request $request) {
         }
         if (!$subFile && $cleanPath) {
             $subFile = (clone $q)
-                ->where('file_path', $cleanPath)
-                ->orWhere('file_path', 'storage/' . $cleanPath)
-                ->orWhere('file_path', '/storage/' . $cleanPath)
-                ->orWhere('file_path', 'like', '%' . $fileNameOnly)
+                ->where(function ($sub) use ($cleanPath, $fileNameOnly) {
+                    $sub->where('file_path', $cleanPath)
+                        ->orWhere('file_path', 'storage/' . $cleanPath)
+                        ->orWhere('file_path', '/storage/' . $cleanPath);
+                    if (strlen($fileNameOnly) >= 3) {
+                        $sub->orWhere('file_path', 'like', '%' . $fileNameOnly);
+                    }
+                })
                 ->first();
         }
 
@@ -215,7 +246,7 @@ Route::get('/download-file', function (Request $request) {
     }
 
     return response(
-        "<div style='font-family:sans-serif;text-align:center;padding:60px;background:#f9fafb;min-h-screen;'>
+        "<div style='font-family:sans-serif;text-align:center;padding:60px;background:#f9fafb;min-height:100vh;'>
             <div style='max-width:480px;margin:0 auto;background:#fff;padding:32px;border-radius:16px;box-shadow:0 4px 12px rgba(0,0,0,0.05);'>
                 <div style='font-size:48px;margin-bottom:16px;'>⚠️</div>
                 <h2 style='color:#111827;margin-bottom:8px;'>មិនរកឃើញឯកសារ (File Not Found)</h2>
@@ -327,10 +358,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/attendance', [TeacherController::class, 'markAttendance']);
         Route::post('/attendance/bulk', [TeacherController::class, 'bulkMarkAttendance']);
 
-        // Scores
+        // Scores (✅ បំបែក POST និង PUT កុំឱ្យជាន់គ្នា)
         Route::get('/courses/{courseId}/scores', [TeacherController::class, 'getScores']);
         Route::post('/scores', [TeacherController::class, 'storeGrade']);
-        Route::match(['put', 'post'], '/scores', [TeacherController::class, 'updateScores']);
+        Route::put('/scores', [TeacherController::class, 'updateScores']);
 
         // Lessons (ដាក់ static routes មុន dynamic {lessonId})
         Route::get('/lessons', [TeacherLessonController::class, 'index']);
@@ -367,11 +398,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/quizzes/questions/{id}', [TeacherController::class, 'deleteQuestion']);
         Route::get('/quizzes/{quizId}/results', [TeacherController::class, 'getQuizResults']);
 
-        // Department management
+        // Department (✅ អនុញ្ញាតឱ្យគ្រូមើលតែបញ្ជីដេប៉ាតឺម៉ង់ប៉ុណ្ណោះ)
         Route::get('/departments', [DepartmentController::class, 'index']);
-        Route::post('/departments', [DepartmentController::class, 'store']);
-        Route::match(['put', 'post'], '/departments/{department}', [DepartmentController::class, 'update']);
-        Route::delete('/departments/{department}', [DepartmentController::class, 'destroy']);
     });
 
     // Student routes
@@ -379,7 +407,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Dashboard
         Route::get('/dashboard', [StudentController::class, 'dashboard']);
 
-        // Courses & Lessons (✅ កែពី getMyCourses មកជា getCourses ឱ្យត្រូវជាមួយ StudentController.php)
+        // Courses & Lessons
         Route::get('/courses', [StudentController::class, 'getCourses']);
         Route::get('/courses/{course}', [CourseController::class, 'show']);
         Route::get('/courses/{courseId}/lessons', [StudentController::class, 'getCourseLessons']);

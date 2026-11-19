@@ -464,6 +464,9 @@ class AdminTeacherController extends Controller
 
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
+        if ($teacher->user_id) {
+            Cache::forget('lms_auth_user_payload_' . $teacher->user_id);
+        }
 
         $freshTeacher = $teacher->fresh(['department:id,department_name', 'user:id,status,email', 'role:id,role_name']);
         $this->deduplicateTeacherAvatar($freshTeacher);
@@ -481,6 +484,7 @@ class AdminTeacherController extends Controller
     public function destroy(Teacher $teacher)
     {
         $teacherName = trim($teacher->first_name . ' ' . $teacher->last_name);
+        $userId = $teacher->user_id;
 
         if (
             $teacher->profile_image &&
@@ -500,6 +504,9 @@ class AdminTeacherController extends Controller
 
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
+        if ($userId) {
+            Cache::forget('lms_auth_user_payload_' . $userId);
+        }
 
         return response()->json([
             'message' => "បានលុបគណនីគ្រូបង្រៀន '{$teacherName}' ដោយជោគជ័យ",
@@ -674,7 +681,7 @@ class AdminTeacherController extends Controller
 
                 $password = !empty($item['password']) ? $item['password'] : '12345678';
                 $gender = in_array($item['gender'] ?? '', ['Male', 'Female', 'Other']) ? $item['gender'] : null;
-                $employmentType = in_array($item['employment_type'] ?? '', ['Full-time', 'Part-time,Contract', 'Part-time', 'Contract'])
+                $employmentType = in_array($item['employment_type'] ?? '', ['Full-time', 'Part-time', 'Contract'])
                     ? $item['employment_type']
                     : 'Full-time';
                 $status = in_array($item['status'] ?? '', ['active', 'inactive']) ? $item['status'] : 'active';

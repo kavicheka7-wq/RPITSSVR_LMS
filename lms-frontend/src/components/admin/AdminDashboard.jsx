@@ -28,7 +28,7 @@ import {
 } from 'recharts';
 
 // ============================================================================
-// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (User-Scoped 0ms Cache & Prefetcher)
+// 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (User-Scoped 0ms Cache & Smart Prefetcher)
 // ============================================================================
 const LAST_ACTIVE_ADMIN_UID_KEY = 'lms_last_active_admin_uid';
 const CACHE_KEY_SHARED_STATS = 'cached_admin_stats';
@@ -47,6 +47,15 @@ const ADMIN_DASH_MEM_CACHE = {
   avatarMap: {},
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -57,9 +66,10 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ រក្សាទុកបញ្ជីចូល localStorage ដោយសុវត្ថិភាព (បើរូប Base64 ធំពេកលើសទំហំ localStorage វានឹងរក្សារូបក្នុង RAM ជំនួស)
-const safeWriteListStorage = (key, list, saveToAvatarMap = false) => {
+// ✅ រក្សាទុកបញ្ជីចូល localStorage នៅពេល Browser ទំនេរ (Stringify តែ ១ ដងគត់ និងការពារ QuotaExceededError)
+const safeWriteListStorageMulti = (keys, list, saveToAvatarMap = false) => {
   if (!Array.isArray(list)) return;
+
   if (saveToAvatarMap) {
     list.forEach((uItem) => {
       const img =
@@ -71,38 +81,60 @@ const safeWriteListStorage = (key, list, saveToAvatarMap = false) => {
       }
     });
   }
-  try {
-    const str = JSON.stringify(list);
+
+  runWhenIdle(() => {
     try {
-      sessionStorage.setItem(key, str);
-    } catch {}
-    localStorage.setItem(key, str);
-  } catch {
-    try {
-      const lightList = list.map((item) => ({
-        ...item,
-        profile_image:
-          item.profile_image && item.profile_image.startsWith('data:')
-            ? null
-            : item.profile_image,
-        user: item.user
-          ? {
-              ...item.user,
-              profile_image:
-                item.user.profile_image &&
-                item.user.profile_image.startsWith('data:')
-                  ? null
-                  : item.user.profile_image,
-            }
-          : item.user,
-      }));
+      const lightList = list.map((item) => {
+        if (!item || typeof item !== 'object') return item;
+        const copy = { ...item };
+        if (
+          typeof copy.profile_image === 'string' &&
+          copy.profile_image.startsWith('data:') &&
+          copy.profile_image.length > 15000
+        ) {
+          copy.profile_image = null;
+        }
+        if (copy.user && typeof copy.user === 'object') {
+          const uCopy = { ...copy.user };
+          if (
+            typeof uCopy.profile_image === 'string' &&
+            uCopy.profile_image.startsWith('data:') &&
+            uCopy.profile_image.length > 15000
+          ) {
+            uCopy.profile_image = null;
+          }
+          copy.user = uCopy;
+        }
+        return copy;
+      });
+
       const slimStr = JSON.stringify(lightList);
-      try {
-        sessionStorage.setItem(key, slimStr);
-      } catch {}
-      localStorage.setItem(key, slimStr);
+      keys.forEach((key) => {
+        try {
+          sessionStorage.setItem(key, slimStr);
+        } catch {}
+        try {
+          localStorage.setItem(key, slimStr);
+        } catch {}
+      });
     } catch {}
-  }
+  });
+};
+
+const safeWriteObjectStorageMulti = (keys, obj) => {
+  runWhenIdle(() => {
+    try {
+      const str = JSON.stringify(obj);
+      keys.forEach((key) => {
+        try {
+          sessionStorage.setItem(key, str);
+        } catch {}
+        try {
+          localStorage.setItem(key, str);
+        } catch {}
+      });
+    } catch {}
+  });
 };
 
 // ✅ អនុគមន៍បិទបាំងផ្នែកកណ្ដាលនៃអ៊ីមែល (ឧ. "classit830@gmail.com" -> "cla*****30@gmail.com")
@@ -166,69 +198,95 @@ const ensureCleanAdminSessionCache = (newUid) => {
   } catch (e) {}
 };
 
-// ✅ អនុគមន៍ទាញទិន្នន័យគ្រប់ទំព័ររបស់ Admin ទុកមុននៅផ្ទៃខាងក្រោយ (Background Prefetch)
+// ✅ ទាញទិន្នន័យទំព័រផ្សេងៗនៅផ្ទៃខាងក្រោយតែពេលមិនទាន់មានក្នុង Cache និងបំបែកជា ២ ដំណាក់កាល (មិនស្ទះ Hosting)
 const prefetchAllAdminPagesData = (uid) => {
   if (!uid || uid === 'default_admin') return;
   if (ADMIN_DASH_MEM_CACHE.prefetchedUid === uid) return;
   ADMIN_DASH_MEM_CACHE.prefetchedUid = uid;
 
   setTimeout(() => {
-    api
-      .get('/admin/departments')
-      .then((res) => {
-        const raw = res.data?.data ?? res.data ?? [];
-        const data = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-        safeWriteListStorage(`cached_admin_departments_list_v8_${uid}`, data);
-        safeWriteListStorage('cached_admin_departments_list', data);
-      })
-      .catch(() => {});
+    runWhenIdle(() => {
+      const existingDepts = readStorageJson(`cached_admin_departments_list_v8_${uid}`, null);
+      if (!Array.isArray(existingDepts) || existingDepts.length === 0) {
+        api
+          .get('/admin/departments')
+          .then((res) => {
+            const raw = res.data?.data ?? res.data ?? [];
+            const data = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+            safeWriteListStorageMulti(
+              [`cached_admin_departments_list_v8_${uid}`, 'cached_admin_departments_list'],
+              data
+            );
+          })
+          .catch(() => {});
+      }
 
-    api
-      .get('/admin/courses')
-      .then((res) => {
-        const raw = res.data?.data ?? res.data ?? [];
-        const data = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-        safeWriteListStorage(`cached_admin_courses_list_v8_${uid}`, data);
-        safeWriteListStorage('cached_admin_courses_list', data);
-      })
-      .catch(() => {});
+      const existingCourses = readStorageJson(`cached_admin_courses_list_v8_${uid}`, null);
+      if (!Array.isArray(existingCourses) || existingCourses.length === 0) {
+        api
+          .get('/admin/courses')
+          .then((res) => {
+            const raw = res.data?.data ?? res.data ?? [];
+            const data = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+            safeWriteListStorageMulti(
+              [`cached_admin_courses_list_v8_${uid}`, 'cached_admin_courses_list'],
+              data
+            );
+          })
+          .catch(() => {});
+      }
+    });
+  }, 1500);
 
-    api
-      .get('/admin/teachers')
-      .then((res) => {
-        const raw = res.data?.data ?? res.data ?? [];
-        const data = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-        safeWriteListStorage(`cached_admin_teachers_list_v8_${uid}`, data);
-        safeWriteListStorage('cached_admin_teachers_list', data);
-      })
-      .catch(() => {});
+  setTimeout(() => {
+    runWhenIdle(() => {
+      const existingTeachers = readStorageJson(`cached_admin_teachers_list_v8_${uid}`, null);
+      if (!Array.isArray(existingTeachers) || existingTeachers.length === 0) {
+        api
+          .get('/admin/teachers')
+          .then((res) => {
+            const raw = res.data?.data ?? res.data ?? [];
+            const data = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+            safeWriteListStorageMulti(
+              [`cached_admin_teachers_list_v8_${uid}`, 'cached_admin_teachers_list'],
+              data
+            );
+          })
+          .catch(() => {});
+      }
 
-    api
-      .get('/admin/students')
-      .then((res) => {
-        const raw = res.data?.data ?? res.data ?? [];
-        const data = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-        safeWriteListStorage(`cached_admin_students_list_v8_${uid}`, data);
-        safeWriteListStorage('cached_admin_students_list', data);
-      })
-      .catch(() => {});
-  }, 200);
+      const existingStudents = readStorageJson(`cached_admin_students_list_v8_${uid}`, null);
+      if (!Array.isArray(existingStudents) || existingStudents.length === 0) {
+        api
+          .get('/admin/students')
+          .then((res) => {
+            const raw = res.data?.data ?? res.data ?? [];
+            const data = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+            safeWriteListStorageMulti(
+              [`cached_admin_students_list_v8_${uid}`, 'cached_admin_students_list'],
+              data
+            );
+          })
+          .catch(() => {});
+      }
+    });
+  }, 3000);
 };
 
 const AdminDashboard = () => {
@@ -324,8 +382,11 @@ const AdminDashboard = () => {
       });
       if (changed) {
         ADMIN_DASH_MEM_CACHE.recentUsers = updated;
-        safeWriteListStorage(getUsersCacheKey(currentAdminId), updated, true);
-        safeWriteListStorage(CACHE_KEY_SHARED_USERS, updated, false);
+        safeWriteListStorageMulti(
+          [getUsersCacheKey(currentAdminId), CACHE_KEY_SHARED_USERS],
+          updated,
+          true
+        );
       }
       return changed ? updated : prev;
     });
@@ -356,11 +417,9 @@ const AdminDashboard = () => {
   }, [stats, language]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ទាញយកទិន្នន័យដោយឯករាជ្យមិនរង់ចាំគ្នា (Non-Blocking 0ms Sync)
+  // 📌 ផ្នែកទី២៖ ទាញយកទិន្នន័យដោយឯករាជ្យមិនរង់ចាំគ្នា (Non-Blocking 30s Cache TTL)
   // ============================================================================
   const fetchDashboardData = useCallback(() => {
-    prefetchAllAdminPagesData(currentAdminId);
-
     const cachedSt = readStorageJson(getStatsCacheKey(currentAdminId), null);
     const cachedUs = readStorageJson(getUsersCacheKey(currentAdminId), null);
 
@@ -386,8 +445,9 @@ const AdminDashboard = () => {
       ADMIN_DASH_MEM_CACHE.stats &&
       Object.keys(ADMIN_DASH_MEM_CACHE.stats).length > 0 &&
       Array.isArray(ADMIN_DASH_MEM_CACHE.recentUsers) &&
-      now - ADMIN_DASH_MEM_CACHE.lastSyncedAt < 25000
+      now - ADMIN_DASH_MEM_CACHE.lastSyncedAt < 30000
     ) {
+      prefetchAllAdminPagesData(currentAdminId);
       return;
     }
 
@@ -397,57 +457,50 @@ const AdminDashboard = () => {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    api
-      .get('/admin/stats', { signal: controller.signal })
-      .then((res) => {
-        const newStats = res.data?.data || res.data || {};
-        setStats(newStats);
-        ADMIN_DASH_MEM_CACHE.uid = currentAdminId;
-        ADMIN_DASH_MEM_CACHE.stats = newStats;
-        ADMIN_DASH_MEM_CACHE.lastSyncedAt = Date.now();
-        try {
-          const str = JSON.stringify(newStats);
-          try {
-            sessionStorage.setItem(getStatsCacheKey(currentAdminId), str);
-          } catch {}
-          localStorage.setItem(getStatsCacheKey(currentAdminId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_STATS, str);
-        } catch (e) {
-          console.warn('Failed to cache admin stats:', e);
-        }
-      })
-      .catch((err) => {
-        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
-        console.error('Stats API error:', err);
-      });
+    Promise.allSettled([
+      api
+        .get('/admin/stats', { signal: controller.signal })
+        .then((res) => {
+          const newStats = res.data?.data || res.data || {};
+          setStats(newStats);
+          ADMIN_DASH_MEM_CACHE.uid = currentAdminId;
+          ADMIN_DASH_MEM_CACHE.stats = newStats;
+          ADMIN_DASH_MEM_CACHE.lastSyncedAt = Date.now();
+          safeWriteObjectStorageMulti(
+            [getStatsCacheKey(currentAdminId), CACHE_KEY_SHARED_STATS],
+            newStats
+          );
+        })
+        .catch((err) => {
+          if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
+          console.error('Stats API error:', err);
+        }),
 
-    api
-      .get('/admin/users?per_page=5', { signal: controller.signal })
-      .then((res) => {
-        const rawUsers = res.data?.data ?? res.data ?? [];
-        const fetchedUsers = Array.isArray(rawUsers)
-          ? rawUsers
-          : Array.isArray(rawUsers?.data)
-          ? rawUsers.data
-          : [];
-        fetchedUsers.forEach((uItem) => {
-          const img =
-            uItem?.profile_image ||
-            uItem?.teacher?.profile_image ||
-            uItem?.student?.profile_image;
-          if (uItem?.id && img) {
-            ADMIN_DASH_MEM_CACHE.avatarMap[uItem.id] = img;
-          }
-        });
-        setRecentUsers(fetchedUsers);
-        ADMIN_DASH_MEM_CACHE.recentUsers = fetchedUsers;
-        safeWriteListStorage(getUsersCacheKey(currentAdminId), fetchedUsers, true);
-        safeWriteListStorage(CACHE_KEY_SHARED_USERS, fetchedUsers, false);
-      })
-      .catch((err) => {
-        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
-        console.error('Users API error:', err);
-      });
+      api
+        .get('/admin/users?per_page=5', { signal: controller.signal })
+        .then((res) => {
+          const rawUsers = res.data?.data ?? res.data ?? [];
+          const fetchedUsers = Array.isArray(rawUsers)
+            ? rawUsers
+            : Array.isArray(rawUsers?.data)
+            ? rawUsers.data
+            : [];
+          setRecentUsers(fetchedUsers);
+          ADMIN_DASH_MEM_CACHE.recentUsers = fetchedUsers;
+          safeWriteListStorageMulti(
+            [getUsersCacheKey(currentAdminId), CACHE_KEY_SHARED_USERS],
+            fetchedUsers,
+            true
+          );
+        })
+        .catch((err) => {
+          if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
+          console.error('Users API error:', err);
+        }),
+    ]).finally(() => {
+      // ✅ ទាញទិន្នន័យទំព័រផ្សេងៗតាមក្រោយបន្ទាប់ពី Dashboard រួចរាល់ ដើម្បីកុំឱ្យស្ទះ Server
+      prefetchAllAdminPagesData(currentAdminId);
+    });
   }, [currentAdminId]);
 
   useEffect(() => {
@@ -530,8 +583,9 @@ const AdminDashboard = () => {
       {/* 📌 1. WELCOME BANNER (Adaptive Phone / Tablet / iPad / Desktop)    */}
       {/* ================================================================== */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-blue-950 via-indigo-900 to-slate-950 p-5 sm:p-7 md:p-8 lg:p-10 border border-blue-800/30 shadow-xl">
-        <div className="absolute top-0 right-0 w-64 sm:w-96 h-64 sm:h-96 bg-blue-500/10 rounded-full blur-3xl -mr-32 -mt-32 pointer-events-none"></div>
-        <div className="absolute bottom-0 left-0 w-60 sm:w-80 h-60 sm:h-80 bg-indigo-500/10 rounded-full blur-3xl -ml-24 -mb-24 pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 sm:w-96 h-64 sm:h-96 bg-blue-500/10 rounded-full blur-3xl -mr-32 -mt-32 pointer-events-none"></div>
+        <div className="hidden md:block absolute bottom-0 left-0 w-60 sm:w-80 h-60 sm:h-80 bg-indigo-500/10 rounded-full blur-3xl -ml-24 -mb-24 pointer-events-none"></div>
         
         <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-64 h-44 sm:h-64 text-white/[0.04] -rotate-12 pointer-events-none" />
 
@@ -567,7 +621,7 @@ const AdminDashboard = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-blue-200/80 font-bold pt-0.5 sm:pt-1">
-              <span className="inline-flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 backdrop-blur-sm shadow-2xs">
+              <span className="inline-flex items-center gap-1.5 bg-white/15 md:bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 md:backdrop-blur-sm shadow-2xs">
                 <ClockIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-yellow-400 shrink-0" />
                 <span>
                   {new Date().toLocaleDateString(
@@ -584,7 +638,7 @@ const AdminDashboard = () => {
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-4 bg-white/[0.06] backdrop-blur-md border border-white/10 p-4 pr-6 rounded-3xl shadow-2xl shrink-0 self-start xl:self-center">
+          <div className="hidden md:flex items-center gap-4 bg-white/[0.06] md:backdrop-blur-md border border-white/10 p-4 pr-6 rounded-3xl shadow-2xl shrink-0 self-start xl:self-center">
             <div className="h-14 w-14 lg:h-16 lg:w-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center border border-white/20 shadow-lg shrink-0">
               <AcademicCapIcon className="h-8 w-8 lg:h-9 lg:w-9 text-yellow-300" />
             </div>
@@ -620,7 +674,7 @@ const AdminDashboard = () => {
             <Link
               key={index}
               to={stat.link || '#'}
-              className={`admin-surface-card bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 border border-gray-100 hover:border-blue-200 shadow-sm hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 flex flex-col justify-between relative overflow-hidden ${
+              className={`admin-surface-card bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 border border-gray-100 hover:border-blue-200 shadow-sm hover:shadow-xl transition-all duration-200 group hover:-translate-y-1 flex flex-col justify-between relative overflow-hidden ${
                 isLastItem
                   ? 'col-span-2 md:col-span-1 xl:col-span-1'
                   : ''
@@ -636,7 +690,7 @@ const AdminDashboard = () => {
                   </p>
                 </div>
                 <div
-                  className={`admin-stat-icon ${stat.themeClass} h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl ${stat.bgColor} flex items-center justify-center border border-gray-100/50 group-hover:scale-110 transition-transform duration-300 shrink-0`}
+                  className={`admin-stat-icon ${stat.themeClass} h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl ${stat.bgColor} flex items-center justify-center border border-gray-100/50 group-hover:scale-110 transition-transform duration-200 shrink-0`}
                 >
                   <Icon className={`h-5 w-5 sm:h-6 sm:w-6 ${stat.textColor}`} />
                 </div>
@@ -894,7 +948,7 @@ const AdminDashboard = () => {
                                 <img
                                   src={avatarUrl}
                                   alt={u.first_name || u.name || 'User'}
-                                  loading="eager"
+                                  loading="lazy"
                                   decoding="async"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
@@ -986,6 +1040,7 @@ const AdminDashboard = () => {
                             src={avatarUrl}
                             alt={u.first_name || u.name || 'User'}
                             loading="lazy"
+                            decoding="async"
                             className="h-full w-full object-cover rounded-full"
                             onError={() =>
                               setFailedAvatars((prev) => ({
@@ -1049,7 +1104,6 @@ const AdminDashboard = () => {
           scrollbar-width: none;
         }
 
-        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
         .admin-table-row + .admin-table-row > td {
           border-top: 1px solid #f1f5f9;
         }
@@ -1080,7 +1134,6 @@ const AdminDashboard = () => {
           color: #60a5fa !important;
         }
 
-        /* ពណ៌ប្រអប់ Icon លើកាតស្ថិតិពេលបើក Dark Mode */
         html.dark .admin-stat-blue {
           background-color: rgba(59, 130, 246, 0.15) !important;
           border-color: rgba(59, 130, 246, 0.3) !important;
@@ -1111,12 +1164,10 @@ const AdminDashboard = () => {
         }
         html.dark .admin-stat-cyan svg { color: #22d3ee !important; }
 
-        /* ក្រឡាបន្ទាត់ក្នុង Chart */
         html.dark .admin-chart-grid line {
           stroke: #334155 !important;
         }
 
-        /* ✅ តារាងអ្នកប្រើប្រាស់ថ្មីៗ និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         html.dark .admin-table-head {
           background-color: #0f172a !important;
           border-color: rgba(51, 65, 85, 0.7) !important;
@@ -1137,7 +1188,6 @@ const AdminDashboard = () => {
           border-color: rgba(16, 185, 129, 0.35) !important;
         }
 
-        /* Badges ក្នុងតារាង និងក្រាហ្វិក */
         html.dark .admin-badge-emerald {
           background-color: rgba(16, 185, 129, 0.15) !important;
           color: #34d399 !important;
@@ -1164,7 +1214,6 @@ const AdminDashboard = () => {
           border-color: rgba(148, 163, 184, 0.3) !important;
         }
       `}</style>
-
     </div>
   );
 };

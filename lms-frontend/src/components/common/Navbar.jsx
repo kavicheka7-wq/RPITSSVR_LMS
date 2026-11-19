@@ -191,6 +191,12 @@ const Navbar = () => {
     [contextUser]
   );
 
+  // ✅ រក្សា Reference របស់ user ការពារកុំឱ្យ syncTelegramStatus បង្កើតថ្មីរាល់ដង (បំបាត់ Infinite Loop)
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
   const teacherData = useMemo(
     () => contextTeacher || readCachedTeacherSync() || user?.teacher || null,
     [contextTeacher, user?.teacher]
@@ -225,10 +231,12 @@ const Navbar = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const [logoError, setLogoError] = useState(false);
   const [instantAvatarPreview, setInstantAvatarPreview] = useState(null);
+  const [profileFormError, setProfileFormError] = useState('');
   const [passwordFormError, setPasswordFormError] = useState('');
 
   const userEmail = useMemo(
@@ -495,6 +503,7 @@ const Navbar = () => {
     [user, teacherData]
   );
 
+  // ✅ ប្រើ userRef និងឆែកលក្ខខណ្ឌមុនហៅ setUser ដើម្បីការពារ Infinite API Loop
   const syncTelegramStatus = useCallback(
     async (isPolling = false) => {
       if (!userEmail) return;
@@ -515,14 +524,19 @@ const Navbar = () => {
           } catch {}
         }
 
+        const currentUser = userRef.current;
+
         if (res?.linked) {
           setIsTelegramLinked(true);
           setWaitingTelegramLink(false);
-          const updatedUser = { ...user, telegram_linked: true };
-          if (typeof setUser === 'function') {
-            setUser(updatedUser);
+
+          if (!currentUser?.telegram_linked) {
+            const updatedUser = { ...currentUser, telegram_linked: true };
+            if (typeof setUser === 'function') {
+              setUser(updatedUser);
+            }
+            syncUserToStorage(updatedUser);
           }
-          syncUserToStorage(updatedUser);
 
           if (isPolling) {
             pushLocalNotification({
@@ -540,7 +554,7 @@ const Navbar = () => {
         }
       } catch {}
     },
-    [userEmail, checkTelegramLinkStatus, user, setUser, syncUserToStorage]
+    [userEmail, checkTelegramLinkStatus, setUser, syncUserToStorage]
   );
 
   const handleUnlinkTelegram = useCallback(async () => {
@@ -566,8 +580,9 @@ const Navbar = () => {
         } catch {}
       }
 
+      const currentUser = userRef.current;
       const updatedUser = {
-        ...user,
+        ...currentUser,
         telegram_linked: false,
         telegram_chat_id: null,
       };
@@ -590,7 +605,7 @@ const Navbar = () => {
     } finally {
       setIsUnlinkingTelegram(false);
     }
-  }, [userEmail, isUnlinkingTelegram, user, setUser, syncUserToStorage]);
+  }, [userEmail, isUnlinkingTelegram, setUser, syncUserToStorage]);
 
   useEffect(() => {
     if (isSettingsModalOpen) {
@@ -791,6 +806,7 @@ const Navbar = () => {
   }, [isAdmin, isTeacher, isStudent, t]);
 
   const openProfileModal = useCallback(() => {
+    setProfileFormError('');
     setProfileData({
       first_name: resolvedFirstName || user?.name || '',
       last_name: resolvedLastName || '',
@@ -811,6 +827,7 @@ const Navbar = () => {
   const closeProfileModal = useCallback(() => {
     setIsProfileModalOpen(false);
     setIsEditing(false);
+    setProfileFormError('');
   }, []);
 
   const openSettingsModal = useCallback(() => {
@@ -898,14 +915,24 @@ const Navbar = () => {
     }
   };
 
-  // ✅ មុខងារដាក់រូបភាពប្រវត្តិរូបដែលបានបង្រួមជា Base64 សម្រាប់រក្សាទុកក្នុង Database លើ Railway ជាប់រហូត ១០០%
+  // ✅ មុខងារដាក់រូបភាពប្រវត្តិរូបដែលបានបង្រួមជា Base64 + Rollback ពេលបរាជ័យ
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || isUploadingAvatar) return;
 
     if (!file.type.startsWith('image/')) {
+      setProfileFormError(
+        t('សូមជ្រើសរើសឯកសាររូបភាពតែប៉ុណ្ណោះ!', 'Please select an image file!')
+      );
       return;
     }
+
+    setProfileFormError('');
+    setIsUploadingAvatar(true);
+
+    const previousUser = { ...user };
+    const previousTeacher = teacherData ? { ...teacherData } : null;
+    const previousImg = profileData.profile_image;
 
     try {
       const { dataUrl, compressedFile } = await compressImageToBase64(
@@ -955,7 +982,9 @@ const Navbar = () => {
         endpoint = '/student/profile/update-image';
       }
 
-      const response = await api.post(endpoint, formData);
+      const response = await api.post(endpoint, formData, {
+        headers: { 'Content-Type': undefined },
+      });
 
       if (response.data) {
         const newImgPath =
@@ -964,7 +993,10 @@ const Navbar = () => {
           dataUrl;
         const resolvedServerUrl = resolveImageUrl(newImgPath) || dataUrl;
 
-        const updatedUser = { ...optimisticUser, profile_image: resolvedServerUrl };
+        const updatedUser = {
+          ...optimisticUser,
+          profile_image: resolvedServerUrl,
+        };
         let updatedTeacher = optimisticTeacher
           ? { ...optimisticTeacher, profile_image: resolvedServerUrl }
           : null;
@@ -1003,13 +1035,35 @@ const Navbar = () => {
       }
     } catch (error) {
       console.error('Upload error:', error);
+      // ✅ Rollback រូបភាពចាស់មកវិញបើ Upload បរាជ័យ
+      if (typeof setUser === 'function') {
+        setUser(previousUser);
+      }
+      syncUserToStorage(previousUser, previousTeacher);
+      setInstantAvatarPreview(null);
+      setProfileData((prev) => ({
+        ...prev,
+        profile_image: previousImg,
+      }));
+      setProfileFormError(
+        error.response?.data?.message ||
+          t(
+            'មិនអាចបង្ហោះរូបភាពបានទេ សូមព្យាយាមម្ដងទៀត!',
+            'Could not upload profile photo, please try again!'
+          )
+      );
     } finally {
+      setIsUploadingAvatar(false);
       if (e.target) e.target.value = null;
     }
   };
 
   const handleProfileUpdate = async () => {
+    setProfileFormError('');
     if (!profileData.first_name.trim()) {
+      setProfileFormError(
+        t('សូមបញ្ចូលនាមខ្លួន!', 'Please enter your first name!')
+      );
       return;
     }
 
@@ -1053,7 +1107,6 @@ const Navbar = () => {
       setUser(optimisticUser);
     }
     syncUserToStorage(optimisticUser, optimisticTeacher);
-    setIsEditing(false);
     setIsSavingProfile(true);
 
     try {
@@ -1077,6 +1130,7 @@ const Navbar = () => {
           setUser(updatedUser);
         }
         syncUserToStorage(updatedUser, optimisticTeacher);
+        setIsEditing(false);
 
         pushLocalNotification({
           titleKm: 'បានកែប្រែព័ត៌មានប្រវត្តិរូប',
@@ -1092,6 +1146,13 @@ const Navbar = () => {
         setUser(previousUser);
       }
       syncUserToStorage(previousUser, previousTeacher);
+      setProfileFormError(
+        error.response?.data?.message ||
+          t(
+            'មិនអាចរក្សាទុកព័ត៌មានបានទេ សូមព្យាយាមម្ដងទៀត!',
+            'Could not save profile changes, please try again!'
+          )
+      );
     } finally {
       setIsSavingProfile(false);
     }
@@ -1156,7 +1217,7 @@ const Navbar = () => {
                 onClick={toggleTheme}
                 className={`p-2.5 rounded-xl border transition-colors text-white cursor-pointer shadow-sm ${
                   isStudent
-                    ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35 backdrop-blur-md'
+                    ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35 md:backdrop-blur-md'
                     : 'bg-blue-800/50 hover:bg-blue-700/60 border-blue-600/30'
                 }`}
                 title={
@@ -1181,7 +1242,7 @@ const Navbar = () => {
                 onClick={toggleLanguage}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-colors text-white cursor-pointer shadow-sm ${
                   isStudent
-                    ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35 backdrop-blur-md'
+                    ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35 md:backdrop-blur-md'
                     : 'bg-blue-800/50 hover:bg-blue-700/60 border-blue-600/30'
                 }`}
                 title={
@@ -1350,12 +1411,13 @@ const Navbar = () => {
           </div>
         </div>
 
+        {/* ✅ ដក backdrop-blur-md ចេញពី Mobile Menu ដើម្បីឱ្យអូសរលូន 60fps លើទូរស័ព្ទ */}
         {isMobileMenuOpen && (
           <div
-            className={`md:hidden border-t backdrop-blur-md max-h-[85vh] overflow-y-auto ${
+            className={`md:hidden border-t max-h-[85vh] overflow-y-auto ${
               isStudent
-                ? 'border-indigo-500/30 bg-gradient-to-b from-blue-950/98 via-indigo-950/98 to-violet-950/98'
-                : 'border-blue-700/30 bg-blue-950/98'
+                ? 'border-indigo-500/30 bg-gradient-to-b from-blue-950 via-indigo-950 to-violet-950'
+                : 'border-blue-700/30 bg-blue-950'
             }`}
           >
             <div className="pt-3 pb-4 space-y-3 px-4">
@@ -1578,7 +1640,7 @@ const Navbar = () => {
         onClose={closeProfileModal}
       >
         <div
-          className="fixed inset-0 bg-blue-950/60 backdrop-blur-sm"
+          className="fixed inset-0 bg-blue-950/65 md:backdrop-blur-sm"
           aria-hidden="true"
         />
 
@@ -1604,6 +1666,15 @@ const Navbar = () => {
             </div>
 
             <div className="p-6 sm:p-8 overflow-y-auto flex-1">
+              {profileFormError && (
+                <div className="mb-5 p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded-xl flex items-start gap-2 text-rose-600 dark:text-rose-400">
+                  <ExclamationCircleIcon className="h-5 w-5 shrink-0 mt-0.5" />
+                  <p className="text-xs font-bold leading-relaxed">
+                    {profileFormError}
+                  </p>
+                </div>
+              )}
+
               <div className="flex flex-col items-center mb-8">
                 <div className="relative group">
                   <div
@@ -1634,15 +1705,20 @@ const Navbar = () => {
                   />
                   <button
                     type="button"
+                    disabled={isUploadingAvatar}
                     onClick={() => fileInputRef.current?.click()}
-                    className={`absolute bottom-1 right-1 p-3 rounded-full text-white transition-colors shadow-lg cursor-pointer ${
+                    className={`absolute bottom-1 right-1 p-3 rounded-full text-white transition-colors shadow-lg cursor-pointer disabled:opacity-60 ${
                       isStudent
                         ? 'bg-indigo-600 hover:bg-indigo-700'
                         : 'bg-blue-600 hover:bg-blue-700'
                     }`}
                     title={t('ដូររូបភាព', 'Change Image')}
                   >
-                    <CameraIcon className="h-5 w-5" />
+                    {isUploadingAvatar ? (
+                      <ArrowPathIcon className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <CameraIcon className="h-5 w-5" />
+                    )}
                   </button>
                 </div>
 
@@ -1749,12 +1825,13 @@ const Navbar = () => {
                         type="text"
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.first_name}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          if (profileFormError) setProfileFormError('');
                           setProfileData({
                             ...profileData,
                             first_name: e.target.value,
-                          })
-                        }
+                          });
+                        }}
                       />
                     </div>
                     <div>
@@ -1765,12 +1842,13 @@ const Navbar = () => {
                         type="text"
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.last_name}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          if (profileFormError) setProfileFormError('');
                           setProfileData({
                             ...profileData,
                             last_name: e.target.value,
-                          })
-                        }
+                          });
+                        }}
                       />
                     </div>
                     <div>
@@ -1781,12 +1859,13 @@ const Navbar = () => {
                         type="email"
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.email}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          if (profileFormError) setProfileFormError('');
                           setProfileData({
                             ...profileData,
                             email: e.target.value,
-                          })
-                        }
+                          });
+                        }}
                       />
                     </div>
                     <div>
@@ -1797,12 +1876,13 @@ const Navbar = () => {
                         type="tel"
                         className="w-full px-4 py-3.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                         value={profileData.phone}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          if (profileFormError) setProfileFormError('');
                           setProfileData({
                             ...profileData,
                             phone: e.target.value,
-                          })
-                        }
+                          });
+                        }}
                       />
                     </div>
                   </div>
@@ -1822,7 +1902,10 @@ const Navbar = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setIsEditing(true)}
+                    onClick={() => {
+                      setProfileFormError('');
+                      setIsEditing(true);
+                    }}
                     className="px-6 py-3.5 bg-blue-600 text-white hover:bg-blue-700 rounded-xl text-sm font-bold flex items-center gap-2 cursor-pointer"
                   >
                     <PencilIcon className="h-4 w-4" />
@@ -1833,7 +1916,10 @@ const Navbar = () => {
                 <>
                   <button
                     type="button"
-                    onClick={() => setIsEditing(false)}
+                    onClick={() => {
+                      setIsEditing(false);
+                      setProfileFormError('');
+                    }}
                     className="px-6 py-3.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer"
                     disabled={isSavingProfile}
                   >
@@ -1843,7 +1929,7 @@ const Navbar = () => {
                     type="button"
                     onClick={handleProfileUpdate}
                     disabled={isSavingProfile}
-                    className="px-6 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 rounded-xl text-sm font-bold flex items-center gap-2 cursor-pointer"
+                    className="px-6 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 rounded-xl text-sm font-bold flex items-center gap-2 cursor-pointer disabled:opacity-60"
                   >
                     {isSavingProfile ? (
                       <ArrowPathIcon className="h-5 w-5 animate-spin" />
@@ -1869,7 +1955,7 @@ const Navbar = () => {
         onClose={closeSettingsModal}
       >
         <div
-          className="fixed inset-0 bg-blue-950/60 backdrop-blur-sm p-4"
+          className="fixed inset-0 bg-blue-950/65 md:backdrop-blur-sm p-4"
           aria-hidden="true"
         />
 

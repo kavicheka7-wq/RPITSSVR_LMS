@@ -134,16 +134,19 @@ const Sidebar = () => {
   const popoverRef = useRef(null);
   const spacerRef = useRef(null);
 
-  // ✅ គណនាទីតាំងពីខាងលើ (Top Offset) ដោយស្វ័យប្រវត្តិតាមកម្ពស់ Navbar ជាក់ស្តែង
+  // ✅ គណនាទីតាំងពីខាងលើ (Top Offset) ដោយស្វ័យប្រវត្តិតាមកម្ពស់ Navbar ជាក់ស្តែង (ការពារ Bug លើទូរស័ព្ទ/Tablet)
   const [topOffset, setTopOffset] = useState(84);
 
   useEffect(() => {
     const updatePosition = () => {
-      if (spacerRef.current && window.scrollY < 50) {
-        const rect = spacerRef.current.getBoundingClientRect();
+      if (window.innerWidth < 768 || !spacerRef.current) return;
+      const rect = spacerRef.current.getBoundingClientRect();
+      if (rect.width === 0) return;
+
+      if (window.scrollY < 50) {
         const calculatedTop = Math.min(
           120,
-          Math.max(16, Math.round(rect.top + window.scrollY))
+          Math.max(68, Math.round(rect.top + window.scrollY))
         );
         setTopOffset(calculatedTop);
       }
@@ -154,8 +157,10 @@ const Sidebar = () => {
     return () => window.removeEventListener('resize', updatePosition);
   }, []);
 
-  // បិទផ្ទាំងផុសដោយស្វ័យប្រវត្តិ ពេលចុចក្រៅប្រអប់ (សម្រាប់អេក្រង់ Tablet)
+  // ✅ ភ្ជាប់ Event Listener តែពេល openPopover បើកប៉ុណ្ណោះ (មិនរត់ឥតប្រយោជន៍រាល់ពេលចុចលើអេក្រង់)
   useEffect(() => {
+    if (!openPopover) return;
+
     const handleClickOutside = (event) => {
       if (
         window.innerWidth < 1024 &&
@@ -171,7 +176,7 @@ const Sidebar = () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
     };
-  }, []);
+  }, [openPopover]);
 
   // បើកទុកដោយស្វ័យប្រវត្តិនៅលើកុំព្យូទ័រ ពេលកំពុងស្ថិតក្នុងទំព័រគ្រប់គ្រងសិស្ស និងបិទលើ Tablet ពេលប្ដូរទំព័រ
   useEffect(() => {
@@ -406,21 +411,27 @@ const Sidebar = () => {
 
   const isStudent = roleKey === 'Student';
   const section = roleKey ? NAV_CONFIG[roleKey] : null;
-  const navItems = section?.items || [];
 
-  const uniqueNavItems = navItems.reduce((acc, current) => {
-    const exists = acc.find(
-      (item) => item.path === current.path && item.name === current.name
-    );
-    if (!exists) {
-      acc.push(current);
-    }
-    return acc;
-  }, []);
+  // ✅ Memoize ការច្រោះបញ្ជីម៉ឺនុយ និង URL param ដើម្បីកុំឱ្យគណនាឡើងវិញរាល់ពេល Re-render
+  const uniqueNavItems = useMemo(() => {
+    const items = section?.items || [];
+    return items.reduce((acc, current) => {
+      const exists = acc.find(
+        (item) => item.path === current.path && item.name === current.name
+      );
+      if (!exists) {
+        acc.push(current);
+      }
+      return acc;
+    }, []);
+  }, [section]);
 
-  const currentYearParam = new URLSearchParams(location.search).get('year') || 'all';
+  const currentYearParam = useMemo(
+    () => new URLSearchParams(location.search).get('year') || 'all',
+    [location.search]
+  );
 
-  // ✅ អនុគមន៍ឆែកមើលថាតើម៉ឺនុយនីមួយៗកំពុង Active ឬអត់ (គាំទ្រទាំងពេលវាយ Domain ចូលដំបូង '/' ឬ '/dashboard' ឬ '/student/dashboard')
+  // ✅ អនុគមន៍ឆែកមើលថាតើម៉ឺនុយនីមួយៗកំពុង Active ឬអត់
   const checkIsNavItemActive = useCallback(
     (item) => {
       const routerPath = (location.pathname || '/').replace(/\/+$/, '') || '/';
@@ -472,11 +483,11 @@ const Sidebar = () => {
             : 'bg-gradient-to-b from-slate-950 via-blue-950 to-indigo-950 border border-blue-800/45'
         }`}
       >
-        {/* ផ្ទៃក្រឡាអុចៗស្រាលៗ និងពន្លឺ Glow បែបទំនើប */}
+        {/* ផ្ទៃក្រឡាអុចៗស្រាលៗ និងពន្លឺ Glow (លាក់ blur-3xl លើ Tablet ដើម្បីសម្រាល GPU) */}
         <div className="absolute inset-0 rounded-[1.75rem] overflow-hidden pointer-events-none">
           <div className="std-sidebar-grid-pattern absolute inset-0 opacity-15" />
-          <div className="absolute -top-24 -right-24 w-52 h-52 bg-blue-500/20 rounded-full blur-3xl" />
-          <div className="absolute -bottom-24 -left-24 w-52 h-52 bg-indigo-500/20 rounded-full blur-3xl" />
+          <div className="hidden lg:block absolute -top-24 -right-24 w-52 h-52 bg-blue-500/20 rounded-full blur-3xl" />
+          <div className="hidden lg:block absolute -bottom-24 -left-24 w-52 h-52 bg-indigo-500/20 rounded-full blur-3xl" />
         </div>
 
         <div className="relative z-10 flex flex-col h-full w-full py-2.5">
@@ -548,7 +559,7 @@ const Sidebar = () => {
                       onClick={() => setOpenPopover(isPopoverOpen ? null : item.path)}
                       className={`w-full group relative flex flex-col lg:flex-row items-center justify-center lg:justify-between py-2 px-1.5 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 cursor-pointer ${
                         isParentActive || isPopoverOpen
-                          ? 'bg-gradient-to-r from-white/15 to-white/[0.06] backdrop-blur-md text-white font-extrabold border-white/20 shadow-lg'
+                          ? 'bg-gradient-to-r from-white/15 to-white/[0.06] lg:backdrop-blur-md text-white font-extrabold border-white/20 shadow-lg'
                           : 'border-transparent text-blue-100/80 font-semibold hover:bg-white/[0.07] hover:text-white lg:hover:translate-x-1'
                       }`}
                     >
@@ -652,7 +663,7 @@ const Sidebar = () => {
                     const activeState = isActive || isCustomActive;
                     return `group relative flex flex-col lg:flex-row items-center justify-center lg:justify-start gap-1 lg:gap-3 py-2 px-1.5 lg:px-3 lg:py-2 text-[14.5px] rounded-2xl border transition-all duration-200 ${
                       activeState
-                        ? 'bg-gradient-to-r from-white/15 to-white/[0.06] backdrop-blur-md text-white font-extrabold border-white/20 shadow-lg'
+                        ? 'bg-gradient-to-r from-white/15 to-white/[0.06] lg:backdrop-blur-md text-white font-extrabold border-white/20 shadow-lg'
                         : 'border-transparent text-blue-100/80 font-semibold hover:bg-white/[0.07] hover:text-white lg:hover:translate-x-1'
                     }`;
                   }}

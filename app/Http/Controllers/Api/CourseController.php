@@ -35,7 +35,6 @@ class CourseController extends Controller
             return $courses;
         }
 
-        // ✅ ទាញយកតែជួរឈរឈ្មោះ និងព័ត៌មានគ្រូពីតារាង teachers ក្នុង Query តែ ១ ដង (មិនទាញ profile_image Base64 ធំៗទេ)
         $teachersById = Teacher::whereIn('id', $teacherIds)
             ->orWhereIn('user_id', $teacherIds)
             ->select([
@@ -281,6 +280,7 @@ class CourseController extends Controller
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
+            Cache::forget('admin_course_stats');
 
             return response()->json([
                 'message' => 'បានបង្កើតមុខវិជ្ជាដោយជោគជ័យ',
@@ -359,6 +359,7 @@ class CourseController extends Controller
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
+            Cache::forget('admin_course_stats');
 
             $freshCourse = $course->fresh(['department:id,department_name']);
             $this->attachTeacherDetailsToCollection([$freshCourse]);
@@ -390,14 +391,18 @@ class CourseController extends Controller
             $courseName = $course->course_name;
 
             DB::transaction(function () use ($course) {
-                DB::table('enrollments')->where('course_id', $course->id)->delete();
-                DB::table('attendances')->where('course_id', $course->id)->delete();
-                DB::table('grades')->where('course_id', $course->id)->delete();
+                $relatedTables = ['enrollments', 'attendances', 'grades', 'lessons', 'assignments', 'quizzes'];
+                foreach ($relatedTables as $table) {
+                    if (Schema::hasTable($table)) {
+                        DB::table($table)->where('course_id', $course->id)->delete();
+                    }
+                }
                 $course->delete();
             });
 
             Cache::forget('admin_dashboard_stats');
             Cache::forget('admin_overview_report');
+            Cache::forget('admin_course_stats');
 
             return response()->json([
                 'message' => "បានលុបមុខវិជ្ជា '{$courseName}' ដោយជោគជ័យ",
@@ -501,21 +506,23 @@ class CourseController extends Controller
     public function getStats()
     {
         try {
-            $stats = [
-                'total_courses' => Course::count(),
-                'total_departments' => Department::count(),
-                'courses_by_department' => Department::withCount('courses')
-                    ->orderBy('courses_count', 'desc')
-                    ->get()
-                    ->map(function ($dept) {
-                        return [
-                            'department_name' => $dept->department_name,
-                            'total_courses' => (int) $dept->courses_count,
-                        ];
-                    }),
-                'total_credits' => (int) Course::sum('credit'),
-                'avg_credits' => round((float) (Course::avg('credit') ?? 0), 1),
-            ];
+            $stats = Cache::remember('admin_course_stats', 300, function () {
+                return [
+                    'total_courses' => Course::count(),
+                    'total_departments' => Department::count(),
+                    'courses_by_department' => Department::withCount('courses')
+                        ->orderBy('courses_count', 'desc')
+                        ->get()
+                        ->map(function ($dept) {
+                            return [
+                                'department_name' => $dept->department_name,
+                                'total_courses' => (int) $dept->courses_count,
+                            ];
+                        }),
+                    'total_credits' => (int) Course::sum('credit'),
+                    'avg_credits' => round((float) (Course::avg('credit') ?? 0), 1),
+                ];
+            });
 
             return response()->json([
                 'data' => $stats,

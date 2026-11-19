@@ -5,6 +5,7 @@ import React, {
   Fragment,
   useMemo,
   useCallback,
+  useRef,
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -224,6 +225,26 @@ const buildActionNotification = (method, url, role, configData, resData) => {
           'The selected students have been successfully promoted to the new academic year.',
         link: '/students/year-1',
         category: 'student',
+      };
+    }
+    // ✅ ញែកលក្ខខណ្ឌចុះឈ្មោះ/លុបមុខវិជ្ជាសិស្សចេញពីការលុប/កែប្រែគណនីសិស្ស
+    if (u.includes('admin/students') && u.includes('enrollments')) {
+      const isDelete = m === 'delete';
+      return {
+        titleKm: isDelete
+          ? 'បានលុបមុខវិជ្ជាចេញពីសិស្ស'
+          : 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្ស',
+        titleEn: isDelete
+          ? 'Student Unenrolled from Course'
+          : 'Student Enrolled in Course',
+        descKm: isDelete
+          ? 'មុខវិជ្ជាត្រូវបានដកចេញពីបញ្ជីសិក្សារបស់សិស្សរួចរាល់។'
+          : 'បានចុះឈ្មោះមុខវិជ្ជាជូនសិស្សក្នុងប្រព័ន្ធដោយជោគជ័យ។',
+        descEn: isDelete
+          ? 'Course was removed from student enrollments.'
+          : 'Student course enrollment was saved successfully.',
+        link: '/students/year-1',
+        category: 'course',
       };
     }
     if (u.includes('admin/students')) {
@@ -517,6 +538,9 @@ const NotificationBell = ({ isMobile = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const instanceIdRef = useRef(
+    `nbell_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+  );
   const [showClearPopover, setShowClearPopover] = useState(false);
 
   // ✅ កំណត់អត្តសញ្ញាណ និងតួនាទីអ្នកប្រើប្រាស់ភ្លាមៗក្នុង 0ms
@@ -527,11 +551,18 @@ const NotificationBell = ({ isMobile = false }) => {
 
   const isStudent = normalizedRole === 'student';
 
-  // ✅ យក Key ពី User បច្ចុប្បន្ន ដើម្បីឱ្យត្រូវគ្នា ១០០% ជាមួយ pushLocalNotification គ្រប់ទំព័រ
   const userUniqueKey = useMemo(
     () => `lms_notifs_${normalizedRole}_${currentUid}`,
     [normalizedRole, currentUid]
   );
+
+  const dispatchSelfSyncEvent = useCallback(() => {
+    window.dispatchEvent(
+      new CustomEvent(SYNC_EVENT_NAME, {
+        detail: { sourceId: instanceIdRef.current },
+      })
+    );
+  }, []);
 
   // ✅ អានពី RAM Cache ក្នុង 0ms បើគ្មានទើបអានពី LocalStorage
   const [notifications, setNotifications] = useState(() => {
@@ -556,9 +587,12 @@ const NotificationBell = ({ isMobile = false }) => {
     }
   });
 
-  // ✅ ស្ដាប់ Event 'lms_notifications_sync_event' គ្រប់ពេលមានសកម្មភាពថ្មី
+  // ✅ ស្ដាប់ Event 'lms_notifications_sync_event' ដោយរំលងការអានស្ទួនបើជា Event ពីខ្លួនឯង
   useEffect(() => {
-    const loadFromStorage = () => {
+    const loadFromStorage = (event) => {
+      if (event?.detail?.sourceId === instanceIdRef.current) {
+        return;
+      }
       try {
         const saved = localStorage.getItem(userUniqueKey);
         const parsed = saved ? JSON.parse(saved) : [];
@@ -602,7 +636,6 @@ const NotificationBell = ({ isMobile = false }) => {
 
           const cleanTargetLink = normalizeNotifLink(notifObj.link);
 
-          // ការពារកុំឱ្យជាន់គ្នាជាមួយ pushLocalNotification ដែលទំព័រនីមួយៗបានហៅរួចហើយ
           const isDuplicateRecentLocal = currentList.some((existing) => {
             if (!existing?.id?.toString().startsWith('local_')) return false;
             const timeDiff = Math.abs(
@@ -646,12 +679,12 @@ const NotificationBell = ({ isMobile = false }) => {
         NOTIF_MEM_CACHE.list = updated;
         localStorage.setItem(userUniqueKey, JSON.stringify(updated));
         setNotifications(updated);
-        window.dispatchEvent(new Event(SYNC_EVENT_NAME));
+        dispatchSelfSyncEvent();
       } catch (e) {
         console.error('Failed to push notification batch:', e);
       }
     },
-    [normalizedRole, userUniqueKey]
+    [normalizedRole, userUniqueKey, dispatchSelfSyncEvent]
   );
 
   // រក្សាទុកយោង (Reference) នៃតួនាទី និងអនុគមន៍ចុងក្រោយសម្រាប់ប្រើក្នុង Singleton Interceptor
@@ -756,9 +789,9 @@ const NotificationBell = ({ isMobile = false }) => {
       NOTIF_MEM_CACHE.list = updated;
       setNotifications(updated);
       localStorage.setItem(userUniqueKey, JSON.stringify(updated));
-      window.dispatchEvent(new Event(SYNC_EVENT_NAME));
+      dispatchSelfSyncEvent();
     } catch {}
-  }, [notifications, userUniqueKey]);
+  }, [notifications, userUniqueKey, dispatchSelfSyncEvent]);
 
   const confirmClearAllNotifications = useCallback(
     (e) => {
@@ -769,10 +802,10 @@ const NotificationBell = ({ isMobile = false }) => {
       setShowClearPopover(false);
       try {
         localStorage.setItem(userUniqueKey, JSON.stringify([]));
-        window.dispatchEvent(new Event(SYNC_EVENT_NAME));
+        dispatchSelfSyncEvent();
       } catch {}
     },
-    [userUniqueKey]
+    [userUniqueKey, dispatchSelfSyncEvent]
   );
 
   const handleNotificationClick = useCallback(
@@ -785,13 +818,13 @@ const NotificationBell = ({ isMobile = false }) => {
         NOTIF_MEM_CACHE.list = updated;
         setNotifications(updated);
         localStorage.setItem(userUniqueKey, JSON.stringify(updated));
-        window.dispatchEvent(new Event(SYNC_EVENT_NAME));
+        dispatchSelfSyncEvent();
       } catch {}
       if (notif.link) {
         navigate(normalizeNotifLink(notif.link));
       }
     },
-    [notifications, userUniqueKey, navigate]
+    [notifications, userUniqueKey, navigate, dispatchSelfSyncEvent]
   );
 
   const formatNotifTime = useCallback(
@@ -825,14 +858,14 @@ const NotificationBell = ({ isMobile = false }) => {
         onClick={() => setShowClearPopover(false)}
         className={
           isMobile
-            ? `relative p-2 rounded-xl border text-yellow-300/90 hover:text-yellow-300 transition-all cursor-pointer focus:outline-none ${
+            ? `relative p-2 rounded-xl border text-yellow-300/90 hover:text-yellow-300 transition-colors cursor-pointer focus:outline-none ${
                 isStudent
                   ? 'bg-white/10 border-indigo-400/30 hover:bg-white/15'
                   : 'bg-blue-800/40 border-blue-600/30 hover:bg-blue-800/60'
               }`
             : `relative p-2.5 rounded-xl border transition-all text-white cursor-pointer focus:outline-none shadow-sm hover:scale-105 ${
                 isStudent
-                  ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35 backdrop-blur-md'
+                  ? 'bg-white/10 hover:bg-white/15 border-indigo-400/35 md:backdrop-blur-md'
                   : 'bg-blue-800/50 hover:bg-blue-700/60 border-blue-600/30'
               }`
         }
@@ -935,7 +968,7 @@ const NotificationBell = ({ isMobile = false }) => {
                     e.stopPropagation();
                     setShowClearPopover((prev) => !prev);
                   }}
-                  className={`p-2 rounded-xl border transition-all cursor-pointer ${
+                  className={`p-2 rounded-xl border transition-colors cursor-pointer ${
                     showClearPopover
                       ? 'bg-rose-600 text-white border-rose-600 shadow-xs scale-105'
                       : 'bg-white/80 dark:bg-slate-800 border-gray-200/80 dark:border-slate-700 text-gray-500 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/40'
@@ -1006,7 +1039,7 @@ const NotificationBell = ({ isMobile = false }) => {
             </Transition>
           </div>
 
-          {/* បញ្ជីសារជូនដំណឹង (Adaptive Max-Height សម្រាប់ទូរស័ព្ទ, iPad, Laptop និង Desktop) */}
+          {/* បញ្ជីសារជូនដំណឹង */}
           <div
             onClick={() => {
               if (showClearPopover) setShowClearPopover(false);

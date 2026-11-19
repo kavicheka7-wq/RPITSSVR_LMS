@@ -23,6 +23,59 @@ use Illuminate\Support\Facades\Schema;
 class AdminReportController extends Controller
 {
     /**
+     * ✅ បង្រួមរូបថត Base64 ធំៗឱ្យមកទំហំតូចល្មម (~4KB) និងរក្សាទុកក្នុង Cache ដើម្បីឱ្យ JSON របាយការណ៍ស្រាលបំផុត
+     */
+    private function compressAvatarIfHeavy(?string $rawImage, string $prefix, int $entityId): ?string
+    {
+        if (!$rawImage) {
+            return null;
+        }
+        $trimmed = trim($rawImage);
+        if ($trimmed === '' || strlen($trimmed) <= 18000 || !str_starts_with($trimmed, 'data:image')) {
+            return $trimmed ?: null;
+        }
+
+        $cacheKey = "adm_rep_avatar_v1_{$prefix}_{$entityId}_" . md5(substr($trimmed, 0, 100) . strlen($trimmed));
+
+        return Cache::remember($cacheKey, 86400, function () use ($trimmed) {
+            if (!preg_match('/^data:([^;]+);base64,(.+)$/s', $trimmed, $m)) {
+                return $trimmed;
+            }
+            $binary = base64_decode(preg_replace('/\s+/', '', $m[2]));
+            if (!$binary || !function_exists('imagecreatefromstring')) {
+                return $trimmed;
+            }
+            try {
+                $src = @imagecreatefromstring($binary);
+                if ($src !== false) {
+                    $w = imagesx($src);
+                    $h = imagesy($src);
+                    $maxDim = 96;
+                    $newW = $w > $h ? $maxDim : max(1, (int) round(($w * $maxDim) / $h));
+                    $newH = $w > $h ? max(1, (int) round(($h * $maxDim) / $w)) : $maxDim;
+
+                    $dst = imagecreatetruecolor($newW, $newH);
+                    $white = imagecolorallocate($dst, 255, 255, 255);
+                    imagefilledrectangle($dst, 0, 0, $newW, $newH, $white);
+                    imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $w, $h);
+
+                    ob_start();
+                    imagejpeg($dst, null, 78);
+                    $out = ob_get_clean();
+                    imagedestroy($src);
+                    imagedestroy($dst);
+
+                    if ($out && strlen($out) < strlen($binary)) {
+                        return 'data:image/jpeg;base64,' . base64_encode($out);
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+            return $trimmed;
+        });
+    }
+
+    /**
      * Get system overview report stats & distributions.
      */
     public function getOverviewReport(Request $request)
@@ -65,7 +118,7 @@ class AdminReportController extends Controller
             $effectiveAttended = $presentAttendances + $lateAttendances + ($permissionAttendances * 0.5);
             $overallAttendanceRate = $totalAttendances > 0
                 ? min(100, round(($effectiveAttended / $totalAttendances) * 100, 1))
-                : 100;
+                : 0;
 
             $departments = Department::withCount(['courses', 'students', 'teachers'])->get();
             $departmentDistribution = $departments->map(function ($dept) {
@@ -157,7 +210,7 @@ class AdminReportController extends Controller
             });
         }
 
-        // ✅ រាប់ចំនួនសរុបទាំង ៤ ស្ថានភាពក្នុង Query តែ ១ ដងគត់ (លឿនជាងមុន ៤ ដង)
+        // ✅ រាប់ចំនួនសរុបទាំង ៤ ស្ថានភាពក្នុង Query តែ ១ ដងគត់
         $summaryRow = (clone $baseQuery)->selectRaw("
             COUNT(*) as total,
             SUM(CASE WHEN status = 'active' OR status IS NULL OR status = '' THEN 1 ELSE 0 END) as active,
@@ -174,7 +227,6 @@ class AdminReportController extends Controller
 
         $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
 
-        // ✅ មិនទាញ profile_image ស្ទួនពីតារាង users ទេ (ទាញតែពីតារាង students ខាងក្រោមដើម្បីសន្សំសំចៃ RAM)
         $paginated = $baseQuery
             ->with([
                 'student:id,first_name,last_name,email,gender',
@@ -207,6 +259,12 @@ class AdminReportController extends Controller
                 }
             }
 
+            $compressedImg = $this->compressAvatarIfHeavy(
+                $studentProfile->profile_image ?? null,
+                'std',
+                (int) ($studentProfile->id ?? $enr->student_id)
+            );
+
             return [
                 'id' => $enr->id,
                 'student_id' => $enr->student_id,
@@ -214,7 +272,8 @@ class AdminReportController extends Controller
                     ? trim(($studentUser->first_name ?? '') . ' ' . ($studentUser->last_name ?? ''))
                     : 'N/A',
                 'student_code' => $studentProfile->student_code ?? ('STD-' . $enr->student_id),
-                'student_image' => $studentProfile->profile_image ?? null,
+                'profile_image' => $compressedImg,
+                'student_image' => $compressedImg,
                 'gender' => $studentProfile->gender ?? $studentUser->gender ?? null,
                 'batch_year' => $studentProfile->batch_year ?? null,
                 'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
@@ -281,7 +340,7 @@ class AdminReportController extends Controller
         $effectiveAttended = $presentCount + $lateCount + ($permissionCount * 0.5);
         $rate = $totalRecords > 0
             ? min(100, round(($effectiveAttended / $totalRecords) * 100, 1))
-            : 100;
+            : 0;
 
         $coursesQuery = Course::with(['department:id,department_name', 'teacher:id,first_name,last_name,email,profile_image'])
             ->when($request->filled('department_id'), function ($q) use ($request) {
@@ -325,7 +384,7 @@ class AdminReportController extends Controller
             ])
             ->get();
 
-        // ✅ ទាញតែគ្រូណាដែលពាក់ព័ន្ធនឹងមុខវិជ្ជាទាំងនេះប៉ុណ្ណោះ (មិនទាញគ្រូទូទាំងសាលាទាំងអស់ចូល RAM ទេ)
+        // ✅ ទាញតែគ្រូណាដែលពាក់ព័ន្ធនឹងមុខវិជ្ជាទាំងនេះប៉ុណ្ណោះ
         $relevantTeacherIds = $coursesResult->pluck('teacher_id')->filter()->unique()->values()->all();
         $teachersByUserId = !empty($relevantTeacherIds)
             ? Teacher::select('id', 'user_id', 'first_name', 'last_name', 'profile_image')
@@ -343,7 +402,7 @@ class AdminReportController extends Controller
             $cPermission = (int) $course->permission;
 
             $cEffective = $cPresent + $cLate + ($cPermission * 0.5);
-            $cRate = $cTotal > 0 ? min(100, round(($cEffective / $cTotal) * 100, 1)) : 100;
+            $cRate = $cTotal > 0 ? min(100, round(($cEffective / $cTotal) * 100, 1)) : 0;
 
             $relTeacher = $course->teacher;
             $extTeacher = $teachersByUserId->get($course->teacher_id);
@@ -360,9 +419,15 @@ class AdminReportController extends Controller
                 $teacherName = $relTeacher->name;
             }
 
-            $teacherImage = $relTeacher->profile_image
+            $rawTeacherImage = $relTeacher->profile_image
                 ?? $extTeacher?->profile_image
                 ?? null;
+
+            $teacherImage = $this->compressAvatarIfHeavy(
+                $rawTeacherImage,
+                'tch',
+                (int) ($extTeacher->id ?? $course->teacher_id ?? $course->id)
+            );
 
             return [
                 'course_id' => $course->id,
@@ -370,6 +435,7 @@ class AdminReportController extends Controller
                 'course_code' => $course->course_code,
                 'department_name' => $course->department->department_name ?? 'N/A',
                 'teacher_name' => $teacherName ?: 'មិនស្គាល់គ្រូបង្រៀន',
+                'teacher_profile_image' => $teacherImage,
                 'teacher_image' => $teacherImage,
                 'total' => $cTotal,
                 'present' => $cPresent,
@@ -462,7 +528,6 @@ class AdminReportController extends Controller
 
         $perPage = max(1, min(200, (int) ($request->per_page ?? 50)));
 
-        // ✅ មិនទាញ profile_image ស្ទួនពីតារាង users ទេ
         $paginated = (clone $baseQuery)
             ->with([
                 'student:id,first_name,last_name,email,gender',
@@ -485,6 +550,12 @@ class AdminReportController extends Controller
             $studentUser = $g->student;
             $studentProfile = $studentProfiles->get($g->student_id);
 
+            $compressedImg = $this->compressAvatarIfHeavy(
+                $studentProfile->profile_image ?? null,
+                'std',
+                (int) ($studentProfile->id ?? $g->student_id)
+            );
+
             return [
                 'id' => $g->id,
                 'student_id' => $g->student_id,
@@ -492,7 +563,8 @@ class AdminReportController extends Controller
                     ? trim(($studentUser->first_name ?? '') . ' ' . ($studentUser->last_name ?? ''))
                     : 'N/A',
                 'student_code' => $studentProfile->student_code ?? ('STD-' . $g->student_id),
-                'student_image' => $studentProfile->profile_image ?? null,
+                'profile_image' => $compressedImg,
+                'student_image' => $compressedImg,
                 'gender' => $studentProfile->gender ?? $studentUser->gender ?? null,
                 'batch_year' => $studentProfile->batch_year ?? null,
                 'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',

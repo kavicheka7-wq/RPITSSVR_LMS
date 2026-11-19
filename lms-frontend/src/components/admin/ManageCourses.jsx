@@ -4,7 +4,6 @@ import api from '../../services/api';
 import { getCachedDepartments, clearCoursesCache } from '../../services/metadataService';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import XLSX from 'xlsx-js-style';
 import {
   PencilSquareIcon,
   TrashIcon,
@@ -38,6 +37,15 @@ const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v15_${uid}`;
 const getCoursesMetaCacheKey = (uid) => `cached_admin_courses_meta_v15_${uid}`;
 const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v15_${uid}`;
 const getTeachersCacheKey = (uid) => `cached_admin_teachers_list_v15_${uid}`;
+
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
 
 // ✅ សម្អាត Cache ចាស់ៗពីជំនាន់មុនដែលធ្លាប់ជាប់មុខវិជ្ជាតែ ១ ចោលតែម្ដង
 let legacyCoursesCacheCleaned = false;
@@ -117,31 +125,49 @@ const stripHeavyImages = (list) => {
   });
 };
 
-const safeWriteStorage = (key, value) => {
-  try {
-    const cleanVal = Array.isArray(value) ? stripHeavyImages(value) : value;
-    const str = JSON.stringify(cleanVal);
+// ✅ សរសេរ Storage នៅពេល Browser ទំនេរ (Stringify តែ ១ ដងគត់សម្រាប់ Keys ច្រើន)
+const safeWriteStorageMulti = (keys, value) => {
+  runWhenIdle(() => {
     try {
-      sessionStorage.setItem(key, str);
+      const cleanVal = Array.isArray(value) ? stripHeavyImages(value) : value;
+      const str = JSON.stringify(cleanVal);
+      keys.forEach((key) => {
+        try {
+          sessionStorage.setItem(key, str);
+        } catch {}
+        try {
+          localStorage.setItem(key, str);
+        } catch {}
+      });
     } catch {}
-    localStorage.setItem(key, str);
-  } catch {}
+  });
 };
 
-// ✅ រក្សាទុកបញ្ជីមុខវិជ្ជាទៅគ្រប់ Key ទាំងអស់ ដើម្បីឱ្យពេលចុចចេញហើយចូលមកវិញ បង្ហាញគ្រប់មុខវិជ្ជាទាំងអស់ភ្លាមៗក្នុង 0ms
+// ✅ រក្សាទុកបញ្ជីមុខវិជ្ជាទៅគ្រប់ Key ទាំងអស់ដោយមិនប៉ះពាល់ FPS
 const persistCoursesToAllCaches = (uid, coursesList, metaObj = null) => {
   const cleanList = stripHeavyImages(coursesList);
   ADMIN_COURSES_MEM_CACHE.uid = uid;
   ADMIN_COURSES_MEM_CACHE.courses = cleanList;
-  safeWriteStorage(getCoursesCacheKey(uid), cleanList);
-  safeWriteStorage(getCoursesCacheKey('default_admin'), cleanList);
-  safeWriteStorage(CACHE_KEY_SHARED_COURSES, cleanList);
+
+  safeWriteStorageMulti(
+    [
+      getCoursesCacheKey(uid),
+      getCoursesCacheKey('default_admin'),
+      CACHE_KEY_SHARED_COURSES,
+    ],
+    cleanList
+  );
 
   if (metaObj) {
     ADMIN_COURSES_MEM_CACHE.meta = metaObj;
-    safeWriteStorage(getCoursesMetaCacheKey(uid), metaObj);
-    safeWriteStorage(getCoursesMetaCacheKey('default_admin'), metaObj);
-    safeWriteStorage(CACHE_KEY_SHARED_META, metaObj);
+    safeWriteStorageMulti(
+      [
+        getCoursesMetaCacheKey(uid),
+        getCoursesMetaCacheKey('default_admin'),
+        CACHE_KEY_SHARED_META,
+      ],
+      metaObj
+    );
   }
 };
 
@@ -351,7 +377,7 @@ const ManageCourses = () => {
   }
   ADMIN_COURSES_MEM_CACHE.uid = currentAdminId;
 
-  // ✅ ១. អានទិន្នន័យពី Cache ថ្មីមកបង្ហាញភ្លាមៗក្នុង 0 វិនាទី (គ្មានការជាប់មុខវិជ្ជា ១ ចាស់ទៀតឡើយ)
+  // ✅ ១. អានទិន្នន័យពី Cache ថ្មីមកបង្ហាញភ្លាមៗក្នុង 0 វិនាទី
   const [courses, setCourses] = useState(() => {
     if (
       Array.isArray(ADMIN_COURSES_MEM_CACHE.courses) &&
@@ -409,7 +435,6 @@ const ManageCourses = () => {
   const [formError, setFormError] = useState('');
   const [importError, setImportError] = useState('');
 
-  // State និង Ref សម្រាប់កាតដេប៉ាតឺម៉ង់ខាងលើ
   const [selectedDepartment, setSelectedDepartment] = useState('all');
   const cardsScrollRef = useRef(null);
   const [isDraggingCards, setIsDraggingCards] = useState(false);
@@ -449,7 +474,6 @@ const ManageCourses = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [courseToDelete, setCourseToDelete] = useState(null);
 
-  // State សម្រាប់នាំចូលមុខវិជ្ជាពី Excel
   const [showImportModal, setShowImportModal] = useState(false);
   const [importPreview, setImportPreview] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
@@ -614,7 +638,7 @@ const ManageCourses = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី ៥៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
+  // 📌 ផ្នែកទី ៥៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (30s Cache TTL)
   // ============================================================================
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -642,8 +666,10 @@ const ManageCourses = () => {
       if (Array.isArray(data)) {
         setDepartments(data);
         ADMIN_COURSES_MEM_CACHE.departments = data;
-        safeWriteStorage(getDeptsCacheKey(currentAdminId), data);
-        safeWriteStorage(CACHE_KEY_SHARED_DEPTS, data);
+        safeWriteStorageMulti(
+          [getDeptsCacheKey(currentAdminId), CACHE_KEY_SHARED_DEPTS],
+          data
+        );
       }
     } catch (error) {
       console.error('Error fetching departments:', error);
@@ -676,8 +702,10 @@ const ManageCourses = () => {
           setTeachers(lightTeachers);
           ADMIN_COURSES_MEM_CACHE.teachers = lightTeachers;
           ADMIN_COURSES_MEM_CACHE.lastTeachersSyncedAt = Date.now();
-          safeWriteStorage(getTeachersCacheKey(currentAdminId), lightTeachers);
-          safeWriteStorage(CACHE_KEY_SHARED_TEACHERS, lightTeachers);
+          safeWriteStorageMulti(
+            [getTeachersCacheKey(currentAdminId), CACHE_KEY_SHARED_TEACHERS],
+            lightTeachers
+          );
         }
       } catch (error) {
         console.error('Error fetching teachers:', error);
@@ -688,9 +716,8 @@ const ManageCourses = () => {
 
   useEffect(() => {
     fetchDepartments();
-    // ពន្យារពេលទាញបញ្ជីគ្រូបន្តិច ដើម្បីឱ្យ API `/admin/courses` មកដល់មុនក្នុង 0ms ដោយគ្មានការដណ្ដើម Connection គ្នា
-    const t = setTimeout(() => fetchTeachers(false), 250);
-    return () => clearTimeout(t);
+    const tTimer = setTimeout(() => fetchTeachers(false), 350);
+    return () => clearTimeout(tTimer);
   }, [fetchDepartments, fetchTeachers]);
 
   const fetchCourses = useCallback(
@@ -706,10 +733,11 @@ const ManageCourses = () => {
           ADMIN_COURSES_MEM_CACHE.courses = cachedList;
         }
         const now = Date.now();
+        // ✅ ដំឡើង Cache TTL ពី 10s មក 30s ដើម្បីកាត់បន្ថយបន្ទុក Hosting
         if (
           Array.isArray(ADMIN_COURSES_MEM_CACHE.courses) &&
           ADMIN_COURSES_MEM_CACHE.courses.length > 0 &&
-          now - ADMIN_COURSES_MEM_CACHE.lastSyncedAt < 10000
+          now - ADMIN_COURSES_MEM_CACHE.lastSyncedAt < 30000
         ) {
           return;
         }
@@ -1036,9 +1064,10 @@ const ManageCourses = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី ៦៖ មុខងារនាំចេញ និងនាំចូលមុខវិជ្ជាតាមរយៈឯកសារ EXCEL (.XLSX)
+  // 📌 ផ្នែកទី ៦៖ មុខងារនាំចេញ និងនាំចូលមុខវិជ្ជាតាមរយៈឯកសារ EXCEL (Dynamic Import)
   // ============================================================================
   const applyExcelStyling = (
+    XLSX,
     worksheet,
     colWidths = [],
     textColumnIndices = []
@@ -1106,10 +1135,12 @@ const ManageCourses = () => {
     worksheet['!rows'] = rows;
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     if (!displayedCourses || displayedCourses.length === 0) {
       return;
     }
+
+    const { default: XLSX } = await import('xlsx-js-style');
 
     const currentDeptName = activeDepartmentObj
       ? getDepartmentDisplayName(activeDepartmentObj)
@@ -1145,7 +1176,7 @@ const ManageCourses = () => {
       { wch: 24 },
       { wch: 36 },
     ];
-    applyExcelStyling(worksheet, colWidths, [1]);
+    applyExcelStyling(XLSX, worksheet, colWidths, [1]);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Courses_List');
@@ -1167,7 +1198,9 @@ const ManageCourses = () => {
     });
   };
 
-  const handleDownloadTemplate = () => {
+  const handleDownloadTemplate = async () => {
+    const { default: XLSX } = await import('xlsx-js-style');
+
     const defaultDeptName = activeDepartmentObj
       ? getDepartmentDisplayName(activeDepartmentObj)
       : '';
@@ -1192,7 +1225,7 @@ const ManageCourses = () => {
       { wch: 24 },
       { wch: 35 },
     ];
-    applyExcelStyling(worksheet, colWidths, [0, 2]);
+    applyExcelStyling(XLSX, worksheet, colWidths, [0, 2]);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
@@ -1282,117 +1315,116 @@ const ManageCourses = () => {
     setImportError('');
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
-      setTimeout(() => {
-        try {
-          const data = evt.target.result;
-          const workbook = XLSX.read(data, { type: 'array' });
-          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-          const rawJson = XLSX.utils.sheet_to_json(worksheet, {
-            defval: '',
-            raw: false,
-          });
+    reader.onload = async (evt) => {
+      try {
+        const { default: XLSX } = await import('xlsx-js-style');
+        const data = evt.target.result;
+        const workbook = XLSX.read(data, { type: 'array' });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rawJson = XLSX.utils.sheet_to_json(worksheet, {
+          defval: '',
+          raw: false,
+        });
 
-          const nonEmptyRows = rawJson
-            .map((row, index) => ({ row, excelRowNumber: index + 2 }))
-            .filter(({ row }) => {
-              const item = {};
-              Object.keys(row).forEach((k) => {
-                item[normalizeCourseHeader(k)] = row[k]?.toString().trim();
-              });
-              return Boolean(item.course_code || item.course_name);
-            });
-
-          if (nonEmptyRows.length === 0) {
-            setImportPreview([]);
-            setImportError(
-              t(
-                'រកមិនឃើញទិន្នន័យមុខវិជ្ជាក្នុងឯកសារនេះទេ!',
-                'No course data found in this file!'
-              )
-            );
-            return;
-          }
-
-          const existingCodes = new Set(
-            courses.map((c) => (c.course_code || '').toLowerCase())
-          );
-          const fileCodes = new Set();
-
-          const parsedRows = nonEmptyRows.map(({ row, excelRowNumber }) => {
+        const nonEmptyRows = rawJson
+          .map((row, index) => ({ row, excelRowNumber: index + 2 }))
+          .filter(({ row }) => {
             const item = {};
             Object.keys(row).forEach((k) => {
               item[normalizeCourseHeader(k)] = row[k]?.toString().trim();
             });
-
-            const cleanCode = (item.course_code || '')
-              .replace(/^'+/, '')
-              .trim();
-            const errors = [];
-
-            if (!cleanCode) {
-              errors.push(t('ខ្វះកូដមុខវិជ្ជា', 'Missing Course Code'));
-            } else if (existingCodes.has(cleanCode.toLowerCase())) {
-              errors.push(
-                t(
-                  'កូដមុខវិជ្ជានេះមានក្នុងប្រព័ន្ធរួចហើយ',
-                  'Course code already exists'
-                )
-              );
-            } else if (fileCodes.has(cleanCode.toLowerCase())) {
-              errors.push(
-                t(
-                  'កូដមុខវិជ្ជាស្ទួនក្នុងឯកសារនេះ',
-                  'Duplicate course code in file'
-                )
-              );
-            } else {
-              fileCodes.add(cleanCode.toLowerCase());
-            }
-
-            if (!item.course_name)
-              errors.push(t('ខ្វះឈ្មោះមុខវិជ្ជា', 'Missing Course Name'));
-
-            const deptId = findDepartmentId(item.department);
-            const teacherId = findTeacherId(item.teacher);
-            if (!deptId)
-              errors.push(t('រកមិនឃើញដេប៉ាតឺម៉ង់', 'Department not found'));
-            if (!item.teacher) {
-              errors.push(t('ខ្វះឈ្មោះគ្រូបង្រៀន', 'Missing Teacher Name'));
-            } else if (!teacherId) {
-              errors.push(
-                t(
-                  'រកមិនឃើញឈ្មោះគ្រូបង្រៀននេះក្នុងប្រព័ន្ធ',
-                  'Teacher not found in system'
-                )
-              );
-            }
-
-            return {
-              rowIndex: excelRowNumber,
-              data: {
-                course_code: cleanCode,
-                course_name: item.course_name || '',
-                credit: Number(item.credit) || 3,
-                department_id: deptId,
-                teacher_id: teacherId,
-                description: item.description || '',
-              },
-              isValid: errors.length === 0,
-              errors,
-            };
+            return Boolean(item.course_code || item.course_name);
           });
 
-          setImportPreview(parsedRows);
-        } catch (err) {
-          console.error('Course Excel parse error:', err);
+        if (nonEmptyRows.length === 0) {
+          setImportPreview([]);
           setImportError(
-            t('មិនអាចអានឯកសារ Excel នេះបានទេ!', 'Failed to read Excel file!')
+            t(
+              'រកមិនឃើញទិន្នន័យមុខវិជ្ជាក្នុងឯកសារនេះទេ!',
+              'No course data found in this file!'
+            )
           );
-        } finally {
-          e.target.value = null;
+          return;
         }
-      }, 0);
+
+        const existingCodes = new Set(
+          courses.map((c) => (c.course_code || '').toLowerCase())
+        );
+        const fileCodes = new Set();
+
+        const parsedRows = nonEmptyRows.map(({ row, excelRowNumber }) => {
+          const item = {};
+          Object.keys(row).forEach((k) => {
+            item[normalizeCourseHeader(k)] = row[k]?.toString().trim();
+          });
+
+          const cleanCode = (item.course_code || '')
+            .replace(/^'+/, '')
+            .trim();
+          const errors = [];
+
+          if (!cleanCode) {
+            errors.push(t('ខ្វះកូដមុខវិជ្ជា', 'Missing Course Code'));
+          } else if (existingCodes.has(cleanCode.toLowerCase())) {
+            errors.push(
+              t(
+                'កូដមុខវិជ្ជានេះមានក្នុងប្រព័ន្ធរួចហើយ',
+                'Course code already exists'
+              )
+            );
+          } else if (fileCodes.has(cleanCode.toLowerCase())) {
+            errors.push(
+              t(
+                'កូដមុខវិជ្ជាស្ទួនក្នុងឯកសារនេះ',
+                'Duplicate course code in file'
+              )
+            );
+          } else {
+            fileCodes.add(cleanCode.toLowerCase());
+          }
+
+          if (!item.course_name)
+            errors.push(t('ខ្វះឈ្មោះមុខវិជ្ជា', 'Missing Course Name'));
+
+          const deptId = findDepartmentId(item.department);
+          const teacherId = findTeacherId(item.teacher);
+          if (!deptId)
+            errors.push(t('រកមិនឃើញដេប៉ាតឺម៉ង់', 'Department not found'));
+          if (!item.teacher) {
+            errors.push(t('ខ្វះឈ្មោះគ្រូបង្រៀន', 'Missing Teacher Name'));
+          } else if (!teacherId) {
+            errors.push(
+              t(
+                'រកមិនឃើញឈ្មោះគ្រូបង្រៀននេះក្នុងប្រព័ន្ធ',
+                'Teacher not found in system'
+              )
+            );
+          }
+
+          return {
+            rowIndex: excelRowNumber,
+            data: {
+              course_code: cleanCode,
+              course_name: item.course_name || '',
+              credit: Number(item.credit) || 3,
+              department_id: deptId,
+              teacher_id: teacherId,
+              description: item.description || '',
+            },
+            isValid: errors.length === 0,
+            errors,
+          };
+        });
+
+        setImportPreview(parsedRows);
+      } catch (err) {
+        console.error('Course Excel parse error:', err);
+        setImportError(
+          t('មិនអាចអានឯកសារ Excel នេះបានទេ!', 'Failed to read Excel file!')
+        );
+      } finally {
+        e.target.value = null;
+      }
     };
     reader.readAsArrayBuffer(file);
   };
@@ -1455,13 +1487,14 @@ const ManageCourses = () => {
       {/* 7.1. ផ្ទាំងក្បាលខាងលើ (Header Banner) និងប៊ូតុងសកម្មភាពគោល           */}
       {/* ------------------------------------------------------------------ */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
           <div className="space-y-2 sm:space-y-3 min-w-0">
             <h1 className="text-xl sm:text-2xl md:text-[26px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-2.5 sm:p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+              <div className="p-2.5 sm:p-3 bg-white/15 md:bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                 <BookOpenIcon className="h-6 w-6 sm:h-7 sm:w-7 lg:h-8 lg:w-8 text-yellow-400" />
               </div>
               <span className="truncate">{t('គ្រប់គ្រងមុខវិជ្ជា', 'Manage Courses')}</span>
@@ -1535,7 +1568,7 @@ const ManageCourses = () => {
           <button
             type="button"
             onClick={() => scrollDepartmentCards('left')}
-            className="crs-scroll-arrow hidden sm:flex absolute -left-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
+            className="crs-scroll-arrow hidden sm:flex absolute -left-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white md:backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
             title={t('អូសទៅឆ្វេង', 'Scroll Left')}
           >
             <ChevronLeftIcon className="h-4 w-4 stroke-[2.5]" />
@@ -1674,7 +1707,7 @@ const ManageCourses = () => {
           <button
             type="button"
             onClick={() => scrollDepartmentCards('right')}
-            className="crs-scroll-arrow hidden sm:flex absolute -right-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
+            className="crs-scroll-arrow hidden sm:flex absolute -right-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white md:backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
             title={t('អូសទៅស្ដាំ', 'Scroll Right')}
           >
             <ChevronRightIcon className="h-4 w-4 stroke-[2.5]" />
@@ -1696,7 +1729,7 @@ const ManageCourses = () => {
             )}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="crs-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
+            className="crs-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-colors shadow-sm"
           />
           {searchTerm && (
             <button
@@ -1736,7 +1769,7 @@ const ManageCourses = () => {
             <button
               type="button"
               onClick={() => setSelectedDepartment('all')}
-              className="crs-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer shrink-0"
+              className="crs-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shrink-0"
             >
               {t('បង្ហាញគ្រប់ដេប៉ាតឺម៉ង់វិញ', 'Show All Departments')}
             </button>
@@ -1846,7 +1879,7 @@ const ManageCourses = () => {
                           <button
                             type="button"
                             onClick={() => openEditModal(course)}
-                            className="crs-action-edit p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 border border-transparent hover:border-indigo-100 rounded-xl transition-all cursor-pointer"
+                            className="crs-action-edit p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 border border-transparent hover:border-indigo-100 rounded-xl transition-colors cursor-pointer"
                             title={t('កែប្រែ', 'Edit')}
                           >
                             <PencilSquareIcon className="h-5 w-5" />
@@ -1854,7 +1887,7 @@ const ManageCourses = () => {
                           <button
                             type="button"
                             onClick={() => handleDeleteClick(course)}
-                            className="crs-action-delete p-2 text-rose-600 hover:text-rose-900 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl transition-all cursor-pointer"
+                            className="crs-action-delete p-2 text-rose-600 hover:text-rose-900 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl transition-colors cursor-pointer"
                             title={t('លុប', 'Delete')}
                           >
                             <TrashIcon className="h-5 w-5" />
@@ -1899,7 +1932,6 @@ const ManageCourses = () => {
                   key={`mob-crs-${course.id}`}
                   className="crs-dept-card bg-white rounded-2xl border border-gray-200/80 p-3.5 shadow-2xs space-y-3"
                 >
-                  {/* Top Row: Course Title + Action Buttons */}
                   <div className="flex items-start justify-between gap-2.5">
                     <div className="flex items-start gap-3 min-w-0 flex-1">
                       <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center text-white shadow-2xs shrink-0 mt-0.5">
@@ -1920,7 +1952,7 @@ const ManageCourses = () => {
                       <button
                         type="button"
                         onClick={() => openEditModal(course)}
-                        className="crs-action-edit p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer"
+                        className="crs-action-edit p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors cursor-pointer"
                         title={t('កែប្រែ', 'Edit')}
                       >
                         <PencilSquareIcon className="h-5 w-5" />
@@ -1928,7 +1960,7 @@ const ManageCourses = () => {
                       <button
                         type="button"
                         onClick={() => handleDeleteClick(course)}
-                        className="crs-action-delete p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                        className="crs-action-delete p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
                         title={t('លុប', 'Delete')}
                       >
                         <TrashIcon className="h-5 w-5" />
@@ -1936,7 +1968,6 @@ const ManageCourses = () => {
                     </div>
                   </div>
 
-                  {/* Middle Row: Code & Credit Badges */}
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="crs-code-pill px-2.5 py-1 text-[11px] font-bold font-mono bg-gray-100 border border-gray-200 text-gray-700 rounded-lg">
                       {course.course_code}
@@ -1946,7 +1977,6 @@ const ManageCourses = () => {
                     </span>
                   </div>
 
-                  {/* Bottom Row: Department & Teacher */}
                   <div className="pt-2.5 border-t border-gray-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
                     <span className="crs-text-secondary inline-flex items-center gap-1.5 font-semibold text-gray-600 truncate max-w-[55%]">
                       <BuildingLibraryIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
@@ -1982,7 +2012,7 @@ const ManageCourses = () => {
                 type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={meta.current_page === 1}
-                className="crs-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="crs-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
                 {t('មុន', 'Previous')}
               </button>
@@ -1991,7 +2021,7 @@ const ManageCourses = () => {
                   key={pageNum}
                   type="button"
                   onClick={() => setPage(pageNum)}
-                  className={`px-3 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                  className={`px-3 py-2 text-xs font-bold rounded-xl transition-colors cursor-pointer ${
                     meta.current_page === pageNum
                       ? 'bg-blue-600 text-white shadow-xs'
                       : 'crs-page-btn bg-white border border-gray-200 hover:bg-gray-50'
@@ -2004,7 +2034,7 @@ const ManageCourses = () => {
                 type="button"
                 onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
                 disabled={meta.current_page === meta.last_page}
-                className="crs-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="crs-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
                 {t('បន្ទាប់', 'Next')}
               </button>
@@ -2017,7 +2047,7 @@ const ManageCourses = () => {
       {/* 7.6. ផ្ទាំង Modal បង្កើត ឬកែប្រែមុខវិជ្ជា (Bottom Sheet on Phone)      */}
       {/* ------------------------------------------------------------------ */}
       {showModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="crs-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
             <div className="crs-modal-bar flex justify-between items-center p-5 sm:p-7 border-b border-gray-100">
               <div>
@@ -2044,7 +2074,7 @@ const ManageCourses = () => {
                   setShowModal(false);
                   setFormError('');
                 }}
-                className="crs-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
+                className="crs-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -2076,8 +2106,8 @@ const ManageCourses = () => {
                     required
                     value={formData.course_name}
                     onChange={handleInputChange}
-                    className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                    placeholder=""
+                    className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
+                    placeholder={t('បញ្ចូលឈ្មោះមុខវិជ្ជា...', 'Enter course name...')}
                   />
                 </div>
 
@@ -2093,8 +2123,8 @@ const ManageCourses = () => {
                       required
                       value={formData.course_code}
                       onChange={handleInputChange}
-                      className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm font-mono"
-                      placeholder=""
+                      className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm font-mono"
+                      placeholder={t('ឧ. CS101', 'e.g. CS101')}
                     />
                   </div>
                   <div>
@@ -2107,7 +2137,7 @@ const ManageCourses = () => {
                       required
                       value={formData.credit}
                       onChange={handleInputChange}
-                      className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all bg-white shadow-sm"
+                      className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors bg-white shadow-sm"
                     >
                       <option value="" disabled>
                         {t('ជ្រើសរើសក្រេឌីត', 'Select Credit')}
@@ -2133,7 +2163,7 @@ const ManageCourses = () => {
                       }
                       value={formData.department_id}
                       onChange={handleInputChange}
-                      className={`crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all bg-white shadow-sm ${
+                      className={`crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors bg-white shadow-sm ${
                         Boolean(editingCourse) || selectedDepartment !== 'all'
                           ? 'opacity-80 cursor-not-allowed bg-gray-100 font-bold text-indigo-900'
                           : ''
@@ -2160,7 +2190,7 @@ const ManageCourses = () => {
                       required
                       value={formData.teacher_id}
                       onChange={handleInputChange}
-                      className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all bg-white shadow-sm"
+                      className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors bg-white shadow-sm"
                     >
                       <option value="" disabled>
                         {t('ជ្រើសរើសគ្រូបង្រៀន', 'Select Teacher')}
@@ -2183,7 +2213,7 @@ const ManageCourses = () => {
                     rows={3}
                     value={formData.description}
                     onChange={handleInputChange}
-                    className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all resize-none shadow-sm"
+                    className="crs-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors resize-none shadow-sm"
                     placeholder={t(
                       'ពិពណ៌នាអំពីមុខវិជ្ជា...',
                       'Describe the course...'
@@ -2200,7 +2230,7 @@ const ManageCourses = () => {
                   setShowModal(false);
                   setFormError('');
                 }}
-                className="crs-cancel-btn px-5 sm:px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                className="crs-cancel-btn px-5 sm:px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
@@ -2208,7 +2238,7 @@ const ManageCourses = () => {
                 type="submit"
                 form="courseForm"
                 disabled={isSubmitting}
-                className="px-5 sm:px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                className="px-5 sm:px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-md flex items-center gap-2 cursor-pointer"
               >
                 {isSubmitting ? (
                   <ArrowPathIcon className="h-5 w-5 animate-spin" />
@@ -2228,7 +2258,7 @@ const ManageCourses = () => {
       {/* 7.7. ផ្ទាំង Modal សម្រាប់នាំចូលមុខវិជ្ជាពី Excel (Bottom Sheet on Phone) */}
       {/* ------------------------------------------------------------------ */}
       {showImportModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="crs-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
             <div className="crs-modal-bar flex justify-between items-center p-5 border-b border-gray-100">
               <div>
@@ -2255,7 +2285,7 @@ const ManageCourses = () => {
                   setSelectedFileName('');
                   setImportError('');
                 }}
-                className="crs-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
+                className="crs-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
               >
                 <XMarkIcon className="h-5 w-5" />
               </button>
@@ -2291,7 +2321,7 @@ const ManageCourses = () => {
                 <button
                   type="button"
                   onClick={handleDownloadTemplate}
-                  className="crs-template-btn inline-flex items-center px-4 py-2 bg-white border border-emerald-300 text-emerald-800 text-xs font-bold rounded-lg hover:bg-emerald-100 transition-all shrink-0 shadow-sm cursor-pointer"
+                  className="crs-template-btn inline-flex items-center px-4 py-2 bg-white border border-emerald-300 text-emerald-800 text-xs font-bold rounded-lg hover:bg-emerald-100 transition-colors shrink-0 shadow-sm cursor-pointer"
                 >
                   <DocumentIcon className="h-4 w-4 mr-1.5 text-emerald-600" />
                   {t('ទាញយកគំរូ', 'Template')}
@@ -2317,7 +2347,7 @@ const ManageCourses = () => {
                     )}
                   />
                   <div
-                    className={`crs-dropzone border-2 border-dashed rounded-xl py-6 px-4 flex flex-col items-center justify-center text-center transition-all duration-300 shadow-sm ${
+                    className={`crs-dropzone border-2 border-dashed rounded-xl py-6 px-4 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-sm ${
                       selectedFileName
                         ? 'border-emerald-500 bg-emerald-50'
                         : 'border-emerald-300 bg-emerald-50/40 group-hover:bg-emerald-50 group-hover:border-emerald-500 group-hover:shadow-md'
@@ -2337,7 +2367,7 @@ const ManageCourses = () => {
                       </>
                     ) : (
                       <>
-                        <div className="crs-badge-emerald p-2.5 bg-emerald-100 rounded-full mb-3 group-hover:scale-110 transition-transform duration-300 shadow-sm border border-emerald-200">
+                        <div className="crs-badge-emerald p-2.5 bg-emerald-100 rounded-full mb-3 group-hover:scale-110 transition-transform duration-200 shadow-sm border border-emerald-200">
                           <DocumentIcon className="h-6 w-6 text-emerald-600" />
                         </div>
                         <h3 className="crs-import-title text-sm font-extrabold text-emerald-900 mb-1.5">
@@ -2397,7 +2427,7 @@ const ManageCourses = () => {
                   setSelectedFileName('');
                   setImportError('');
                 }}
-                className="crs-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                className="crs-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
@@ -2408,7 +2438,7 @@ const ManageCourses = () => {
                   importPreview.filter((r) => r.isValid).length === 0
                 }
                 onClick={handleConfirmImport}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-md flex items-center gap-2 cursor-pointer"
               >
                 {isImporting ? (
                   <ArrowPathIcon className="h-5 w-5 animate-spin" />
@@ -2428,7 +2458,7 @@ const ManageCourses = () => {
       {/* 7.8. ផ្ទាំង Modal បញ្ជាក់ការលុបមុខវិជ្ជា (Bottom Sheet on Phone)     */}
       {/* ------------------------------------------------------------------ */}
       {showDeleteModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="crs-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="crs-delete-title flex items-center text-rose-600 mb-5">
               <div className="crs-badge-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
@@ -2465,7 +2495,7 @@ const ManageCourses = () => {
                   setCourseToDelete(null);
                 }}
                 disabled={isDeleting}
-                className="crs-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
+                className="crs-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
@@ -2473,7 +2503,7 @@ const ManageCourses = () => {
                 type="button"
                 onClick={confirmDelete}
                 disabled={isDeleting}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer disabled:opacity-50"
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-colors shadow-md cursor-pointer disabled:opacity-50"
               >
                 {t('លុបចោល', 'Delete')}
               </button>
@@ -2489,7 +2519,6 @@ const ManageCourses = () => {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        /* ✅ បន្ទាត់ខណ្ឌចែកជួរក្នុងតារាងពេលថ្ងៃ (Light mode subtle row dividers) */
         .crs-table-row + .crs-table-row > td {
           border-top: 1px solid #f1f5f9;
         }
@@ -2552,7 +2581,6 @@ const ManageCourses = () => {
           background-color: #0f172a !important;
         }
 
-        /* ✅ តារាងមុខវិជ្ជា និងបន្ទាត់ខណ្ឌចែកស្រទន់ស្អាតភ្នែកក្នុងទម្រង់យប់ */
         html.dark .crs-table-head {
           background-color: #0f172a !important;
           border-color: rgba(51, 65, 85, 0.7) !important;

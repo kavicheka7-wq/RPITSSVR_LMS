@@ -17,7 +17,21 @@ use Illuminate\Validation\Rule;
 class ProfileController extends Controller
 {
     /**
-     * HELPER: បំប្លែងរូបភាពទៅជា Base64 Data URI និងធានាថាជួរឈរក្នុង Database ជា LONGTEXT
+     * ✅ HELPER: ឆែកជួរឈរ profile_image ក្នុងតារាង teachers/students ដោយប្រើ Cache (24 ម៉ោង)
+     */
+    private function hasProfileImageColumn(string $table): bool
+    {
+        return (bool) Cache::remember("lms_{$table}_has_profile_img_col_v1", 86400, function () use ($table) {
+            try {
+                return Schema::hasColumn($table, 'profile_image');
+            } catch (\Throwable $e) {
+                return false;
+            }
+        });
+    }
+
+    /**
+     * HELPER: បំប្លែងរូបភាពទៅជា Base64 Data URI
      */
     private function convertImageToBase64($file): string
     {
@@ -27,17 +41,22 @@ class ProfileController extends Controller
     }
 
     /**
-     * HELPER: ស្រង់យកទិន្នន័យរូបភាព Base64 Data URI ពី Request (គាំទ្រទាំង Base64 ផ្ទាល់ពី Frontend និង File Upload)
+     * ✅ HELPER: ស្រង់យក និងផ្ទៀងផ្ទាត់សុវត្ថិភាពរូបភាព Base64 Data URI (ការពារ SVG XSS និងទំហំធំពេក)
      */
     private function extractImageDataUri(Request $request): ?string
     {
-        // ១. ពិនិត្យមើលថាតើ Frontend បានផ្ញើមកជាទម្រង់ Base64 ដែលបង្រួមរួចឬទេ (profile_image_base64 ឬ profile_image ជាអក្សរ data:image/...)
         $rawBase64 = $request->input('profile_image_base64') ?: $request->input('profile_image');
-        if (is_string($rawBase64) && str_starts_with(trim($rawBase64), 'data:image/')) {
-            return trim($rawBase64);
+        if (is_string($rawBase64)) {
+            $trimmed = trim($rawBase64);
+            // អនុញ្ញាតតែ jpeg, jpg, png, gif, webp និងទំហំ Base64 មិនលើសពី ~2.8MB (~2MB file)
+            if (
+                strlen($trimmed) <= 2800000 &&
+                preg_match('/^data:image\/(jpeg|jpg|png|gif|webp);base64,[A-Za-z0-9+\/=\r\n]+$/i', $trimmed)
+            ) {
+                return $trimmed;
+            }
         }
 
-        // ២. ពិនិត្យមើលថាតើផ្ញើមកជា File Upload ធម្មតាឬទេ
         if ($request->hasFile('profile_image')) {
             $file = $request->file('profile_image');
             if ($file && $file->isValid()) {
@@ -49,7 +68,7 @@ class ProfileController extends Controller
     }
 
     /**
-     * HELPER: កែប្រែប្រភេទជួរឈរ profile_image ទៅជា LONGTEXT តែ ១ ដងគត់ (ការពារកុំឱ្យ Lock តារាងរាល់ពេលបង្ហោះរូប)
+     * HELPER: កែប្រែប្រភេទជួរឈរ profile_image ទៅជា LONGTEXT តែ ១ ដងគត់
      */
     private function ensureLongTextColumns(): void
     {
@@ -59,10 +78,10 @@ class ProfileController extends Controller
 
         try {
             DB::statement('ALTER TABLE users MODIFY profile_image LONGTEXT NULL');
-            if (Schema::hasColumn('teachers', 'profile_image')) {
+            if ($this->hasProfileImageColumn('teachers')) {
                 DB::statement('ALTER TABLE teachers MODIFY profile_image LONGTEXT NULL');
             }
-            if (Schema::hasColumn('students', 'profile_image')) {
+            if ($this->hasProfileImageColumn('students')) {
                 DB::statement('ALTER TABLE students MODIFY profile_image LONGTEXT NULL');
             }
             Cache::forever('lms_profile_image_longtext_migrated_v1', true);
@@ -92,14 +111,17 @@ class ProfileController extends Controller
         if ($dataUri) {
             $this->ensureLongTextColumns();
 
-            DB::transaction(function () use ($user, $dataUri) {
+            $hasTeacherImg = $this->hasProfileImageColumn('teachers');
+            $hasStudentImg = $this->hasProfileImageColumn('students');
+
+            DB::transaction(function () use ($user, $dataUri, $hasTeacherImg, $hasStudentImg) {
                 $user->profile_image = $dataUri;
                 $user->save();
 
-                if (Schema::hasColumn('teachers', 'profile_image')) {
+                if ($hasTeacherImg) {
                     Teacher::where('user_id', $user->id)->update(['profile_image' => $dataUri]);
                 }
-                if (Schema::hasColumn('students', 'profile_image')) {
+                if ($hasStudentImg) {
                     Student::where('user_id', $user->id)->update(['profile_image' => $dataUri]);
                 }
             });
@@ -114,7 +136,7 @@ class ProfileController extends Controller
             ]);
         }
 
-        return response()->json(['message' => 'រកមិនឃើញរូបភាព ឬទំហំរូបភាពធំពេក'], 400);
+        return response()->json(['message' => 'រកមិនឃើញរូបភាព ប្រភេទរូបភាពមិនត្រឹមត្រូវ ឬទំហំរូបភាពធំពេក'], 400);
     }
 
     /**
@@ -255,14 +277,12 @@ class ProfileController extends Controller
             return response()->json(['message' => 'សូមចូលប្រព័ន្ធជាមុនសិន'], 401);
         }
 
-        // ផ្ទៀងផ្ទាត់ពាក្យសម្ងាត់ចាស់ ថាតើត្រឹមត្រូវឬទេ
         if (!Hash::check($request->current_password, $user->password)) {
             return response()->json([
                 'message' => 'ពាក្យសម្ងាត់បច្ចុប្បន្នមិនត្រឹមត្រូវទេ!',
             ], 400);
         }
 
-        // កែប្រែពាក្យសម្ងាត់ថ្មីចូល Database
         $user->update([
             'password' => Hash::make($request->new_password),
         ]);

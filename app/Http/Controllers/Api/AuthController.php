@@ -211,7 +211,6 @@ class AuthController extends Controller
 
     /**
      * ✅ HELPER METHOD: កំណត់យក Telegram Chat ID ផ្ទាល់ខ្លួនរបស់អ្នកប្រើប្រាស់ម្នាក់ៗ
-     * (ឆែកធានាថា Chat ID នោះមិនមែនជារបស់គណនីផ្សេងដែលជាន់គ្នាឡើយ)
      */
     private function resolveUserTelegramChatId(User $user): ?string
     {
@@ -230,7 +229,6 @@ class AuthController extends Controller
             return null;
         }
 
-        // ✅ សុវត្ថិភាពបន្ថែម៖ ប្រសិនបើក្នុង Cache កត់ត្រាថា Chat ID នេះត្រូវបានគ្រប់គ្រងដោយម្ចាស់គណនីផ្សេង ត្រូវបដិសេធមិនយកមកប្រើឡើយ
         $ownerUserId = Cache::get('lms_tg_chat_owner_' . $chatId);
         if ($ownerUserId !== null && (int) $ownerUserId !== (int) $user->id) {
             Cache::forget('lms_user_telegram_chat_id_' . $user->id);
@@ -242,7 +240,6 @@ class AuthController extends Controller
 
     /**
      * ✅ HELPER METHOD: រក្សាទុក Telegram Chat ID ដោយអនុវត្តច្បាប់ "Telegram ១ គណនី ១" (One-to-One Binding)
-     * ប្រសិនបើ Chat ID នេះធ្លាប់ជាប់ជាមួយគណនីផ្សេង វានឹងផ្ដាច់ចេញពីគណនីផ្សេងនោះភ្លាមៗ!
      */
     private function saveUserTelegramChatId(User $user, string $chatId): void
     {
@@ -251,14 +248,12 @@ class AuthController extends Controller
             return;
         }
 
-        // ១. ប្រសិនបើ Chat ID នេះធ្លាប់ជាប់ជាមួយ User ផ្សេងពីមុនក្នុង Cache ត្រូវលុបចេញពី User ចាស់នោះភ្លាម
         $previousOwnerId = Cache::get('lms_tg_chat_owner_' . $cleanChatId);
         if ($previousOwnerId && (int) $previousOwnerId !== (int) $user->id) {
             Cache::forget('lms_user_telegram_chat_id_' . $previousOwnerId);
             Cache::forget('lms_auth_user_payload_' . $previousOwnerId);
         }
 
-        // ២. ប្រសិនបើក្នុងតារាង users មានគណនីផ្សេងប្រើប្រាស់ telegram_chat_id នេះស្ទួនគ្នា ត្រូវលុបចេញពីគណនីផ្សេងទាំងអស់
         try {
             if ($this->hasTelegramChatIdColumn()) {
                 $duplicateUsers = User::where('telegram_chat_id', $cleanChatId)
@@ -280,7 +275,6 @@ class AuthController extends Controller
             Log::warning('Could not save unique telegram_chat_id to users table: ' . $e->getMessage());
         }
 
-        // ៣. កត់ត្រាម្ចាស់កម្មសិទ្ធិពិតប្រាកដនៃ Chat ID នេះ
         Cache::forever('lms_tg_chat_owner_' . $cleanChatId, (int) $user->id);
         Cache::forever('lms_user_telegram_chat_id_' . $user->id, $cleanChatId);
         Cache::forget('lms_auth_user_payload_' . $user->id);
@@ -322,12 +316,12 @@ class AuthController extends Controller
      */
     private function resolveTelegramBotUsername(): ?string
     {
-        $envUsername = env('TELEGRAM_BOT_USERNAME');
+        $envUsername = config('services.telegram.bot_username') ?: env('TELEGRAM_BOT_USERNAME');
         if (!empty($envUsername)) {
             return ltrim(trim((string) $envUsername), '@');
         }
 
-        $botToken = env('TELEGRAM_BOT_TOKEN');
+        $botToken = config('services.telegram.bot_token') ?: env('TELEGRAM_BOT_TOKEN');
         if (empty($botToken)) {
             return null;
         }
@@ -346,8 +340,7 @@ class AuthController extends Controller
     }
 
     /**
-     * ✅ HELPER METHOD: បង្កើតតំណភ្ជាប់ Telegram Deep-Link ដោយប្រើសោសម្ងាត់គ្រីប (Cryptographic Random Token ២៤ តួអក្សរ)
-     * មិនដាក់លេខ ID គណនីឱ្យគេទាយបាន និងមានសុពលភាពតែ ១០ នាទីប៉ុណ្ណោះ!
+     * ✅ HELPER METHOD: បង្កើតតំណភ្ជាប់ Telegram Deep-Link ដោយប្រើសោសម្ងាត់គ្រីប (២៤ តួអក្សរ, សុពលភាព ១០ នាទី)
      */
     private function generateTelegramLinkUrl(User $user, bool $forceNewToken = false): ?string
     {
@@ -376,7 +369,7 @@ class AuthController extends Controller
      */
     private function sendTelegramOtpAlert(User $user, string $otp, Request $request, string $purpose = '2fa'): bool
     {
-        $botToken = env('TELEGRAM_BOT_TOKEN');
+        $botToken = config('services.telegram.bot_token') ?: env('TELEGRAM_BOT_TOKEN');
         $chatId = $this->resolveUserTelegramChatId($user);
 
         if (!$botToken || !$chatId) {
@@ -431,7 +424,6 @@ class AuthController extends Controller
 
     /**
      * ✅ HELPER METHOD: បង្កើត និងផ្ញើលេខកូដ ៦ ខ្ទង់ដោយរហ័ស និងមានសុវត្ថិភាពខ្ពស់បំផុត
-     * (គាំទ្រការប្រើលេខកូដ OTP រួមគ្នា ប្រសិនបើមានមនុស្ស ២ នាក់ចុច Login គណនីតែមួយក្នុងពេលដំណាលគ្នា)
      */
     private function generateAndSendOtp(User $user, Request $request, string $purpose = '2fa', bool $forceNewOtp = false): array
     {
@@ -441,7 +433,6 @@ class AuthController extends Controller
         $cacheKey = $prefix . $user->id;
         $attemptKey = $attemptPrefix . $user->id;
 
-        // ✅ ប្រសិនបើមានអ្នកទី ២ ចុច Login គណនីដូចគ្នា ក្នុងពេលដែល OTP ចាស់មិនទាន់ផុតកំណត់ ឱ្យប្រើលេខកូដដដែល ដើម្បីកុំឱ្យលេខកូដអ្នកទី ១ ក្លាយជាខុស!
         $existingOtp = !$forceNewOtp ? Cache::get($cacheKey) : null;
         $otp = ($existingOtp && preg_match('/^\d{6}$/', (string) $existingOtp))
             ? (string) $existingOtp
@@ -473,12 +464,14 @@ class AuthController extends Controller
 
         $isTelegramLinked = $this->resolveUserTelegramChatId($user) !== null;
 
-        // ✅ ១. ប្រសិនបើម្ចាស់គណនីបានភ្ជាប់ Telegram ផ្ទាល់ខ្លួនរួចហើយ ទើបផ្ញើទៅ Telegram របស់គាត់
+        // ១. ប្រសិនបើម្ចាស់គណនីបានភ្ជាប់ Telegram ផ្ទាល់ខ្លួនរួចហើយ ទើបផ្ញើទៅ Telegram របស់គាត់
         if ($isTelegramLinked) {
             $telegramSent = $this->sendTelegramOtpAlert($user, $otp, $request, $purpose);
             if ($telegramSent) {
                 $deliveryChannel = 'telegram';
-                Log::info("6-Digit OTP ({$purpose}) for [{$user->email}] ({$rawRole}) via [telegram]: {$otp}");
+                if (config('app.debug')) {
+                    Log::info("6-Digit OTP ({$purpose}) for [{$user->email}] ({$rawRole}) via [telegram]: {$otp}");
+                }
 
                 return [
                     'otp' => null,
@@ -492,7 +485,7 @@ class AuthController extends Controller
             }
         }
 
-        // ✅ ២. បើមិនទាន់បានភ្ជាប់ Telegram ទេ គឺត្រូវតែផ្ញើទៅកាន់ Email ម្ចាស់គណនីជានិច្ច!
+        // ២. បើមិនទាន់បានភ្ជាប់ Telegram ទេ គឺត្រូវតែផ្ញើទៅកាន់ Email ម្ចាស់គណនីជានិច្ច
         $badgeTitle = $purpose === 'reset'
             ? '🔐 សំណើកំណត់ពាក្យសម្ងាត់ឡើងវិញ'
             : '🛡️ ការផ្ទៀងផ្ទាត់សុវត្ថិភាពចូលប្រព័ន្ធ (2FA)';
@@ -505,17 +498,16 @@ class AuthController extends Controller
             ? 'RPITSSVR LMS - កំណត់ពាក្យសម្ងាត់ឡើងវិញ'
             : 'RPITSSVR LMS - លេខកូដផ្ទៀងផ្ទាត់សុវត្ថិភាព';
 
-        $frontendBase = rtrim((string) env('FRONTEND_URL', 'https://lmsrpitssvr.site'), '/');
+        $frontendBase = rtrim((string) (config('app.frontend_url') ?: env('FRONTEND_URL', 'https://lmsrpitssvr.site')), '/');
         if (str_contains($frontendBase, 'localhost') || str_contains($frontendBase, '127.0.0.1')) {
             $frontendBase = 'https://lmsrpitssvr.site';
         }
         $logoUrl = htmlspecialchars(
-            trim((string) env('MAIL_LOGO_URL', $frontendBase . '/PRIT.png')),
+            trim((string) (config('mail.logo_url') ?: env('MAIL_LOGO_URL', $frontendBase . '/PRIT.png'))),
             ENT_QUOTES,
             'UTF-8'
         );
 
-        // ✅ រៀបចំប្រអប់លេខកូដទាំង ៦ ខ្ទង់ឱ្យសមរម្យ ស្អាត និងនៅចំកណ្ដាលជានិច្ចគ្រប់អេក្រង់ (Phone, Tablet, iPad, Laptop & Desktop) មិនឱ្យរីកធំហៀរចេញក្រៅដាច់ខាត!
         $digitsArray = str_split((string) $otp);
         $otpBoxesHtml = '';
         foreach ($digitsArray as $d) {
@@ -538,13 +530,10 @@ class AuthController extends Controller
         </head>
         <body style='margin: 0; padding: 14px 8px; background-color: #f1f5f9; font-family: \"Kantumruy Pro\", \"Battambang\", \"Khmer OS Siemreap\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Arial, sans-serif; color: #1e293b; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;'>
             <div style='max-width: 480px; margin: 0 auto; background-color: #ffffff; border-radius: 22px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);'>
-                
-                <!-- ក្បាលសំបុត្រផ្លូវការរបស់វិទ្យាស្ថាន + រូប Logo -->
                 <div style='background: linear-gradient(135deg, #1e3a8a 0%, #312e81 55%, #4338ca 100%); padding: 22px 16px; text-align: center; border-bottom: 4px solid #f59e0b;'>
                     <div style='margin: 0 auto 10px auto; width: 64px; height: 64px; background-color: #ffffff; border-radius: 16px; padding: 6px; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25); border: 2px solid rgba(253, 224, 71, 0.65); box-sizing: border-box;'>
                         <img src='{$logoUrl}' alt='RPITSSVR' width='48' height='48' style='width: 48px; height: 48px; object-fit: contain; display: block; margin: 0 auto; border: 0; font-size: 10px; color: #1e3a8a; font-weight: bold;' />
                     </div>
-
                     <div style='display: inline-block; padding: 4px 12px; background-color: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; color: #fde047; font-size: 11px; font-weight: bold; margin-bottom: 8px;'>
                         ប្រព័ន្ធគ្រប់គ្រងការសិក្សាតាមអនឡាញ • RPITSSVR LMS
                     </div>
@@ -557,38 +546,31 @@ class AuthController extends Controller
                     </p>
                 </div>
 
-                <!-- ខ្លឹមសារសំបុត្រ -->
                 <div style='padding: 20px 16px;'>
                     <div style='margin-bottom: 14px; padding: 9px 12px; background-color: #eef2ff; border-left: 4px solid #4f46e5; border-radius: 8px; color: #312e81; font-size: 12.5px; font-weight: bold; line-height: 1.5;'>
                         {$badgeTitle}
                     </div>
-
                     <p style='margin: 0 0 8px 0; font-size: 14px; color: #0f172a; line-height: 1.6;'>
                         គោរពជូន <strong>{$fullName}</strong> <span style='color: #4f46e5; font-size: 12px; font-weight: bold;'>({$roleKh})</span>,
                     </p>
-
                     <p style='margin: 0 0 18px 0; font-size: 13px; color: #475569; line-height: 1.65;'>
                         {$purposeDescription}
                     </p>
 
-                    <!-- ប្រអប់លេខកូដ ៦ ខ្ទង់ (Responsive 100% លើ Phone, Tablet, iPad, Laptop & Desktop មិនហៀរចេញក្រៅ) -->
                     <div style='margin: 18px 0; padding: 18px 10px; background: linear-gradient(145deg, #0f172a 0%, #1e1b4b 100%); border: 2px solid #4f46e5; border-radius: 18px; text-align: center; box-shadow: 0 8px 20px rgba(49, 46, 129, 0.18); box-sizing: border-box;'>
                         <div style='font-size: 12px; font-weight: bold; color: #e2e8f0; margin-bottom: 12px; line-height: 1.4;'>
                             🔑 លេខកូដផ្ទៀងផ្ទាត់ ៦ ខ្ទង់របស់អ្នកគឺ៖
                         </div>
-
                         <table role='presentation' cellspacing='0' cellpadding='0' border='0' align='center' style='margin: 0 auto 12px auto; border-collapse: collapse;'>
                             <tr>
                                 {$otpBoxesHtml}
                             </tr>
                         </table>
-
                         <div style='font-size: 11.5px; color: #38bdf8; font-weight: bold; line-height: 1.4;'>
                             ⏳ សុពលភាពប្រើប្រាស់៖ ៥ នាទី
                         </div>
                     </div>
 
-                    <!-- តារាងព័ត៌មានលម្អិតនៃការចូលប្រព័ន្ធ -->
                     <div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; font-size: 12px; color: #334155; line-height: 1.8;'>
                         <div style='font-weight: bold; color: #0f172a; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;'>
                             📋 ព័ត៌មានលម្អិតនៃការស្នើសុំ៖
@@ -599,13 +581,11 @@ class AuthController extends Controller
                         <div style='word-break: break-word;'><strong>💻 ឧបករណ៍៖</strong> {$userAgent}</div>
                     </div>
 
-                    <!-- សារព្រមានសុវត្ថិភាព -->
                     <div style='padding: 11px 13px; background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 12px; color: #be123c; font-size: 11.5px; font-weight: bold; line-height: 1.6;'>
                         ⚠️ សម្គាល់សុវត្ថិភាព៖ ប្រសិនបើអ្នកមិនបានធ្វើការស្នើសុំនេះទេ សូមរក្សាលេខកូដនេះជាសម្ងាត់ និងកុំប្រាប់ទៅអ្នកដទៃដាច់ខាត!
                     </div>
                 </div>
 
-                <!-- ផ្នែកខាងក្រោម (Footer) -->
                 <div style='background-color: #0f172a; padding: 16px 14px; text-align: center; color: #94a3b8; font-size: 11px; line-height: 1.6;'>
                     <div style='color: #fde047; font-weight: bold; margin-bottom: 4px;'>
                         «TVET ជំនាញពិត ជីវិតប្រសើរ! រៀនឱ្យចប់ ឱ្យចេះ ឱ្យមានការងារ»
@@ -614,19 +594,19 @@ class AuthController extends Controller
                         &copy; {$yearNow} វិទ្យាស្ថានពហុបច្ចេកទេសភូមិភាគតេជោសែនស្វាយរៀង (RPITSSVR)
                     </div>
                 </div>
-
             </div>
         </body>
         </html>
         ";
 
-        $smtpUsername = trim((string) env('MAIL_USERNAME', 'kavicheka7@gmail.com'));
-        $smtpPassword = str_replace(' ', '', trim((string) env('MAIL_PASSWORD', 'cdezkfuqvznodtsp')));
-        $smtpFromAddress = trim((string) env('MAIL_FROM_ADDRESS', $smtpUsername));
-        $smtpFromName = trim((string) env('MAIL_FROM_NAME', 'RPITSSVR LMS'));
+        // ✅ អានពី config / .env តែប៉ុណ្ណោះ (លុប Hardcoded Gmail & App Password ចេញដើម្បីសុវត្ថិភាព)
+        $smtpUsername = trim((string) (config('mail.mailers.smtp.username') ?: env('MAIL_USERNAME', '')));
+        $smtpPassword = str_replace(' ', '', trim((string) (config('mail.mailers.smtp.password') ?: env('MAIL_PASSWORD', ''))));
+        $smtpFromAddress = trim((string) (config('mail.from.address') ?: env('MAIL_FROM_ADDRESS', $smtpUsername)));
+        $smtpFromName = trim((string) (config('mail.from.name') ?: env('MAIL_FROM_NAME', 'RPITSSVR LMS')));
 
-        $googleScriptUrl = trim((string) env('GOOGLE_SCRIPT_MAIL_URL', ''));
-        $brevoApiKey = trim((string) env('BREVO_API_KEY', ''));
+        $googleScriptUrl = trim((string) (config('services.mail_script.url') ?: env('GOOGLE_SCRIPT_MAIL_URL', '')));
+        $brevoApiKey = trim((string) (config('services.brevo.key') ?: env('BREVO_API_KEY', '')));
 
         if (!$mailSent && !empty($googleScriptUrl)) {
             try {
@@ -684,14 +664,14 @@ class AuthController extends Controller
             }
         }
 
-        if (!$mailSent && empty($brevoApiKey) && empty($googleScriptUrl)) {
+        if (!$mailSent && empty($brevoApiKey) && empty($googleScriptUrl) && !empty($smtpUsername) && !empty($smtpPassword)) {
             config([
                 'mail.default' => 'smtp',
                 'mail.mailers.smtp' => [
                     'transport' => 'smtp',
-                    'host' => env('MAIL_HOST', 'smtp.gmail.com'),
-                    'port' => (int) env('MAIL_PORT', 587),
-                    'encryption' => env('MAIL_ENCRYPTION', 'tls'),
+                    'host' => config('mail.mailers.smtp.host') ?: env('MAIL_HOST', 'smtp.gmail.com'),
+                    'port' => (int) (config('mail.mailers.smtp.port') ?: env('MAIL_PORT', 587)),
+                    'encryption' => config('mail.mailers.smtp.encryption') ?: env('MAIL_ENCRYPTION', 'tls'),
                     'username' => $smtpUsername,
                     'password' => $smtpPassword,
                     'timeout' => 4,
@@ -726,11 +706,10 @@ class AuthController extends Controller
             $deliveryChannel = $telegramSent ? 'both' : 'email';
         }
 
-        Log::info("6-Digit OTP ({$purpose}) for [{$user->email}] ({$rawRole}) via [{$deliveryChannel}]: {$otp}");
+        if (config('app.debug')) {
+            Log::info("6-Digit OTP ({$purpose}) for [{$user->email}] ({$rawRole}) via [{$deliveryChannel}]: {$otp}");
+        }
 
-        // ✅ សុវត្ថិភាពសំខាន់បំផុត៖
-        // - នៅពេលចុច "ភ្លេចពាក្យសម្ងាត់" ($purpose === 'reset') គឺហាមដាច់ខាតមិនឱ្យបង្កើតតំណភ្ជាប់ Telegram ថ្មីឡើយ!
-        // - អនុញ្ញាតឱ្យភ្ជាប់ Telegram តែនៅពេលដែលអ្នកប្រើបានវាយ Email + Password ត្រឹមត្រូវ ($purpose === '2fa') ប៉ុណ្ណោះ!
         $allowTelegramLinking = ($purpose === '2fa') && !$isTelegramLinked;
 
         return [
@@ -799,7 +778,7 @@ class AuthController extends Controller
             ]);
         }
 
-        $botToken = env('TELEGRAM_BOT_TOKEN');
+        $botToken = config('services.telegram.bot_token') ?: env('TELEGRAM_BOT_TOKEN');
         if (!$botToken) {
             return response()->json(['linked' => false]);
         }
@@ -1039,7 +1018,7 @@ class AuthController extends Controller
         ]);
     }
 
-    // ✅ ជំហានទី ២៖ ផ្ទៀងផ្ទាត់លេខកូដ OTP ៦ ខ្ទង់ (គាំទ្រការប្រើគណនីតែមួយ ២-៣ នាក់ក្នុងពេលតែមួយដោយមិនទាត់គ្នាចេញ)
+    // ✅ ជំហានទី ២៖ ផ្ទៀងផ្ទាត់លេខកូដ OTP ៦ ខ្ទង់
     public function verifyTwoFactor(Request $request)
     {
         $request->validate([
@@ -1117,14 +1096,12 @@ class AuthController extends Controller
             Cache::put('lms_trusted_devices_' . $user->id, $trustedDevices, now()->addDays(30));
         }
 
-        // ✅ រក្សាទុក OTP រយៈពេល ៣០ វិនាទីទៀត ការពារករណីមនុស្ស ២ នាក់វាយលេខកូដដំណាលគ្នា មិនឱ្យអ្នកទី ២ ជាប់ OTP Expired
         Cache::put($cacheKey, $cachedOtp, now()->addSeconds(30));
         Cache::forget($attemptKey);
         Cache::forget($otpLockoutKey);
         Cache::forget('lms_2fa_verified_password_device_' . $user->id);
         Cache::forget('lms_auth_user_payload_' . $user->id);
 
-        // ✅ សំខាន់បំផុត៖ មិនលុប Token របស់ឧបករណ៍ផ្សេងដែលកំពុងប្រើគណនីរួមគ្នាឡើយ (លុបតែ Token ចាស់ៗដែលលើសពី 7 ថ្ងៃ)
         if ($request->boolean('logout_other_devices', false)) {
             $user->tokens()->delete();
         } else {

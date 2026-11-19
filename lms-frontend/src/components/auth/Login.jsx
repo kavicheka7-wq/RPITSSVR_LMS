@@ -142,8 +142,23 @@ const Login = () => {
     });
   }, []);
 
-  const [themePref, setThemePref] = useState('auto');
-  const [isDarkMode, setIsDarkMode] = useState(() => checkIsNightTime());
+  // ✅ អាន Theme Mode ដែលអ្នកប្រើប្រាស់ធ្លាប់រើសពី localStorage មុនគេ (មិនជាន់លើការកំណត់ចាស់)
+  const [themePref, setThemePref] = useState(() => {
+    try {
+      const saved = localStorage.getItem('lms_theme_mode');
+      if (saved === 'dark' || saved === 'light') return saved;
+    } catch {}
+    return 'auto';
+  });
+
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('lms_theme_mode');
+      if (saved === 'dark') return true;
+      if (saved === 'light') return false;
+    } catch {}
+    return checkIsNightTime();
+  });
 
   useEffect(() => {
     try {
@@ -158,14 +173,18 @@ const Login = () => {
       const root = document.documentElement;
       if (darkActive) {
         root.classList.add('dark');
-        try {
-          localStorage.setItem('lms_theme_mode', 'dark');
-        } catch {}
+        if (themePref !== 'auto') {
+          try {
+            localStorage.setItem('lms_theme_mode', 'dark');
+          } catch {}
+        }
       } else {
         root.classList.remove('dark');
-        try {
-          localStorage.setItem('lms_theme_mode', 'light');
-        } catch {}
+        if (themePref !== 'auto') {
+          try {
+            localStorage.setItem('lms_theme_mode', 'light');
+          } catch {}
+        }
       }
     };
 
@@ -829,18 +848,19 @@ const Login = () => {
           : 'bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 text-slate-900'
       }`}
     >
+      {/* ✅ លាក់ blur-[120px] លើទូរស័ព្ទដើម្បីសម្រាល GPU */}
       <div
-        className={`absolute -top-32 -left-32 w-96 h-96 rounded-full blur-[120px] pointer-events-none ${
+        className={`hidden md:block absolute -top-32 -left-32 w-96 h-96 rounded-full blur-[120px] pointer-events-none ${
           isDarkMode ? 'bg-blue-500/15' : 'bg-blue-400/25'
         }`}
       ></div>
       <div
-        className={`absolute top-1/3 right-10 w-80 h-80 rounded-full blur-[120px] pointer-events-none ${
+        className={`hidden md:block absolute top-1/3 right-10 w-80 h-80 rounded-full blur-[120px] pointer-events-none ${
           isDarkMode ? 'bg-purple-500/15' : 'bg-indigo-400/20'
         }`}
       ></div>
       <div
-        className={`absolute -bottom-32 left-1/3 w-96 h-96 rounded-full blur-[120px] pointer-events-none ${
+        className={`hidden md:block absolute -bottom-32 left-1/3 w-96 h-96 rounded-full blur-[120px] pointer-events-none ${
           isDarkMode ? 'bg-indigo-500/15' : 'bg-sky-400/20'
         }`}
       ></div>
@@ -855,7 +875,7 @@ const Login = () => {
       {/* ================================================================== */}
       <div className="relative z-10 w-full max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3 pt-1 shrink-0">
         <div
-          className={`inline-flex items-center gap-2.5 px-4 py-2 rounded-full backdrop-blur-md border shadow-xs transition-colors ${
+          className={`inline-flex items-center gap-2.5 px-4 py-2 rounded-full md:backdrop-blur-md border shadow-xs transition-colors ${
             isDarkMode
               ? 'bg-white/10 border-white/15 text-blue-100'
               : 'bg-white/95 border-blue-200/80 text-blue-950 shadow-sm'
@@ -876,7 +896,7 @@ const Login = () => {
 
         <div className="flex items-center gap-2">
           <div
-            className={`hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-extrabold border backdrop-blur-md shadow-2xs transition-colors ${
+            className={`hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-extrabold border md:backdrop-blur-md shadow-2xs transition-colors ${
               isDarkMode
                 ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30 shadow-emerald-950/20'
                 : 'bg-emerald-50/95 text-emerald-700 border-emerald-200/90'
@@ -894,7 +914,7 @@ const Login = () => {
           <button
             type="button"
             onClick={handleToggleTheme}
-            className={`p-2 rounded-xl border backdrop-blur-md transition-colors cursor-pointer ${
+            className={`p-2 rounded-xl border md:backdrop-blur-md transition-colors cursor-pointer ${
               isDarkMode
                 ? 'bg-white/10 hover:bg-white/20 border-white/15 text-white'
                 : 'bg-white hover:bg-blue-50 border-slate-200 text-slate-700 shadow-2xs'
@@ -915,7 +935,7 @@ const Login = () => {
           <button
             type="button"
             onClick={toggleLanguage}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border backdrop-blur-md text-xs font-extrabold transition-colors cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border md:backdrop-blur-md text-xs font-extrabold transition-colors cursor-pointer ${
               isDarkMode
                 ? 'bg-white/10 hover:bg-white/20 border-white/15 text-white'
                 : 'bg-white hover:bg-blue-50 border-slate-200 text-slate-800 shadow-2xs'
@@ -999,7 +1019,7 @@ const Login = () => {
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <div
-              className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-[13.5px] font-bold border backdrop-blur-sm transition-colors ${
+              className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-[13.5px] font-bold border md:backdrop-blur-sm transition-colors ${
                 isDarkMode
                   ? 'bg-white/[0.07] border-white/15 text-blue-100'
                   : 'bg-white/95 border-blue-200/80 text-slate-800 shadow-sm'
@@ -1016,7 +1036,7 @@ const Login = () => {
             </div>
 
             <div
-              className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-[13.5px] font-bold border backdrop-blur-sm transition-colors ${
+              className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-[13.5px] font-bold border md:backdrop-blur-sm transition-colors ${
                 isDarkMode
                   ? 'bg-white/[0.07] border-white/15 text-blue-100'
                   : 'bg-white/95 border-blue-200/80 text-slate-800 shadow-sm'
@@ -1033,7 +1053,7 @@ const Login = () => {
             </div>
 
             <div
-              className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-[13.5px] font-bold border backdrop-blur-sm transition-colors ${
+              className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-[13.5px] font-bold border md:backdrop-blur-sm transition-colors ${
                 isDarkMode
                   ? 'bg-white/[0.07] border-white/15 text-blue-100'
                   : 'bg-white/95 border-blue-200/80 text-slate-800 shadow-sm'
@@ -1054,14 +1074,14 @@ const Login = () => {
         {/* 📌 ផ្នែកខាងស្ដាំ៖ ប្រអប់ Login, 2FA, និង កំណត់ពាក្យសម្ងាត់ឡើងវិញដោយខ្លួនឯង */}
         <div className="lg:col-span-5 flex justify-center lg:justify-end">
           <div
-            className={`relative w-full max-w-[400px] rounded-[1.75rem] backdrop-blur-2xl border p-5 sm:p-7 overflow-hidden transition-colors duration-200 ${
+            className={`relative w-full max-w-[400px] rounded-[1.75rem] md:backdrop-blur-2xl border p-5 sm:p-7 overflow-hidden transition-colors duration-200 ${
               isDarkMode
-                ? 'bg-white/[0.08] border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.5)]'
-                : 'bg-white/95 border-white shadow-[0_20px_50px_rgba(15,23,42,0.12)]'
+                ? 'bg-slate-900/90 md:bg-white/[0.08] border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.5)]'
+                : 'bg-white md:bg-white/95 border-white shadow-[0_20px_50px_rgba(15,23,42,0.12)]'
             }`}
           >
             <div
-              className={`absolute -top-20 left-1/2 -translate-x-1/2 w-56 h-28 rounded-full blur-2xl pointer-events-none ${
+              className={`hidden md:block absolute -top-20 left-1/2 -translate-x-1/2 w-56 h-28 rounded-full blur-2xl pointer-events-none ${
                 isDarkMode ? 'bg-indigo-400/20' : 'bg-blue-400/15'
               }`}
             ></div>
@@ -1717,7 +1737,7 @@ const Login = () => {
               </div>
             ) : (
               /* ============================================================
-                 ✅ ផ្ទាំងវាយលេខកូដ ៦ ខ្ទង់ (មាន Logo សាលា + ទំហំលេខសមរម្យស្អាតលើ Phone, Tablet, iPad, Laptop & Desktop)
+                 ✅ ផ្ទាំងវាយលេខកូដ ៦ ខ្ទង់
               ============================================================= */
               <div className="relative z-10 space-y-4 sm:space-y-5">
                 <div className="flex flex-col items-center text-center">
@@ -1829,7 +1849,7 @@ const Login = () => {
                   </div>
                 </div>
 
-                {/* ប្រអប់វាយលេខកូដទាំង ៦ ខ្ទង់ (ទំហំសមរម្យស្អាតលើគ្រប់អេក្រង់ Phone / iPad / Desktop) */}
+                {/* ប្រអប់វាយលេខកូដទាំង ៦ ខ្ទង់ */}
                 <div className="py-1">
                   <div
                     className={`grid grid-cols-6 gap-1.5 sm:gap-2 max-w-[290px] sm:max-w-[320px] mx-auto ${

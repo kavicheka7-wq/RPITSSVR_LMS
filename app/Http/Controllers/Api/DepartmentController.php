@@ -16,6 +16,16 @@ use Illuminate\Validation\Rule;
 class DepartmentController extends Controller
 {
     /**
+     * ✅ ចងចាំការឆែកជួរឈរ department_code ក្នុង Cache (24 ម៉ោង) ដើម្បីកុំឱ្យរត់ Query ទៅ information_schema រាល់ពេលហៅ API
+     */
+    private function hasDepartmentCodeColumn(): bool
+    {
+        return (bool) Cache::remember('lms_dept_has_code_col_v1', 86400, function () {
+            return Schema::hasColumn('departments', 'department_code');
+        });
+    }
+
+    /**
      * រៀបចំទម្រង់ទិន្នន័យ Department ឱ្យស៊ីគ្នាគ្រប់ទំព័រទាំងអស់
      */
     private function formatDepartmentPayload(Department $department, bool $hasCodeCol = false): array
@@ -50,7 +60,7 @@ class DepartmentController extends Controller
      */
     public function index(Request $request)
     {
-        $hasCodeCol = Schema::hasColumn('departments', 'department_code');
+        $hasCodeCol = $this->hasDepartmentCodeColumn();
 
         $selectCols = [
             'id',
@@ -92,7 +102,7 @@ class DepartmentController extends Controller
      */
     public function show(Department $department)
     {
-        $hasCodeCol = Schema::hasColumn('departments', 'department_code');
+        $hasCodeCol = $this->hasDepartmentCodeColumn();
         $department->loadCount(['teachers', 'students', 'courses']);
 
         return response()->json([
@@ -106,7 +116,7 @@ class DepartmentController extends Controller
         $resolvedName = trim((string) ($request->input('name') ?? $request->input('department_name') ?? ''));
         $request->merge(['name' => $resolvedName]);
 
-        $hasCodeCol = Schema::hasColumn('departments', 'department_code');
+        $hasCodeCol = $this->hasDepartmentCodeColumn();
 
         $rules = [
             'name' => 'required|string|max:255|unique:departments,department_name',
@@ -148,7 +158,7 @@ class DepartmentController extends Controller
         $resolvedName = trim((string) ($request->input('name') ?? $request->input('department_name') ?? ''));
         $request->merge(['name' => $resolvedName]);
 
-        $hasCodeCol = Schema::hasColumn('departments', 'department_code');
+        $hasCodeCol = $this->hasDepartmentCodeColumn();
 
         $rules = [
             'name' => [

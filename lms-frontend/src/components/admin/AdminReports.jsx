@@ -4,7 +4,6 @@ import api from '../../services/api';
 import { getCachedDepartments, getCachedCourses } from '../../services/metadataService';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import XLSX from 'xlsx-js-style';
 import logo from '../../assets/image/PRIT.png';
 import {
   ChartBarIcon,
@@ -67,6 +66,15 @@ const DEFAULT_OVERVIEW_STATE = {
   enrollment_trend: [],
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -96,71 +104,73 @@ let reportAvatarPersistTimer = null;
 const scheduleReportAvatarMapPersist = (uid) => {
   if (reportAvatarPersistTimer) clearTimeout(reportAvatarPersistTimer);
   reportAvatarPersistTimer = setTimeout(() => {
-    try {
-      const avStr = JSON.stringify(ADMIN_REPORTS_MEM_CACHE.avatarMap);
+    runWhenIdle(() => {
       try {
-        sessionStorage.setItem(AVATAR_REPORTS_STORAGE_KEY, avStr);
+        const avStr = JSON.stringify(ADMIN_REPORTS_MEM_CACHE.avatarMap);
+        try {
+          sessionStorage.setItem(AVATAR_REPORTS_STORAGE_KEY, avStr);
+        } catch {}
+        localStorage.setItem(AVATAR_REPORTS_STORAGE_KEY, avStr);
+
+        if (
+          uid &&
+          ADMIN_REPORTS_MEM_CACHE.enrollments &&
+          Array.isArray(ADMIN_REPORTS_MEM_CACHE.enrollments.data)
+        ) {
+          const compactEnr = ADMIN_REPORTS_MEM_CACHE.enrollments.data.map((r) => {
+            const keyId = r.student_id || r.student_code;
+            const tiny = ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`];
+            return {
+              ...r,
+              profile_image: tiny && tiny.length < 25000 ? tiny : null,
+              student: r.student
+                ? { ...r.student, profile_image: null, user: null }
+                : null,
+              user: null,
+            };
+          });
+          const enrStr = JSON.stringify({
+            ...ADMIN_REPORTS_MEM_CACHE.enrollments,
+            data: compactEnr,
+          });
+          try {
+            sessionStorage.setItem(getEnrollmentsCacheKey(uid), enrStr);
+          } catch {}
+          localStorage.setItem(getEnrollmentsCacheKey(uid), enrStr);
+        }
+
+        if (
+          uid &&
+          ADMIN_REPORTS_MEM_CACHE.academic &&
+          Array.isArray(ADMIN_REPORTS_MEM_CACHE.academic.data)
+        ) {
+          const compactAcad = ADMIN_REPORTS_MEM_CACHE.academic.data.map((r) => {
+            const keyId = r.student_id || r.student_code;
+            const tiny = ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`];
+            return {
+              ...r,
+              profile_image: tiny && tiny.length < 25000 ? tiny : null,
+              student: r.student
+                ? { ...r.student, profile_image: null, user: null }
+                : null,
+              user: null,
+            };
+          });
+          const acadStr = JSON.stringify({
+            ...ADMIN_REPORTS_MEM_CACHE.academic,
+            data: compactAcad,
+          });
+          try {
+            sessionStorage.setItem(getAcademicCacheKey(uid), acadStr);
+          } catch {}
+          localStorage.setItem(getAcademicCacheKey(uid), acadStr);
+        }
       } catch {}
-      localStorage.setItem(AVATAR_REPORTS_STORAGE_KEY, avStr);
-
-      if (
-        uid &&
-        ADMIN_REPORTS_MEM_CACHE.enrollments &&
-        Array.isArray(ADMIN_REPORTS_MEM_CACHE.enrollments.data)
-      ) {
-        const compactEnr = ADMIN_REPORTS_MEM_CACHE.enrollments.data.map((r) => {
-          const keyId = r.student_id || r.student_code;
-          const tiny = ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`];
-          return {
-            ...r,
-            profile_image: tiny && tiny.length < 25000 ? tiny : null,
-            student: r.student
-              ? { ...r.student, profile_image: null, user: null }
-              : null,
-            user: null,
-          };
-        });
-        const enrStr = JSON.stringify({
-          ...ADMIN_REPORTS_MEM_CACHE.enrollments,
-          data: compactEnr,
-        });
-        try {
-          sessionStorage.setItem(getEnrollmentsCacheKey(uid), enrStr);
-        } catch {}
-        localStorage.setItem(getEnrollmentsCacheKey(uid), enrStr);
-      }
-
-      if (
-        uid &&
-        ADMIN_REPORTS_MEM_CACHE.academic &&
-        Array.isArray(ADMIN_REPORTS_MEM_CACHE.academic.data)
-      ) {
-        const compactAcad = ADMIN_REPORTS_MEM_CACHE.academic.data.map((r) => {
-          const keyId = r.student_id || r.student_code;
-          const tiny = ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`];
-          return {
-            ...r,
-            profile_image: tiny && tiny.length < 25000 ? tiny : null,
-            student: r.student
-              ? { ...r.student, profile_image: null, user: null }
-              : null,
-            user: null,
-          };
-        });
-        const acadStr = JSON.stringify({
-          ...ADMIN_REPORTS_MEM_CACHE.academic,
-          data: compactAcad,
-        });
-        try {
-          sessionStorage.setItem(getAcademicCacheKey(uid), acadStr);
-        } catch {}
-        localStorage.setItem(getAcademicCacheKey(uid), acadStr);
-      }
-    } catch {}
-  }, 150);
+    });
+  }, 300);
 };
 
-// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail ស្រាលបំផុត (~3KB)
+// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail ស្រាលបំផុត (~3KB) ដោយរត់នៅពេល Browser ទំនេរ
 const compressBase64Avatar = (dataUrl, callback) => {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
     callback(dataUrl);
@@ -170,81 +180,91 @@ const compressBase64Avatar = (dataUrl, callback) => {
     callback(dataUrl);
     return;
   }
-  try {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 80;
-        let width = img.width || maxSize;
-        let height = img.height || maxSize;
-        if (width > height) {
-          if (width > maxSize) {
-            height = Math.round((height * maxSize) / width);
-            width = maxSize;
+  runWhenIdle(() => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 80;
+          let width = img.width || maxSize;
+          let height = img.height || maxSize;
+          if (width > height) {
+            if (width > maxSize) {
+              height = Math.round((height * maxSize) / width);
+              width = maxSize;
+            }
+          } else {
+            if (height > maxSize) {
+              width = Math.round((width * maxSize) / height);
+              height = maxSize;
+            }
           }
-        } else {
-          if (height > maxSize) {
-            width = Math.round((width * maxSize) / height);
-            height = maxSize;
-          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/webp', 0.76);
+          callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } catch {
+          callback(dataUrl);
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        const compressed = canvas.toDataURL('image/webp', 0.76);
-        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
-      } catch {
-        callback(dataUrl);
-      }
-    };
-    img.onerror = () => callback(dataUrl);
-    img.src = dataUrl;
-  } catch {
-    callback(dataUrl);
-  }
+      };
+      img.onerror = () => callback(dataUrl);
+      img.src = dataUrl;
+    } catch {
+      callback(dataUrl);
+    }
+  }, 400);
 };
 
 const processReportAvatars = (rows, prefix, uid) => {
   if (!Array.isArray(rows)) return;
-  rows.forEach((r) => {
-    const rawImg =
-      r?.profile_image ||
-      r?.student?.profile_image ||
-      r?.student?.user?.profile_image ||
-      r?.user?.profile_image ||
-      r?.teacher_profile_image ||
-      r?.teacher?.profile_image ||
-      r?.course?.teacher?.profile_image;
+  runWhenIdle(() => {
+    rows.forEach((r) => {
+      const rawImg =
+        r?.profile_image ||
+        r?.student?.profile_image ||
+        r?.student?.user?.profile_image ||
+        r?.user?.profile_image ||
+        r?.teacher_profile_image ||
+        r?.teacher?.profile_image ||
+        r?.course?.teacher?.profile_image;
 
-    const keyId = r?.student_id || r?.student_code || r?.course_id;
-    if (keyId && rawImg) {
-      const cacheKey = `${prefix}_${keyId}`;
-      const existing = ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey];
-      if (existing && existing.length < 18000 && rawImg.startsWith('data:'))
-        return;
-      if (!existing) {
-        ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey] = rawImg;
-      }
-      compressBase64Avatar(rawImg, (tiny) => {
-        if (tiny) {
-          ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey] = tiny;
-          scheduleReportAvatarMapPersist(uid);
+      const keyId = r?.student_id || r?.student_code || r?.course_id;
+      if (keyId && rawImg) {
+        const cacheKey = `${prefix}_${keyId}`;
+        const existing = ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey];
+        if (existing && existing.length < 18000 && rawImg.startsWith('data:'))
+          return;
+        if (!existing) {
+          ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey] = rawImg;
         }
-      });
-    }
+        compressBase64Avatar(rawImg, (tiny) => {
+          if (tiny) {
+            ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey] = tiny;
+            scheduleReportAvatarMapPersist(uid);
+          }
+        });
+      }
+    });
   });
 };
 
-const safeWriteReportStorage = (key, payload) => {
-  try {
-    const str = JSON.stringify(payload);
+const safeWriteJsonMulti = (keys, payload) => {
+  runWhenIdle(() => {
     try {
-      sessionStorage.setItem(key, str);
+      const str = JSON.stringify(payload);
+      keys.forEach((key) => {
+        try {
+          sessionStorage.setItem(key, str);
+        } catch {}
+        try {
+          localStorage.setItem(key, str);
+        } catch {}
+      });
     } catch {}
-    localStorage.setItem(key, str);
-  } catch {}
+  });
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រង
@@ -554,7 +574,7 @@ const AdminReports = () => {
   const abortControllerRef = useRef(null);
 
   // ==========================================================================
-  // 📌 ផ្នែកទី ៣៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
+  // 📌 ផ្នែកទី ៣៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (30s Cache TTL)
   // ==========================================================================
   const fetchMetadata = useCallback(async () => {
     try {
@@ -565,28 +585,25 @@ const AdminReports = () => {
       if (Array.isArray(deptList)) {
         setDepartments(deptList);
         ADMIN_REPORTS_MEM_CACHE.departments = deptList;
-        try {
-          const str = JSON.stringify(deptList);
-          sessionStorage.setItem(getDeptsCacheKey(currentAdminId), str);
-          localStorage.setItem(getDeptsCacheKey(currentAdminId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_DEPTS, str);
-        } catch {}
+        safeWriteJsonMulti(
+          [getDeptsCacheKey(currentAdminId), CACHE_KEY_SHARED_DEPTS],
+          deptList
+        );
       }
       if (Array.isArray(courseList)) {
         setCourses(courseList);
         ADMIN_REPORTS_MEM_CACHE.courses = courseList;
-        try {
-          const str = JSON.stringify(courseList);
-          sessionStorage.setItem(getCoursesCacheKey(currentAdminId), str);
-          localStorage.setItem(getCoursesCacheKey(currentAdminId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
-        } catch {}
+        safeWriteJsonMulti(
+          [getCoursesCacheKey(currentAdminId), CACHE_KEY_SHARED_COURSES],
+          courseList
+        );
       }
     } catch (err) {}
   }, [currentAdminId]);
 
   useEffect(() => {
-    fetchMetadata();
+    const tTimer = setTimeout(() => fetchMetadata(), 200);
+    return () => clearTimeout(tTimer);
   }, [fetchMetadata]);
 
   const filteredCourses = useMemo(() => {
@@ -612,6 +629,16 @@ const AdminReports = () => {
   }, [searchQuery]);
 
   const fetchReportData = useCallback(async () => {
+    // ✅ ប្រើ 30s Cache TTL សម្រាប់ Overview ដើម្បីកុំឱ្យបាញ់ API ដដែលៗពេលចុចប្តូរ Tab ទៅមក
+    if (
+      activeTab === 'overview' &&
+      ADMIN_REPORTS_MEM_CACHE.uid === currentAdminId &&
+      ADMIN_REPORTS_MEM_CACHE.overview &&
+      Date.now() - ADMIN_REPORTS_MEM_CACHE.lastSyncedOverviewAt < 30000
+    ) {
+      return;
+    }
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -646,8 +673,10 @@ const AdminReports = () => {
         ADMIN_REPORTS_MEM_CACHE.uid = currentAdminId;
         ADMIN_REPORTS_MEM_CACHE.overview = formatted;
         ADMIN_REPORTS_MEM_CACHE.lastSyncedOverviewAt = Date.now();
-        safeWriteReportStorage(getOverviewCacheKey(currentAdminId), formatted);
-        safeWriteReportStorage(CACHE_KEY_LEGACY_OVERVIEW, formatted);
+        safeWriteJsonMulti(
+          [getOverviewCacheKey(currentAdminId), CACHE_KEY_LEGACY_OVERVIEW],
+          formatted
+        );
       } else if (activeTab === 'enrollments') {
         const params = {
           department_id: selectedDept,
@@ -699,8 +728,8 @@ const AdminReports = () => {
         setAttendanceData(formattedAtt);
         if (isDefaultFilter) {
           ADMIN_REPORTS_MEM_CACHE.attendance = formattedAtt;
-          safeWriteReportStorage(
-            getAttendanceCacheKey(currentAdminId),
+          safeWriteJsonMulti(
+            [getAttendanceCacheKey(currentAdminId)],
             formattedAtt
           );
         }
@@ -994,9 +1023,10 @@ const AdminReports = () => {
   }, [academicSummaryComputed, t]);
 
   // ==========================================================================
-  // 📌 ផ្នែកទី ៥៖ មុខងារនាំចេញរបាយការណ៍ជា EXCEL (.XLSX) និងមុខងារបោះពុម្ព (PRINT)
+  // 📌 ផ្នែកទី ៥៖ មុខងារនាំចេញរបាយការណ៍ជា EXCEL (Dynamic Import) និងបោះពុម្ព (PRINT)
   // ==========================================================================
   const applyExcelStyling = (
+    XLSX,
     worksheet,
     colWidths = [],
     textColumnIndices = []
@@ -1064,7 +1094,7 @@ const AdminReports = () => {
     worksheet['!rows'] = rows;
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     let exportRows = [];
     let colWidths = [];
     let textCols = [];
@@ -1212,8 +1242,9 @@ const AdminReports = () => {
       return;
     }
 
+    const { default: XLSX } = await import('xlsx-js-style');
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
-    applyExcelStyling(worksheet, colWidths, textCols);
+    applyExcelStyling(XLSX, worksheet, colWidths, textCols);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
@@ -1278,7 +1309,7 @@ const AdminReports = () => {
             type="button"
             onClick={() => onPageChange(Math.max(1, current - 1))}
             disabled={current === 1}
-            className="rep-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+            className="rep-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             {t('មុន', 'Previous')}
           </button>
@@ -1287,7 +1318,7 @@ const AdminReports = () => {
               key={pageNum}
               type="button"
               onClick={() => onPageChange(pageNum)}
-              className={`px-3 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+              className={`px-3 py-2 text-xs font-bold rounded-xl transition-colors cursor-pointer ${
                 current === pageNum
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'rep-page-btn bg-white border border-gray-200 hover:bg-gray-50'
@@ -1300,7 +1331,7 @@ const AdminReports = () => {
             type="button"
             onClick={() => onPageChange(Math.min(last, current + 1))}
             disabled={current === last}
-            className="rep-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+            className="rep-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             {t('បន្ទាប់', 'Next')}
           </button>
@@ -1387,13 +1418,14 @@ const AdminReports = () => {
         {/* 6.2. ផ្ទាំងក្បាលខាងលើសម្រាប់អេក្រង់កុំព្យូទ័រ និងប៊ូតុង Excel / Print (no-print) */}
         {/* ------------------------------------------------------------------ */}
         <div className="no-print relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
-          <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+          <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
+          <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
           <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
             <div className="space-y-2 sm:space-y-3 min-w-0">
               <h1 className="text-xl sm:text-2xl md:text-[26px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-                <div className="p-2.5 sm:p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+                <div className="p-2.5 sm:p-3 bg-white/15 md:bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                   <DocumentChartBarIcon className="w-6 h-6 sm:w-7 sm:h-7 lg:w-8 lg:h-8 text-yellow-400" />
                 </div>
                 <span className="truncate">{t('របាយការណ៍ និងការវិភាគ', 'Reports & Analytics')}</span>
@@ -1468,7 +1500,7 @@ const AdminReports = () => {
                   setEnrollmentPage(1);
                   setAcademicPage(1);
                 }}
-                className={`flex items-center justify-center sm:justify-start gap-2 px-3 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm transition-all whitespace-nowrap cursor-pointer ${
+                className={`flex items-center justify-center sm:justify-start gap-2 px-3 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm transition-colors whitespace-nowrap cursor-pointer ${
                   isActive
                     ? 'bg-blue-600 text-white shadow-md'
                     : 'rep-tab-inactive text-gray-500 hover:text-blue-900 hover:bg-blue-50'
@@ -1534,7 +1566,7 @@ const AdminReports = () => {
                     setEnrollmentPage(1);
                     setAcademicPage(1);
                   }}
-                  className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all shadow-sm"
+                  className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                 >
                   <option value="">
                     {t('-- ទាំងអស់ --', '-- All Departments --')}
@@ -1559,7 +1591,7 @@ const AdminReports = () => {
                     setEnrollmentPage(1);
                     setAcademicPage(1);
                   }}
-                  className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all shadow-sm"
+                  className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                 >
                   <option value="">
                     {t('-- ទាំងអស់ --', '-- All Courses --')}
@@ -1583,7 +1615,7 @@ const AdminReports = () => {
                       setSelectedStatus(e.target.value);
                       setEnrollmentPage(1);
                     }}
-                    className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all shadow-sm"
+                    className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                   >
                     <option value="">
                       {t('-- គ្រប់ស្ថានភាព --', '-- All Statuses --')}
@@ -1611,7 +1643,7 @@ const AdminReports = () => {
                       type="date"
                       value={dateFrom}
                       onChange={(e) => setDateFrom(e.target.value)}
-                      className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all shadow-sm"
+                      className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                     />
                   </div>
                   <div>
@@ -1622,7 +1654,7 @@ const AdminReports = () => {
                       type="date"
                       value={dateTo}
                       onChange={(e) => setDateTo(e.target.value)}
-                      className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all shadow-sm"
+                      className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                     />
                   </div>
                 </div>
@@ -1640,7 +1672,7 @@ const AdminReports = () => {
                       placeholder={t('ឈ្មោះ ឬលេខកូដ...', 'Name or Code...')}
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="rep-input w-full pl-9 sm:pl-10 pr-9 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all shadow-sm"
+                      className="rep-input w-full pl-9 sm:pl-10 pr-9 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                     />
                     {searchQuery && (
                       <button
@@ -1665,7 +1697,7 @@ const AdminReports = () => {
           {activeTab === 'overview' && (
             <div className="space-y-5 sm:space-y-6">
               <div className="no-print grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
-                <div className="rep-surface-card bg-white rounded-2xl p-4 sm:p-6 border border-gray-100 shadow-sm relative overflow-hidden group hover:border-blue-200 transition-all">
+                <div className="rep-surface-card bg-white rounded-2xl p-4 sm:p-6 border border-gray-100 shadow-sm relative overflow-hidden group hover:border-blue-200 transition-colors">
                   <div className="absolute top-0 right-0 p-3 sm:p-4 opacity-5 group-hover:scale-110 transition-transform">
                     <UserGroupIcon className="w-16 h-16 sm:w-20 sm:h-20 text-blue-900" />
                   </div>
@@ -1681,7 +1713,7 @@ const AdminReports = () => {
                   </span>
                 </div>
 
-                <div className="rep-surface-card bg-white rounded-2xl p-4 sm:p-6 border border-gray-100 shadow-sm relative overflow-hidden group hover:border-emerald-200 transition-all">
+                <div className="rep-surface-card bg-white rounded-2xl p-4 sm:p-6 border border-gray-100 shadow-sm relative overflow-hidden group hover:border-emerald-200 transition-colors">
                   <div className="absolute top-0 right-0 p-3 sm:p-4 opacity-5 group-hover:scale-110 transition-transform">
                     <AcademicCapIcon className="w-16 h-16 sm:w-20 sm:h-20 text-emerald-600" />
                   </div>
@@ -1697,7 +1729,7 @@ const AdminReports = () => {
                   </span>
                 </div>
 
-                <div className="rep-surface-card bg-white rounded-2xl p-4 sm:p-6 border border-gray-100 shadow-sm relative overflow-hidden group hover:border-amber-200 transition-all">
+                <div className="rep-surface-card bg-white rounded-2xl p-4 sm:p-6 border border-gray-100 shadow-sm relative overflow-hidden group hover:border-amber-200 transition-colors">
                   <div className="absolute top-0 right-0 p-3 sm:p-4 opacity-5 group-hover:scale-110 transition-transform">
                     <BookOpenIcon className="w-16 h-16 sm:w-20 sm:h-20 text-amber-500" />
                   </div>
@@ -1713,7 +1745,7 @@ const AdminReports = () => {
                   </span>
                 </div>
 
-                <div className="rep-surface-card bg-white rounded-2xl p-4 sm:p-6 border border-gray-100 shadow-sm relative overflow-hidden group hover:border-indigo-200 transition-all">
+                <div className="rep-surface-card bg-white rounded-2xl p-4 sm:p-6 border border-gray-100 shadow-sm relative overflow-hidden group hover:border-indigo-200 transition-colors">
                   <div className="absolute top-0 right-0 p-3 sm:p-4 opacity-5 group-hover:scale-110 transition-transform">
                     <CheckCircleIcon className="w-16 h-16 sm:w-20 sm:h-20 text-indigo-600" />
                   </div>
@@ -2333,6 +2365,7 @@ const AdminReports = () => {
                                   src={avatarUrl}
                                   alt={item.student_name || 'Student'}
                                   loading="lazy"
+                                  decoding="async"
                                   className="h-10 w-10 rounded-full object-cover shrink-0 border border-blue-200"
                                   onError={() =>
                                     setFailedAvatars((prev) => ({
@@ -2418,7 +2451,7 @@ const AdminReports = () => {
               <div className="no-print space-y-5 sm:space-y-6">
                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 sm:gap-5">
                   <div className="xl:col-span-4 bg-gradient-to-br from-blue-900 via-indigo-800 to-indigo-950 rounded-2xl sm:rounded-3xl p-5 sm:p-6 text-white shadow-xl border border-indigo-500/30 relative overflow-hidden flex flex-col justify-between min-h-[165px] sm:min-h-[175px]">
-                    <div className="absolute -right-8 -top-8 w-36 h-36 bg-blue-400/10 rounded-full blur-2xl pointer-events-none"></div>
+                    <div className="hidden md:block absolute -right-8 -top-8 w-36 h-36 bg-blue-400/10 rounded-full blur-2xl pointer-events-none"></div>
 
                     <div className="relative z-10 flex items-center justify-between gap-4">
                       <div>
@@ -2487,7 +2520,7 @@ const AdminReports = () => {
                   </div>
 
                   <div className="xl:col-span-8 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                    <div className="rep-surface-card rep-att-card-emerald bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative overflow-hidden group">
+                    <div className="rep-surface-card rep-att-card-emerald bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-gray-100 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between relative overflow-hidden group">
                       <div className="absolute top-0 inset-x-0 h-1 bg-emerald-500"></div>
                       <div className="flex items-center justify-between gap-2">
                         <div className="rep-att-icon-emerald w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-emerald-50 border border-emerald-200/80 flex items-center justify-center text-emerald-600 group-hover:scale-105 transition-transform shrink-0">
@@ -2520,7 +2553,7 @@ const AdminReports = () => {
                       </div>
                     </div>
 
-                    <div className="rep-surface-card rep-att-card-rose bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative overflow-hidden group">
+                    <div className="rep-surface-card rep-att-card-rose bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-gray-100 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between relative overflow-hidden group">
                       <div className="absolute top-0 inset-x-0 h-1 bg-rose-500"></div>
                       <div className="flex items-center justify-between gap-2">
                         <div className="rep-att-icon-rose w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-rose-50 border border-rose-200/80 flex items-center justify-center text-rose-600 group-hover:scale-105 transition-transform shrink-0">
@@ -2553,7 +2586,7 @@ const AdminReports = () => {
                       </div>
                     </div>
 
-                    <div className="rep-surface-card rep-att-card-blue bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative overflow-hidden group">
+                    <div className="rep-surface-card rep-att-card-blue bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-gray-100 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between relative overflow-hidden group">
                       <div className="absolute top-0 inset-x-0 h-1 bg-blue-500"></div>
                       <div className="flex items-center justify-between gap-2">
                         <div className="rep-att-icon-blue w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-blue-50 border border-blue-200/80 flex items-center justify-center text-blue-600 group-hover:scale-105 transition-transform shrink-0">
@@ -2586,7 +2619,7 @@ const AdminReports = () => {
                       </div>
                     </div>
 
-                    <div className="rep-surface-card rep-att-card-amber bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative overflow-hidden group">
+                    <div className="rep-surface-card rep-att-card-amber bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-gray-100 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between relative overflow-hidden group">
                       <div className="absolute top-0 inset-x-0 h-1 bg-amber-500"></div>
                       <div className="flex items-center justify-between gap-2">
                         <div className="rep-att-icon-amber w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-amber-50 border border-amber-200/80 flex items-center justify-center text-amber-600 group-hover:scale-105 transition-transform shrink-0">
@@ -2793,7 +2826,7 @@ const AdminReports = () => {
                               </div>
                               <div className="rep-progress-track w-full bg-gray-100 h-2 rounded-full overflow-hidden shadow-inner border border-gray-200/60">
                                 <div
-                                  className={`h-full rounded-full transition-all duration-1000 ${rateColors.bg}`}
+                                  className={`h-full rounded-full transition-all duration-700 ${rateColors.bg}`}
                                   style={{ width: `${safeRate}%` }}
                                 ></div>
                               </div>
@@ -3361,6 +3394,7 @@ const AdminReports = () => {
                                   src={avatarUrl}
                                   alt={g.student_name || 'Student'}
                                   loading="lazy"
+                                  decoding="async"
                                   className="h-10 w-10 rounded-full object-cover shrink-0 border border-blue-200"
                                   onError={() =>
                                     setFailedAvatars((prev) => ({

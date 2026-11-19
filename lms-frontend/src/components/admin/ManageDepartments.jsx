@@ -32,6 +32,15 @@ const ADMIN_DEPTS_MEM_CACHE = {
   lastSyncedAt: 0,
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -42,18 +51,21 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
+// ✅ រក្សាទុក Cache នៅពេល Browser ទំនេរ (Stringify តែ ១ ដងគត់)
 const safeSaveDeptsStorage = (uid, deptsList) => {
   if (!Array.isArray(deptsList)) return;
-  try {
-    const str = JSON.stringify(deptsList);
+  runWhenIdle(() => {
     try {
-      sessionStorage.setItem(getDeptsCacheKey(uid), str);
-    } catch {}
-    localStorage.setItem(getDeptsCacheKey(uid), str);
-    localStorage.setItem(CACHE_KEY_SHARED_DEPTS, str);
-  } catch (e) {
-    console.warn('Failed to cache departments:', e);
-  }
+      const str = JSON.stringify(deptsList);
+      try {
+        sessionStorage.setItem(getDeptsCacheKey(uid), str);
+      } catch {}
+      localStorage.setItem(getDeptsCacheKey(uid), str);
+      localStorage.setItem(CACHE_KEY_SHARED_DEPTS, str);
+    } catch (e) {
+      console.warn('Failed to cache departments:', e);
+    }
+  });
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រងឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -200,7 +212,7 @@ const ManageDepartments = () => {
   });
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ ទាញយកទិន្នន័យដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
+  // 📌 ផ្នែកទី៣៖ ទាញយកទិន្នន័យដោយមិនរាំងស្ទះ UI (Non-Blocking 30s Cache TTL)
   // ============================================================================
   const fetchDepartments = useCallback(
     async (forceRefresh = false) => {
@@ -219,7 +231,7 @@ const ManageDepartments = () => {
         ADMIN_DEPTS_MEM_CACHE.uid === currentAdminId &&
         Array.isArray(ADMIN_DEPTS_MEM_CACHE.departments) &&
         ADMIN_DEPTS_MEM_CACHE.departments.length > 0 &&
-        now - ADMIN_DEPTS_MEM_CACHE.lastSyncedAt < 25000
+        now - ADMIN_DEPTS_MEM_CACHE.lastSyncedAt < 30000
       ) {
         return;
       }
@@ -269,10 +281,10 @@ const ManageDepartments = () => {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     if (formError) setFormError('');
-    setFormData({
-      ...formData,
+    setFormData((prev) => ({
+      ...prev,
       [name]: value,
-    });
+    }));
   };
 
   // ✅ រក្សាទុកដេប៉ាតឺម៉ង់ថ្មី ឬការកែប្រែ រួចធ្វើបច្ចុប្បន្នភាពលើអេក្រង់ភ្លាមៗ
@@ -450,6 +462,19 @@ const ManageDepartments = () => {
     setShowModal(true);
   };
 
+  // ✅ គណនាស្ថិតិសរុបម្ដងគត់តាមរយៈ useMemo (មិនគណនាឡើងវិញពេលវាយ Search ឬ Modal)
+  const deptTotals = useMemo(() => {
+    return departments.reduce(
+      (acc, dept) => {
+        acc.teachers += dept.teachers_count || 0;
+        acc.students += dept.students_count || 0;
+        acc.courses += dept.courses_count || 0;
+        return acc;
+      },
+      { teachers: 0, students: 0, courses: 0 }
+    );
+  }, [departments]);
+
   const filteredDepartments = useMemo(() => {
     if (!searchTerm.trim()) return departments;
     const q = searchTerm.toLowerCase().trim();
@@ -479,13 +504,14 @@ const ManageDepartments = () => {
       {/* 1. Header Banner (Adaptive Phone / Tablet / iPad / Desktop)        */}
       {/* ------------------------------------------------------------------ */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
           <div className="space-y-2 sm:space-y-3 min-w-0">
             <h1 className="text-xl sm:text-2xl md:text-[26px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-2.5 sm:p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+              <div className="p-2.5 sm:p-3 bg-white/15 md:bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                 <BuildingLibraryIcon className="h-6 w-6 sm:h-7 sm:w-7 lg:h-8 lg:w-8 text-yellow-400" />
               </div>
               <span className="truncate">{t('គ្រប់គ្រងដេប៉ាតឺម៉ង់', 'Manage Departments')}</span>
@@ -525,7 +551,7 @@ const ManageDepartments = () => {
             )}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="dept-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
+            className="dept-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-colors shadow-sm"
           />
           {searchTerm && (
             <button
@@ -549,31 +575,19 @@ const ManageDepartments = () => {
           <div className="dept-badge-purple flex items-center justify-center sm:justify-start gap-1.5 px-3 py-1.5 bg-purple-50 rounded-xl border border-purple-100 shadow-2xs">
             <AcademicCapIcon className="h-4 w-4 text-purple-500 shrink-0" />
             <span className="text-xs font-bold text-purple-700 truncate">
-              {departments.reduce(
-                (acc, dept) => acc + (dept.teachers_count || 0),
-                0
-              )}{' '}
-              {t('គ្រូ', 'Teachers')}
+              {deptTotals.teachers} {t('គ្រូ', 'Teachers')}
             </span>
           </div>
           <div className="dept-badge-emerald flex items-center justify-center sm:justify-start gap-1.5 px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-100 shadow-2xs">
             <UserGroupIcon className="h-4 w-4 text-emerald-500 shrink-0" />
             <span className="text-xs font-bold text-emerald-700 truncate">
-              {departments.reduce(
-                (acc, dept) => acc + (dept.students_count || 0),
-                0
-              )}{' '}
-              {t('សិស្ស', 'Students')}
+              {deptTotals.students} {t('សិស្ស', 'Students')}
             </span>
           </div>
           <div className="dept-badge-amber flex items-center justify-center sm:justify-start gap-1.5 px-3 py-1.5 bg-amber-50 rounded-xl border border-amber-100 shadow-2xs">
             <BookOpenIcon className="h-4 w-4 text-amber-500 shrink-0" />
             <span className="text-xs font-bold text-amber-700 truncate">
-              {departments.reduce(
-                (acc, dept) => acc + (dept.courses_count || 0),
-                0
-              )}{' '}
-              {t('មុខវិជ្ជា', 'Courses')}
+              {deptTotals.courses} {t('មុខវិជ្ជា', 'Courses')}
             </span>
           </div>
         </div>
@@ -618,24 +632,24 @@ const ManageDepartments = () => {
             return (
               <div
                 key={dept.id}
-                className="dept-surface-card bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-gray-100 p-5 sm:p-6 hover:shadow-xl hover:border-indigo-100 transition-all duration-300 hover:-translate-y-1 group flex flex-col h-full relative overflow-hidden"
+                className="dept-surface-card bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-gray-100 p-5 sm:p-6 hover:shadow-xl hover:border-indigo-100 transition-all duration-200 hover:-translate-y-1 group flex flex-col h-full relative overflow-hidden"
               >
-                {/* Decoration */}
+                {/* Decoration (លាក់លើទូរស័ព្ទដើម្បីកុំឱ្យស៊ី GPU ពេលអូស) */}
                 <div
-                  className={`absolute -right-6 -top-6 w-24 h-24 bg-gradient-to-br ${colorGradient} opacity-5 rounded-full blur-2xl group-hover:opacity-20 transition-opacity`}
+                  className={`hidden md:block absolute -right-6 -top-6 w-24 h-24 bg-gradient-to-br ${colorGradient} opacity-5 rounded-full blur-2xl group-hover:opacity-20 transition-opacity pointer-events-none`}
                 ></div>
 
                 <div className="flex items-start justify-between mb-4 sm:mb-5 relative z-10">
                   <div
-                    className={`h-12 w-12 sm:h-14 sm:w-14 rounded-2xl bg-gradient-to-r ${colorGradient} flex items-center justify-center shadow-md transform group-hover:scale-105 transition-transform duration-300 shrink-0`}
+                    className={`h-12 w-12 sm:h-14 sm:w-14 rounded-2xl bg-gradient-to-r ${colorGradient} flex items-center justify-center shadow-md transform group-hover:scale-105 transition-transform duration-200 shrink-0`}
                   >
                     <BuildingLibraryIcon className="h-6 w-6 sm:h-7 sm:w-7 text-white" />
                   </div>
-                  <div className="dept-action-box flex items-center gap-1.5 opacity-100 xl:opacity-0 xl:group-hover:opacity-100 transition-opacity duration-300 bg-gray-50/80 p-1.5 rounded-xl border border-gray-100 backdrop-blur-sm">
+                  <div className="dept-action-box flex items-center gap-1.5 opacity-100 xl:opacity-0 xl:group-hover:opacity-100 transition-opacity duration-200 bg-gray-50/90 md:bg-gray-50/80 p-1.5 rounded-xl border border-gray-100 md:backdrop-blur-sm">
                     <button
                       type="button"
                       onClick={() => openEditModal(dept)}
-                      className="dept-action-edit p-1.5 text-indigo-600 xl:text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all cursor-pointer"
+                      className="dept-action-edit p-1.5 text-indigo-600 xl:text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
                       title={t('កែប្រែ', 'Edit')}
                     >
                       <PencilSquareIcon className="h-4 w-4" />
@@ -643,7 +657,7 @@ const ManageDepartments = () => {
                     <button
                       type="button"
                       onClick={() => handleDeleteClick(dept)}
-                      className="dept-action-delete p-1.5 text-rose-600 xl:text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
+                      className="dept-action-delete p-1.5 text-rose-600 xl:text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                       title={t('លុប', 'Delete')}
                     >
                       <TrashIcon className="h-4 w-4" />
@@ -718,7 +732,7 @@ const ManageDepartments = () => {
       {/* 4. MODAL - 1: Add/Edit Department (Bottom Sheet on Phone)          */}
       {/* ------------------------------------------------------------------ */}
       {showModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4">
           <div className="dept-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-lg flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
             
             {/* Modal Header Fixed */}
@@ -737,7 +751,7 @@ const ManageDepartments = () => {
                   setShowModal(false);
                   setFormError('');
                 }}
-                className="dept-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-xl transition-all bg-white border border-gray-200 cursor-pointer"
+                className="dept-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-xl transition-colors bg-white border border-gray-200 cursor-pointer"
               >
                 <XMarkIcon className="h-5 w-5" />
               </button>
@@ -771,8 +785,11 @@ const ManageDepartments = () => {
                     required
                     value={formData.name}
                     onChange={handleInputChange}
-                    className="dept-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                    placeholder=""
+                    className="dept-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
+                    placeholder={t(
+                      'ឧ. វិទ្យាសាស្ត្រកុំព្យូទ័រ',
+                      'e.g. Computer Science'
+                    )}
                   />
                 </div>
 
@@ -785,7 +802,7 @@ const ManageDepartments = () => {
                     rows={4}
                     value={formData.description}
                     onChange={handleInputChange}
-                    className="dept-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all resize-none shadow-sm"
+                    className="dept-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors resize-none shadow-sm"
                     placeholder={t(
                       'ពិពណ៌នាអំពីមុខងារដេប៉ាតឺម៉ង់...',
                       'Describe department function...'
@@ -802,7 +819,7 @@ const ManageDepartments = () => {
                     setShowModal(false);
                     setFormError('');
                   }}
-                  className="dept-cancel-btn px-5 sm:px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 transition-all cursor-pointer"
+                  className="dept-cancel-btn px-5 sm:px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
                 >
                   {t('បោះបង់', 'Cancel')}
                 </button>
@@ -810,7 +827,7 @@ const ManageDepartments = () => {
                   type="submit"
                   form="deptForm"
                   disabled={isSubmitting}
-                  className="px-5 sm:px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-all shadow-md flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                  className="px-5 sm:px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors shadow-md flex items-center gap-2 disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmitting ? (
                     <ArrowPathIcon className="h-5 w-5 animate-spin" />
@@ -831,7 +848,7 @@ const ManageDepartments = () => {
       {/* 5. MODAL - 2: Delete Confirmation (Bottom Sheet on Phone)          */}
       {/* ------------------------------------------------------------------ */}
       {showDeleteModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4">
           <div className="dept-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="dept-delete-title flex items-center text-rose-600 mb-5">
               <div className="dept-badge-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
@@ -868,7 +885,7 @@ const ManageDepartments = () => {
                   setSelectedDepartment(null);
                 }}
                 disabled={isDeleting}
-                className="dept-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
+                className="dept-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
@@ -876,7 +893,7 @@ const ManageDepartments = () => {
                 type="button"
                 onClick={confirmDelete}
                 disabled={isDeleting}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer disabled:opacity-50"
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-colors shadow-md cursor-pointer disabled:opacity-50"
               >
                 {t('លុបចោល', 'Delete')}
               </button>
@@ -917,7 +934,6 @@ const ManageDepartments = () => {
           border-color: #334155 !important;
         }
 
-        /* ប្រអប់ Input ស្វែងរក និង Form ក្នុងទម្រង់យប់ */
         html.dark .dept-input {
           background-color: #0f172a !important;
           border-color: #334155 !important;
@@ -931,7 +947,6 @@ const ManageDepartments = () => {
           background-color: #0f172a !important;
         }
 
-        /* ផ្លាកសញ្ញាស្ថិតិ (Stats Badges) ក្នុងទម្រង់យប់ */
         html.dark .dept-badge-indigo {
           background-color: rgba(99, 102, 241, 0.15) !important;
           border-color: rgba(99, 102, 241, 0.3) !important;
@@ -974,7 +989,6 @@ const ManageDepartments = () => {
           color: #fb7185 !important;
         }
 
-        /* ប្រអប់ស្ថិតិទាំង ៣ នៅក្នុងកាតដេប៉ាតឺម៉ង់នីមួយៗ */
         html.dark .dept-stats-container {
           background-color: rgba(15, 23, 42, 0.6) !important;
           border-color: #334155 !important;
@@ -993,7 +1007,6 @@ const ManageDepartments = () => {
           border-color: #334155 !important;
         }
 
-        /* ប៊ូតុងកែប្រែ និងលុបលើកាត */
         html.dark .dept-action-box {
           background-color: rgba(15, 23, 42, 0.85) !important;
           border-color: #334155 !important;
@@ -1007,7 +1020,6 @@ const ManageDepartments = () => {
           color: #fb7185 !important;
         }
 
-        /* ផ្ទាំង Modal បន្ថែម/កែប្រែ និងលុប */
         html.dark .dept-modal-card {
           background-color: #1e293b !important;
           border-color: #334155 !important;

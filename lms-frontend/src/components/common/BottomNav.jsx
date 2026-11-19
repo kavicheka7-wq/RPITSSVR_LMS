@@ -32,7 +32,7 @@ const readStorageSafe = (key) => {
   return null;
 };
 
-// ✅ អនុគមន៍ចាប់យកតួនាទីអ្នកប្រើប្រាស់ភ្លាមៗក្នុង 0ms (គាំទ្រទាំង Context, SessionStorage, LocalStorage និង role_id)
+// ✅ អនុគមន៍ចាប់យកតួនាទីអ្នកប្រើប្រាស់ភ្លាមៗក្នុង 0ms និងឆែក Token ការពារកុំឱ្យលោតម៉ឺនុយពេល Logout
 const resolveRoleSync = (contextUser, hasRoleFn) => {
   if (typeof hasRoleFn === 'function') {
     if (hasRoleFn('Admin')) return 'admin';
@@ -42,6 +42,11 @@ const resolveRoleSync = (contextUser, hasRoleFn) => {
 
   let u = contextUser;
   if (!u || (!u.role && !u.role_name && !u.role_id)) {
+    const hasToken = Boolean(
+      readStorageSafe('token') || readStorageSafe('auth_token')
+    );
+    if (!hasToken) return '';
+
     try {
       const raw = readStorageSafe('user') || readStorageSafe('auth_user');
       if (raw) {
@@ -274,9 +279,9 @@ const BottomNav = () => {
 
   return (
     <div className="md:hidden fixed bottom-3 sm:bottom-4 left-0 right-0 z-40 flex justify-center px-3 sm:px-4 pb-[env(safe-area-inset-bottom,0px)] animate-slideUp pointer-events-none select-none">
-      {/* ✅ ប្រអប់របារម៉ឺនុយខាងក្រោម សមាមាត្រគ្រប់ទំហំទូរស័ព្ទ (Small & Large Phones) */}
+      {/* ✅ ដក backdrop-blur-xl ចេញដើម្បីឱ្យអូសរលូន 60fps លើទូរស័ព្ទ */}
       <div
-        className={`backdrop-blur-xl border rounded-2xl p-1.5 flex items-center justify-between gap-1 w-full max-w-[400px] pointer-events-auto transition-all duration-300 ${
+        className={`border rounded-2xl p-1.5 flex items-center justify-between gap-1 w-full max-w-[400px] pointer-events-auto transition-colors duration-200 ${
           isStudent
             ? 'bg-gradient-to-r from-blue-950/95 via-indigo-900/95 to-violet-950/95 border-indigo-400/35 shadow-[0_14px_34px_rgba(30,27,75,0.55)]'
             : 'bg-gradient-to-r from-slate-950/95 via-blue-950/95 to-indigo-950/95 border-blue-700/45 shadow-[0_14px_34px_rgba(15,23,42,0.55)]'
@@ -292,7 +297,7 @@ const BottomNav = () => {
               to={item.path}
               className={({ isActive }) => {
                 const activeState = isActive || isCustomActive;
-                return `relative flex-1 min-w-0 flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all duration-200 ${
+                return `relative flex-1 min-w-0 flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-colors duration-200 ${
                   activeState
                     ? isStudent
                       ? 'bg-white/15 text-white shadow-inner border border-yellow-400/35'
@@ -311,14 +316,14 @@ const BottomNav = () => {
                     )}
 
                     <Icon
-                      className={`transition-all duration-200 mb-0.5 shrink-0 ${
+                      className={`transition-transform duration-200 mb-0.5 shrink-0 ${
                         activeState
                           ? 'h-5 w-5 stroke-[2.4] text-yellow-400 drop-shadow-md scale-105'
                           : 'h-5 w-5 stroke-[1.9] text-blue-200/80'
                       }`}
                     />
                     <span
-                      className={`text-[9.5px] xs:text-[10px] transition-all duration-200 truncate w-full text-center leading-tight px-0.5 ${
+                      className={`text-[9.5px] xs:text-[10px] transition-colors duration-200 truncate w-full text-center leading-tight px-0.5 ${
                         activeState
                           ? 'font-extrabold text-yellow-300'
                           : 'font-semibold text-blue-100/80'

@@ -568,6 +568,9 @@ class AdminStudentController extends Controller
 
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
+        if ($student->user_id) {
+            Cache::forget('lms_auth_user_payload_' . $student->user_id);
+        }
 
         $freshStudent = $student->fresh(['department:id,department_name', 'user:id,status,email', 'role:id,role_name']);
         $this->deduplicateStudentAvatar($freshStudent);
@@ -581,6 +584,7 @@ class AdminStudentController extends Controller
     public function destroy(Student $student)
     {
         $studentName = trim($student->first_name . ' ' . $student->last_name);
+        $userId = $student->user_id;
 
         if (
             $student->profile_image &&
@@ -600,6 +604,9 @@ class AdminStudentController extends Controller
 
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
+        if ($userId) {
+            Cache::forget('lms_auth_user_payload_' . $userId);
+        }
 
         return response()->json([
             'message' => "បានលុបគណនីសិស្ស '{$studentName}' ដោយជោគជ័យ",
@@ -847,16 +854,25 @@ class AdminStudentController extends Controller
                 ->map(fn ($e) => strtolower(trim($e)))
                 ->toArray();
 
-            $existingEmails = User::whereIn('email', $emails)->pluck('email')
+            $existingEmailsMap = User::whereIn('email', $emails)->pluck('email')
                 ->merge(Student::whereIn('email', $emails)->pluck('email'))
                 ->map(fn ($e) => strtolower(trim($e)))
                 ->unique()
-                ->toArray();
+                ->flip()
+                ->all();
+
+            // ✅ ទាញយក student_code ដែលមានស្រាប់ និង max(id) តែ ១ ដងគត់ មុនចូល Loop (O(1) Lookup)
+            $existingCodesMap = Student::whereNotNull('student_code')
+                ->pluck('student_code')
+                ->flip()
+                ->all();
+            $year = date('Y');
+            $nextCodeNum = (int) Student::max('id') + 1;
 
             foreach ($request->students as $index => $item) {
                 $cleanEmail = strtolower(trim($item['email']));
 
-                if (in_array($cleanEmail, $existingEmails, true)) {
+                if (isset($existingEmailsMap[$cleanEmail])) {
                     $skipped[] = [
                         'row' => $index + 1,
                         'email' => $item['email'],
@@ -865,7 +881,7 @@ class AdminStudentController extends Controller
                     continue;
                 }
 
-                $existingEmails[] = $cleanEmail;
+                $existingEmailsMap[$cleanEmail] = true;
 
                 $password = !empty($item['password']) ? $item['password'] : '12345678';
                 $gender = in_array($item['gender'] ?? '', ['Male', 'Female', 'Other']) ? $item['gender'] : 'Male';
@@ -889,14 +905,22 @@ class AdminStudentController extends Controller
                 ]);
 
                 $requestedCode = !empty($item['student_code']) ? trim($item['student_code']) : null;
-                if ($requestedCode && Student::where('student_code', $requestedCode)->exists()) {
+                if ($requestedCode && isset($existingCodesMap[$requestedCode])) {
                     $requestedCode = null;
                 }
+
+                if (!$requestedCode) {
+                    do {
+                        $requestedCode = 'STU-' . $year . '-' . str_pad((string) $nextCodeNum, 4, '0', STR_PAD_LEFT);
+                        $nextCodeNum++;
+                    } while (isset($existingCodesMap[$requestedCode]));
+                }
+                $existingCodesMap[$requestedCode] = true;
 
                 Student::create([
                     'user_id' => $user->id,
                     'role_id' => $studentRoleId,
-                    'student_code' => $requestedCode ?: $this->generateStudentCode(),
+                    'student_code' => $requestedCode,
                     'first_name' => $cleanFirst,
                     'last_name' => $cleanLast,
                     'gender' => $gender,

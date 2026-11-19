@@ -4,7 +4,6 @@ import api from '../../services/api';
 import { getCachedDepartments, getCachedRoles, getCachedCourses } from '../../services/metadataService';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import XLSX from 'xlsx-js-style';
 import {
   PencilSquareIcon,
   TrashIcon,
@@ -48,6 +47,15 @@ const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v8_${uid}`;
 const getAllStudentsCacheKey = (uid) => `cached_admin_students_list_v8_${uid}`;
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -76,45 +84,47 @@ let avatarY1PersistTimer = null;
 const scheduleAvatarY1MapPersist = (uid) => {
   if (avatarY1PersistTimer) clearTimeout(avatarY1PersistTimer);
   avatarY1PersistTimer = setTimeout(() => {
-    try {
-      const avStr = JSON.stringify(ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap);
+    runWhenIdle(() => {
       try {
-        sessionStorage.setItem(AVATAR_STUDENT_Y1_STORAGE_KEY, avStr);
-      } catch {}
-      localStorage.setItem(AVATAR_STUDENT_Y1_STORAGE_KEY, avStr);
-
-      if (uid && Array.isArray(ADMIN_STUDENTS_Y1_MEM_CACHE.students)) {
-        const updatedCompact = ADMIN_STUDENTS_Y1_MEM_CACHE.students.map((item) => {
-          const tiny = ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[item.id];
-          return {
-            ...item,
-            profile_image:
-              tiny && tiny.length < 25000
-                ? tiny
-                : item.profile_image && !item.profile_image.startsWith('data:')
-                ? item.profile_image
-                : null,
-            user: item.user
-              ? {
-                  id: item.user.id,
-                  status: item.user.status,
-                  email: item.user.email,
-                }
-              : item.user,
-          };
-        });
-        const listStr = JSON.stringify(updatedCompact);
+        const avStr = JSON.stringify(ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap);
         try {
-          sessionStorage.setItem(getStudentsY1CacheKey(uid), listStr);
+          sessionStorage.setItem(AVATAR_STUDENT_Y1_STORAGE_KEY, avStr);
         } catch {}
-        localStorage.setItem(getStudentsY1CacheKey(uid), listStr);
-        localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, listStr);
-      }
-    } catch {}
-  }, 120);
+        localStorage.setItem(AVATAR_STUDENT_Y1_STORAGE_KEY, avStr);
+
+        if (uid && Array.isArray(ADMIN_STUDENTS_Y1_MEM_CACHE.students)) {
+          const updatedCompact = ADMIN_STUDENTS_Y1_MEM_CACHE.students.map((item) => {
+            const tiny = ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[item.id];
+            return {
+              ...item,
+              profile_image:
+                tiny && tiny.length < 25000
+                  ? tiny
+                  : item.profile_image && !item.profile_image.startsWith('data:')
+                  ? item.profile_image
+                  : null,
+              user: item.user
+                ? {
+                    id: item.user.id,
+                    status: item.user.status,
+                    email: item.user.email,
+                  }
+                : item.user,
+            };
+          });
+          const listStr = JSON.stringify(updatedCompact);
+          try {
+            sessionStorage.setItem(getStudentsY1CacheKey(uid), listStr);
+          } catch {}
+          localStorage.setItem(getStudentsY1CacheKey(uid), listStr);
+          localStorage.setItem(CACHE_KEY_LEGACY_STUDENTS, listStr);
+        }
+      } catch {}
+    });
+  }, 300);
 };
 
-// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail តូចច្បាស់ (~3KB) ដើម្បីរក្សាទុកក្នុង localStorage សម្រាប់បង្ហាញភ្លាមៗក្នុង 0 វិនាទី
+// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail តូចច្បាស់ (~3KB) ដោយរត់នៅពេល Browser ទំនេរ
 const compressBase64Avatar = (dataUrl, callback) => {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
     callback(dataUrl);
@@ -124,94 +134,123 @@ const compressBase64Avatar = (dataUrl, callback) => {
     callback(dataUrl);
     return;
   }
-  try {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 88;
-        let width = img.width || maxSize;
-        let height = img.height || maxSize;
-        if (width > height) {
-          if (width > maxSize) {
-            height = Math.round((height * maxSize) / width);
-            width = maxSize;
+  runWhenIdle(() => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 88;
+          let width = img.width || maxSize;
+          let height = img.height || maxSize;
+          if (width > height) {
+            if (width > maxSize) {
+              height = Math.round((height * maxSize) / width);
+              width = maxSize;
+            }
+          } else {
+            if (height > maxSize) {
+              width = Math.round((width * maxSize) / height);
+              height = maxSize;
+            }
           }
-        } else {
-          if (height > maxSize) {
-            width = Math.round((width * maxSize) / height);
-            height = maxSize;
-          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/webp', 0.76);
+          callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } catch {
+          callback(dataUrl);
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        const compressed = canvas.toDataURL('image/webp', 0.76);
-        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
-      } catch {
-        callback(dataUrl);
-      }
-    };
-    img.onerror = () => callback(dataUrl);
-    img.src = dataUrl;
-  } catch {
-    callback(dataUrl);
-  }
+      };
+      img.onerror = () => callback(dataUrl);
+      img.src = dataUrl;
+    } catch {
+      callback(dataUrl);
+    }
+  }, 400);
 };
 
-// ✅ រក្សាទុកទាំងទិន្នន័យ និងរូបភាពសិស្សចូលក្នុង localStorage ដើម្បីបើកភ្លាមឃើញរូបភ្លាមក្នុង 0ms
-const safeWriteStudentsStorage = (key, list, uid = null) => {
+// ✅ រក្សាទុកទាំងទិន្នន័យ និងរូបភាពសិស្សនៅពេល Browser ទំនេរ (Stringify តែ ១ ដងគត់)
+const safeWriteStudentsStorageMulti = (keys, list, uid = null, metaObj = null) => {
   if (!Array.isArray(list)) return;
 
-  list.forEach((sItem) => {
-    const rawImg = sItem?.profile_image || sItem?.user?.profile_image;
-    if (sItem?.id && rawImg) {
-      const existingCached = ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[sItem.id];
-      if (existingCached && existingCached.length < 18000 && rawImg.startsWith('data:')) {
-        return;
-      }
-      if (!existingCached) {
-        ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[sItem.id] = rawImg;
-      }
-      compressBase64Avatar(rawImg, (tinyImg) => {
-        if (tinyImg) {
-          ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[sItem.id] = tinyImg;
-          scheduleAvatarY1MapPersist(uid || ADMIN_STUDENTS_Y1_MEM_CACHE.uid);
+  runWhenIdle(() => {
+    list.forEach((sItem) => {
+      const rawImg = sItem?.profile_image || sItem?.user?.profile_image;
+      if (sItem?.id && rawImg) {
+        const existingCached = ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[sItem.id];
+        if (existingCached && existingCached.length < 18000 && rawImg.startsWith('data:')) {
+          return;
         }
-      });
-    }
-  });
-
-  const compactList = list.map((item) => {
-    const cachedTiny = ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[item.id];
-    const slimImage =
-      cachedTiny && cachedTiny.length < 25000
-        ? cachedTiny
-        : item.profile_image && !item.profile_image.startsWith('data:')
-        ? item.profile_image
-        : null;
-
-    return {
-      ...item,
-      profile_image: slimImage,
-      user: item.user
-        ? {
-            id: item.user.id,
-            status: item.user.status,
-            email: item.user.email,
+        if (!existingCached) {
+          ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[sItem.id] = rawImg;
+        }
+        compressBase64Avatar(rawImg, (tinyImg) => {
+          if (tinyImg) {
+            ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[sItem.id] = tinyImg;
+            scheduleAvatarY1MapPersist(uid || ADMIN_STUDENTS_Y1_MEM_CACHE.uid);
           }
-        : item.user,
-    };
-  });
+        });
+      }
+    });
 
-  try {
-    const str = JSON.stringify(compactList);
+    const compactList = list.map((item) => {
+      const cachedTiny = ADMIN_STUDENTS_Y1_MEM_CACHE.avatarMap[item.id];
+      const slimImage =
+        cachedTiny && cachedTiny.length < 25000
+          ? cachedTiny
+          : item.profile_image && !item.profile_image.startsWith('data:')
+          ? item.profile_image
+          : null;
+
+      return {
+        ...item,
+        profile_image: slimImage,
+        user: item.user
+          ? {
+              id: item.user.id,
+              status: item.user.status,
+              email: item.user.email,
+            }
+          : item.user,
+      };
+    });
+
     try {
-      sessionStorage.setItem(key, str);
+      const str = JSON.stringify(compactList);
+      keys.forEach((key) => {
+        try {
+          sessionStorage.setItem(key, str);
+        } catch {}
+        try {
+          localStorage.setItem(key, str);
+        } catch {}
+      });
+      if (metaObj && uid) {
+        const metaStr = JSON.stringify(metaObj);
+        localStorage.setItem(getStudentsY1MetaCacheKey(uid), metaStr);
+        localStorage.setItem(CACHE_KEY_LEGACY_META, metaStr);
+      }
     } catch {}
-    localStorage.setItem(key, str);
-  } catch {}
+  });
+};
+
+const safeWriteJsonMulti = (keys, data) => {
+  runWhenIdle(() => {
+    try {
+      const str = JSON.stringify(data);
+      keys.forEach((key) => {
+        try {
+          sessionStorage.setItem(key, str);
+        } catch {}
+        try {
+          localStorage.setItem(key, str);
+        } catch {}
+      });
+    } catch {}
+  });
 };
 
 // ✅ បញ្ចូលរូបភាពពី Cache មកភ្ជាប់ជាមួយបញ្ជីសិស្សភ្លាមៗក្នុង 0 វិនាទី
@@ -320,7 +359,6 @@ const formatDateOnly = (dateVal) => {
   return str;
 };
 
-// ✅ បង្ហាញឈ្មោះដើមពី Database ដោយមិនបម្លែងភាសាខ្មែរ-អង់គ្លេស
 const getStudentFullName = (person) => {
   if (!person) return '';
   const firstLast = `${person.first_name || ''} ${person.last_name || ''}`.trim();
@@ -337,7 +375,6 @@ const getDepartmentDisplayName = (deptObjOrName) => {
   return rawName || '—';
 };
 
-// ✅ អនុគមន៍កំណត់ប្រភេទវេនសិក្សារបស់សិស្ស (ចន្ទ-សុក្រ vs សៅរ៍-អាទិត្យ)
 const normalizeShiftKey = (shiftVal) => {
   const s = (shiftVal || '').toString().trim().toLowerCase();
   if (
@@ -362,7 +399,6 @@ const normalizeShiftKey = (shiftVal) => {
   return s ? shiftVal : 'Monday-Friday';
 };
 
-// ✅ អនុគមន៍បម្លែងកម្រិតសិក្សាពី Excel (ទោះវាយជាខ្មែរ ឬអង់គ្លេស) ឱ្យត្រូវជាមួយប្រព័ន្ធ
 const normalizeDegreeLevel = (degVal) => {
   if (!degVal) return '';
   const d = degVal.toString().trim().toLowerCase();
@@ -415,7 +451,6 @@ const calculateNextBatchYear = (currentVal) => {
   return nextVal + ' (ទៅឆ្នាំទី២)';
 };
 
-// ✅ អនុគមន៍តម្រៀបសិស្សដែលមានឈ្មោះមុន (លេខរៀងទី 1 ឬអត្តលេខតូច) ឱ្យនៅខាងលើគេដេញចុះមកក្រោម សម្រាប់ទាញយក Excel
 const sortStudentsOldestFirst = (list) => {
   if (!Array.isArray(list)) return [];
   return [...list].sort((a, b) => {
@@ -763,16 +798,10 @@ const ManageStudentsYear1 = () => {
       setEnrolledDeptsMap((prev) => {
         const next = { ...prev, [studentId]: Array.from(deptIds) };
         ADMIN_STUDENTS_Y1_MEM_CACHE.enrolledDeptsMap = next;
-        try {
-          localStorage.setItem(
-            getEnrolledDeptsMapKey(currentAdminId),
-            JSON.stringify(next)
-          );
-          localStorage.setItem(
-            CACHE_KEY_LEGACY_ENROLLED_MAP,
-            JSON.stringify(next)
-          );
-        } catch (e) {}
+        safeWriteJsonMulti(
+          [getEnrolledDeptsMapKey(currentAdminId), CACHE_KEY_LEGACY_ENROLLED_MAP],
+          next
+        );
         return next;
       });
     },
@@ -995,13 +1024,8 @@ const ManageStudentsYear1 = () => {
       setStudents((prev) => {
         const newList = prev.filter((s) => !selectedStudents.includes(s.id));
         ADMIN_STUDENTS_Y1_MEM_CACHE.students = newList;
-        safeWriteStudentsStorage(
-          getStudentsY1CacheKey(currentAdminId),
-          newList,
-          currentAdminId
-        );
-        safeWriteStudentsStorage(
-          CACHE_KEY_LEGACY_STUDENTS,
+        safeWriteStudentsStorageMulti(
+          [getStudentsY1CacheKey(currentAdminId), CACHE_KEY_LEGACY_STUDENTS],
           newList,
           currentAdminId
         );
@@ -1049,7 +1073,7 @@ const ManageStudentsYear1 = () => {
   }, [selectedDepartment, departmentsByIdMap]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី ៦៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (Non-Blocking 0ms Sync)
+  // 📌 ផ្នែកទី ៦៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (30s Cache TTL)
   // ============================================================================
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -1078,12 +1102,10 @@ const ManageStudentsYear1 = () => {
       if (Array.isArray(data)) {
         setDepartments(data);
         ADMIN_STUDENTS_Y1_MEM_CACHE.departments = data;
-        try {
-          const str = JSON.stringify(data);
-          sessionStorage.setItem(getDeptsCacheKey(currentAdminId), str);
-          localStorage.setItem(getDeptsCacheKey(currentAdminId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_DEPTS, str);
-        } catch {}
+        safeWriteJsonMulti(
+          [getDeptsCacheKey(currentAdminId), CACHE_KEY_SHARED_DEPTS],
+          data
+        );
       }
     } catch (error) {}
   }, [currentAdminId]);
@@ -1108,12 +1130,10 @@ const ManageStudentsYear1 = () => {
         if (Array.isArray(coursesData)) {
           setAllCourses(coursesData);
           ADMIN_STUDENTS_Y1_MEM_CACHE.courses = coursesData;
-          try {
-            const str = JSON.stringify(coursesData);
-            sessionStorage.setItem(getCoursesCacheKey(currentAdminId), str);
-            localStorage.setItem(getCoursesCacheKey(currentAdminId), str);
-            localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
-          } catch {}
+          safeWriteJsonMulti(
+            [getCoursesCacheKey(currentAdminId), CACHE_KEY_SHARED_COURSES],
+            coursesData
+          );
         }
       } catch (error) {}
     },
@@ -1137,7 +1157,7 @@ const ManageStudentsYear1 = () => {
           ADMIN_STUDENTS_Y1_MEM_CACHE.uid === currentAdminId &&
           Array.isArray(ADMIN_STUDENTS_Y1_MEM_CACHE.students) &&
           ADMIN_STUDENTS_Y1_MEM_CACHE.students.length > 0 &&
-          now - ADMIN_STUDENTS_Y1_MEM_CACHE.lastSyncedAt < 25000
+          now - ADMIN_STUDENTS_Y1_MEM_CACHE.lastSyncedAt < 30000
         ) {
           return;
         }
@@ -1183,26 +1203,12 @@ const ManageStudentsYear1 = () => {
           ADMIN_STUDENTS_Y1_MEM_CACHE.students = hydratedList;
           ADMIN_STUDENTS_Y1_MEM_CACHE.meta = studentMeta;
           ADMIN_STUDENTS_Y1_MEM_CACHE.lastSyncedAt = Date.now();
-          safeWriteStudentsStorage(
-            getStudentsY1CacheKey(currentAdminId),
+          safeWriteStudentsStorageMulti(
+            [getStudentsY1CacheKey(currentAdminId), CACHE_KEY_LEGACY_STUDENTS],
             hydratedList,
-            currentAdminId
+            currentAdminId,
+            studentMeta
           );
-          safeWriteStudentsStorage(
-            CACHE_KEY_LEGACY_STUDENTS,
-            hydratedList,
-            currentAdminId
-          );
-          try {
-            localStorage.setItem(
-              getStudentsY1MetaCacheKey(currentAdminId),
-              JSON.stringify(studentMeta)
-            );
-            localStorage.setItem(
-              CACHE_KEY_LEGACY_META,
-              JSON.stringify(studentMeta)
-            );
-          } catch (e) {}
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED')
@@ -1220,7 +1226,7 @@ const ManageStudentsYear1 = () => {
       fetchDepartments();
       fetchStudentRole();
       fetchCoursesList(false);
-    }, 150);
+    }, 250);
     return () => {
       clearTimeout(timer);
       if (abortControllerRef.current) {
@@ -1232,7 +1238,7 @@ const ManageStudentsYear1 = () => {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     if (formError) setFormError('');
-    setFormData({ ...formData, [name]: value });
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e) => {
@@ -1295,13 +1301,8 @@ const ManageStudentsYear1 = () => {
             : prev.filter((s) => s.id !== editingStudent.id);
           if (page === 1 && !debouncedSearch) {
             ADMIN_STUDENTS_Y1_MEM_CACHE.students = newList;
-            safeWriteStudentsStorage(
-              getStudentsY1CacheKey(currentAdminId),
-              newList,
-              currentAdminId
-            );
-            safeWriteStudentsStorage(
-              CACHE_KEY_LEGACY_STUDENTS,
+            safeWriteStudentsStorageMulti(
+              [getStudentsY1CacheKey(currentAdminId), CACHE_KEY_LEGACY_STUDENTS],
               newList,
               currentAdminId
             );
@@ -1328,7 +1329,7 @@ const ManageStudentsYear1 = () => {
           if (
             dataWithYear1[key] !== null &&
             dataWithYear1[key] !== undefined &&
-            dataToUpdateFieldValid(dataWithYear1[key])
+            dataWithYear1[key] !== ''
           ) {
             payload[key] = dataWithYear1[key];
           }
@@ -1343,13 +1344,8 @@ const ManageStudentsYear1 = () => {
             const newList = [newStudent, ...prev].slice(0, perPage);
             if (page === 1 && !debouncedSearch) {
               ADMIN_STUDENTS_Y1_MEM_CACHE.students = newList;
-              safeWriteStudentsStorage(
-                getStudentsY1CacheKey(currentAdminId),
-                newList,
-                currentAdminId
-              );
-              safeWriteStudentsStorage(
-                CACHE_KEY_LEGACY_STUDENTS,
+              safeWriteStudentsStorageMulti(
+                [getStudentsY1CacheKey(currentAdminId), CACHE_KEY_LEGACY_STUDENTS],
                 newList,
                 currentAdminId
               );
@@ -1389,10 +1385,6 @@ const ManageStudentsYear1 = () => {
     }
   };
 
-  function dataToUpdateFieldValid(val) {
-    return val !== '';
-  }
-
   const handleDeleteClick = (student) => {
     setStudentToDelete(student);
     setShowDeleteModal(true);
@@ -1412,13 +1404,8 @@ const ManageStudentsYear1 = () => {
       const newList = prev.filter((s) => s.id !== deletedId);
       if (page === 1 && !debouncedSearch) {
         ADMIN_STUDENTS_Y1_MEM_CACHE.students = newList;
-        safeWriteStudentsStorage(
-          getStudentsY1CacheKey(currentAdminId),
-          newList,
-          currentAdminId
-        );
-        safeWriteStudentsStorage(
-          CACHE_KEY_LEGACY_STUDENTS,
+        safeWriteStudentsStorageMulti(
+          [getStudentsY1CacheKey(currentAdminId), CACHE_KEY_LEGACY_STUDENTS],
           newList,
           currentAdminId
         );
@@ -1812,16 +1799,10 @@ const ManageStudentsYear1 = () => {
           );
         });
         ADMIN_STUDENTS_Y1_MEM_CACHE.enrolledDeptsMap = next;
-        try {
-          localStorage.setItem(
-            getEnrolledDeptsMapKey(currentAdminId),
-            JSON.stringify(next)
-          );
-          localStorage.setItem(
-            CACHE_KEY_LEGACY_ENROLLED_MAP,
-            JSON.stringify(next)
-          );
-        } catch (e) {}
+        safeWriteJsonMulti(
+          [getEnrolledDeptsMapKey(currentAdminId), CACHE_KEY_LEGACY_ENROLLED_MAP],
+          next
+        );
         return next;
       });
     }
@@ -1886,9 +1867,10 @@ const ManageStudentsYear1 = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី ៨៖ មុខងារនាំចេញ និងនាំចូលទិន្នន័យសិស្សតាមរយៈឯកសារ EXCEL (.XLSX)
+  // 📌 ផ្នែកទី ៨៖ មុខងារនាំចេញ និងនាំចូលទិន្នន័យសិស្សតាមរយៈឯកសារ EXCEL (Dynamic Import)
   // ============================================================================
   const applyExcelStyling = (
+    XLSX,
     worksheet,
     colWidths = [],
     textColumnIndices = []
@@ -1956,10 +1938,12 @@ const ManageStudentsYear1 = () => {
     worksheet['!rows'] = rows;
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     if (displayedStudents.length === 0) {
       return;
     }
+    const { default: XLSX } = await import('xlsx-js-style');
+
     const currentDeptName = activeDepartmentObj
       ? getDepartmentDisplayName(activeDepartmentObj)
       : '';
@@ -2006,7 +1990,7 @@ const ManageStudentsYear1 = () => {
       { wch: 20 },
       { wch: 18 },
     ];
-    applyExcelStyling(worksheet, colWidths, [1, 6]);
+    applyExcelStyling(XLSX, worksheet, colWidths, [1, 6]);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Year_1_Students');
@@ -2030,7 +2014,9 @@ const ManageStudentsYear1 = () => {
     });
   };
 
-  const handleDownloadTemplate = () => {
+  const handleDownloadTemplate = async () => {
+    const { default: XLSX } = await import('xlsx-js-style');
+
     const defaultDeptName = activeDepartmentObj
       ? getDepartmentDisplayName(activeDepartmentObj)
       : '';
@@ -2072,7 +2058,7 @@ const ManageStudentsYear1 = () => {
       { wch: 15 },
       { wch: 15 },
     ];
-    applyExcelStyling(worksheet, colWidths, [3, 5, 7, 11, 12]);
+    applyExcelStyling(XLSX, worksheet, colWidths, [3, 5, 7, 11, 12]);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
@@ -2140,8 +2126,9 @@ const ManageStudentsYear1 = () => {
     setImportError('');
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
+        const { default: XLSX } = await import('xlsx-js-style');
         const data = evt.target.result;
         const workbook = XLSX.read(data, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -2474,12 +2461,13 @@ const ManageStudentsYear1 = () => {
       {/* 9.1. ផ្ទាំងក្បាលខាងលើ (Header Banner) និងប៊ូតុងសកម្មភាពគោល           */}
       {/* ------------------------------------------------------------------ */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
           <div className="space-y-2 sm:space-y-3 min-w-0">
             <h1 className="text-xl sm:text-2xl md:text-[26px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-2.5 sm:p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+              <div className="p-2.5 sm:p-3 bg-white/15 md:bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                 <UserGroupIcon className="h-6 w-6 sm:h-7 sm:w-7 lg:h-8 lg:w-8 text-yellow-400" />
               </div>
               <span className="truncate">{t('គ្រប់គ្រងសិស្ស - ឆ្នាំទី១', 'Manage Students - Year 1')}</span>
@@ -2545,7 +2533,7 @@ const ManageStudentsYear1 = () => {
           <button
             type="button"
             onClick={() => scrollDepartmentCards('left')}
-            className="std-scroll-arrow hidden sm:flex absolute -left-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
+            className="std-scroll-arrow hidden sm:flex absolute -left-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white md:backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
             title={t('អូសទៅឆ្វេង', 'Scroll Left')}
           >
             <ChevronLeftIcon className="h-4 w-4 stroke-[2.5]" />
@@ -2684,7 +2672,7 @@ const ManageStudentsYear1 = () => {
           <button
             type="button"
             onClick={() => scrollDepartmentCards('right')}
-            className="std-scroll-arrow hidden sm:flex absolute -right-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
+            className="std-scroll-arrow hidden sm:flex absolute -right-3 z-20 h-9 w-9 rounded-full bg-white/90 hover:bg-white md:backdrop-blur-md border border-gray-200/90 text-gray-700 hover:text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.12)] items-center justify-center transition-all duration-200 hover:scale-105 cursor-pointer"
             title={t('អូសទៅស្ដាំ', 'Scroll Right')}
           >
             <ChevronRightIcon className="h-4 w-4 stroke-[2.5]" />
@@ -2706,7 +2694,7 @@ const ManageStudentsYear1 = () => {
             )}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="std-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-sm"
+            className="std-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-colors shadow-sm"
           />
           {searchTerm && (
             <button
@@ -2724,7 +2712,7 @@ const ManageStudentsYear1 = () => {
             <button
               type="button"
               onClick={handleOpenBulkEnrollModal}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-colors shrink-0 cursor-pointer"
             >
               <BookOpenIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
               <span>
@@ -2738,7 +2726,7 @@ const ManageStudentsYear1 = () => {
             <button
               type="button"
               onClick={handleOpenPromoteModal}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md transition-colors shrink-0 cursor-pointer"
             >
               <ChevronDoubleUpIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2 shrink-0" />
               <span>
@@ -2754,7 +2742,7 @@ const ManageStudentsYear1 = () => {
             <button
               type="button"
               onClick={() => setSelectedShift('all')}
-              className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-xs font-extrabold transition-colors cursor-pointer ${
                 selectedShift === 'all'
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'std-shift-btn text-gray-600 hover:text-gray-900 hover:bg-white/60'
@@ -2776,7 +2764,7 @@ const ManageStudentsYear1 = () => {
             <button
               type="button"
               onClick={() => setSelectedShift('Monday-Friday')}
-              className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-xs font-extrabold transition-colors cursor-pointer ${
                 selectedShift === 'Monday-Friday'
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'std-shift-btn text-gray-600 hover:text-gray-900 hover:bg-white/60'
@@ -2798,7 +2786,7 @@ const ManageStudentsYear1 = () => {
             <button
               type="button"
               onClick={() => setSelectedShift('Saturday-Sunday')}
-              className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-lg text-xs font-extrabold transition-colors cursor-pointer ${
                 selectedShift === 'Saturday-Sunday'
                   ? 'bg-amber-500 text-white shadow-xs'
                   : 'std-shift-btn text-gray-600 hover:text-gray-900 hover:bg-white/60'
@@ -2843,7 +2831,7 @@ const ManageStudentsYear1 = () => {
                 <button
                   type="button"
                   onClick={() => setSelectedShift('all')}
-                  className="std-badge-indigo text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+                  className="std-badge-indigo text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                 >
                   {t('បង្ហាញគ្រប់វេនវិញ', 'Show All Shifts')}
                 </button>
@@ -2852,7 +2840,7 @@ const ManageStudentsYear1 = () => {
                 <button
                   type="button"
                   onClick={() => setSelectedDepartment('all')}
-                  className="std-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+                  className="std-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                 >
                   {t('បង្ហាញគ្រប់ដេប៉ាតឺម៉ង់វិញ', 'Show All Departments')}
                 </button>
@@ -2943,7 +2931,7 @@ const ManageStudentsYear1 = () => {
                     </td>
                   </tr>
                 ) : (
-                  displayedStudents.map((student) => {
+                  displayedStudents.map((student, idx) => {
                     const primaryDeptId =
                       student.department_id || student.department?.id;
                     const matchedDeptObj =
@@ -2997,7 +2985,7 @@ const ManageStudentsYear1 = () => {
                                   <img
                                     src={avatarUrl}
                                     alt={getStudentFullName(student)}
-                                    loading="eager"
+                                    loading={idx < 8 ? 'eager' : 'lazy'}
                                     decoding="async"
                                     className="h-full w-full object-cover rounded-full"
                                     onError={() =>
@@ -3120,7 +3108,7 @@ const ManageStudentsYear1 = () => {
                             <button
                               type="button"
                               onClick={() => openEnrollmentModal(student)}
-                              className="std-action-enroll p-2 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-50 border border-transparent hover:border-emerald-100 rounded-xl transition-all cursor-pointer"
+                              className="std-action-enroll p-2 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-50 border border-transparent hover:border-emerald-100 rounded-xl transition-colors cursor-pointer"
                               title={t('ចុះឈ្មោះមុខវិជ្ជា', 'Manage Courses')}
                             >
                               <BookOpenIcon className="h-5 w-5" />
@@ -3128,7 +3116,7 @@ const ManageStudentsYear1 = () => {
                             <button
                               type="button"
                               onClick={() => openEditModal(student)}
-                              className="std-action-edit p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 border border-transparent hover:border-indigo-100 rounded-xl transition-all cursor-pointer"
+                              className="std-action-edit p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 border border-transparent hover:border-indigo-100 rounded-xl transition-colors cursor-pointer"
                               title={t('កែប្រែ', 'Edit')}
                             >
                               <PencilSquareIcon className="h-5 w-5" />
@@ -3136,7 +3124,7 @@ const ManageStudentsYear1 = () => {
                             <button
                               type="button"
                               onClick={() => handleDeleteClick(student)}
-                              className="std-action-delete p-2 text-rose-600 hover:text-rose-900 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl transition-all cursor-pointer"
+                              className="std-action-delete p-2 text-rose-600 hover:text-rose-900 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded-xl transition-colors cursor-pointer"
                               title={t('លុប', 'Delete')}
                             >
                               <TrashIcon className="h-5 w-5" />
@@ -3239,13 +3227,12 @@ const ManageStudentsYear1 = () => {
                 return (
                   <div
                     key={`mob-std-${student.id}`}
-                    className={`std-dept-card bg-white rounded-2xl border p-3.5 shadow-2xs space-y-3 transition-all ${
+                    className={`std-dept-card bg-white rounded-2xl border p-3.5 shadow-2xs space-y-3 transition-colors ${
                       isSelectedCard
                         ? 'border-blue-500 ring-2 ring-blue-500/15'
                         : 'border-gray-200/80'
                     }`}
                   >
-                    {/* Top Row: Avatar/Checkbox + Name + Actions */}
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div
@@ -3262,6 +3249,7 @@ const ManageStudentsYear1 = () => {
                                 src={avatarUrl}
                                 alt={getStudentFullName(student)}
                                 loading="lazy"
+                                decoding="async"
                                 className="h-full w-full object-cover rounded-full"
                                 onError={() =>
                                   setFailedAvatars((prev) => ({
@@ -3308,7 +3296,7 @@ const ManageStudentsYear1 = () => {
                         <button
                           type="button"
                           onClick={() => openEnrollmentModal(student)}
-                          className="std-action-enroll p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer"
+                          className="std-action-enroll p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer"
                           title={t('ចុះឈ្មោះមុខវិជ្ជា', 'Manage Courses')}
                         >
                           <BookOpenIcon className="h-5 w-5" />
@@ -3316,7 +3304,7 @@ const ManageStudentsYear1 = () => {
                         <button
                           type="button"
                           onClick={() => openEditModal(student)}
-                          className="std-action-edit p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer"
+                          className="std-action-edit p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors cursor-pointer"
                           title={t('កែប្រែ', 'Edit')}
                         >
                           <PencilSquareIcon className="h-5 w-5" />
@@ -3324,7 +3312,7 @@ const ManageStudentsYear1 = () => {
                         <button
                           type="button"
                           onClick={() => handleDeleteClick(student)}
-                          className="std-action-delete p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                          className="std-action-delete p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
                           title={t('លុប', 'Delete')}
                         >
                           <TrashIcon className="h-5 w-5" />
@@ -3332,7 +3320,6 @@ const ManageStudentsYear1 = () => {
                       </div>
                     </div>
 
-                    {/* Middle Badges: Gender, Code, Degree, Shift, Status */}
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
@@ -3377,7 +3364,6 @@ const ManageStudentsYear1 = () => {
                       </span>
                     </div>
 
-                    {/* Bottom Row: Department & Phone */}
                     <div className="pt-2.5 border-t border-gray-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
                       <div className="flex items-center gap-1.5 min-w-0 max-w-[65%]">
                         <BuildingLibraryIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
@@ -3418,7 +3404,7 @@ const ManageStudentsYear1 = () => {
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={meta.current_page === 1}
-              className="std-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {t('មុន', 'Previous')}
             </button>
@@ -3427,7 +3413,7 @@ const ManageStudentsYear1 = () => {
                 key={pageNum}
                 type="button"
                 onClick={() => setPage(pageNum)}
-                className={`px-3 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                className={`px-3 py-2 text-xs font-bold rounded-xl transition-colors cursor-pointer ${
                   meta.current_page === pageNum
                     ? 'bg-blue-600 text-white shadow-xs'
                     : 'std-page-btn bg-white border border-gray-200 hover:bg-gray-50'
@@ -3440,7 +3426,7 @@ const ManageStudentsYear1 = () => {
               type="button"
               onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
               disabled={meta.current_page === meta.last_page}
-              className="std-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-page-btn px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {t('បន្ទាប់', 'Next')}
             </button>
@@ -3452,7 +3438,7 @@ const ManageStudentsYear1 = () => {
       {/* 9.6. ផ្ទាំង Modal បន្ថែម ឬកែប្រែព័ត៌មានសិស្ស (Bottom Sheet on Phone) */}
       {/* ------------------------------------------------------------------ */}
       {showModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
             <div className="std-modal-bar flex justify-between items-center p-5 sm:p-7 border-b border-gray-100">
               <div>
@@ -3479,7 +3465,7 @@ const ManageStudentsYear1 = () => {
                   setShowModal(false);
                   setFormError('');
                 }}
-                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
+                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -3512,8 +3498,8 @@ const ManageStudentsYear1 = () => {
                       required
                       value={formData.first_name}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder=""
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
+                      placeholder={t('បញ្ចូលនាមខ្លួន...', 'Enter first name...')}
                     />
                   </div>
 
@@ -3528,8 +3514,8 @@ const ManageStudentsYear1 = () => {
                       required
                       value={formData.last_name}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder=""
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
+                      placeholder={t('បញ្ចូលនាមត្រកូល...', 'Enter last name...')}
                     />
                   </div>
 
@@ -3566,9 +3552,9 @@ const ManageStudentsYear1 = () => {
                       placeholder={
                         editingStudent
                           ? maskEmailAddress(editingStudent.email || '')
-                          : ''
+                          : 'student@example.com'
                       }
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
                     />
                   </div>
 
@@ -3581,8 +3567,8 @@ const ManageStudentsYear1 = () => {
                       name="phone"
                       value={formData.phone}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder=""
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
+                      placeholder={t('ឧ. 012 345 678', 'e.g. 012 345 678')}
                     />
                   </div>
 
@@ -3595,8 +3581,8 @@ const ManageStudentsYear1 = () => {
                       name="student_code"
                       value={formData.student_code}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder=""
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
+                      placeholder={t('ឧ. STU-001', 'e.g. STU-001')}
                     />
                   </div>
 
@@ -3610,7 +3596,7 @@ const ManageStudentsYear1 = () => {
                       required
                       value={formData.gender}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white"
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm bg-white"
                     >
                       <option value="" disabled>
                         {t('ជ្រើសរើសភេទ', 'Select Gender')}
@@ -3630,7 +3616,7 @@ const ManageStudentsYear1 = () => {
                       name="date_of_birth"
                       value={formData.date_of_birth}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
                     />
                   </div>
 
@@ -3647,7 +3633,7 @@ const ManageStudentsYear1 = () => {
                       }
                       value={formData.department_id}
                       onChange={handleInputChange}
-                      className={`std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white ${
+                      className={`std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm bg-white ${
                         Boolean(editingStudent) || selectedDepartment !== 'all'
                           ? 'opacity-80 cursor-not-allowed bg-gray-100 font-bold text-indigo-900'
                           : ''
@@ -3673,8 +3659,8 @@ const ManageStudentsYear1 = () => {
                       name="batch_year"
                       value={formData.batch_year}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
-                      placeholder=""
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
+                      placeholder={t('ឧ. ជំនាន់ទី១៥, ឆ្នាំទី១', 'e.g. Batch 15, Year 1')}
                     />
                   </div>
 
@@ -3688,7 +3674,7 @@ const ManageStudentsYear1 = () => {
                       required
                       value={formData.degree_level}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white"
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm bg-white"
                     >
                       <option value="" disabled>
                         {t('ជ្រើសរើសកម្រិត', 'Select Level')}
@@ -3715,7 +3701,7 @@ const ManageStudentsYear1 = () => {
                       required
                       value={formData.study_shift}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white"
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm bg-white"
                     >
                       <option value="" disabled>
                         {t('ជ្រើសរើសវេនសិក្សា', 'Select Study Shift')}
@@ -3738,8 +3724,8 @@ const ManageStudentsYear1 = () => {
                       name="address"
                       value={formData.address}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all resize-none shadow-sm"
-                      placeholder=""
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors resize-none shadow-sm"
+                      placeholder={t('បញ្ចូលអាសយដ្ឋាន...', 'Enter address...')}
                     />
                   </div>
 
@@ -3761,7 +3747,7 @@ const ManageStudentsYear1 = () => {
                       required={!editingStudent}
                       value={formData.password}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
                       placeholder="••••••••"
                     />
                   </div>
@@ -3776,7 +3762,7 @@ const ManageStudentsYear1 = () => {
                       required
                       value={formData.status}
                       onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm bg-white"
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm bg-white"
                     >
                       <option value="" disabled>
                         {t('ជ្រើសរើសស្ថានភាព', 'Select Status')}
@@ -3798,7 +3784,7 @@ const ManageStudentsYear1 = () => {
                   setShowModal(false);
                   setFormError('');
                 }}
-                className="std-cancel-btn px-5 sm:px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                className="std-cancel-btn px-5 sm:px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
@@ -3806,7 +3792,7 @@ const ManageStudentsYear1 = () => {
                 type="submit"
                 form="studentForm"
                 disabled={isSubmitting}
-                className="px-5 sm:px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                className="px-5 sm:px-6 py-3 text-sm font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-md flex items-center gap-2 cursor-pointer"
               >
                 {isSubmitting ? (
                   <ArrowPathIcon className="h-5 w-5 animate-spin" />
@@ -3826,7 +3812,7 @@ const ManageStudentsYear1 = () => {
       {/* 9.7. ផ្ទាំង Modal ចុះឈ្មោះមុខវិជ្ជាឱ្យសិស្សម្នាក់ៗ (Bottom Sheet on Phone) */}
       {/* ------------------------------------------------------------------ */}
       {showEnrollmentModal && selectedStudent && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
             <div className="std-modal-bar flex justify-between items-center p-5 sm:p-7 border-b border-gray-100">
               <div>
@@ -3847,7 +3833,7 @@ const ManageStudentsYear1 = () => {
               <button
                 type="button"
                 onClick={() => setShowEnrollmentModal(false)}
-                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
+                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -3870,7 +3856,7 @@ const ManageStudentsYear1 = () => {
                       type="button"
                       disabled={isEnrollingCourses}
                       onClick={handleQuickEnrollAllDeptCourses}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer"
                     >
                       <SparklesIcon className="h-4 w-4 text-yellow-300 shrink-0" />
                       <span>
@@ -3965,7 +3951,7 @@ const ManageStudentsYear1 = () => {
                           <div
                             key={course.id}
                             onClick={() => toggleCourseInSingleModal(course.id)}
-                            className={`std-enroll-item flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                            className={`std-enroll-item flex items-center justify-between p-3 rounded-xl border transition-colors cursor-pointer select-none ${
                               isChecked
                                 ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/30 shadow-2xs'
                                 : 'border-gray-200 bg-white hover:border-emerald-300'
@@ -4005,7 +3991,7 @@ const ManageStudentsYear1 = () => {
                           selectedCoursesToEnroll.length === 0
                         }
                         onClick={handleEnrollSelectedCourses}
-                        className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
                       >
                         {isEnrollingCourses ? (
                           <ArrowPathIcon className="h-4 w-4 animate-spin" />
@@ -4066,7 +4052,7 @@ const ManageStudentsYear1 = () => {
                       return (
                         <div
                           key={enrollment.id}
-                          className="std-enroll-item flex items-center justify-between p-3.5 bg-white border border-gray-200 rounded-2xl hover:border-indigo-300 transition-all shadow-sm"
+                          className="std-enroll-item flex items-center justify-between p-3.5 bg-white border border-gray-200 rounded-2xl hover:border-indigo-300 transition-colors shadow-sm"
                         >
                           <div className="flex items-start gap-3">
                             <div className="h-9 w-9 rounded-full bg-indigo-500 text-white flex items-center justify-center shrink-0 font-extrabold text-xs overflow-hidden shadow-sm">
@@ -4074,7 +4060,7 @@ const ManageStudentsYear1 = () => {
                                 <img
                                   src={teacherInfo.avatarUrl}
                                   alt={teacherInfo.name}
-                                  loading="eager"
+                                  loading="lazy"
                                   decoding="async"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
@@ -4108,7 +4094,7 @@ const ManageStudentsYear1 = () => {
                             onClick={() =>
                               setUnenrollTarget(enrollment.course_id)
                             }
-                            className="std-action-delete p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                            className="std-action-delete p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
                             title={t('លុបមុខវិជ្ជាចេញ', 'Remove Course')}
                           >
                             <TrashIcon className="h-4 w-4" />
@@ -4125,7 +4111,7 @@ const ManageStudentsYear1 = () => {
               <button
                 type="button"
                 onClick={() => setShowEnrollmentModal(false)}
-                className="std-cancel-btn px-6 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                className="std-cancel-btn px-6 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
               >
                 {t('បិទផ្ទាំង', 'Close')}
               </button>
@@ -4138,7 +4124,7 @@ const ManageStudentsYear1 = () => {
       {/* 9.8. ផ្ទាំង Modal ចុះឈ្មោះមុខវិជ្ជាជាក្រុម (Bottom Sheet on Phone)   */}
       {/* ------------------------------------------------------------------ */}
       {showBulkEnrollModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent animate-fadeIn">
             <div className="std-modal-bar flex justify-between items-center p-5 sm:p-6 border-b border-gray-100">
               <div>
@@ -4158,7 +4144,7 @@ const ManageStudentsYear1 = () => {
               <button
                 type="button"
                 onClick={() => setShowBulkEnrollModal(false)}
-                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
+                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -4255,7 +4241,7 @@ const ManageStudentsYear1 = () => {
                       <div
                         key={course.id}
                         onClick={() => toggleBulkCourseSelection(course.id)}
-                        className={`std-enroll-item flex items-center justify-between p-3.5 rounded-2xl border transition-all cursor-pointer select-none ${
+                        className={`std-enroll-item flex items-center justify-between p-3.5 rounded-2xl border transition-colors cursor-pointer select-none ${
                           isChecked
                             ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/30 shadow-xs'
                             : 'border-gray-200 bg-white hover:border-emerald-300'
@@ -4292,7 +4278,7 @@ const ManageStudentsYear1 = () => {
                 <button
                   type="button"
                   onClick={() => setShowBulkEnrollModal(false)}
-                  className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                  className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
                 >
                   {t('បោះបង់', 'Cancel')}
                 </button>
@@ -4301,7 +4287,7 @@ const ManageStudentsYear1 = () => {
                   disabled={
                     isBulkEnrolling || bulkSelectedCourses.length === 0
                   }
-                  className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                  className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl shadow-md transition-colors flex items-center gap-2 cursor-pointer"
                 >
                   {isBulkEnrolling ? (
                     <ArrowPathIcon className="h-5 w-5 animate-spin" />
@@ -4325,7 +4311,7 @@ const ManageStudentsYear1 = () => {
       {/* 9.9. ផ្ទាំង Modal សម្រាប់នាំចូលទិន្នន័យសិស្សពី Excel (Bottom Sheet on Phone) */}
       {/* ------------------------------------------------------------------ */}
       {showImportModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
             <div className="std-modal-bar flex justify-between items-center p-5 border-b border-gray-100">
               <div>
@@ -4355,7 +4341,7 @@ const ManageStudentsYear1 = () => {
                   setSelectedFileName('');
                   setImportError('');
                 }}
-                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
+                className="std-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
               >
                 <XMarkIcon className="h-5 w-5" />
               </button>
@@ -4391,7 +4377,7 @@ const ManageStudentsYear1 = () => {
                 <button
                   type="button"
                   onClick={handleDownloadTemplate}
-                  className="std-template-btn inline-flex items-center px-4 py-2 bg-white border border-emerald-300 text-emerald-800 text-xs font-bold rounded-lg hover:bg-emerald-100 transition-all shrink-0 shadow-sm cursor-pointer"
+                  className="std-template-btn inline-flex items-center px-4 py-2 bg-white border border-emerald-300 text-emerald-800 text-xs font-bold rounded-lg hover:bg-emerald-100 transition-colors shrink-0 shadow-sm cursor-pointer"
                 >
                   <DocumentIcon className="h-4 w-4 mr-1.5 text-emerald-600" />
                   {t('ទាញយកគំរូ', 'Template')}
@@ -4418,7 +4404,7 @@ const ManageStudentsYear1 = () => {
                   />
 
                   <div
-                    className={`std-dropzone border-2 border-dashed rounded-xl py-6 px-4 flex flex-col items-center justify-center text-center transition-all duration-300 shadow-sm ${
+                    className={`std-dropzone border-2 border-dashed rounded-xl py-6 px-4 flex flex-col items-center justify-center text-center transition-all duration-200 shadow-sm ${
                       selectedFileName
                         ? 'border-emerald-500 bg-emerald-50'
                         : 'border-emerald-300 bg-emerald-50/40 group-hover:bg-emerald-50 group-hover:border-emerald-500'
@@ -4438,7 +4424,7 @@ const ManageStudentsYear1 = () => {
                       </>
                     ) : (
                       <>
-                        <div className="std-badge-emerald p-2.5 bg-emerald-100 rounded-full mb-3 group-hover:scale-110 transition-transform duration-300 shadow-sm border border-emerald-200">
+                        <div className="std-badge-emerald p-2.5 bg-emerald-100 rounded-full mb-3 group-hover:scale-110 transition-transform duration-200 shadow-sm border border-emerald-200">
                           <DocumentIcon className="h-6 w-6 text-emerald-600" />
                         </div>
                         <h3 className="std-import-title text-sm font-extrabold text-emerald-900 mb-1.5">
@@ -4498,7 +4484,7 @@ const ManageStudentsYear1 = () => {
                   setSelectedFileName('');
                   setImportError('');
                 }}
-                className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
@@ -4509,7 +4495,7 @@ const ManageStudentsYear1 = () => {
                   importPreview.filter((r) => r.isValid).length === 0
                 }
                 onClick={handleConfirmImport}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-md flex items-center gap-2 cursor-pointer"
               >
                 {isImporting ? (
                   <ArrowPathIcon className="h-5 w-5 animate-spin" />
@@ -4529,7 +4515,7 @@ const ManageStudentsYear1 = () => {
       {/* 9.10. ផ្ទាំង Modal បញ្ជាក់ការលុបគណនីសិស្ស (Bottom Sheet on Phone)   */}
       {/* ------------------------------------------------------------------ */}
       {showDeleteModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="std-delete-title flex items-center text-rose-600 mb-5">
               <div className="std-badge-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
@@ -4566,7 +4552,7 @@ const ManageStudentsYear1 = () => {
                   setStudentToDelete(null);
                 }}
                 disabled={isDeleting}
-                className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
+                className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
@@ -4574,7 +4560,7 @@ const ManageStudentsYear1 = () => {
                 type="button"
                 onClick={confirmDelete}
                 disabled={isDeleting}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer disabled:opacity-50"
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-colors shadow-md cursor-pointer disabled:opacity-50"
               >
                 {t('លុបចោល', 'Delete')}
               </button>
@@ -4587,7 +4573,7 @@ const ManageStudentsYear1 = () => {
       {/* 9.11. ផ្ទាំង Modal បញ្ជាក់ការលុបមុខវិជ្ជាចេញពីសិស្ស                 */}
       {/* ------------------------------------------------------------------ */}
       {unenrollTarget && (
-        <div className="fixed inset-0 m-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="std-delete-title flex items-center text-rose-600 mb-5">
               <div className="std-badge-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
@@ -4607,14 +4593,14 @@ const ManageStudentsYear1 = () => {
               <button
                 type="button"
                 onClick={() => setUnenrollTarget(null)}
-                className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
               >
                 {t('បោះបង់', 'Cancel')}
               </button>
               <button
                 type="button"
                 onClick={confirmUnenrollCourse}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-all shadow-md cursor-pointer"
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition-colors shadow-md cursor-pointer"
               >
                 {t('លុបចោល', 'Delete')}
               </button>
@@ -4627,7 +4613,7 @@ const ManageStudentsYear1 = () => {
       {/* 9.12. ផ្ទាំង Modal បញ្ជាក់ការដំឡើងឆ្នាំសិក្សាសិស្ស (Bottom Sheet on Phone) */}
       {/* ------------------------------------------------------------------ */}
       {showPromoteModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="std-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="std-promote-title flex items-center text-blue-600 mb-5">
               <div className="std-badge-blue p-2 bg-blue-100 rounded-full mr-3 border border-blue-200">
@@ -4654,8 +4640,8 @@ const ManageStudentsYear1 = () => {
                   type="text"
                   value={promoteTargetYear}
                   onChange={(e) => setPromoteTargetYear(e.target.value)}
-                  className="std-input w-full bg-gray-50 border border-blue-200 rounded-xl px-4 py-2.5 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all shadow-sm"
-                  placeholder=""
+                  className="std-input w-full bg-gray-50 border border-blue-200 rounded-xl px-4 py-2.5 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
+                  placeholder={t('ឧ. ជំនាន់ទី១៥, ឆ្នាំទី២', 'e.g. Batch 15, Year 2')}
                   required
                 />
                 <p className="std-text-secondary text-[11px] text-gray-500 mt-2 font-medium">
@@ -4677,14 +4663,14 @@ const ManageStudentsYear1 = () => {
                 <button
                   type="button"
                   onClick={() => setShowPromoteModal(false)}
-                  className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                  className="std-cancel-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
                 >
                   {t('បោះបង់', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isPromoting}
-                  className="px-5 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all shadow-md cursor-pointer flex items-center"
+                  className="px-5 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-md cursor-pointer flex items-center"
                 >
                   {isPromoting ? (
                     <ArrowPathIcon className="h-5 w-5 animate-spin mr-2" />

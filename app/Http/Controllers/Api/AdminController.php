@@ -14,10 +14,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class AdminController extends Controller
 {
+    private const SETTINGS_FILE_PATH = 'lms_system_settings.json';
+    private const SETTINGS_CACHE_KEY = 'lms_system_settings';
+
     /**
      * ✅ បង្រួមរូបថត Base64 ធំៗឱ្យមកទំហំតូចល្មម (~4KB) និងរក្សាទុកក្នុង Cache ការពារកុំឱ្យគាំង RAM
      */
@@ -239,6 +243,8 @@ class AdminController extends Controller
             }
         }
 
+        $deletedUserId = $user->id;
+
         DB::transaction(function () use ($user) {
             Teacher::where('user_id', $user->id)->delete();
             Student::where('user_id', $user->id)->delete();
@@ -247,6 +253,7 @@ class AdminController extends Controller
 
         Cache::forget('admin_dashboard_stats');
         Cache::forget('admin_overview_report');
+        Cache::forget('lms_auth_user_payload_' . $deletedUserId);
 
         return response()->json([
             'message' => 'User deleted successfully',
@@ -301,7 +308,18 @@ class AdminController extends Controller
             'time_format' => 'H:i',
         ];
 
-        $saved = Cache::get('lms_system_settings', []);
+        $saved = Cache::rememberForever(self::SETTINGS_CACHE_KEY, function () {
+            try {
+                if (Storage::disk('local')->exists(self::SETTINGS_FILE_PATH)) {
+                    $decoded = json_decode((string) Storage::disk('local')->get(self::SETTINGS_FILE_PATH), true);
+                    if (is_array($decoded)) {
+                        return $decoded;
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+            return [];
+        });
 
         return response()->json(array_merge($defaults, is_array($saved) ? $saved : []));
     }
@@ -315,9 +333,30 @@ class AdminController extends Controller
             'time_format' => 'sometimes|string|max:32',
         ]);
 
-        $current = Cache::get('lms_system_settings', []);
-        $updated = array_merge(is_array($current) ? $current : [], $validated);
-        Cache::forever('lms_system_settings', $updated);
+        $current = Cache::get(self::SETTINGS_CACHE_KEY, []);
+        if (!is_array($current) || empty($current)) {
+            try {
+                if (Storage::disk('local')->exists(self::SETTINGS_FILE_PATH)) {
+                    $decoded = json_decode((string) Storage::disk('local')->get(self::SETTINGS_FILE_PATH), true);
+                    if (is_array($decoded)) {
+                        $current = $decoded;
+                    }
+                }
+            } catch (\Throwable $e) {
+                $current = [];
+            }
+        }
+
+        $updated = array_merge($current, $validated);
+        Cache::forever(self::SETTINGS_CACHE_KEY, $updated);
+
+        try {
+            Storage::disk('local')->put(
+                self::SETTINGS_FILE_PATH,
+                json_encode($updated, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
+            );
+        } catch (\Throwable $e) {
+        }
 
         return response()->json([
             'settings' => $updated,
