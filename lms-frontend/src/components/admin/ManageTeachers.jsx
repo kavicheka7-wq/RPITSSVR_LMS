@@ -380,7 +380,7 @@ const formatDateOnly = (dateVal) => {
 
 const getTeacherFullName = (person) => {
   if (!person) return '';
-  return `${person.first_name || ''} ${person.last_name || ''}`.trim();
+  return `${person.last_name || ''} ${person.first_name || ''}`.trim();
 };
 
 const getDepartmentDisplayName = (deptObjOrName) => {
@@ -1287,18 +1287,21 @@ const ManageTeachers = () => {
           ? allDeptNames.join(' + ')
           : getDepartmentDisplayName(teacher.department || activeDepartmentObj);
 
+      const isActive =
+        String(teacher.user?.status || teacher.status || 'active').toLowerCase() === 'active';
+
       return {
         'ល.រ': idx + 1,
         'អត្តលេខគ្រូ': teacher.teacher_code || '',
-        'នាមខ្លួន': teacher.first_name || '',
         'នាមត្រកូល': teacher.last_name || '',
-        'ភេទ': teacher.gender || '',
+        'នាមខ្លួន': teacher.first_name || '',
+        'ភេទ': getGenderLabel(teacher.gender),
         'អ៊ីមែល': maskEmailAddress(teacher.email || ''),
         'លេខទូរស័ព្ទ': teacher.phone || '',
         'ដេប៉ាតឺម៉ង់': deptDisplay,
         'ឯកទេស': teacher.specialization || '',
-        'ប្រភេទការងារ': teacher.employment_type || 'Full-time',
-        'ស្ថានភាព': teacher.user?.status || teacher.status || 'active',
+        'ប្រភេទការងារ': getEmploymentTypeLabel(teacher.employment_type),
+        'ស្ថានភាព': isActive ? t('សកម្ម', 'Active') : t('អសកម្ម', 'Inactive'),
       };
     });
 
@@ -1346,17 +1349,17 @@ const ManageTeachers = () => {
       : '';
 
     const blankRow = () => ({
-      first_name: '',
-      last_name: '',
-      email: '',
-      phone: '',
-      gender: '',
-      teacher_code: '',
-      department: defaultDeptName,
-      specialization: '',
-      employment_type: 'Full-time',
-      date_of_birth: '',
-      password: '',
+      'នាមត្រកូល': '',
+      'នាមខ្លួន': '',
+      'អ៊ីមែល': '',
+      'លេខទូរស័ព្ទ': '',
+      'ភេទ': '',
+      'អត្តលេខគ្រូ': '',
+      'ដេប៉ាតឺម៉ង់': defaultDeptName,
+      'ឯកទេស': '',
+      'ប្រភេទការងារ': 'ពេញម៉ោង',
+      'ថ្ងៃខែឆ្នាំកំណើត': '',
+      'ពាក្យសម្ងាត់': '',
     });
 
     const templateData = Array.from({ length: 50 }, () => blankRow());
@@ -1372,17 +1375,17 @@ const ManageTeachers = () => {
       { wch: 28 },
       { wch: 22 },
       { wch: 18 },
-      { wch: 16 },
+      { wch: 18 },
       { wch: 16 },
     ];
     applyExcelStyling(XLSX, worksheet, colWidths, [3, 5, 8, 9, 10]);
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'គំរូគ្រូបង្រៀន');
     const safeDeptSuffix = defaultDeptName
       ? `_${defaultDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}`
       : '';
-    XLSX.writeFile(workbook, `teacher_import_template${safeDeptSuffix}.xlsx`);
+    XLSX.writeFile(workbook, `គំរូ_គ្រូបង្រៀន${safeDeptSuffix}.xlsx`);
 
     pushLocalNotification({
       titleKm: 'បានទាញយកទម្រង់គំរូ Excel គ្រូបង្រៀន',
@@ -1519,17 +1522,15 @@ const ManageTeachers = () => {
             }
           }
 
-          let gender = item.gender;
-          if (gender === 'ប្រុស' || gender === 'Male' || gender === 'M')
+          const rawGender = (item.gender || '').toString().trim().toLowerCase();
+          let gender = 'Male';
+          if (rawGender === 'ប្រុស' || rawGender === 'male' || rawGender === 'm') {
             gender = 'Male';
-          else if (
-            gender === 'ស្រី' ||
-            gender === 'Female' ||
-            gender === 'F'
-          )
+          } else if (rawGender === 'ស្រី' || rawGender === 'female' || rawGender === 'f') {
             gender = 'Female';
-          else if (gender) gender = 'Other';
-          else gender = 'Male';
+          } else if (rawGender) {
+            gender = 'Other';
+          }
 
           let empRaw = (item.employment_type || '').toLowerCase().trim();
           let cleanEmploymentType = 'Full-time';
@@ -2475,20 +2476,6 @@ const ManageTeachers = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                   <div>
                     <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('នាមខ្លួន', 'First Name')}{' '}
-                      <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      name="first_name"
-                      required
-                      value={formData.first_name}
-                      onChange={handleInputChange}
-                      className="tch-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
                       {t('នាមត្រកូល', 'Last Name')}{' '}
                       <span className="text-rose-500">*</span>
                     </label>
@@ -2497,6 +2484,20 @@ const ManageTeachers = () => {
                       name="last_name"
                       required
                       value={formData.last_name}
+                      onChange={handleInputChange}
+                      className="tch-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="tch-label block text-sm font-bold text-gray-700 mb-1.5">
+                      {t('នាមខ្លួន', 'First Name')}{' '}
+                      <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="first_name"
+                      required
+                      value={formData.first_name}
                       onChange={handleInputChange}
                       className="tch-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
                     />
@@ -2532,11 +2533,7 @@ const ManageTeachers = () => {
                         }
                       }}
                       onChange={handleInputChange}
-                      placeholder={
-                        editingTeacher
-                          ? maskEmailAddress(editingTeacher.email || '')
-                          : 'teacher@example.com'
-                      }
+                      placeholder=""
                       className="tch-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
                     />
                   </div>
@@ -2550,7 +2547,7 @@ const ManageTeachers = () => {
                       value={formData.phone}
                       onChange={handleInputChange}
                       className="tch-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
-                      placeholder={t('ឧ. 012 345 678', 'e.g. 012 345 678')}
+                      placeholder=""
                     />
                   </div>
 
@@ -2564,7 +2561,7 @@ const ManageTeachers = () => {
                       value={formData.teacher_code}
                       onChange={handleInputChange}
                       className="tch-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
-                      placeholder={t('ឧ. TCH-001', 'e.g. TCH-001')}
+                      placeholder={t('IT-001', 'IT-001')}
                     />
                   </div>
                   <div>
