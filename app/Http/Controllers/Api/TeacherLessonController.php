@@ -574,10 +574,6 @@ class TeacherLessonController extends Controller
      * Delete lesson file
      * DELETE /teacher/lessons/files/{fileId}
      */
-   /**
-     * Delete lesson file
-     * DELETE /teacher/lessons/files/{fileId}
-     */
     public function deleteFile($fileId)
     {
         try {
@@ -586,6 +582,12 @@ class TeacherLessonController extends Controller
                 return response()->json([
                     'message' => 'បានលុបឯកសារដោយជោគជ័យ',
                 ]);
+            }
+
+            // ✅ ផ្ទៀងផ្ទាត់សិទ្ធិគ្រូមុនពេលលុបឯកសារ
+            $lesson = Lesson::select('id', 'course_id', 'created_by')->find($file->lesson_id);
+            if ($lesson) {
+                $this->ensureLessonAccess($lesson);
             }
 
             if (
@@ -607,6 +609,10 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'បានលុបឯកសារដោយជោគជ័យ',
             ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'message' => 'អ្នកមិនមានសិទ្ធិលុបឯកសារនេះទេ',
+            ], 403);
         } catch (\Throwable $e) {
             Log::error('File delete error: ' . $e->getMessage());
             return response()->json([
@@ -680,10 +686,6 @@ class TeacherLessonController extends Controller
      * Delete video
      * DELETE /teacher/lessons/videos/{videoId}
      */
-   /**
-     * Delete video
-     * DELETE /teacher/lessons/videos/{videoId}
-     */
     public function deleteVideo($videoId)
     {
         try {
@@ -692,6 +694,12 @@ class TeacherLessonController extends Controller
                 return response()->json([
                     'message' => 'បានលុបវីដេអូដោយជោគជ័យ',
                 ]);
+            }
+
+            // ✅ ផ្ទៀងផ្ទាត់សិទ្ធិគ្រូមុនពេលលុបវីដេអូ
+            $lesson = Lesson::select('id', 'course_id', 'created_by')->find($video->lesson_id);
+            if ($lesson) {
+                $this->ensureLessonAccess($lesson);
             }
 
             if (
@@ -714,6 +722,10 @@ class TeacherLessonController extends Controller
             return response()->json([
                 'message' => 'បានលុបវីដេអូដោយជោគជ័យ',
             ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'message' => 'អ្នកមិនមានសិទ្ធិលុបវីដេអូនេះទេ',
+            ], 403);
         } catch (\Throwable $e) {
             Log::error('Video delete error: ' . $e->getMessage());
             return response()->json([

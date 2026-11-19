@@ -4,7 +4,6 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import XLSX from 'xlsx-js-style';
 import {
   CalendarDaysIcon,
   BookOpenIcon,
@@ -52,6 +51,15 @@ const ATTENDANCE_MEM_CACHE = {
   historyByCourse: {},
   lastSyncedStudentsAt: 0,
   lastSyncedHistoryAt: {},
+};
+
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
 };
 
 const readStorageJson = (key, fallback) => {
@@ -116,7 +124,7 @@ const getAvatarMapSync = () => {
   return ATTENDANCE_MEM_CACHE.avatarMap;
 };
 
-// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 80x80px (~2KB) សម្រាប់បង្ហាញក្នុង 0ms
+// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 80x80px (~2KB) ដោយរត់នៅពេលទំនេរ
 const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
   if (!studentId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
 
@@ -131,39 +139,41 @@ const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
     map[studentId] = rawDataUrl;
   }
 
-  try {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 80;
-        let w = img.width || maxSize;
-        let h = img.height || maxSize;
-        if (w > h) {
-          if (w > maxSize) {
-            h = Math.round((h * maxSize) / w);
-            w = maxSize;
+  runWhenIdle(() => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 80;
+          let w = img.width || maxSize;
+          let h = img.height || maxSize;
+          if (w > h) {
+            if (w > maxSize) {
+              h = Math.round((h * maxSize) / w);
+              w = maxSize;
+            }
+          } else {
+            if (h > maxSize) {
+              w = Math.round((w * maxSize) / h);
+              h = maxSize;
+            }
           }
-        } else {
-          if (h > maxSize) {
-            w = Math.round((w * maxSize) / h);
-            h = maxSize;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        const tinyWebp = canvas.toDataURL('image/webp', 0.78);
-        const bestImg =
-          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
-        map[studentId] = bestImg;
-        if (typeof onCompressed === 'function') onCompressed(studentId, bestImg);
-      } catch {}
-    };
-    img.src = rawDataUrl;
-  } catch {}
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          const tinyWebp = canvas.toDataURL('image/webp', 0.78);
+          const bestImg =
+            tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
+          map[studentId] = bestImg;
+          if (typeof onCompressed === 'function') onCompressed(studentId, bestImg);
+        } catch {}
+      };
+      img.src = rawDataUrl;
+    } catch {}
+  }, 400);
 };
 
 // ✅ ភ្ជាប់រូបភាពពី Avatar Dictionary មកដាក់ក្នុងបញ្ជីសិស្សវិញភ្លាមៗក្នុង 0ms
@@ -185,64 +195,72 @@ const hydrateStudentsWithAvatars = (list) => {
   });
 };
 
-// ✅ រក្សាទុកបញ្ជីសិស្ស (Slim JSON) និងរូបភាព Thumbnail ដាច់ដោយឡែក ការពារពេញ localStorage 100%
+// ✅ រក្សាទុកបញ្ជីសិស្ស (Slim JSON) និងរូបភាព Thumbnail នៅពេលទំនេរ ការពារទាក់អេក្រង់ និងពេញ localStorage 100%
 const persistStudentsAndAvatarsSafely = (uid, studentsList) => {
   if (!Array.isArray(studentsList)) return;
-  const avatarMap = getAvatarMapSync();
-  let pendingCompressCount = 0;
 
-  const saveAvatarMapToStorage = () => {
-    try {
-      const str = JSON.stringify(avatarMap);
-      sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
-    } catch {}
-  };
+  runWhenIdle(() => {
+    const avatarMap = getAvatarMapSync();
+    let pendingCompressCount = 0;
 
-  const slimStudents = studentsList.map((stu) => {
-    if (!stu || typeof stu !== 'object') return stu;
-    const rawImg = stu.profile_image || stu.user?.profile_image || null;
-
-    if (stu.id && rawImg) {
-      pendingCompressCount++;
-      compressStudentAvatarAsync(stu.id, rawImg, () => {
-        pendingCompressCount--;
-        if (pendingCompressCount <= 0) {
-          saveAvatarMapToStorage();
-        }
+    const saveAvatarMapToStorage = () => {
+      runWhenIdle(() => {
+        try {
+          const str = JSON.stringify(avatarMap);
+          sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+          localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+        } catch {}
       });
+    };
+
+    const slimStudents = studentsList.map((stu) => {
+      if (!stu || typeof stu !== 'object') return stu;
+      const rawImg = stu.profile_image || stu.user?.profile_image || null;
+
+      if (stu.id && rawImg) {
+        const existingCached = avatarMap[stu.id];
+        if (!existingCached || existingCached.length > 12000) {
+          pendingCompressCount++;
+          compressStudentAvatarAsync(stu.id, rawImg, () => {
+            pendingCompressCount--;
+            if (pendingCompressCount <= 0) {
+              saveAvatarMapToStorage();
+            }
+          });
+        }
+      }
+
+      const copy = { ...stu };
+      if (
+        typeof copy.profile_image === 'string' &&
+        copy.profile_image.startsWith('data:') &&
+        copy.profile_image.length > 12000
+      ) {
+        copy.profile_image = null;
+      }
+      if (copy.user && typeof copy.user === 'object') {
+        copy.user = {
+          id: copy.user.id,
+          status: copy.user.status,
+          email: copy.user.email,
+        };
+      }
+      return copy;
+    });
+
+    if (pendingCompressCount === 0) {
+      saveAvatarMapToStorage();
+    } else {
+      setTimeout(saveAvatarMapToStorage, 400);
     }
 
-    const copy = { ...stu };
-    if (
-      typeof copy.profile_image === 'string' &&
-      copy.profile_image.startsWith('data:') &&
-      copy.profile_image.length > 12000
-    ) {
-      copy.profile_image = null;
-    }
-    if (copy.user && typeof copy.user === 'object') {
-      copy.user = {
-        id: copy.user.id,
-        status: copy.user.status,
-        email: copy.user.email,
-      };
-    }
-    return copy;
+    try {
+      const serialized = JSON.stringify(slimStudents);
+      sessionStorage.setItem(getStudentsCacheKey(uid), serialized);
+      localStorage.setItem(getStudentsCacheKey(uid), serialized);
+      localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, serialized);
+    } catch {}
   });
-
-  if (pendingCompressCount === 0) {
-    saveAvatarMapToStorage();
-  } else {
-    setTimeout(saveAvatarMapToStorage, 300);
-  }
-
-  try {
-    const serialized = JSON.stringify(slimStudents);
-    sessionStorage.setItem(getStudentsCacheKey(uid), serialized);
-    localStorage.setItem(getStudentsCacheKey(uid), serialized);
-    localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, serialized);
-  } catch {}
 };
 
 // ✅ បង្រួមកំណត់ត្រាប្រវត្តិវត្តមាន (លុប nested student object ធ្ងន់ៗចេញ) មុនពេល Save ចូល localStorage
@@ -940,18 +958,20 @@ const ManageAttendance = () => {
           const latestMap = stdRes.data.course_students_map;
           setCourseMap(latestMap);
           ATTENDANCE_MEM_CACHE.courseMap = latestMap;
-          try {
-            const mapStr = JSON.stringify(latestMap);
-            sessionStorage.setItem(
-              getCourseMapCacheKey(currentTeacherId),
-              mapStr
-            );
-            localStorage.setItem(
-              getCourseMapCacheKey(currentTeacherId),
-              mapStr
-            );
-            localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
-          } catch {}
+          runWhenIdle(() => {
+            try {
+              const mapStr = JSON.stringify(latestMap);
+              sessionStorage.setItem(
+                getCourseMapCacheKey(currentTeacherId),
+                mapStr
+              );
+              localStorage.setItem(
+                getCourseMapCacheKey(currentTeacherId),
+                mapStr
+              );
+              localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
+            } catch {}
+          });
         }
       })
       .catch(() => {});
@@ -964,12 +984,14 @@ const ManageAttendance = () => {
         const latestCourses = getArrayData(crsRes.data);
         setCourses(latestCourses);
         ATTENDANCE_MEM_CACHE.courses = latestCourses;
-        try {
-          const crsStr = JSON.stringify(latestCourses);
-          sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
-          localStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
-          localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
-        } catch {}
+        runWhenIdle(() => {
+          try {
+            const crsStr = JSON.stringify(latestCourses);
+            sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+            localStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+            localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
+          } catch {}
+        });
       })
       .catch(() => {});
 
@@ -1024,12 +1046,14 @@ const ManageAttendance = () => {
 
         setHistoryByCourse((prev) => {
           const next = { ...prev, [cid]: slimRecords };
-          try {
-            localStorage.setItem(
-              getAttHistoryMapKey(currentTeacherId),
-              JSON.stringify(next)
-            );
-          } catch {}
+          runWhenIdle(() => {
+            try {
+              localStorage.setItem(
+                getAttHistoryMapKey(currentTeacherId),
+                JSON.stringify(next)
+              );
+            } catch {}
+          });
           return next;
         });
       })
@@ -1213,12 +1237,14 @@ const ManageAttendance = () => {
 
       setHistoryByCourse((prev) => {
         const next = { ...prev, [cid]: updatedCourseHistory };
-        try {
-          localStorage.setItem(
-            getAttHistoryMapKey(currentTeacherId),
-            JSON.stringify(next)
-          );
-        } catch {}
+        runWhenIdle(() => {
+          try {
+            localStorage.setItem(
+              getAttHistoryMapKey(currentTeacherId),
+              JSON.stringify(next)
+            );
+          } catch {}
+        });
         return next;
       });
 
@@ -1245,7 +1271,7 @@ const ManageAttendance = () => {
     }
   };
 
-  const applyExcelStyling = (worksheet, colWidths = [], textColumnIndices = []) => {
+  const applyExcelStyling = (XLSX, worksheet, colWidths = [], textColumnIndices = []) => {
     if (!worksheet || !worksheet['!ref']) return;
     const range = XLSX.utils.decode_range(worksheet['!ref']);
 
@@ -1306,10 +1332,13 @@ const ManageAttendance = () => {
     worksheet['!rows'] = rows;
   };
 
-  const handleExportExcel = () => {
+  // ✅ ទាញ Library xlsx-js-style តែពេលគ្រូចុចប៊ូតុង Export Excel ប៉ុណ្ណោះ (កាត់បន្ថយទំហំទំព័រដំបូង ~1MB)
+  const handleExportExcel = async () => {
     if (filteredStudents.length === 0) {
       return;
     }
+
+    const { default: XLSX } = await import('xlsx-js-style');
 
     const statusLabelKm = {
       Present: t('វត្តមាន', 'Present'),
@@ -1369,7 +1398,7 @@ const ManageAttendance = () => {
       { wch: 18 },
       { wch: 14 },
     ];
-    applyExcelStyling(worksheet, colWidths, [1, 7, 9]);
+    applyExcelStyling(XLSX, worksheet, colWidths, [1, 7, 9]);
 
     const yearSuffix = selectedYear !== 'all' ? `_Year${selectedYear}` : '';
     const courseSuffix = activeCourseObj?.course_code
@@ -1516,13 +1545,14 @@ const ManageAttendance = () => {
       {/* 📌 1. HEADER BANNER                                                */}
       {/* ================================================================== */}
       <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 sm:p-8 shadow-xl border border-blue-900">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-3">
             <h1 className="text-2xl sm:text-[28px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+              <div className="p-3 bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                 <CheckIcon className="w-7 h-7 sm:w-8 sm:h-8 text-yellow-400" />
               </div>
               <span>{t('គ្រប់គ្រងវត្តមានសិស្ស', 'Manage Student Attendance')}</span>
@@ -1774,7 +1804,7 @@ const ManageAttendance = () => {
         {/* ================================================================== */}
         {/* 📌 4. STICKY ACTION BAR & LIVE SUMMARY COUNTERS                    */}
         {/* ================================================================== */}
-        <div className="att-sticky-bar sticky top-4 z-30 bg-white/90 backdrop-blur-lg rounded-[1.5rem] border border-gray-200 shadow-md p-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="att-sticky-bar sticky top-4 z-30 bg-white/95 md:bg-white/90 md:backdrop-blur-lg rounded-[1.5rem] border border-gray-200 shadow-md p-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-3 mr-2">
               <div className="att-icon-blue bg-blue-100 text-blue-600 p-2.5 rounded-xl">
@@ -2413,7 +2443,7 @@ const ManageAttendance = () => {
           background-color: #263449 !important;
         }
         html.dark .att-sticky-bar {
-          background-color: rgba(30, 41, 59, 0.92) !important;
+          background-color: rgba(30, 41, 59, 0.96) !important;
           border-color: #334155 !important;
         }
         html.dark .att-shift-tabs {

@@ -4,7 +4,6 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import XLSX from 'xlsx-js-style';
 import {
   BookOpenIcon,
   PlusIcon,
@@ -50,6 +49,15 @@ const LESSONS_MEM_CACHE = {
   allStudents: null,
   courseMap: null,
   lastSyncedAt: 0,
+};
+
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
 };
 
 const readStorageJson = (key, fallback) => {
@@ -103,39 +111,45 @@ const stripHeavyDataFromStudents = (studentsList) => {
 };
 
 const safeSaveLessonsCache = (uid, lessonsList) => {
-  const slim = stripHeavyDataFromLessons(lessonsList);
-  try {
-    const str = JSON.stringify(slim);
+  runWhenIdle(() => {
+    const slim = stripHeavyDataFromLessons(lessonsList);
     try {
-      sessionStorage.setItem(getLessonsCacheKey(uid), str);
+      const str = JSON.stringify(slim);
+      try {
+        sessionStorage.setItem(getLessonsCacheKey(uid), str);
+      } catch {}
+      localStorage.setItem(getLessonsCacheKey(uid), str);
+      localStorage.setItem(CACHE_KEY_SHARED_LESSONS, str);
     } catch {}
-    localStorage.setItem(getLessonsCacheKey(uid), str);
-    localStorage.setItem(CACHE_KEY_SHARED_LESSONS, str);
-  } catch {}
+  });
 };
 
 const safeSaveCoursesCache = (uid, coursesList) => {
   if (!Array.isArray(coursesList)) return;
-  try {
-    const str = JSON.stringify(coursesList);
+  runWhenIdle(() => {
     try {
-      sessionStorage.setItem(getCoursesCacheKey(uid), str);
+      const str = JSON.stringify(coursesList);
+      try {
+        sessionStorage.setItem(getCoursesCacheKey(uid), str);
+      } catch {}
+      localStorage.setItem(getCoursesCacheKey(uid), str);
+      localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
     } catch {}
-    localStorage.setItem(getCoursesCacheKey(uid), str);
-    localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
-  } catch {}
+  });
 };
 
 const safeSaveStudentsCache = (uid, studentsList) => {
-  const slim = stripHeavyDataFromStudents(studentsList);
-  try {
-    const str = JSON.stringify(slim);
+  runWhenIdle(() => {
+    const slim = stripHeavyDataFromStudents(studentsList);
     try {
-      sessionStorage.setItem(getStudentsCacheKey(uid), str);
+      const str = JSON.stringify(slim);
+      try {
+        sessionStorage.setItem(getStudentsCacheKey(uid), str);
+      } catch {}
+      localStorage.setItem(getStudentsCacheKey(uid), str);
+      localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, str);
     } catch {}
-    localStorage.setItem(getStudentsCacheKey(uid), str);
-    localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, str);
-  } catch {}
+  });
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -584,16 +598,13 @@ export default function ManageLessons() {
           if (stdRes.data?.course_students_map) {
             setCourseMap(stdRes.data.course_students_map);
             LESSONS_MEM_CACHE.courseMap = stdRes.data.course_students_map;
-            try {
-              localStorage.setItem(
-                getCourseMapCacheKey(currentTeacherId),
-                JSON.stringify(stdRes.data.course_students_map)
-              );
-              localStorage.setItem(
-                CACHE_KEY_SHARED_MAP,
-                JSON.stringify(stdRes.data.course_students_map)
-              );
-            } catch (e) {}
+            runWhenIdle(() => {
+              try {
+                const mapStr = JSON.stringify(stdRes.data.course_students_map);
+                localStorage.setItem(getCourseMapCacheKey(currentTeacherId), mapStr);
+                localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
+              } catch (e) {}
+            });
           }
         })
         .catch(() => {});
@@ -1266,7 +1277,7 @@ export default function ManageLessons() {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
-    
+
     // បើគ្រូមិនបានវាយចំណងជើងទេ យកឈ្មោះហ្វាល់មកធ្វើជាចំណងជើងវីដេអូដោយស្វ័យប្រវត្តិ
     const titleVal = videoTitle.trim() || file.name || 'Video File';
 
@@ -1349,11 +1360,11 @@ export default function ManageLessons() {
 
     setMediaErrorMsg('');
     const targetLesson = lessons.find((l) => l.id === lessonId);
-    
+
     // បើគ្រូមិនបានវាយចំណងជើងទេ យកឈ្មោះមេរៀនមកធ្វើជាចំណងជើងលីងដោយស្វ័យប្រវត្តិ
     const titleVal = videoTitle.trim() || targetLesson?.title || 'YouTube Video';
     const urlVal = videoUrlInput.trim();
-    
+
     setVideoTitle('');
     setVideoUrlInput('');
 
@@ -1426,7 +1437,7 @@ export default function ManageLessons() {
     }
   };
 
-  // ✅ ២. អនុគមន៍បើកផ្ទាំងបញ្ជាក់ការលុបឯកសារមេរៀន (ដែលបាត់ពីមុន)
+  // ✅ ២. អនុគមន៍បើកផ្ទាំងបញ្ជាក់ការលុបឯកសារមេរៀន
   const handleDeleteFileClick = (file) => {
     if (!file) return;
     setDeleteMediaTarget({
@@ -1541,7 +1552,7 @@ export default function ManageLessons() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ ការច្រោះទិន្នន័យមេរៀន និងការនាំចេញឯកសារ Excel (.xlsx) មិនឱ្យស្ទួន
+  // 📌 ផ្នែកទី៥៖ ការច្រោះទិន្នន័យមេរៀន និងការនាំចេញឯកសារ Excel (.xlsx) ដោយប្រើ Dynamic Import
   // ============================================================================
   const filteredLessons = useMemo(() => {
     if (!Array.isArray(lessons)) return [];
@@ -1599,10 +1610,13 @@ export default function ManageLessons() {
       });
   }, [lessons, enrichedCourses, selectedYear, selectedCourse, searchTerm]);
 
-  const handleExportLessonsExcel = () => {
+  // ✅ ទាញ Library xlsx-js-style តែពេលគ្រូចុចប៊ូតុង Export Excel ប៉ុណ្ណោះ (កាត់បន្ថយទំហំទំព័រដំបូង ~1MB)
+  const handleExportLessonsExcel = async () => {
     if (filteredLessons.length === 0) {
       return;
     }
+
+    const { default: XLSX } = await import('xlsx-js-style');
 
     const exportData = filteredLessons.map((item, idx) => {
       const matchedCourse = enrichedCourses.find(
@@ -1775,13 +1789,14 @@ export default function ManageLessons() {
       {/* 1. Header Banner                                                   */}
       {/* ================================================================== */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
           <div className="space-y-2 sm:space-y-3 min-w-0">
             <h1 className="text-xl sm:text-2xl md:text-[26px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-2.5 sm:p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+              <div className="p-2.5 sm:p-3 bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                 <BookOpenIcon className="w-6 h-6 sm:w-7 sm:h-7 lg:w-8 lg:h-8 text-yellow-400" />
               </div>
               <span className="truncate">{t('មេរៀន និងឯកសារមេរៀនទាំងអស់', 'All Lessons and Materials')}</span>
@@ -2442,7 +2457,7 @@ export default function ManageLessons() {
       {/* 5. MODAL - Add/Edit Lesson (Bottom Sheet on Phone, Centered on iPad/Desktop) */}
       {/* ------------------------------------------------------------------ */}
       {showAddModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4">
           <div className="lsn-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden border border-transparent">
             <div className="lsn-modal-bar flex justify-between items-center p-5 sm:p-7 border-b border-gray-100">
               <h2 className="lsn-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
@@ -2723,7 +2738,7 @@ export default function ManageLessons() {
       {/* 6. Delete Lesson Confirmation Modal                                */}
       {/* ------------------------------------------------------------------ */}
       {showDeleteModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="lsn-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="lsn-delete-title flex items-center text-rose-600 mb-5">
               <div className="lsn-badge-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
@@ -2779,7 +2794,7 @@ export default function ManageLessons() {
       {/* 7. Delete File / Video Confirmation Modal                          */}
       {/* ------------------------------------------------------------------ */}
       {deleteMediaTarget && (
-        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 m-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
           <div className="lsn-modal-card bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-8 animate-fadeIn border border-transparent">
             <div className="lsn-delete-title flex items-center text-rose-600 mb-5">
               <div className="lsn-badge-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">

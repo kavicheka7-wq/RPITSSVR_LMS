@@ -490,8 +490,9 @@ class TeacherController extends Controller
     // --- Classroom Management ---
     public function getMyCourses()
     {
+        // ✅ មិនទាញបញ្ជី students ធ្ងន់ៗមកភ្ជាប់ជាមួយមុខវិជ្ជាទេ (ប្រើ withCount students_count ជំនួស)
         $courses = $this->teacherCourseQuery()
-            ->with(['department', 'students'])
+            ->with(['department'])
             ->withCount(['enrollments as students_count', 'lessons', 'assignments', 'quizzes'])
             ->get();
 
@@ -1044,12 +1045,20 @@ class TeacherController extends Controller
                 'scores.*.grade_letter' => 'nullable|string|max:5',
             ]);
 
+            // ✅ ពិនិត្យសិទ្ធិមុខវិជ្ជាតែ ១ ដងគត់សម្រាប់ course_id នីមួយៗនៅក្រៅ Loop (មិនរត់ Query ស្ទួន ៥០ ដងទេ)
+            $uniqueCourseIds = collect($validated['scores'])
+                ->pluck('course_id')
+                ->unique()
+                ->values();
+
+            foreach ($uniqueCourseIds as $cid) {
+                $this->findAuthorizedCourse($cid);
+            }
+
             $hasExamScoreColumn = Schema::hasColumn('grades', 'exam_score');
 
             DB::transaction(function () use ($validated, $hasExamScoreColumn) {
                 foreach ($validated['scores'] as $scoreData) {
-                    $this->findAuthorizedCourse($scoreData['course_id']);
-
                     $updatePayload = [
                         'assignment_score' => $scoreData['assignment_score'] ?? null,
                         'quiz_score' => $scoreData['quiz_score'] ?? null,
@@ -1143,7 +1152,16 @@ class TeacherController extends Controller
         try {
             $courseIds = $this->teacherCourseQuery()->pluck('id');
 
-            $query = Lesson::with(['course', 'files', 'videos'])
+            // ✅ កំណត់ select ជួរឈរស្រាលៗ មិនទាញជួរឈរ file_data (Base64 ធំៗ) មកក្នុង RAM ដាច់ខាត
+            $fileCols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
+
+            $query = Lesson::with([
+                'course:id,course_code,course_name,department_id,teacher_id,credit',
+                'files' => function ($q) use ($fileCols) {
+                    $q->select($fileCols);
+                },
+                'videos:id,lesson_id,title,video_url,duration,created_at,updated_at',
+            ])
                 ->where(function ($q) use ($courseIds) {
                     if ($courseIds->isNotEmpty()) {
                         $q->whereIn('course_id', $courseIds)
@@ -1333,7 +1351,7 @@ class TeacherController extends Controller
         ]);
     }
 
-   public function deleteLessonFile($id)
+    public function deleteLessonFile($id)
     {
         try {
             $lessonFile = LessonFile::select('id', 'lesson_id', 'file_name', 'file_path')->find($id);
@@ -1341,6 +1359,12 @@ class TeacherController extends Controller
                 return response()->json([
                     'message' => 'បានលុបឯកសារដោយជោគជ័យ',
                 ]);
+            }
+
+            // ✅ ផ្ទៀងផ្ទាត់សិទ្ធិគ្រូមុនពេលលុបឯកសារ
+            $lesson = Lesson::select('id', 'course_id', 'created_by')->find($lessonFile->lesson_id);
+            if ($lesson && (int) $lesson->created_by !== (int) auth()->id()) {
+                $this->findAuthorizedCourse($lesson->course_id);
             }
 
             if (
@@ -1416,6 +1440,12 @@ class TeacherController extends Controller
                 return response()->json([
                     'message' => 'បានលុបវីដេអូដោយជោគជ័យ',
                 ]);
+            }
+
+            // ✅ ផ្ទៀងផ្ទាត់សិទ្ធិគ្រូមុនពេលលុបវីដេអូ
+            $lesson = Lesson::select('id', 'course_id', 'created_by')->find($video->lesson_id);
+            if ($lesson && (int) $lesson->created_by !== (int) auth()->id()) {
+                $this->findAuthorizedCourse($lesson->course_id);
             }
 
             if (
@@ -2113,7 +2143,7 @@ class TeacherController extends Controller
         }
     }
 
-   public function deleteQuestion($id)
+    public function deleteQuestion($id)
     {
         try {
             $question = Question::find($id);

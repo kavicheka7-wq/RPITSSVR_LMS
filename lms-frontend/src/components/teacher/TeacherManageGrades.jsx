@@ -4,7 +4,6 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import XLSX from 'xlsx-js-style';
 import {
   BookOpenIcon,
   CheckIcon,
@@ -53,6 +52,15 @@ const GRADES_MEM_CACHE = {
   lastSyncedScoresAt: {},
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -77,7 +85,7 @@ const getAvatarMapSync = () => {
   return GRADES_MEM_CACHE.avatarMap;
 };
 
-// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 80x80px (~2KB) សម្រាប់បង្ហាញក្នុង 0ms
+// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 80x80px (~2KB) ដោយរត់នៅពេលទំនេរ
 const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
   if (!studentId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
 
@@ -92,39 +100,41 @@ const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
     map[studentId] = rawDataUrl;
   }
 
-  try {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 80;
-        let w = img.width || maxSize;
-        let h = img.height || maxSize;
-        if (w > h) {
-          if (w > maxSize) {
-            h = Math.round((h * maxSize) / w);
-            w = maxSize;
+  runWhenIdle(() => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 80;
+          let w = img.width || maxSize;
+          let h = img.height || maxSize;
+          if (w > h) {
+            if (w > maxSize) {
+              h = Math.round((h * maxSize) / w);
+              w = maxSize;
+            }
+          } else {
+            if (h > maxSize) {
+              w = Math.round((w * maxSize) / h);
+              h = maxSize;
+            }
           }
-        } else {
-          if (h > maxSize) {
-            w = Math.round((w * maxSize) / h);
-            h = maxSize;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        const tinyWebp = canvas.toDataURL('image/webp', 0.78);
-        const bestImg =
-          tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
-        map[studentId] = bestImg;
-        if (typeof onCompressed === 'function') onCompressed(studentId, bestImg);
-      } catch {}
-    };
-    img.src = rawDataUrl;
-  } catch {}
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          const tinyWebp = canvas.toDataURL('image/webp', 0.78);
+          const bestImg =
+            tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
+          map[studentId] = bestImg;
+          if (typeof onCompressed === 'function') onCompressed(studentId, bestImg);
+        } catch {}
+      };
+      img.src = rawDataUrl;
+    } catch {}
+  }, 400);
 };
 
 // ✅ ភ្ជាប់រូបភាពពី Avatar Dictionary មកដាក់ក្នុងបញ្ជីសិស្សវិញភ្លាមៗក្នុង 0ms
@@ -149,108 +159,122 @@ const hydrateStudentsWithAvatars = (list) => {
   });
 };
 
-// ✅ រក្សាទុកបញ្ជីសិស្ស (Slim JSON) និងរូបភាព Thumbnail ដាច់ដោយឡែក ការពារពេញ localStorage 100%
+// ✅ រក្សាទុកបញ្ជីសិស្ស (Slim JSON) និងរូបភាព Thumbnail នៅពេលទំនេរ ការពារទាក់អេក្រង់ និងពេញ localStorage 100%
 const persistStudentsAndAvatarsSafely = (uid, studentsList) => {
   if (!Array.isArray(studentsList)) return;
-  const avatarMap = getAvatarMapSync();
-  let pendingCompressCount = 0;
 
-  const saveAvatarMapToStorage = () => {
-    try {
-      const str = JSON.stringify(avatarMap);
-      sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
-    } catch {}
-  };
+  runWhenIdle(() => {
+    const avatarMap = getAvatarMapSync();
+    let pendingCompressCount = 0;
 
-  const slimStudents = studentsList.map((stu) => {
-    if (!stu || typeof stu !== 'object') return stu;
-    const rawImg = stu.profile_image || stu.user?.profile_image || null;
-
-    if (stu.id && rawImg) {
-      pendingCompressCount++;
-      compressStudentAvatarAsync(stu.id, rawImg, () => {
-        if (stu.user_id) {
-          avatarMap[stu.user_id] = avatarMap[stu.id];
-        }
-        pendingCompressCount--;
-        if (pendingCompressCount <= 0) {
-          saveAvatarMapToStorage();
-        }
+    const saveAvatarMapToStorage = () => {
+      runWhenIdle(() => {
+        try {
+          const str = JSON.stringify(avatarMap);
+          sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+          localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+        } catch {}
       });
+    };
+
+    const slimStudents = studentsList.map((stu) => {
+      if (!stu || typeof stu !== 'object') return stu;
+      const rawImg = stu.profile_image || stu.user?.profile_image || null;
+
+      if (stu.id && rawImg) {
+        const existingCached = avatarMap[stu.id];
+        if (!existingCached || existingCached.length > 12000) {
+          pendingCompressCount++;
+          compressStudentAvatarAsync(stu.id, rawImg, () => {
+            if (stu.user_id) {
+              avatarMap[stu.user_id] = avatarMap[stu.id];
+            }
+            pendingCompressCount--;
+            if (pendingCompressCount <= 0) {
+              saveAvatarMapToStorage();
+            }
+          });
+        }
+      }
+
+      const copy = { ...stu };
+      if (
+        typeof copy.profile_image === 'string' &&
+        copy.profile_image.startsWith('data:') &&
+        copy.profile_image.length > 12000
+      ) {
+        copy.profile_image = null;
+      }
+      if (copy.user && typeof copy.user === 'object') {
+        copy.user = {
+          id: copy.user.id,
+          status: copy.user.status,
+          email: copy.user.email,
+        };
+      }
+      return copy;
+    });
+
+    if (pendingCompressCount === 0) {
+      saveAvatarMapToStorage();
+    } else {
+      setTimeout(saveAvatarMapToStorage, 400);
     }
 
-    const copy = { ...stu };
-    if (
-      typeof copy.profile_image === 'string' &&
-      copy.profile_image.startsWith('data:') &&
-      copy.profile_image.length > 12000
-    ) {
-      copy.profile_image = null;
-    }
-    if (copy.user && typeof copy.user === 'object') {
-      copy.user = {
-        id: copy.user.id,
-        status: copy.user.status,
-        email: copy.user.email,
-      };
-    }
-    return copy;
+    try {
+      const serialized = JSON.stringify(slimStudents);
+      sessionStorage.setItem(getStudentsCacheKey(uid), serialized);
+      localStorage.setItem(getStudentsCacheKey(uid), serialized);
+      localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, serialized);
+    } catch {}
   });
-
-  if (pendingCompressCount === 0) {
-    saveAvatarMapToStorage();
-  } else {
-    setTimeout(saveAvatarMapToStorage, 300);
-  }
-
-  try {
-    const serialized = JSON.stringify(slimStudents);
-    sessionStorage.setItem(getStudentsCacheKey(uid), serialized);
-    localStorage.setItem(getStudentsCacheKey(uid), serialized);
-    localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, serialized);
-  } catch {}
 };
 
-// ✅ លុបរូបភាព Base64 ធំៗចេញពីតារាងពិន្ទុតាមមុខវិជ្ជាមុនពេល Save ចូល localStorage (ព្រោះរូបភាពមានក្នុង CACHE_KEY_STUDENT_AVATARS រួចហើយ)
+// ✅ លុបរូបភាព Base64 ធំៗចេញពីតារាងពិន្ទុតាមមុខវិជ្ជាមុនពេល Save ចូល localStorage នៅពេលទំនេរ
 const persistCourseScoresSafely = (uid, courseId, scoresList) => {
   if (!courseId || !Array.isArray(scoresList)) return;
-  const avatarMap = getAvatarMapSync();
 
-  const slimScores = scoresList.map((row) => {
-    if (!row || typeof row !== 'object') return row;
-    const rawImg =
-      row.profile_image ||
-      row.student?.profile_image ||
-      row.user?.profile_image ||
-      null;
-    const recId = row.student_record_id || row.id;
-    if (recId && rawImg) {
-      compressStudentAvatarAsync(recId, rawImg, (_, compressed) => {
-        if (row.student_id) avatarMap[row.student_id] = compressed;
-      });
-    }
+  runWhenIdle(() => {
+    const avatarMap = getAvatarMapSync();
 
-    const copy = { ...row };
-    if (
-      typeof copy.profile_image === 'string' &&
-      copy.profile_image.startsWith('data:') &&
-      copy.profile_image.length > 12000
-    ) {
-      copy.profile_image = null;
-    }
-    if (copy.student && typeof copy.student === 'object') {
-      const { profile_image, ...restStudent } = copy.student;
-      copy.student = restStudent;
-    }
-    return copy;
+    const slimScores = scoresList.map((row) => {
+      if (!row || typeof row !== 'object') return row;
+      const rawImg =
+        row.profile_image ||
+        row.student?.profile_image ||
+        row.user?.profile_image ||
+        null;
+      const recId = row.student_record_id || row.id;
+      if (recId && rawImg) {
+        const existingCached = avatarMap[recId];
+        if (!existingCached || existingCached.length > 12000) {
+          compressStudentAvatarAsync(recId, rawImg, (_, compressed) => {
+            if (row.student_id) avatarMap[row.student_id] = compressed;
+          });
+        }
+      }
+
+      const copy = { ...row };
+      if (
+        typeof copy.profile_image === 'string' &&
+        copy.profile_image.startsWith('data:') &&
+        copy.profile_image.length > 12000
+      ) {
+        copy.profile_image = null;
+      }
+      if (copy.student && typeof copy.student === 'object') {
+        const { profile_image, ...restStudent } = copy.student;
+        copy.student = restStudent;
+      }
+      return copy;
+    });
+
+    try {
+      const str = JSON.stringify(slimScores);
+      sessionStorage.setItem(getCourseScoresCacheKey(uid, courseId), str);
+      localStorage.setItem(getCourseScoresCacheKey(uid, courseId), str);
+    } catch {}
   });
-
-  try {
-    const str = JSON.stringify(slimScores);
-    sessionStorage.setItem(getCourseScoresCacheKey(uid, courseId), str);
-    localStorage.setItem(getCourseScoresCacheKey(uid, courseId), str);
-  } catch {}
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
@@ -1177,7 +1201,7 @@ const TeacherManageGrades = () => {
       return;
     }
 
-    // ១. ទាញបញ្ជីសិស្សមុនគេ និងបង្រួមរូបភាពទុកក្នុង Avatar Dictionary
+    // ១. ទាញបញ្ជីសិស្សមុនគេ និងបង្រួមរូបភាពទុកក្នុង Avatar Dictionary នៅពេលទំនេរ
     api
       .get('/teacher/students')
       .then((stdRes) => {
@@ -1195,18 +1219,20 @@ const TeacherManageGrades = () => {
         if (stdRes.data?.course_students_map) {
           setCourseMap(stdRes.data.course_students_map);
           GRADES_MEM_CACHE.courseMap = stdRes.data.course_students_map;
-          try {
-            const mapStr = JSON.stringify(stdRes.data.course_students_map);
-            sessionStorage.setItem(
-              getCourseMapCacheKey(currentTeacherId),
-              mapStr
-            );
-            localStorage.setItem(
-              getCourseMapCacheKey(currentTeacherId),
-              mapStr
-            );
-            localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
-          } catch {}
+          runWhenIdle(() => {
+            try {
+              const mapStr = JSON.stringify(stdRes.data.course_students_map);
+              sessionStorage.setItem(
+                getCourseMapCacheKey(currentTeacherId),
+                mapStr
+              );
+              localStorage.setItem(
+                getCourseMapCacheKey(currentTeacherId),
+                mapStr
+              );
+              localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
+            } catch {}
+          });
         }
       })
       .catch(() => {});
@@ -1220,12 +1246,14 @@ const TeacherManageGrades = () => {
         const latestCourses = Array.isArray(rawCrs) ? rawCrs : [];
         setCourses(latestCourses);
         GRADES_MEM_CACHE.courses = latestCourses;
-        try {
-          const crsStr = JSON.stringify(latestCourses);
-          sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
-          localStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
-          localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
-        } catch {}
+        runWhenIdle(() => {
+          try {
+            const crsStr = JSON.stringify(latestCourses);
+            sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+            localStorage.setItem(getCoursesCacheKey(currentTeacherId), crsStr);
+            localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
+          } catch {}
+        });
       })
       .catch(() => {});
 
@@ -1269,6 +1297,14 @@ const TeacherManageGrades = () => {
   const fetchScoresInBackground = async (yearKey, courseId) => {
     if (!courseId) return;
     const cid = String(courseId);
+
+    // ✅ ឆែក Cache មុនសិន៖ បើទើបទាញពិន្ទុមុខវិជ្ជានេះក្រោម 25 វិនាទី មិនបាច់បាញ់ API ជាន់គ្នាទេ
+    if (
+      GRADES_MEM_CACHE.scoresByCourse[cid] &&
+      Date.now() - (GRADES_MEM_CACHE.lastSyncedScoresAt[cid] || 0) < 25000
+    ) {
+      return;
+    }
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -1376,12 +1412,14 @@ const TeacherManageGrades = () => {
         ...(GRADES_MEM_CACHE.examScoresMap || {}),
         [examKey]: value,
       };
-      try {
-        localStorage.setItem(
-          getExamScoresMapKey(currentTeacherId),
-          JSON.stringify(GRADES_MEM_CACHE.examScoresMap)
-        );
-      } catch {}
+      runWhenIdle(() => {
+        try {
+          localStorage.setItem(
+            getExamScoresMapKey(currentTeacherId),
+            JSON.stringify(GRADES_MEM_CACHE.examScoresMap)
+          );
+        } catch {}
+      });
     }
 
     setStudentScores((prev) =>
@@ -1555,9 +1593,9 @@ const TeacherManageGrades = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ មុខងារនាំចេញតារាងពិន្ទុទៅជាឯកសារ Excel (.xlsx)
+  // 📌 ផ្នែកទី៤៖ មុខងារនាំចេញតារាងពិន្ទុទៅជាឯកសារ Excel (.xlsx) ដោយប្រើ Dynamic Import
   // ============================================================================
-  const applyExcelStyling = (worksheet, colWidths = [], textColumnIndices = []) => {
+  const applyExcelStyling = (XLSX, worksheet, colWidths = [], textColumnIndices = []) => {
     if (!worksheet || !worksheet['!ref']) return;
     const range = XLSX.utils.decode_range(worksheet['!ref']);
 
@@ -1618,10 +1656,13 @@ const TeacherManageGrades = () => {
     worksheet['!rows'] = rows;
   };
 
-  const handleExportExcel = () => {
+  // ✅ ទាញ Library xlsx-js-style តែពេលគ្រូចុចប៊ូតុង Export Excel ប៉ុណ្ណោះ (កាត់បន្ថយទំហំទំព័រដំបូង ~1MB)
+  const handleExportExcel = async () => {
     if (!filteredScores || filteredScores.length === 0) {
       return;
     }
+
+    const { default: XLSX } = await import('xlsx-js-style');
 
     const exportData = filteredScores.map((item, idx) => {
       const { total, isPassed } = calculateRowMetrics(
@@ -1699,7 +1740,7 @@ const TeacherManageGrades = () => {
       { wch: 16 },
       { wch: 22 },
     ];
-    applyExcelStyling(worksheet, colWidths, [1]);
+    applyExcelStyling(XLSX, worksheet, colWidths, [1]);
 
     const yearSuffix = selectedYear !== 'all' ? `_Year${selectedYear}` : '';
     const courseSuffix = activeCourseObj?.course_code
@@ -1811,13 +1852,14 @@ const TeacherManageGrades = () => {
       {/* 1. HEADER BANNER (Dark Blue Gradient)                              */}
       {/* ================================================================== */}
       <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 sm:p-8 shadow-xl border border-blue-900">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-3">
             <h1 className="text-2xl sm:text-[28px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+              <div className="p-3 bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                 <ChartBarIcon className="w-7 h-7 sm:w-8 sm:h-8 text-yellow-400" />
               </div>
               <span>{t('បញ្ជីពិន្ទុសិស្សសរុប', 'Student Grades Management')}</span>

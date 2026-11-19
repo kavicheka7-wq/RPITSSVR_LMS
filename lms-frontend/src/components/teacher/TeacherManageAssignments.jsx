@@ -4,7 +4,6 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import XLSX from 'xlsx-js-style';
 import {
   ClipboardDocumentListIcon,
   PlusIcon,
@@ -56,6 +55,15 @@ const ASSIGNMENTS_MEM_CACHE = {
   courseMap: null,
   submissionsByAssignment: {},
   lastSyncedAt: 0,
+};
+
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
 };
 
 const readStorageJson = (key, fallback) => {
@@ -638,12 +646,14 @@ export default function TeacherManageAssignments() {
         if (validAssignments.length > 0) {
           ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
         }
-        try {
-          const str = JSON.stringify(validAssignments);
-          sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-          localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-        } catch (e) {}
+        runWhenIdle(() => {
+          try {
+            const str = JSON.stringify(validAssignments);
+            sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+            localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+            localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
+          } catch (e) {}
+        });
       })
       .catch((error) => {
         console.error('Error syncing assignments data:', error);
@@ -659,12 +669,14 @@ export default function TeacherManageAssignments() {
         if (validCourses.length > 0 || !ASSIGNMENTS_MEM_CACHE.courses?.length) {
           setCourses(validCourses);
           ASSIGNMENTS_MEM_CACHE.courses = validCourses;
-          try {
-            const str = JSON.stringify(validCourses);
-            sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
-            localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
-            localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
-          } catch (e) {}
+          runWhenIdle(() => {
+            try {
+              const str = JSON.stringify(validCourses);
+              sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+              localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
+              localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
+            } catch (e) {}
+          });
         }
       })
       .catch(() => {});
@@ -686,37 +698,41 @@ export default function TeacherManageAssignments() {
           ) {
             setAllStudents(validStudents);
             ASSIGNMENTS_MEM_CACHE.allStudents = validStudents;
-            try {
-              const slimStr = JSON.stringify(
-                stripHeavyStudentsForCache(validStudents)
-              );
-              sessionStorage.setItem(
-                getStudentsCacheKey(currentTeacherId),
-                slimStr
-              );
-              localStorage.setItem(
-                getStudentsCacheKey(currentTeacherId),
-                slimStr
-              );
-              localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
-            } catch (e) {}
+            runWhenIdle(() => {
+              try {
+                const slimStr = JSON.stringify(
+                  stripHeavyStudentsForCache(validStudents)
+                );
+                sessionStorage.setItem(
+                  getStudentsCacheKey(currentTeacherId),
+                  slimStr
+                );
+                localStorage.setItem(
+                  getStudentsCacheKey(currentTeacherId),
+                  slimStr
+                );
+                localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
+              } catch (e) {}
+            });
           }
 
           if (stdRes.data?.course_students_map) {
             setCourseMap(stdRes.data.course_students_map);
             ASSIGNMENTS_MEM_CACHE.courseMap = stdRes.data.course_students_map;
-            try {
-              const mapStr = JSON.stringify(stdRes.data.course_students_map);
-              sessionStorage.setItem(
-                getCourseMapCacheKey(currentTeacherId),
-                mapStr
-              );
-              localStorage.setItem(
-                getCourseMapCacheKey(currentTeacherId),
-                mapStr
-              );
-              localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
-            } catch (e) {}
+            runWhenIdle(() => {
+              try {
+                const mapStr = JSON.stringify(stdRes.data.course_students_map);
+                sessionStorage.setItem(
+                  getCourseMapCacheKey(currentTeacherId),
+                  mapStr
+                );
+                localStorage.setItem(
+                  getCourseMapCacheKey(currentTeacherId),
+                  mapStr
+                );
+                localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
+              } catch (e) {}
+            });
           }
         })
         .catch(() => {});
@@ -740,12 +756,14 @@ export default function TeacherManageAssignments() {
       if (validAssignments.length > 0) {
         ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
       }
-      try {
-        const str = JSON.stringify(validAssignments);
-        sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-        localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-      } catch (e) {}
+      runWhenIdle(() => {
+        try {
+          const str = JSON.stringify(validAssignments);
+          sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+          localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+          localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
+        } catch (e) {}
+      });
     } catch (error) {
       console.error('Error fetching assignments:', error);
     }
@@ -1216,12 +1234,14 @@ export default function TeacherManageAssignments() {
               : a
           );
           ASSIGNMENTS_MEM_CACHE.assignments = updated;
-          try {
-            const str = JSON.stringify(updated);
-            sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-            localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-            localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-          } catch (e) {}
+          runWhenIdle(() => {
+            try {
+              const str = JSON.stringify(updated);
+              sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+              localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+              localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
+            } catch (e) {}
+          });
           return updated;
         });
 
@@ -1248,12 +1268,14 @@ export default function TeacherManageAssignments() {
         setAssignments((prev) => {
           const updated = [createdAsg, ...prev];
           ASSIGNMENTS_MEM_CACHE.assignments = updated;
-          try {
-            const str = JSON.stringify(updated);
-            sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-            localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-            localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-          } catch (e) {}
+          runWhenIdle(() => {
+            try {
+              const str = JSON.stringify(updated);
+              sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+              localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+              localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
+            } catch (e) {}
+          });
           return updated;
         });
 
@@ -1293,12 +1315,14 @@ export default function TeacherManageAssignments() {
     setAssignments((prev) => {
       const updated = prev.filter((a) => a.id !== deletedId);
       ASSIGNMENTS_MEM_CACHE.assignments = updated;
-      try {
-        const str = JSON.stringify(updated);
-        sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-        localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-      } catch (e) {}
+      runWhenIdle(() => {
+        try {
+          const str = JSON.stringify(updated);
+          sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+          localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+          localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
+        } catch (e) {}
+      });
       return updated;
     });
 
@@ -1317,12 +1341,14 @@ export default function TeacherManageAssignments() {
       console.error('Delete assignment error:', error);
       setAssignments(previousAssignments);
       ASSIGNMENTS_MEM_CACHE.assignments = previousAssignments;
-      try {
-        const str = JSON.stringify(previousAssignments);
-        sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-        localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-      } catch (e) {}
+      runWhenIdle(() => {
+        try {
+          const str = JSON.stringify(previousAssignments);
+          sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+          localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
+          localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
+        } catch (e) {}
+      });
     }
   };
 
@@ -1382,20 +1408,22 @@ export default function TeacherManageAssignments() {
       initGradingState(validSubs);
       ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[assignment.id] = validSubs;
 
-      // ✅ សម្អាតទិន្នន័យធ្ងន់ៗមុនពេលរក្សាទុកចូល Storage ការពារពេញ localStorage
-      try {
-        const slimSubsStr = JSON.stringify(
-          stripHeavySubmissionsForCache(validSubs)
-        );
-        sessionStorage.setItem(
-          getSubmissionsCacheKey(currentTeacherId, assignment.id),
-          slimSubsStr
-        );
-        localStorage.setItem(
-          getSubmissionsCacheKey(currentTeacherId, assignment.id),
-          slimSubsStr
-        );
-      } catch (e) {}
+      // ✅ សម្អាតទិន្នន័យធ្ងន់ៗមុនពេលរក្សាទុកចូល Storage នៅពេល Browser ទំនេរ
+      runWhenIdle(() => {
+        try {
+          const slimSubsStr = JSON.stringify(
+            stripHeavySubmissionsForCache(validSubs)
+          );
+          sessionStorage.setItem(
+            getSubmissionsCacheKey(currentTeacherId, assignment.id),
+            slimSubsStr
+          );
+          localStorage.setItem(
+            getSubmissionsCacheKey(currentTeacherId, assignment.id),
+            slimSubsStr
+          );
+        } catch (e) {}
+      });
     } catch (error) {
       console.error('Fetch submissions error:', error);
     }
@@ -1460,31 +1488,33 @@ export default function TeacherManageAssignments() {
         if (viewingAssignment) {
           ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[viewingAssignment.id] =
             updatedSubs;
-          try {
-            const slimSubsStr = JSON.stringify(
-              stripHeavySubmissionsForCache(updatedSubs)
-            );
-            sessionStorage.setItem(
-              getSubmissionsCacheKey(currentTeacherId, viewingAssignment.id),
-              slimSubsStr
-            );
-            localStorage.setItem(
-              getSubmissionsCacheKey(currentTeacherId, viewingAssignment.id),
-              slimSubsStr
-            );
-            if (viewingAssignment.course_id) {
-              const scoreKeysToClear = [
-                `cached_teacher_course_scores_v8_${currentTeacherId}_${viewingAssignment.course_id}`,
-                `cached_teacher_course_scores_v9_${currentTeacherId}_${viewingAssignment.course_id}`,
-              ];
-              scoreKeysToClear.forEach((k) => {
-                try {
-                  sessionStorage.removeItem(k);
-                  localStorage.removeItem(k);
-                } catch {}
-              });
-            }
-          } catch (e) {}
+          runWhenIdle(() => {
+            try {
+              const slimSubsStr = JSON.stringify(
+                stripHeavySubmissionsForCache(updatedSubs)
+              );
+              sessionStorage.setItem(
+                getSubmissionsCacheKey(currentTeacherId, viewingAssignment.id),
+                slimSubsStr
+              );
+              localStorage.setItem(
+                getSubmissionsCacheKey(currentTeacherId, viewingAssignment.id),
+                slimSubsStr
+              );
+              if (viewingAssignment.course_id) {
+                const scoreKeysToClear = [
+                  `cached_teacher_course_scores_v8_${currentTeacherId}_${viewingAssignment.course_id}`,
+                  `cached_teacher_course_scores_v9_${currentTeacherId}_${viewingAssignment.course_id}`,
+                ];
+                scoreKeysToClear.forEach((k) => {
+                  try {
+                    sessionStorage.removeItem(k);
+                    localStorage.removeItem(k);
+                  } catch {}
+                });
+              }
+            } catch (e) {}
+          });
         }
         return updatedSubs;
       });
@@ -1508,7 +1538,7 @@ export default function TeacherManageAssignments() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ អនុគមន៍ជំនួយ និងការនាំចេញឯកសារ Excel (.xlsx)
+  // 📌 ផ្នែកទី៥៖ អនុគមន៍ជំនួយ និងការនាំចេញឯកសារ Excel (.xlsx) ដោយប្រើ Dynamic Import
   // ============================================================================
   const getFileUrl = (fileOrSub) => {
     const rawPath =
@@ -1622,7 +1652,7 @@ export default function TeacherManageAssignments() {
     return `${month} ${day}, ${year}, ${String(hours).padStart(2, '0')}:${minutes} ${period}`;
   };
 
-  const applyExcelStyling = (worksheet, colWidths = [], textColumnIndices = []) => {
+  const applyExcelStyling = (XLSX, worksheet, colWidths = [], textColumnIndices = []) => {
     if (!worksheet || !worksheet['!ref']) return;
     const range = XLSX.utils.decode_range(worksheet['!ref']);
 
@@ -1683,11 +1713,13 @@ export default function TeacherManageAssignments() {
     worksheet['!rows'] = rows;
   };
 
-  // ១. នាំចេញបញ្ជីកិច្ចការទៅជា Excel
-  const handleExportAssignmentsExcel = () => {
+  // ✅ ១. នាំចេញបញ្ជីកិច្ចការទៅជា Excel (ទាញ xlsx-js-style តែពេលចុចប៊ូតុង Export ប៉ុណ្ណោះ)
+  const handleExportAssignmentsExcel = async () => {
     if (filteredAssignments.length === 0) {
       return;
     }
+
+    const { default: XLSX } = await import('xlsx-js-style');
 
     const exportData = filteredAssignments.map((item, idx) => {
       const matchedCourse = enrichedCourses.find(
@@ -1721,7 +1753,7 @@ export default function TeacherManageAssignments() {
       { wch: 22 },
       { wch: 36 },
     ];
-    applyExcelStyling(worksheet, colWidths, []);
+    applyExcelStyling(XLSX, worksheet, colWidths, []);
 
     const yearSuffix = selectedYear !== 'all' ? `_Year${selectedYear}` : '';
     const courseSuffix = activeCourseObj?.course_code
@@ -1745,11 +1777,13 @@ export default function TeacherManageAssignments() {
     });
   };
 
-  // ✅ ២. នាំចេញតារាងពិន្ទុសិស្សដាក់កិច្ចការក្នុង Modal ទៅជា Excel
-  const handleExportSubmissionsExcel = () => {
+  // ✅ ២. នាំចេញតារាងពិន្ទុសិស្សដាក់កិច្ចការក្នុង Modal ទៅជា Excel (Dynamic Import)
+  const handleExportSubmissionsExcel = async () => {
     if (!viewingAssignment || submissions.length === 0) {
       return;
     }
+
+    const { default: XLSX } = await import('xlsx-js-style');
 
     const dueTimeMs = toComparableTimeMs(viewingAssignment.due_date);
 
@@ -1796,7 +1830,7 @@ export default function TeacherManageAssignments() {
       { wch: 16 },
       { wch: 32 },
     ];
-    applyExcelStyling(worksheet, colWidths, []);
+    applyExcelStyling(XLSX, worksheet, colWidths, []);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Submissions');
@@ -1900,13 +1934,14 @@ export default function TeacherManageAssignments() {
       {/* 1. HEADER BANNER                                                   */}
       {/* ================================================================== */}
       <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 sm:p-8 shadow-xl border border-blue-900">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-3">
             <h1 className="text-2xl sm:text-[28px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+              <div className="p-3 bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                 <ClipboardDocumentListIcon className="w-7 h-7 sm:w-8 sm:h-8 text-yellow-400" />
               </div>
               <span>{t('គ្រប់គ្រងកិច្ចការ និងលំហាត់', 'Manage Assignments & Homework')}</span>
@@ -2422,7 +2457,7 @@ export default function TeacherManageAssignments() {
           });
 
           return (
-            <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-md p-4">
+            <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-950/65 md:backdrop-blur-md p-4">
               <div className="asg-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-5xl flex flex-col max-h-[90vh] overflow-hidden border border-gray-200 dark:border-slate-700/80 animate-fadeIn">
                 
                 {/* Modal Header */}
@@ -2844,7 +2879,7 @@ export default function TeacherManageAssignments() {
       {/* MODAL - 2: Add / Edit Assignment                                   */}
       {/* ================================================================== */}
       {showAddModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4">
+        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-4">
           <div className="asg-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
             
             {/* Modal Header */}
@@ -3000,7 +3035,7 @@ export default function TeacherManageAssignments() {
       {/* MODAL - 3: Delete Confirmation                                     */}
       {/* ================================================================== */}
       {showDeleteModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4">
+        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-4">
           <div className="asg-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-md p-8 animate-fadeIn border border-transparent">
             <div className="flex items-center text-rose-600 dark:text-rose-400 mb-5">
               <div className="asg-pill-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
