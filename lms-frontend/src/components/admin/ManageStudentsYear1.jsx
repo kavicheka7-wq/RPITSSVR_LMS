@@ -361,8 +361,8 @@ const formatDateOnly = (dateVal) => {
 
 const getStudentFullName = (person) => {
   if (!person) return '';
-  const firstLast = `${person.first_name || ''} ${person.last_name || ''}`.trim();
-  if (firstLast) return firstLast;
+  const full = `${person.last_name || ''} ${person.first_name || ''}`.trim();
+  if (full) return full;
   return person.full_name || person.name || '';
 };
 
@@ -1961,18 +1961,18 @@ const ManageStudentsYear1 = () => {
           ? allDeptNames.join(' + ')
           : getDepartmentDisplayName(s.department || activeDepartmentObj);
 
-      return {
+return {
         'ល.រ': idx + 1,
         'អត្តលេខសិស្ស': s.student_code || '',
-        'នាមខ្លួន': s.first_name || '',
         'នាមត្រកូល': s.last_name || '',
-        'ភេទ': s.gender || '',
+        'នាមខ្លួន': s.first_name || '',
+        'ភេទ': getGenderLabel(s.gender),
         'អ៊ីមែល': maskEmailAddress(s.email || ''),
         'លេខទូរស័ព្ទ': s.phone || '',
         'ដេប៉ាតឺម៉ង់': deptDisplay,
         'ឆ្នាំសិក្សា': s.batch_year || 'ជំនាន់ទី , ឆ្នាំទី1',
-        'កម្រិតសិក្សា': s.degree_level || '',
-        'វេនសិក្សា': s.study_shift || '',
+        'កម្រិតសិក្សា': getDegreeLevelLabel(s.degree_level),
+        'វេនសិក្សា': getStudyShiftLabel(s.study_shift),
       };
     });
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -2020,60 +2020,57 @@ const ManageStudentsYear1 = () => {
     const defaultDeptName = activeDepartmentObj
       ? getDepartmentDisplayName(activeDepartmentObj)
       : '';
-    const defaultShift =
-      selectedShift !== 'all' ? selectedShift : 'Monday-Friday';
+    const defaultShiftKm =
+      selectedShift === 'Saturday-Sunday' ? 'សៅរ៍-អាទិត្យ' : 'ចន្ទ-សុក្រ';
 
-    const blankRow = () => ({
-      first_name: '',
-      last_name: '',
-      email: '',
-      phone: '',
-      gender: '',
-      student_code: '',
-      department: defaultDeptName,
-      batch_year: 'ជំនាន់ទី , ឆ្នាំទី1',
-      degree_level: 'Bachelor Degree',
-      study_shift: defaultShift,
-      address: '',
-      date_of_birth: '',
-      password: '',
+const blankRow = () => ({
+      'នាមត្រកូល': '',
+      'នាមខ្លួន': '',
+      'អ៊ីមែល': '',
+      'លេខទូរស័ព្ទ': '',
+      'ភេទ': '',
+      'អត្តលេខសិស្ស': '',
+      'ដេប៉ាតឺម៉ង់': defaultDeptName,
+      'ជំនាន់/ឆ្នាំសិក្សា': 'ជំនាន់ទី , ឆ្នាំទី1',
+      'កម្រិតសិក្សា': 'បរិញ្ញាបត្រ',
+      'វេនសិក្សា': defaultShiftKm,
+      'អាសយដ្ឋាន': '',
+      'ថ្ងៃខែឆ្នាំកំណើត': '',
+      'ពាក្យសម្ងាត់': '',
     });
 
     const templateData = Array.from({ length: 50 }, () => blankRow());
-
     const worksheet = XLSX.utils.json_to_sheet(templateData);
 
     const colWidths = [
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 25 },
-      { wch: 15 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 26 },
+      { wch: 16 },
       { wch: 10 },
       { wch: 18 },
-      { wch: 25 },
+      { wch: 26 },
       { wch: 24 },
       { wch: 20 },
       { wch: 18 },
-      { wch: 20 },
-      { wch: 15 },
-      { wch: 15 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 16 },
     ];
     applyExcelStyling(XLSX, worksheet, colWidths, [3, 5, 7, 11, 12]);
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'គំរូសិស្សឆ្នាំទី១');
     const safeDeptSuffix = defaultDeptName
       ? `_${defaultDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}`
       : '';
-    XLSX.writeFile(workbook, `student_year1_template${safeDeptSuffix}.xlsx`);
+    XLSX.writeFile(workbook, `គំរូ_សិស្សឆ្នាំទី១${safeDeptSuffix}.xlsx`);
 
     pushLocalNotification({
       titleKm: 'បានទាញយកទម្រង់គំរូ Excel',
       titleEn: 'Excel Template Downloaded',
-      descKm:
-        'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យសិស្សត្រូវបានទាញយកជោគជ័យ។',
-      descEn:
-        'The Excel template for student import was downloaded successfully.',
+      descKm: 'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យសិស្សត្រូវបានទាញយកជោគជ័យ។',
+      descEn: 'The Excel template for student import was downloaded successfully.',
       category: 'download',
       link: '/students/year-1',
     });
@@ -2203,13 +2200,15 @@ const ManageStudentsYear1 = () => {
             }
           }
 
-          let gender = item.gender;
-          if (gender === 'ប្រុស' || gender === 'Male' || gender === 'M')
+        const rawGender = (item.gender || '').toString().trim().toLowerCase();
+          let gender = 'Male';
+          if (rawGender === 'ប្រុស' || rawGender === 'male' || rawGender === 'm') {
             gender = 'Male';
-          else if (gender === 'ស្រី' || gender === 'Female' || gender === 'F')
+          } else if (rawGender === 'ស្រី' || rawGender === 'female' || rawGender === 'f') {
             gender = 'Female';
-          else if (gender) gender = 'Other';
-          else gender = 'Male';
+          } else if (rawGender) {
+            gender = 'Other';
+          }
 
           let studyShift = item.study_shift
             ? normalizeShiftKey(item.study_shift)
@@ -3487,6 +3486,22 @@ const ManageStudentsYear1 = () => {
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                 <div>
+                    <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
+                      {t('នាមត្រកូល', 'Last Name')}{' '}
+                      <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="last_name"
+                      required
+                      value={formData.last_name}
+                      onChange={handleInputChange}
+                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
+                      placeholder=""
+                    />
+                  </div>
+
                   <div>
                     <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
                       {t('នាមខ្លួន', 'First Name')}{' '}
@@ -3499,23 +3514,7 @@ const ManageStudentsYear1 = () => {
                       value={formData.first_name}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
-                      placeholder={t('បញ្ចូលនាមខ្លួន...', 'Enter first name...')}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="std-label block text-sm font-bold text-gray-700 mb-1.5">
-                      {t('នាមត្រកូល', 'Last Name')}{' '}
-                      <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      name="last_name"
-                      required
-                      value={formData.last_name}
-                      onChange={handleInputChange}
-                      className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
-                      placeholder={t('បញ្ចូលនាមត្រកូល...', 'Enter last name...')}
+                      placeholder=""
                     />
                   </div>
 
@@ -3549,11 +3548,7 @@ const ManageStudentsYear1 = () => {
                         }
                       }}
                       onChange={handleInputChange}
-                      placeholder={
-                        editingStudent
-                          ? maskEmailAddress(editingStudent.email || '')
-                          : 'student@example.com'
-                      }
+                      placeholder=""
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
                     />
                   </div>
@@ -3568,7 +3563,7 @@ const ManageStudentsYear1 = () => {
                       value={formData.phone}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
-                      placeholder={t('ឧ. 012 345 678', 'e.g. 012 345 678')}
+                      placeholder=""
                     />
                   </div>
 
@@ -3582,7 +3577,7 @@ const ManageStudentsYear1 = () => {
                       value={formData.student_code}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
-                      placeholder={t('ឧ. STU-001', 'e.g. STU-001')}
+                      placeholder={t('IT-Y1-001', 'IT-Y1-001')}
                     />
                   </div>
 
@@ -3660,7 +3655,7 @@ const ManageStudentsYear1 = () => {
                       value={formData.batch_year}
                       onChange={handleInputChange}
                       className="std-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-colors shadow-sm"
-                      placeholder={t('ឧ. ជំនាន់ទី១៥, ឆ្នាំទី១', 'e.g. Batch 15, Year 1')}
+                      placeholder={t('ជំនាន់ទី, ឆ្នាំទី', 'Batch, Year')}
                     />
                   </div>
 
