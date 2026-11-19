@@ -602,180 +602,186 @@ class StudentController extends Controller
         });
     }
 
- // Dashboard
+    // ✅ Dashboard (បើកប្រើ Cache 30 វិនាទី ដើម្បីកាត់បន្ថយបន្ទុក MySQL និងឆ្លើយតបលឿនបំផុត)
     public function dashboard()
     {
         try {
             $student = auth()->user();
-            $studentIds = $this->getStudentAllIds($student);
+            $cacheKey = "student_dashboard_fast_v5_{$student->id}";
 
-            $enrollments = Enrollment::whereIn('student_id', $studentIds)
-                ->with(['course' => function ($query) {
-                    $query->with(['department'])
+            $payload = Cache::remember($cacheKey, 30, function () use ($student) {
+                $studentIds = $this->getStudentAllIds($student);
+
+                $enrollments = Enrollment::whereIn('student_id', $studentIds)
+                    ->with(['course' => function ($query) {
+                        $query->with(['department'])
+                            ->withCount(['lessons', 'assignments', 'quizzes']);
+                    }])
+                    ->get();
+
+                if ($enrollments->isEmpty()) {
+                    $deptId = $this->resolveStudentDepartmentId($student);
+                    $deptCoursesQuery = Course::with(['department'])
                         ->withCount(['lessons', 'assignments', 'quizzes']);
-                }])
-                ->get();
 
-            if ($enrollments->isEmpty()) {
-                $deptId = $this->resolveStudentDepartmentId($student);
-                $deptCoursesQuery = Course::with(['department'])
-                    ->withCount(['lessons', 'assignments', 'quizzes']);
+                    if ($deptId) {
+                        $deptCoursesQuery->where('department_id', $deptId);
+                    }
 
-                if ($deptId) {
-                    $deptCoursesQuery->where('department_id', $deptId);
+                    $deptCourses = $deptCoursesQuery->get();
+
+                    $enrollments = $deptCourses->map(function ($course) use ($student) {
+                        $fakeEnrollment = new Enrollment([
+                            'student_id' => $student->id,
+                            'course_id' => $course->id,
+                            'status' => 'active',
+                        ]);
+                        $fakeEnrollment->id = $course->id;
+                        $fakeEnrollment->setRelation('course', $course);
+                        return $fakeEnrollment;
+                    });
                 }
 
-                $deptCourses = $deptCoursesQuery->get();
+                $coursesList = $enrollments->pluck('course')->filter()->values();
+                $this->preloadTeachersForCourses($coursesList);
 
-                $enrollments = $deptCourses->map(function ($course) use ($student) {
-                    $fakeEnrollment = new Enrollment([
-                        'student_id' => $student->id,
-                        'course_id' => $course->id,
-                        'status' => 'active',
-                    ]);
-                    $fakeEnrollment->id = $course->id;
-                    $fakeEnrollment->setRelation('course', $course);
-                    return $fakeEnrollment;
-                });
-            }
+                $stats = [
+                    'total_courses' => $coursesList->count(),
+                    'total_lessons' => 0,
+                    'total_assignments' => 0,
+                    'total_quizzes' => 0,
+                    'average_score' => 0,
+                ];
 
-            $coursesList = $enrollments->pluck('course')->filter()->values();
-            $this->preloadTeachersForCourses($coursesList);
+                foreach ($enrollments as $enrollment) {
+                    if ($enrollment->course) {
+                        $teacherData = $this->formatTeacherData($enrollment->course, true);
+                        $enrollment->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
+                        $enrollment->course->setAttribute('teacher_profile', $teacherData);
+                        $enrollment->course->setAttribute('teacher', $teacherData);
 
-            $stats = [
-                'total_courses' => $coursesList->count(),
-                'total_lessons' => 0,
-                'total_assignments' => 0,
-                'total_quizzes' => 0,
-                'average_score' => 0,
-            ];
-
-            foreach ($enrollments as $enrollment) {
-                if ($enrollment->course) {
-                    $teacherData = $this->formatTeacherData($enrollment->course, true);
-                    $enrollment->course->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
-                    $enrollment->course->setAttribute('teacher_profile', $teacherData);
-                    $enrollment->course->setAttribute('teacher', $teacherData);
-
-                    $stats['total_lessons'] += (int) ($enrollment->course->lessons_count ?? 0);
-                    $stats['total_assignments'] += (int) ($enrollment->course->assignments_count ?? 0);
-                    $stats['total_quizzes'] += (int) ($enrollment->course->quizzes_count ?? 0);
+                        $stats['total_lessons'] += (int) ($enrollment->course->lessons_count ?? 0);
+                        $stats['total_assignments'] += (int) ($enrollment->course->assignments_count ?? 0);
+                        $stats['total_quizzes'] += (int) ($enrollment->course->quizzes_count ?? 0);
+                    }
                 }
-            }
 
-            // ✅ គណនាពិន្ទុបូកបញ្ចូលគ្នាតាមផ្នែកដែលគ្រូបានដាក់ និងរក្សាទុក (កិច្ចការ 20% + សំណួរខ្លី 20% + ពាក់កណ្ដាលឆមាស 25% + ប្រឡងឆមាស 35% = 100 ពិន្ទុ)
-            $courseIds = $coursesList->pluck('id')->filter()->values();
-            $grades = Grade::whereIn('student_id', $studentIds)->get()->keyBy('course_id');
+                // ✅ គណនាពិន្ទុបូកបញ្ចូលគ្នាតាមផ្នែកដែលគ្រូបានដាក់ និងរក្សាទុក (កិច្ចការ 20% + សំណួរខ្លី 20% + ពាក់កណ្ដាលឆមាស 25% + ប្រឡងឆមាស 35% = 100 ពិន្ទុ)
+                $courseIds = $coursesList->pluck('id')->filter()->values();
+                $grades = Grade::whereIn('student_id', $studentIds)->get()->keyBy('course_id');
 
-            $allAssignments = $courseIds->isNotEmpty()
-                ? Assignment::select('id', 'course_id', 'total_score')
-                    ->whereIn('course_id', $courseIds)
-                    ->get()
+                $allAssignments = $courseIds->isNotEmpty()
+                    ? Assignment::select('id', 'course_id', 'total_score')
+                        ->whereIn('course_id', $courseIds)
+                        ->get()
                     : collect();
-            $allAssignIds = $allAssignments->pluck('id');
+                $allAssignIds = $allAssignments->pluck('id');
 
-            $gradedSubmissions = $allAssignIds->isNotEmpty()
-                ? AssignmentSubmission::select('id', 'assignment_id', 'student_id', 'score')
-                    ->whereIn('assignment_id', $allAssignIds)
-                    ->whereIn('student_id', $studentIds)
-                    ->whereNotNull('score')
-                    ->get()
-                    ->groupBy('assignment_id')
-                : collect();
+                $gradedSubmissions = $allAssignIds->isNotEmpty()
+                    ? AssignmentSubmission::select('id', 'assignment_id', 'student_id', 'score')
+                        ->whereIn('assignment_id', $allAssignIds)
+                        ->whereIn('student_id', $studentIds)
+                        ->whereNotNull('score')
+                        ->get()
+                        ->groupBy('assignment_id')
+                    : collect();
 
-            $quizQuery = $courseIds->isNotEmpty()
-                ? Quiz::select('id', 'course_id', 'total_mark')->whereIn('course_id', $courseIds)
-                : null;
-            if ($quizQuery && $this->hasQuestionsMarkColumn()) {
-                $quizQuery->withSum('questions as questions_total_mark', 'mark');
-            }
-            $allQuizzes = $quizQuery ? $quizQuery->get() : collect();
-            $allQuizIds = $allQuizzes->pluck('id');
+                $quizQuery = $courseIds->isNotEmpty()
+                    ? Quiz::select('id', 'course_id', 'total_mark')->whereIn('course_id', $courseIds)
+                    : null;
+                if ($quizQuery && $this->hasQuestionsMarkColumn()) {
+                    $quizQuery->withSum('questions as questions_total_mark', 'mark');
+                }
+                $allQuizzes = $quizQuery ? $quizQuery->get() : collect();
+                $allQuizIds = $allQuizzes->pluck('id');
 
-            $gradedAttempts = $allQuizIds->isNotEmpty()
-                ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score')
-                    ->whereIn('quiz_id', $allQuizIds)
-                    ->whereIn('student_id', $studentIds)
-                    ->whereNotNull('score')
-                    ->whereNotNull('submitted_at')
-                    ->get()
-                    ->groupBy('quiz_id')
-                : collect();
+                $gradedAttempts = $allQuizIds->isNotEmpty()
+                    ? QuizAttempt::select('id', 'quiz_id', 'student_id', 'score')
+                        ->whereIn('quiz_id', $allQuizIds)
+                        ->whereIn('student_id', $studentIds)
+                        ->whereNotNull('score')
+                        ->whereNotNull('submitted_at')
+                        ->get()
+                        ->groupBy('quiz_id')
+                    : collect();
 
-            $courseAccumulatedScores = [];
+                $courseAccumulatedScores = [];
 
-            foreach ($coursesList as $crs) {
-                $g = $grades->get($crs->id);
+                foreach ($coursesList as $crs) {
+                    $g = $grades->get($crs->id);
 
-                // ១. បូកពិន្ទុកិច្ចការនីមួយៗដែលគ្រូបានដាក់ និងរក្សាទុក (គិតជាពិន្ទុក្នុងចំណោម 20 ពិន្ទុ)
-                $cAssigns = $allAssignments->where('course_id', $crs->id);
-                $earnedA = 0;
-                $maxA = 0;
-                $hasGradedA = false;
-                foreach ($cAssigns as $ca) {
-                    $subs = $gradedSubmissions->get($ca->id, collect());
-                    if ($subs->isNotEmpty()) {
-                        $m = (float) ($ca->total_score ?? 20);
-                        if ($m > 0) {
-                            $earnedA += (float) $subs->max('score');
-                            $maxA += $m;
-                            $hasGradedA = true;
+                    // ១. បូកពិន្ទុកិច្ចការនីមួយៗដែលគ្រូបានដាក់ និងរក្សាទុក (គិតជាពិន្ទុក្នុងចំណោម 20 ពិន្ទុ)
+                    $cAssigns = $allAssignments->where('course_id', $crs->id);
+                    $earnedA = 0;
+                    $maxA = 0;
+                    $hasGradedA = false;
+                    foreach ($cAssigns as $ca) {
+                        $subs = $gradedSubmissions->get($ca->id, collect());
+                        if ($subs->isNotEmpty()) {
+                            $m = (float) ($ca->total_score ?? 20);
+                            if ($m > 0) {
+                                $earnedA += (float) $subs->max('score');
+                                $maxA += $m;
+                                $hasGradedA = true;
+                            }
                         }
                     }
-                }
-                $autoAssign100 = ($hasGradedA && $maxA > 0) ? round(($earnedA / $maxA) * 100, 2) : null;
-                $assign100 = ($g && $g->assignment_score !== null) ? (float) $g->assignment_score : $autoAssign100;
-                $assignPts20 = $assign100 !== null ? round(($assign100 * 20) / 100, 2) : null;
+                    $autoAssign100 = ($hasGradedA && $maxA > 0) ? round(($earnedA / $maxA) * 100, 2) : null;
+                    $assign100 = ($g && $g->assignment_score !== null) ? (float) $g->assignment_score : $autoAssign100;
+                    $assignPts20 = $assign100 !== null ? round(($assign100 * 20) / 100, 2) : null;
 
-                // ២. បូកពិន្ទុសំណួរខ្លីដែលមាន (គិតជាពិន្ទុក្នុងចំណោម 20 ពិន្ទុ)
-                $cQuizzes = $allQuizzes->where('course_id', $crs->id);
-                $earnedQ = 0;
-                $maxQ = 0;
-                $hasGradedQ = false;
-                foreach ($cQuizzes as $cq) {
-                    $atts = $gradedAttempts->get($cq->id, collect());
-                    if ($atts->isNotEmpty()) {
-                        $m = (float) ($cq->total_mark ?? $cq->questions_total_mark ?? 20);
-                        if ($m > 0) {
-                            $earnedQ += (float) $atts->max('score');
-                            $maxQ += $m;
-                            $hasGradedQ = true;
+                    // ២. បូកពិន្ទុសំណួរខ្លីដែលមាន (គិតជាពិន្ទុក្នុងចំណោម 20 ពិន្ទុ)
+                    $cQuizzes = $allQuizzes->where('course_id', $crs->id);
+                    $earnedQ = 0;
+                    $maxQ = 0;
+                    $hasGradedQ = false;
+                    foreach ($cQuizzes as $cq) {
+                        $atts = $gradedAttempts->get($cq->id, collect());
+                        if ($atts->isNotEmpty()) {
+                            $m = (float) ($cq->total_mark ?? $cq->questions_total_mark ?? 20);
+                            if ($m > 0) {
+                                $earnedQ += (float) $atts->max('score');
+                                $maxQ += $m;
+                                $hasGradedQ = true;
+                            }
                         }
                     }
+                    $autoQuiz100 = ($hasGradedQ && $maxQ > 0) ? round(($earnedQ / $maxQ) * 100, 2) : null;
+                    $quiz100 = ($g && $g->quiz_score !== null) ? (float) $g->quiz_score : $autoQuiz100;
+                    $quizPts20 = $quiz100 !== null ? round(($quiz100 * 20) / 100, 2) : null;
+
+                    // ៣. ពិន្ទុប្រឡងពាក់កណ្ដាលឆមាសលើក្រដាសក្រៅ (25 ពិន្ទុ) ពេលគ្រូបញ្ចូលហើយចុចរក្សាទុក
+                    $midterm100 = ($g && $g->midterm_score !== null) ? (float) $g->midterm_score : null;
+                    $midtermPts25 = $midterm100 !== null ? round(($midterm100 * 25) / 100, 2) : null;
+
+                    // ៤. ពិន្ទុប្រឡងឆមាស/បញ្ចប់លើក្រដាសក្រៅ (35 ពិន្ទុ) ពេលគ្រូបញ្ចូលហើយចុចរក្សាទុក
+                    $exam100 = ($g && isset($g->exam_score) && $g->exam_score !== null) ? (float) $g->exam_score : null;
+                    $examPts35 = $exam100 !== null ? round(($exam100 * 35) / 100, 2) : null;
+
+                    $parts = array_filter([$assignPts20, $quizPts20, $midtermPts25, $examPts35], fn ($v) => $v !== null);
+
+                    if (!empty($parts)) {
+                        $courseAccumulatedScores[] = round(array_sum($parts), 2);
+                    } elseif ($g && $g->final_score !== null) {
+                        $courseAccumulatedScores[] = round((float) $g->final_score, 2);
+                    }
                 }
-                $autoQuiz100 = ($hasGradedQ && $maxQ > 0) ? round(($earnedQ / $maxQ) * 100, 2) : null;
-                $quiz100 = ($g && $g->quiz_score !== null) ? (float) $g->quiz_score : $autoQuiz100;
-                $quizPts20 = $quiz100 !== null ? round(($quiz100 * 20) / 100, 2) : null;
 
-                // ៣. ពិន្ទុប្រឡងពាក់កណ្ដាលឆមាសលើក្រដាសក្រៅ (25 ពិន្ទុ) ពេលគ្រូបញ្ចូលហើយចុចរក្សាទុក
-                $midterm100 = ($g && $g->midterm_score !== null) ? (float) $g->midterm_score : null;
-                $midtermPts25 = $midterm100 !== null ? round(($midterm100 * 25) / 100, 2) : null;
-
-                // ៤. ពិន្ទុប្រឡងឆមាស/បញ្ចប់លើក្រដាសក្រៅ (35 ពិន្ទុ) ពេលគ្រូបញ្ចូលហើយចុចរក្សាទុក
-                $exam100 = ($g && isset($g->exam_score) && $g->exam_score !== null) ? (float) $g->exam_score : null;
-                $examPts35 = $exam100 !== null ? round(($exam100 * 35) / 100, 2) : null;
-
-                $parts = array_filter([$assignPts20, $quizPts20, $midtermPts25, $examPts35], fn ($v) => $v !== null);
-
-                if (!empty($parts)) {
-                    $courseAccumulatedScores[] = round(array_sum($parts), 2);
-                } elseif ($g && $g->final_score !== null) {
-                    $courseAccumulatedScores[] = round((float) $g->final_score, 2);
+                if (!empty($courseAccumulatedScores)) {
+                    $stats['average_score'] = round(
+                        array_sum($courseAccumulatedScores) / count($courseAccumulatedScores),
+                        2
+                    );
                 }
-            }
 
-            if (!empty($courseAccumulatedScores)) {
-                $stats['average_score'] = round(
-                    array_sum($courseAccumulatedScores) / count($courseAccumulatedScores),
-                    2
-                );
-            }
+                return [
+                    'stats' => $stats,
+                    'enrollments' => $enrollments->values()->toArray(),
+                    'recent_activity' => $this->getRecentActivity($studentIds),
+                ];
+            });
 
-            return response()->json([
-                'stats' => $stats,
-                'enrollments' => $enrollments->values(),
-                'recent_activity' => $this->getRecentActivity($studentIds),
-            ]);
+            return response()->json($payload);
         } catch (\Throwable $e) {
             Log::error('Student dashboard error: ' . $e->getMessage());
             return response()->json([
@@ -1655,7 +1661,7 @@ class StudentController extends Controller
         ]);
     }
 
-    // ✅ Quiz/Exam: ចាប់ផ្តើម ឬបន្តការធ្វើតេស្ត (គាំទ្រការមើលលទ្ធផល និងចម្លើយត្រឹមត្រូវពេលប្រឡងចប់)
+    // ✅ Quiz/Exam: ចាប់ផ្តើម ឬបន្តការធ្វើតេស្ត (បង្ហាញ is_correct តែក្រោយពេលសិស្សប្រឡងចប់ប៉ុណ្ណោះ)
     public function getQuiz($quizId)
     {
         $student = auth()->user();
@@ -1663,17 +1669,18 @@ class StudentController extends Controller
 
         $quiz = Quiz::with(['course', 'questions.options'])->findOrFail($quizId);
 
-        $quiz->questions->each(function ($q) {
-            $q->options->each(function ($opt) {
-                $opt->makeVisible(['is_correct']);
-            });
-        });
-
         $attempt = QuizAttempt::where('quiz_id', $quizId)
             ->whereIn('student_id', $studentIds)
             ->first();
 
         if ($attempt && $attempt->submitted_at) {
+            // ✅ បង្ហាញចម្លើយត្រឹមត្រូវ (is_correct) តែក្រោយពេលសិស្សបញ្ជូនចម្លើយរួចរាល់ប៉ុណ្ណោះ
+            $quiz->questions->each(function ($q) {
+                $q->options->each(function ($opt) {
+                    $opt->makeVisible(['is_correct']);
+                });
+            });
+
             $savedAnswers = [];
             if (!empty($attempt->answers)) {
                 $decoded = is_string($attempt->answers)
@@ -1974,7 +1981,7 @@ class StudentController extends Controller
         ]);
     }
 
-    // ទាញយកកិច្ចការសិស្ស
+    // ទាញយកកិច្ចការសិស្ស (កាត់បន្ថយទំហំ JSON ដោយមិនផ្ញើរូបថតគ្រូស្ទួន)
     public function getAllAssignments(Request $request)
     {
         try {
@@ -2019,7 +2026,7 @@ class StudentController extends Controller
                 $submission = $submissions->get($assignment->id);
                 $courseData = $assignment->course ? clone $assignment->course : null;
                 if ($courseData) {
-                    $teacherData = $this->formatTeacherData($courseData, true);
+                    $teacherData = $this->formatTeacherData($courseData, false);
                     $courseData->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
                     $courseData->setAttribute('teacher_profile', $teacherData);
                     $courseData->setAttribute('teacher', $teacherData);
@@ -2063,7 +2070,7 @@ class StudentController extends Controller
         }
     }
 
-    // ទាញយកកម្រងសំណួរប្រឡង
+    // ទាញយកកម្រងសំណួរប្រឡង (កាត់បន្ថយទំហំ JSON ដោយមិនផ្ញើរូបថតគ្រូស្ទួន)
     public function getAllQuizzes(Request $request)
     {
         try {
@@ -2113,7 +2120,7 @@ class StudentController extends Controller
 
                 $courseData = $quiz->course ? clone $quiz->course : null;
                 if ($courseData) {
-                    $teacherData = $this->formatTeacherData($courseData, true);
+                    $teacherData = $this->formatTeacherData($courseData, false);
                     $courseData->teacher_name = $teacherData['name'] ?? 'គ្រូបង្រៀន';
                     $courseData->setAttribute('teacher_profile', $teacherData);
                     $courseData->setAttribute('teacher', $teacherData);

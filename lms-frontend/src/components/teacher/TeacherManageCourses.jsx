@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
-import XLSX from 'xlsx-js-style';
 import {
   BookOpenIcon,
   ChartBarIcon,
@@ -32,6 +31,15 @@ const TEACHER_COURSES_MEM_CACHE = {
   lastSyncedAt: 0,
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw = sessionStorage.getItem(key) || localStorage.getItem(key);
@@ -39,6 +47,23 @@ const readStorageJson = (key, fallback) => {
   } catch {
     return fallback;
   }
+};
+
+// ✅ សរសេរ Cache នៅពេល Browser ទំនេរ (Stringify តែ ១ ដងគត់)
+const persistTeacherCoursesFast = (uid, coursesData) => {
+  runWhenIdle(() => {
+    try {
+      const str = JSON.stringify(coursesData);
+      try {
+        sessionStorage.setItem(getTeacherCoursesCacheKey(uid), str);
+      } catch {}
+      localStorage.setItem(getTeacherCoursesCacheKey(uid), str);
+      localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
+      localStorage.setItem('cached_teacher_courses_list', str);
+    } catch (e) {
+      console.warn('Failed to cache teacher courses:', e);
+    }
+  });
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -215,7 +240,7 @@ const TeacherManageCourses = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ធ្វើបច្ចុប្បន្នភាពទិន្នន័យមុខវិជ្ជាដោយមិនរាំងស្ទះ UI (Non-blocking 0ms Sync)
+  // 📌 ផ្នែកទី២៖ ធ្វើបច្ចុប្បន្នភាពទិន្នន័យមុខវិជ្ជាដោយមិនរាំងស្ទះ UI (30s Cache TTL)
   // ============================================================================
   const fetchCourses = useCallback(async () => {
     const now = Date.now();
@@ -231,7 +256,7 @@ const TeacherManageCourses = () => {
       if (
         TEACHER_COURSES_MEM_CACHE.uid === currentTeacherId &&
         cachedForUser.length > 0 &&
-        now - TEACHER_COURSES_MEM_CACHE.lastSyncedAt < 25000
+        now - TEACHER_COURSES_MEM_CACHE.lastSyncedAt < 30000
       ) {
         return;
       }
@@ -259,17 +284,7 @@ const TeacherManageCourses = () => {
       TEACHER_COURSES_MEM_CACHE.courses = coursesData;
       TEACHER_COURSES_MEM_CACHE.lastSyncedAt = Date.now();
 
-      try {
-        const str = JSON.stringify(coursesData);
-        try {
-          sessionStorage.setItem(getTeacherCoursesCacheKey(currentTeacherId), str);
-        } catch {}
-        localStorage.setItem(getTeacherCoursesCacheKey(currentTeacherId), str);
-        localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
-        localStorage.setItem('cached_teacher_courses_list', str);
-      } catch (e) {
-        console.warn('Failed to cache teacher courses:', e);
-      }
+      persistTeacherCoursesFast(currentTeacherId, coursesData);
     } catch (error) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
         return;
@@ -335,11 +350,13 @@ const TeacherManageCourses = () => {
     });
   }, [courses, selectedDept, searchTerm]);
 
-  const handleExportExcel = () => {
+  // ✅ Dynamic Import xlsx-js-style តែពេលចុច Export ប៉ុណ្ណោះ (ជួយឱ្យទំព័របើកលឿនជាងមុន)
+  const handleExportExcel = async () => {
     if (filteredCourses.length === 0) {
       return;
     }
 
+    const { default: XLSX } = await import('xlsx-js-style');
     const sortedCourses = sortCoursesOldestFirst(filteredCourses);
 
     const exportData = sortedCourses.map((course, idx) => ({
@@ -444,13 +461,14 @@ const TeacherManageCourses = () => {
       {/* 📌 1. HEADER BANNER (Adaptive Phone / Tablet / iPad / Desktop)      */}
       {/* ================================================================== */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
         
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
           <div className="space-y-2 sm:space-y-3 min-w-0">
             <h1 className="text-xl sm:text-2xl md:text-[26px] lg:text-3xl font-extrabold tracking-tight flex items-center gap-3">
-              <div className="p-2.5 sm:p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20 shrink-0">
+              <div className="p-2.5 sm:p-3 bg-white/15 md:bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                 <BookOpenIcon className="h-6 w-6 sm:h-7 sm:w-7 lg:h-8 lg:w-8 text-yellow-400" />
               </div>
               <span className="truncate">{t('បញ្ជីមុខវិជ្ជាបង្រៀន', 'Teaching Courses List')}</span>
@@ -464,7 +482,7 @@ const TeacherManageCourses = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0">
-            <span className="inline-flex items-center gap-2 px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl bg-white/10 backdrop-blur-md border border-white/15 text-xs sm:text-sm font-extrabold text-yellow-300">
+            <span className="inline-flex items-center gap-2 px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl bg-white/15 md:bg-white/10 md:backdrop-blur-md border border-white/15 text-xs sm:text-sm font-extrabold text-yellow-300">
               <AcademicCapIcon className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
               <span>
                 {courses.length} {t('មុខវិជ្ជាសរុប', 'Total Courses')}
@@ -495,10 +513,13 @@ const TeacherManageCourses = () => {
             <MagnifyingGlassIcon className="absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder=""
+              placeholder={t(
+                'ស្វែងរកឈ្មោះមុខវិជ្ជា ឬកូដមុខវិជ្ជា...',
+                'Search course name or code...'
+              )}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="tc-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
+              className="tc-input w-full pl-10 sm:pl-11 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-colors shadow-2xs"
             />
             {searchTerm && (
               <button
@@ -524,7 +545,7 @@ const TeacherManageCourses = () => {
               <button
                 type="button"
                 onClick={() => handleViewModeChange('grid')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-colors cursor-pointer ${
                   viewMode === 'grid'
                     ? 'course-view-btn-active bg-white text-blue-600 shadow-xs'
                     : 'course-view-btn-inactive text-gray-500 hover:text-gray-800'
@@ -536,7 +557,7 @@ const TeacherManageCourses = () => {
               <button
                 type="button"
                 onClick={() => handleViewModeChange('list')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-colors cursor-pointer ${
                   viewMode === 'list'
                     ? 'course-view-btn-active bg-white text-blue-600 shadow-xs'
                     : 'course-view-btn-inactive text-gray-500 hover:text-gray-800'
@@ -559,7 +580,7 @@ const TeacherManageCourses = () => {
             <button
               type="button"
               onClick={() => setSelectedDept('all')}
-              className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+              className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
                 selectedDept === 'all'
                   ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
                   : 'course-dept-pill bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
@@ -576,7 +597,7 @@ const TeacherManageCourses = () => {
                   key={dept.department_id}
                   type="button"
                   onClick={() => setSelectedDept(dept.department_id)}
-                  className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
                     isSelected
                       ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
                       : 'course-dept-pill bg-blue-50/70 text-blue-800 border-blue-100 hover:bg-blue-100/70'
@@ -640,7 +661,7 @@ const TeacherManageCourses = () => {
             return (
               <div
                 key={course.id}
-                className="course-card bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between overflow-hidden group"
+                className="course-card bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-200 flex flex-col justify-between overflow-hidden group"
               >
                 <div>
                   <div

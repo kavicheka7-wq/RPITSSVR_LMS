@@ -47,6 +47,15 @@ const TEACHER_DASH_MEM_CACHE = {
   prefetchedUid: null,
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -57,81 +66,97 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ បង្រួមរូបភាពសិស្សទុកមុនក្នុង cached_teacher_student_avatars_v1 ដើម្បីឱ្យទំព័រ TeacherManageStudents និង Dashboard បើកភ្លាមឃើញរូបភាពក្នុង 0ms
+// ✅ បង្រួមរូបភាពសិស្សទុកមុនក្នុង cached_teacher_student_avatars_v1 នៅពេល Browser ទំនេរ (មិនបង្រួមដដែលៗ)
 const cacheStudentAvatarsInBackground = (studentsList, onAvatarsUpdated) => {
   if (!Array.isArray(studentsList) || studentsList.length === 0) return;
 
-  const avatarMap = readStorageJson(CACHE_KEY_STUDENT_AVATARS, {}) || {};
-  let pendingCount = 0;
+  runWhenIdle(() => {
+    const avatarMap = readStorageJson(CACHE_KEY_STUDENT_AVATARS, {}) || {};
+    let pendingCount = 0;
+    let hasChanges = false;
 
-  const persistMap = () => {
-    try {
-      const str = JSON.stringify(avatarMap);
-      sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
-    } catch {}
-    if (typeof onAvatarsUpdated === 'function') {
-      onAvatarsUpdated({ ...avatarMap });
-    }
-  };
-
-  studentsList.forEach((stu) => {
-    if (!stu || typeof stu !== 'object' || !stu.id) return;
-    const rawImg = stu.profile_image || stu.user?.profile_image || null;
-    if (!rawImg || typeof rawImg !== 'string') return;
-
-    if (!rawImg.startsWith('data:image') || rawImg.length < 12000) {
-      avatarMap[stu.id] = rawImg;
-      return;
-    }
-
-    pendingCount++;
-    try {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
+    const persistMap = () => {
+      if (!hasChanges) return;
+      runWhenIdle(() => {
         try {
-          const canvas = document.createElement('canvas');
-          const maxSize = 80;
-          let w = img.width || maxSize;
-          let h = img.height || maxSize;
-          if (w > h) {
-            if (w > maxSize) {
-              h = Math.round((h * maxSize) / w);
-              w = maxSize;
-            }
-          } else {
-            if (h > maxSize) {
-              w = Math.round((w * maxSize) / h);
-              h = maxSize;
-            }
-          }
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, w, h);
-          const tinyWebp = canvas.toDataURL('image/webp', 0.78);
-          avatarMap[stu.id] =
-            tinyWebp.length < rawImg.length ? tinyWebp : rawImg;
+          const str = JSON.stringify(avatarMap);
+          sessionStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
+          localStorage.setItem(CACHE_KEY_STUDENT_AVATARS, str);
         } catch {}
-        pendingCount--;
-        if (pendingCount <= 0) persistMap();
-      };
-      img.onerror = () => {
-        pendingCount--;
-        if (pendingCount <= 0) persistMap();
-      };
-      img.src = rawImg;
-    } catch {
-      pendingCount--;
-    }
-  });
+        if (typeof onAvatarsUpdated === 'function') {
+          onAvatarsUpdated({ ...avatarMap });
+        }
+      });
+    };
 
-  if (pendingCount === 0) {
-    persistMap();
-  } else {
-    setTimeout(persistMap, 350);
-  }
+    studentsList.forEach((stu) => {
+      if (!stu || typeof stu !== 'object' || !stu.id) return;
+      const rawImg = stu.profile_image || stu.user?.profile_image || null;
+      if (!rawImg || typeof rawImg !== 'string') return;
+
+      // ✅ បើធ្លាប់បង្រួមទុករួចហើយ និងមានទំហំតូចស្រាប់ មិនបាច់គូរ Canvas ឡើងវិញទេ
+      const existing = avatarMap[stu.id];
+      if (existing && existing.length < 18000 && rawImg.startsWith('data:')) {
+        return;
+      }
+
+      if (!rawImg.startsWith('data:image') || rawImg.length < 12000) {
+        if (existing !== rawImg) {
+          avatarMap[stu.id] = rawImg;
+          hasChanges = true;
+        }
+        return;
+      }
+
+      pendingCount++;
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const maxSize = 80;
+            let w = img.width || maxSize;
+            let h = img.height || maxSize;
+            if (w > h) {
+              if (w > maxSize) {
+                h = Math.round((h * maxSize) / w);
+                w = maxSize;
+              }
+            } else {
+              if (h > maxSize) {
+                w = Math.round((w * maxSize) / h);
+                h = maxSize;
+              }
+            }
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            const tinyWebp = canvas.toDataURL('image/webp', 0.76);
+            avatarMap[stu.id] =
+              tinyWebp.length < rawImg.length ? tinyWebp : rawImg;
+            hasChanges = true;
+          } catch {}
+          pendingCount--;
+          if (pendingCount <= 0) persistMap();
+        };
+        img.onerror = () => {
+          pendingCount--;
+          if (pendingCount <= 0) persistMap();
+        };
+        img.src = rawImg;
+      } catch {
+        pendingCount--;
+      }
+    });
+
+    if (pendingCount === 0) {
+      persistMap();
+    } else {
+      setTimeout(persistMap, 450);
+    }
+  }, 400);
 };
 
 // ✅ លុបរូបភាព Base64 ធំៗចេញពីបញ្ជីមុននឹង Save ចូល localStorage ការពារ QuotaExceededError
@@ -173,17 +198,24 @@ const stripHeavyBase64FromList = (data) => {
   });
 };
 
-const safeWriteTeacherCache = (key, payload) => {
-  try {
-    const slimPayload = Array.isArray(payload)
-      ? stripHeavyBase64FromList(payload)
-      : payload;
-    const str = JSON.stringify(slimPayload);
+// ✅ សរសេរ Cache នៅពេល Browser ទំនេរ (Stringify តែ ១ ដងគត់សម្រាប់ Keys ច្រើន)
+const safeWriteTeacherCacheMulti = (keys, payload) => {
+  runWhenIdle(() => {
     try {
-      sessionStorage.setItem(key, str);
+      const slimPayload = Array.isArray(payload)
+        ? stripHeavyBase64FromList(payload)
+        : payload;
+      const str = JSON.stringify(slimPayload);
+      keys.forEach((key) => {
+        try {
+          sessionStorage.setItem(key, str);
+        } catch {}
+        try {
+          localStorage.setItem(key, str);
+        } catch {}
+      });
     } catch {}
-    localStorage.setItem(key, str);
-  } catch {}
+  });
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -250,7 +282,7 @@ const ensureCleanTeacherSessionCache = (newUid) => {
   } catch (e) {}
 };
 
-// ✅ អនុគមន៍ទាញទិន្នន័យទំព័រផ្សេងៗនៅផ្ទៃខាងក្រោយ ដោយពន្យារពេល ១.២ វិនាទី ដើម្បីទុកឱ្យ Dashboard បង្ហាញលឿន 0ms មុនគេ
+// ✅ ទាញទិន្នន័យទំព័រផ្សេងៗនៅផ្ទៃខាងក្រោយតែពេលមិនទាន់មានក្នុង Cache (កាត់បន្ថយបន្ទុក Hosting)
 const prefetchAllTeacherPagesData = (
   uid,
   onStudentsSynced,
@@ -262,99 +294,123 @@ const prefetchAllTeacherPagesData = (
   TEACHER_DASH_MEM_CACHE.prefetchedUid = uid;
 
   setTimeout(() => {
-    api
-      .get('/teacher/courses')
-      .then((res) => {
-        const raw = res.data?.data ?? res.data ?? [];
-        const data = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-        safeWriteTeacherCache(`cached_teacher_courses_list_v8_${uid}`, data);
-        safeWriteTeacherCache('cached_teacher_courses_list_v6', data);
-      })
-      .catch(() => {});
+    runWhenIdle(() => {
+      const existingCourses = readStorageJson(`cached_teacher_courses_list_v8_${uid}`, null);
+      if (!Array.isArray(existingCourses) || existingCourses.length === 0) {
+        api
+          .get('/teacher/courses')
+          .then((res) => {
+            const raw = res.data?.data ?? res.data ?? [];
+            const data = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+            safeWriteTeacherCacheMulti(
+              [`cached_teacher_courses_list_v8_${uid}`, 'cached_teacher_courses_list_v6'],
+              data
+            );
+          })
+          .catch(() => {});
+      }
 
-    api
-      .get('/teacher/students')
-      .then((res) => {
-        const raw = res.data?.data ?? res.data ?? [];
-        const data = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-        TEACHER_DASH_MEM_CACHE.deptStudentCount = data.length;
-        if (typeof onStudentsSynced === 'function') {
-          onStudentsSynced(data.length);
-        }
-        // ✅ បង្រួមរូបភាពសិស្សទុកមុនក្នុង Avatar Dictionary មុនពេលលុប Base64 ចេញពីបញ្ជីសិស្ស
-        cacheStudentAvatarsInBackground(data, onAvatarsSynced);
-        safeWriteTeacherCache(`cached_teacher_students_list_v8_${uid}`, data);
-        safeWriteTeacherCache('cached_teacher_students_list_v6', data);
+      const existingStudents = readStorageJson(`cached_teacher_students_list_v8_${uid}`, null);
+      if (!Array.isArray(existingStudents) || existingStudents.length === 0) {
+        api
+          .get('/teacher/students')
+          .then((res) => {
+            const raw = res.data?.data ?? res.data ?? [];
+            const data = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+            TEACHER_DASH_MEM_CACHE.deptStudentCount = data.length;
+            if (typeof onStudentsSynced === 'function') {
+              onStudentsSynced(data.length);
+            }
+            cacheStudentAvatarsInBackground(data, onAvatarsSynced);
+            safeWriteTeacherCacheMulti(
+              [`cached_teacher_students_list_v8_${uid}`, 'cached_teacher_students_list_v6'],
+              data
+            );
 
-        if (res.data?.course_students_map) {
-          safeWriteTeacherCache(
-            `cached_teacher_course_map_v8_${uid}`,
-            res.data.course_students_map
-          );
-          safeWriteTeacherCache(
-            'cached_teacher_course_map_v6',
-            res.data.course_students_map
-          );
-        }
-      })
-      .catch(() => {});
+            if (res.data?.course_students_map) {
+              safeWriteTeacherCacheMulti(
+                [`cached_teacher_course_map_v8_${uid}`, 'cached_teacher_course_map_v6'],
+                res.data.course_students_map
+              );
+            }
+          })
+          .catch(() => {});
+      }
 
-    api
-      .get('/teacher/assignments')
-      .then((res) => {
-        const raw = res.data?.data ?? res.data ?? [];
-        const data = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-        TEACHER_DASH_MEM_CACHE.assignmentsList = data;
-        if (typeof onAssignmentsSynced === 'function') {
-          onAssignmentsSynced(data);
-        }
-        safeWriteTeacherCache(`cached_teacher_assignments_list_v8_${uid}`, data);
-        safeWriteTeacherCache('cached_teacher_assignments_list_v6', data);
-      })
-      .catch(() => {});
-  }, 1200);
+      const existingAssignments = readStorageJson(`cached_teacher_assignments_list_v8_${uid}`, null);
+      if (!Array.isArray(existingAssignments) || existingAssignments.length === 0) {
+        api
+          .get('/teacher/assignments')
+          .then((res) => {
+            const raw = res.data?.data ?? res.data ?? [];
+            const data = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+            TEACHER_DASH_MEM_CACHE.assignmentsList = data;
+            if (typeof onAssignmentsSynced === 'function') {
+              onAssignmentsSynced(data);
+            }
+            safeWriteTeacherCacheMulti(
+              [`cached_teacher_assignments_list_v8_${uid}`, 'cached_teacher_assignments_list_v6'],
+              data
+            );
+          })
+          .catch(() => {});
+      }
+    });
+  }, 1500);
 
   setTimeout(() => {
-    api
-      .get('/teacher/lessons')
-      .then((res) => {
-        const raw = res.data?.data ?? res.data ?? [];
-        const data = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-        safeWriteTeacherCache(`cached_teacher_lessons_list_v8_${uid}`, data);
-        safeWriteTeacherCache('cached_teacher_lessons_list_v6', data);
-      })
-      .catch(() => {});
+    runWhenIdle(() => {
+      const existingLessons = readStorageJson(`cached_teacher_lessons_list_v8_${uid}`, null);
+      if (!Array.isArray(existingLessons) || existingLessons.length === 0) {
+        api
+          .get('/teacher/lessons')
+          .then((res) => {
+            const raw = res.data?.data ?? res.data ?? [];
+            const data = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+            safeWriteTeacherCacheMulti(
+              [`cached_teacher_lessons_list_v8_${uid}`, 'cached_teacher_lessons_list_v6'],
+              data
+            );
+          })
+          .catch(() => {});
+      }
 
-    api
-      .get('/teacher/quizzes')
-      .then((res) => {
-        const raw = res.data?.data ?? res.data ?? [];
-        const data = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-        safeWriteTeacherCache(`cached_teacher_quizzes_list_v8_${uid}`, data);
-        safeWriteTeacherCache('cached_teacher_quizzes_list_v6', data);
-      })
-      .catch(() => {});
-  }, 2400);
+      const existingQuizzes = readStorageJson(`cached_teacher_quizzes_list_v8_${uid}`, null);
+      if (!Array.isArray(existingQuizzes) || existingQuizzes.length === 0) {
+        api
+          .get('/teacher/quizzes')
+          .then((res) => {
+            const raw = res.data?.data ?? res.data ?? [];
+            const data = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.data)
+              ? raw.data
+              : [];
+            safeWriteTeacherCacheMulti(
+              [`cached_teacher_quizzes_list_v8_${uid}`, 'cached_teacher_quizzes_list_v6'],
+              data
+            );
+          })
+          .catch(() => {});
+      }
+    });
+  }, 3000);
 };
 
 // ✅ អនុគមន៍ស្រង់យកថ្ងៃខែពិតប្រាកដ
@@ -494,7 +550,7 @@ export default function TeacherDashboard() {
   }, []);
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ទាញយកទិន្នន័យ Dashboard ល្បឿនលឿន (0ms)
+  // 📌 ផ្នែកទី២៖ ទាញយកទិន្នន័យ Dashboard ល្បឿនលឿន (30s Cache TTL)
   // ============================================================================
   const fetchDashboardData = useCallback(async () => {
     const now = Date.now();
@@ -509,7 +565,7 @@ export default function TeacherDashboard() {
       setStats(cachedStatsForUser);
       setRecentActivities(cachedActsForUser);
 
-      if (now - TEACHER_DASH_MEM_CACHE.lastSyncedAt < 25000) {
+      if (now - TEACHER_DASH_MEM_CACHE.lastSyncedAt < 30000) {
         prefetchAllTeacherPagesData(
           currentTeacherId,
           (count) => setDeptStudentCount(count),
@@ -544,17 +600,23 @@ export default function TeacherDashboard() {
       TEACHER_DASH_MEM_CACHE.activities = newActivities;
       TEACHER_DASH_MEM_CACHE.lastSyncedAt = Date.now();
 
-      safeWriteTeacherCache(getStatsCacheKey(currentTeacherId), newStats);
-      safeWriteTeacherCache(getActivitiesCacheKey(currentTeacherId), newActivities);
-      safeWriteTeacherCache('cached_teacher_dashboard_stats', newStats);
-      safeWriteTeacherCache('cached_teacher_dashboard_activities', newActivities);
+      safeWriteTeacherCacheMulti(
+        [getStatsCacheKey(currentTeacherId), 'cached_teacher_dashboard_stats'],
+        newStats
+      );
+      safeWriteTeacherCacheMulti(
+        [
+          getActivitiesCacheKey(currentTeacherId),
+          'cached_teacher_dashboard_activities',
+        ],
+        newActivities
+      );
     } catch (err) {
       if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
         return;
       }
       console.error('Error fetching teacher dashboard data:', err);
     } finally {
-      // ✅ ទាញទិន្នន័យទំព័រផ្សេងៗតាមក្រោយ ដោយមិនរំខានល្បឿនបើកទំព័រដំបូង
       prefetchAllTeacherPagesData(
         currentTeacherId,
         (count) => setDeptStudentCount(count),
@@ -760,8 +822,9 @@ export default function TeacherDashboard() {
       {/* 📌 1. WELCOME BANNER (Adaptive Phone / Tablet / iPad / Desktop)    */}
       {/* ================================================================== */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-blue-950 via-indigo-900 to-slate-950 p-5 sm:p-7 md:p-8 lg:p-10 border border-blue-800/30 shadow-xl">
-        <div className="absolute top-0 right-0 w-64 sm:w-96 h-64 sm:h-96 bg-blue-500/10 rounded-full blur-3xl -mr-32 -mt-32 pointer-events-none"></div>
-        <div className="absolute bottom-0 left-0 w-60 sm:w-80 h-60 sm:h-80 bg-indigo-500/10 rounded-full blur-3xl -ml-24 -mb-24 pointer-events-none"></div>
+        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+        <div className="hidden md:block absolute top-0 right-0 w-64 sm:w-96 h-64 sm:h-96 bg-blue-500/10 rounded-full blur-3xl -mr-32 -mt-32 pointer-events-none"></div>
+        <div className="hidden md:block absolute bottom-0 left-0 w-60 sm:w-80 h-60 sm:h-80 bg-indigo-500/10 rounded-full blur-3xl -ml-24 -mb-24 pointer-events-none"></div>
 
         <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-64 h-44 sm:h-64 text-white/[0.04] -rotate-12 pointer-events-none" />
 
@@ -797,7 +860,7 @@ export default function TeacherDashboard() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-blue-200/80 font-bold pt-0.5 sm:pt-1">
-              <span className="inline-flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl backdrop-blur-sm border border-white/10 shadow-sm">
+              <span className="inline-flex items-center gap-1.5 bg-white/15 md:bg-white/10 px-3 py-1.5 rounded-xl md:backdrop-blur-sm border border-white/10 shadow-sm">
                 <CalendarDaysIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-yellow-400 shrink-0" />
                 <span>
                   {new Date().toLocaleDateString(
@@ -811,14 +874,14 @@ export default function TeacherDashboard() {
                   )}
                 </span>
               </span>
-              <span className="inline-flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl backdrop-blur-sm border border-white/10 shadow-sm">
+              <span className="inline-flex items-center gap-1.5 bg-white/15 md:bg-white/10 px-3 py-1.5 rounded-xl md:backdrop-blur-sm border border-white/10 shadow-sm">
                 <ClockIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-400 shrink-0" />
                 <span>{t('ទិន្នន័យទាន់សម័យ', 'Live Updates')}</span>
               </span>
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-4 bg-white/[0.06] backdrop-blur-md border border-white/10 p-4 pr-6 rounded-3xl shadow-2xl shrink-0 self-start xl:self-center">
+          <div className="hidden md:flex items-center gap-4 bg-white/[0.06] md:backdrop-blur-md border border-white/10 p-4 pr-6 rounded-3xl shadow-2xl shrink-0 self-start xl:self-center">
             <div className="h-14 w-14 lg:h-16 lg:w-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center border border-white/20 shadow-lg shrink-0">
               <AcademicCapIcon className="h-8 w-8 lg:h-9 lg:w-9 text-yellow-300" />
             </div>
@@ -852,7 +915,7 @@ export default function TeacherDashboard() {
             <Link
               key={`stat-${index}`}
               to={stat.link}
-              className="tch-surface-card bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 border border-gray-100 hover:border-blue-200 shadow-sm hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
+              className="tch-surface-card bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 border border-gray-100 hover:border-blue-200 shadow-sm hover:shadow-xl transition-all duration-200 group hover:-translate-y-1 flex flex-col justify-between overflow-hidden"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="space-y-1 sm:space-y-1.5 min-w-0">
@@ -864,7 +927,7 @@ export default function TeacherDashboard() {
                   </p>
                 </div>
                 <div
-                  className={`${stat.themeClass} w-10 h-10 sm:w-12 sm:h-12 lg:w-13 lg:h-13 rounded-xl sm:rounded-2xl ${stat.bgColor} flex items-center justify-center shrink-0 border border-gray-100/60 group-hover:scale-110 transition-transform duration-300`}
+                  className={`${stat.themeClass} w-10 h-10 sm:w-12 sm:h-12 lg:w-13 lg:h-13 rounded-xl sm:rounded-2xl ${stat.bgColor} flex items-center justify-center shrink-0 border border-gray-100/60 group-hover:scale-110 transition-transform duration-200`}
                 >
                   <Icon
                     className={`w-5 h-5 sm:w-6 sm:h-6 ${stat.iconColor} stroke-[2.2]`}
@@ -971,7 +1034,6 @@ export default function TeacherDashboard() {
             </div>
           </div>
 
-          {/* ផ្លាកសង្ខេបតួលេខក្រោមក្រាហ្វ (ងាយស្រួលមើលលើទូរស័ព្ទ និង iPad ដោយមិនបាច់ Hover) */}
           <div className="tch-card-divider mt-4 pt-3 border-t border-gray-100 grid grid-cols-3 gap-2">
             {submissionSummaryChartData.map((item, idx) => (
               <div
@@ -1075,7 +1137,6 @@ export default function TeacherDashboard() {
             </div>
           </div>
 
-          {/* ផ្លាកសង្ខេបតួលេខក្រោមក្រាហ្វ */}
           <div className="tch-card-divider mt-4 pt-3 border-t border-gray-100 grid grid-cols-3 gap-2">
             {passFailChartData.map((item, idx) => (
               <div
@@ -1121,7 +1182,7 @@ export default function TeacherDashboard() {
           </div>
           <Link
             to="/assignments"
-            className="tch-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 border border-blue-100 px-4 py-2 rounded-xl transition-all flex items-center gap-1"
+            className="tch-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 border border-blue-100 px-4 py-2 rounded-xl transition-colors flex items-center gap-1"
           >
             {t('មើលទាំងអស់', 'View All')}
             <ChevronRightIcon className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -1181,6 +1242,8 @@ export default function TeacherDashboard() {
                               <img
                                 src={avatarUrl}
                                 alt={act.student_name || 'Student'}
+                                loading="lazy"
+                                decoding="async"
                                 className="h-full w-full object-cover rounded-full"
                                 onError={() =>
                                   setFailedAvatars((prev) => ({
@@ -1223,7 +1286,7 @@ export default function TeacherDashboard() {
                       <td className="px-6 py-4 text-right whitespace-nowrap">
                         <Link
                           to="/assignments"
-                          className="tch-grade-btn inline-flex items-center gap-1.5 text-xs font-extrabold text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl border border-blue-200 transition-all shadow-2xs"
+                          className="tch-grade-btn inline-flex items-center gap-1.5 text-xs font-extrabold text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl border border-blue-200 transition-colors shadow-2xs"
                         >
                           {t('ដាក់ពិន្ទុ', 'Grade')}
                           <ChevronRightIcon className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -1280,6 +1343,8 @@ export default function TeacherDashboard() {
                       <img
                         src={avatarUrl}
                         alt={act.student_name || 'Student'}
+                        loading="lazy"
+                        decoding="async"
                         className="h-full w-full object-cover rounded-full"
                         onError={() =>
                           setFailedAvatars((prev) => ({
