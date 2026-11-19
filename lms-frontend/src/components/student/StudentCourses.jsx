@@ -39,13 +39,22 @@ const getAssignmentsCacheKey = (uid) => `cached_student_assignments_list_v15_${u
 const getScoresCacheKey = (uid) => `cached_student_scores_list_v15_${uid}`;
 const getDeptCoursesCacheKey = (uid) => `cached_student_dept_courses_v15_${uid}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ (អានក្នុង 0ms គ្មានការគាំងទាក់)
+// ✅ Global Memory Cache បែងចែកតាម uid របស់សិស្សម្នាក់ៗ
 const STUDENT_COURSES_MEM_CACHE = {
   uid: null,
   courses: null,
   meta: null,
   teacherAvatarMap: null,
   lastSyncedAt: 0,
+};
+
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
 };
 
 const readStorageJson = (key, fallback) => {
@@ -58,7 +67,6 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ អានតារាងរូបថតគ្រូបង្រៀនពី RAM ភ្លាមៗក្នុង 0ms
 const getTeacherAvatarMapSync = () => {
   if (
     STUDENT_COURSES_MEM_CACHE.teacherAvatarMap &&
@@ -74,7 +82,7 @@ const getTeacherAvatarMapSync = () => {
   return STUDENT_COURSES_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដើម្បីកុំឱ្យពេញ localStorage (QuotaExceededError)
+// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដោយរត់នៅពេលទំនេរ
 const compressTeacherAvatar = (dataUrl, callback) => {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
     callback(dataUrl);
@@ -84,173 +92,185 @@ const compressTeacherAvatar = (dataUrl, callback) => {
     callback(dataUrl);
     return;
   }
-  try {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 96;
-        let width = img.width || maxSize;
-        let height = img.height || maxSize;
-        if (width > height) {
-          if (width > maxSize) {
-            height = Math.round((height * maxSize) / width);
-            width = maxSize;
+  runWhenIdle(() => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 96;
+          let width = img.width || maxSize;
+          let height = img.height || maxSize;
+          if (width > height) {
+            if (width > maxSize) {
+              height = Math.round((height * maxSize) / width);
+              width = maxSize;
+            }
+          } else {
+            if (height > maxSize) {
+              width = Math.round((width * maxSize) / height);
+              height = maxSize;
+            }
           }
-        } else {
-          if (height > maxSize) {
-            width = Math.round((width * maxSize) / height);
-            height = maxSize;
-          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/webp', 0.76);
+          callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } catch {
+          callback(dataUrl);
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        const compressed = canvas.toDataURL('image/webp', 0.78);
-        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
-      } catch {
-        callback(dataUrl);
-      }
-    };
-    img.onerror = () => callback(dataUrl);
-    img.src = dataUrl;
-  } catch {
-    callback(dataUrl);
-  }
+      };
+      img.onerror = () => callback(dataUrl);
+      img.src = dataUrl;
+    } catch {
+      callback(dataUrl);
+    }
+  }, 400);
 };
 
 let teacherAvatarSaveTimer = null;
 const schedulePersistTeacherAvatars = () => {
   if (teacherAvatarSaveTimer) clearTimeout(teacherAvatarSaveTimer);
   teacherAvatarSaveTimer = setTimeout(() => {
-    try {
-      const map = getTeacherAvatarMapSync();
-      const str = JSON.stringify(map);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
-    } catch {}
-  }, 150);
+    runWhenIdle(() => {
+      try {
+        const map = getTeacherAvatarMapSync();
+        const str = JSON.stringify(map);
+        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
+      } catch {}
+    });
+  }, 300);
 };
 
-// ✅ រក្សាទុកបញ្ជីមុខវិជ្ជា និងរូបថតគ្រូដោយលឿនបំផុត (0ms)
+// ✅ រក្សាទុកបញ្ជីមុខវិជ្ជា និងរូបថតគ្រូនៅពេលទំនេរ (មិនប៉ះពាល់ FPS)
 const persistStudentCoursesFast = (uid, coursesList, metaObj) => {
   if (!Array.isArray(coursesList)) return;
-  const avatarMap = getTeacherAvatarMapSync();
 
-  const extractAndSlimTeacher = (person, courseIdFallback = '') => {
-    if (!person || typeof person !== 'object') return person;
-    const rawImg =
-      person.profile_image_url ||
-      person.profile_image ||
-      person.avatar ||
-      person.user?.profile_image_url ||
-      person.user?.profile_image ||
-      null;
+  runWhenIdle(() => {
+    const avatarMap = getTeacherAvatarMapSync();
 
-    const tchId = String(person.id || person.user_id || '');
-    const cid = String(courseIdFallback || '');
-    const nameKey =
-      person.name || person.full_name
-        ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
-        : '';
-
-    if (rawImg && typeof rawImg === 'string') {
-      if (cid && !avatarMap[`crs_${cid}`]) {
-        avatarMap[`crs_${cid}`] = rawImg;
-      }
-      if (tchId && !avatarMap[`tch_${tchId}`]) {
-        avatarMap[`tch_${tchId}`] = rawImg;
-      }
-      if (nameKey && !avatarMap[nameKey]) {
-        avatarMap[nameKey] = rawImg;
-      }
-
-      compressTeacherAvatar(rawImg, (tinyImg) => {
-        if (tinyImg) {
-          if (cid) avatarMap[`crs_${cid}`] = tinyImg;
-          if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
-          if (nameKey) avatarMap[nameKey] = tinyImg;
-          schedulePersistTeacherAvatars();
-        }
-      });
-    }
-
-    const isHeavyBase64 =
-      typeof rawImg === 'string' &&
-      rawImg.startsWith('data:') &&
-      rawImg.length > 25000;
-
-    const copy = { ...person };
-    if (isHeavyBase64) {
-      const cachedTiny =
-        (cid && avatarMap[`crs_${cid}`]) ||
-        (tchId && avatarMap[`tch_${tchId}`]) ||
+    const extractAndSlimTeacher = (person, courseIdFallback = '') => {
+      if (!person || typeof person !== 'object') return person;
+      const rawImg =
+        person.profile_image_url ||
+        person.profile_image ||
+        person.avatar ||
+        person.user?.profile_image_url ||
+        person.user?.profile_image ||
         null;
-      if (cachedTiny && cachedTiny.length < 25000) {
-        copy.profile_image = cachedTiny;
-        copy.profile_image_url = cachedTiny;
-      } else {
-        delete copy.profile_image;
-        delete copy.profile_image_url;
-      }
-    }
-    if (copy.user && typeof copy.user === 'object') {
-      const uCopy = { ...copy.user };
-      if (
-        typeof uCopy.profile_image === 'string' &&
-        uCopy.profile_image.startsWith('data:') &&
-        uCopy.profile_image.length > 25000
-      ) {
-        delete uCopy.profile_image;
-        delete uCopy.profile_image_url;
-      }
-      copy.user = uCopy;
-    }
-    return copy;
-  };
 
-  const slimCourses = coursesList.map((item) => {
-    if (!item || typeof item !== 'object') return item;
-    const courseInfo = item.course || item;
-    const cid = String(item.course_id || courseInfo.id || item.id || '');
+      const tchId = String(person.id || person.user_id || '');
+      const cid = String(courseIdFallback || '');
+      const nameKey =
+        person.name || person.full_name
+          ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
+          : '';
 
-    const copy = { ...item };
-    if (copy.teacher) {
-      copy.teacher = extractAndSlimTeacher(copy.teacher, cid);
-    }
-    if (copy.teacher_profile) {
-      copy.teacher_profile = extractAndSlimTeacher(copy.teacher_profile, cid);
-    }
-    if (copy.course && typeof copy.course === 'object') {
-      const cCopy = { ...copy.course };
-      if (cCopy.teacher) {
-        cCopy.teacher = extractAndSlimTeacher(cCopy.teacher, cid);
+      if (rawImg && typeof rawImg === 'string') {
+        const existingCached =
+          (cid && avatarMap[`crs_${cid}`]) ||
+          (tchId && avatarMap[`tch_${tchId}`]);
+
+        if (!existingCached || existingCached.length > 18000) {
+          if (cid && !avatarMap[`crs_${cid}`]) {
+            avatarMap[`crs_${cid}`] = rawImg;
+          }
+          if (tchId && !avatarMap[`tch_${tchId}`]) {
+            avatarMap[`tch_${tchId}`] = rawImg;
+          }
+          if (nameKey && !avatarMap[nameKey]) {
+            avatarMap[nameKey] = rawImg;
+          }
+
+          compressTeacherAvatar(rawImg, (tinyImg) => {
+            if (tinyImg) {
+              if (cid) avatarMap[`crs_${cid}`] = tinyImg;
+              if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
+              if (nameKey) avatarMap[nameKey] = tinyImg;
+              schedulePersistTeacherAvatars();
+            }
+          });
+        }
       }
-      if (cCopy.teacher_profile) {
-        cCopy.teacher_profile = extractAndSlimTeacher(cCopy.teacher_profile, cid);
+
+      const isHeavyBase64 =
+        typeof rawImg === 'string' &&
+        rawImg.startsWith('data:') &&
+        rawImg.length > 25000;
+
+      const copy = { ...person };
+      if (isHeavyBase64) {
+        const cachedTiny =
+          (cid && avatarMap[`crs_${cid}`]) ||
+          (tchId && avatarMap[`tch_${tchId}`]) ||
+          null;
+        if (cachedTiny && cachedTiny.length < 25000) {
+          copy.profile_image = cachedTiny;
+          copy.profile_image_url = cachedTiny;
+        } else {
+          delete copy.profile_image;
+          delete copy.profile_image_url;
+        }
       }
-      copy.course = cCopy;
-    }
-    return copy;
+      if (copy.user && typeof copy.user === 'object') {
+        const uCopy = { ...copy.user };
+        if (
+          typeof uCopy.profile_image === 'string' &&
+          uCopy.profile_image.startsWith('data:') &&
+          uCopy.profile_image.length > 25000
+        ) {
+          delete uCopy.profile_image;
+          delete uCopy.profile_image_url;
+        }
+        copy.user = uCopy;
+      }
+      return copy;
+    };
+
+    const slimCourses = coursesList.map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      const courseInfo = item.course || item;
+      const cid = String(item.course_id || courseInfo.id || item.id || '');
+
+      const copy = { ...item };
+      if (copy.teacher) {
+        copy.teacher = extractAndSlimTeacher(copy.teacher, cid);
+      }
+      if (copy.teacher_profile) {
+        copy.teacher_profile = extractAndSlimTeacher(copy.teacher_profile, cid);
+      }
+      if (copy.course && typeof copy.course === 'object') {
+        const cCopy = { ...copy.course };
+        if (cCopy.teacher) {
+          cCopy.teacher = extractAndSlimTeacher(cCopy.teacher, cid);
+        }
+        if (cCopy.teacher_profile) {
+          cCopy.teacher_profile = extractAndSlimTeacher(cCopy.teacher_profile, cid);
+        }
+        copy.course = cCopy;
+      }
+      return copy;
+    });
+
+    schedulePersistTeacherAvatars();
+
+    try {
+      const crsStr = JSON.stringify(slimCourses);
+      localStorage.setItem(getCoursesCacheKey(uid), crsStr);
+      localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
+
+      if (metaObj) {
+        const metaStr = JSON.stringify(metaObj);
+        localStorage.setItem(getCoursesMetaCacheKey(uid), metaStr);
+        localStorage.setItem(CACHE_KEY_SHARED_COURSES_META, metaStr);
+      }
+    } catch {}
   });
-
-  schedulePersistTeacherAvatars();
-
-  try {
-    const crsStr = JSON.stringify(slimCourses);
-    localStorage.setItem(getCoursesCacheKey(uid), crsStr);
-    localStorage.setItem(CACHE_KEY_SHARED_COURSES, crsStr);
-
-    if (metaObj) {
-      const metaStr = JSON.stringify(metaObj);
-      localStorage.setItem(getCoursesMetaCacheKey(uid), metaStr);
-      localStorage.setItem(CACHE_KEY_SHARED_COURSES_META, metaStr);
-    }
-  } catch {}
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
 const resolveStudentUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -278,7 +298,6 @@ const resolveStudentUid = (contextUser) => {
   return 'default_student';
 };
 
-// ✅ អនុគមន៍សម្អាត Cache ចាស់របស់សិស្សមុន នៅពេលមានសិស្សថ្មី Login ចូលលើ Browser តែមួយ
 const ensureCleanStudentSessionCache = (newUid) => {
   if (!newUid || newUid === 'default_student') return;
   try {
@@ -317,7 +336,6 @@ const normalizeShiftKey = (shiftVal) => {
   return 'Monday-Friday';
 };
 
-// ✅ អនុគមន៍ស្រង់យកបញ្ជីមុខវិជ្ជាពី API Response គ្រប់ទម្រង់ទាំងអស់
 const extractValidCoursesList = (resData) => {
   if (!resData) return [];
   if (Array.isArray(resData)) return resData;
@@ -329,7 +347,6 @@ const extractValidCoursesList = (resData) => {
   return [];
 };
 
-// ពណ៌គម្របមុខវិជ្ជាបែបទំនើប (Visual Course Studio Themes)
 const COURSE_COVER_THEMES = [
   {
     coverBg: 'from-blue-600 via-indigo-600 to-violet-700',
@@ -379,7 +396,6 @@ const StudentCourses = () => {
   }
   STUDENT_COURSES_MEM_CACHE.uid = currentStudentId;
 
-  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី
   const [courses, setCourses] = useState(() => {
     if (
       Array.isArray(STUDENT_COURSES_MEM_CACHE.courses) &&
@@ -442,7 +458,7 @@ const StudentCourses = () => {
   const [isCarouselPaused, setIsCarouselPaused] = useState(false);
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី Backend API + Real-Time Silent Sync (0ms)
+  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យពី Backend API + Real-Time Silent Sync
   // ============================================================================
   const fetchCourses = useCallback(
     async (forceRefresh = false) => {
@@ -465,7 +481,7 @@ const StudentCourses = () => {
 
         if (
           STUDENT_COURSES_MEM_CACHE.uid === currentStudentId &&
-          now - STUDENT_COURSES_MEM_CACHE.lastSyncedAt < 4000
+          now - STUDENT_COURSES_MEM_CACHE.lastSyncedAt < 25000
         ) {
           return;
         }
@@ -525,7 +541,6 @@ const StudentCourses = () => {
           }
         }
 
-        // ការពារកុំឱ្យយកបញ្ជីទទេពេលមាន Error ទៅលុបជាន់លើមុខវិជ្ជាចាស់ក្នុង Cache
         if (hadServerError) {
           return;
         }
@@ -574,13 +589,14 @@ const StudentCourses = () => {
     [page, perPage, currentStudentId]
   );
 
-  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 15 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
-  // ដើម្បីឱ្យពេលគ្រូបន្ថែមមេរៀន កិច្ចការ ឬកម្រងសំណួរថ្មី ចំនួននៅលើកាតមុខវិជ្ជាលោតឡើងភ្លាមៗដោយស្វ័យប្រវត្តិ!
   useEffect(() => {
     fetchCourses(false);
 
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
+      if (
+        document.visibilityState === 'visible' &&
+        Date.now() - STUDENT_COURSES_MEM_CACHE.lastSyncedAt > 20000
+      ) {
         fetchCourses(true);
       }
     };
@@ -589,7 +605,7 @@ const StudentCourses = () => {
       if (document.visibilityState === 'visible') {
         fetchCourses(true);
       }
-    }, 15000);
+    }, 60000);
 
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
@@ -605,7 +621,7 @@ const StudentCourses = () => {
   }, [fetchCourses]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់រូបភាព ឈ្មោះគ្រូ និងការស្វែងរកក្នុង 0ms (O(1) Lookup)
+  // 📌 ផ្នែកទី៣៖ អនុគមន៍ជំនួយសម្រាប់រូបភាព ឈ្មោះគ្រូ និងការស្វែងរកក្នុង 0ms
   // ============================================================================
   const getImageUrl = useCallback((path) => {
     if (!path || typeof path !== 'string') return null;
@@ -966,11 +982,12 @@ const StudentCourses = () => {
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង */}
         <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="stdc-hero-grid absolute inset-0 opacity-15 pointer-events-none"></div>
-          <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
-          <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
+          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+          <div className="hidden md:block absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
+          <div className="hidden md:block absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
@@ -982,7 +999,7 @@ const StudentCourses = () => {
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1021,7 +1038,7 @@ const StudentCourses = () => {
             onMouseLeave={() => setIsCarouselPaused(false)}
           >
             {!currentInstructor ? (
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-3">
+              <div className="bg-white/15 md:bg-white/10 md:backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-indigo-500/30 border border-indigo-300/30 flex items-center justify-center text-indigo-200 shrink-0">
                     <UserIcon className="h-5 w-5 sm:h-6 sm:w-6" />
@@ -1037,14 +1054,14 @@ const StudentCourses = () => {
               </div>
             ) : (
               <div className="space-y-2.5">
-                <div className="relative overflow-hidden bg-white/10 hover:bg-white/[0.14] backdrop-blur-md border border-white/20 rounded-2xl px-3.5 sm:px-4 py-3 sm:py-3.5 transition-all duration-300">
+                <div className="relative overflow-hidden bg-white/15 md:bg-white/10 hover:bg-white/[0.16] md:backdrop-blur-md border border-white/20 rounded-2xl px-3.5 sm:px-4 py-3 sm:py-3.5 transition-colors duration-200">
                   <div
                     key={`${currentInstructor.key}-${activeSlideIndex}`}
                     className="std-carousel-slide flex items-center justify-between gap-3"
                   >
                     <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
                       <div
-                        className={`h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-gradient-to-br ${currentInstructor.avatarBg} flex items-center justify-center font-black text-xs sm:text-sm text-white shrink-0 overflow-hidden relative ring-2 ring-white/30 shadow-md transition-transform duration-300`}
+                        className={`h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-gradient-to-br ${currentInstructor.avatarBg} flex items-center justify-center font-black text-xs sm:text-sm text-white shrink-0 overflow-hidden relative ring-2 ring-white/30 shadow-md`}
                       >
                         {currentInstructor.imageUrl &&
                         !failedAvatars[`inst_${currentInstructor.key}`] ? (
@@ -1124,7 +1141,7 @@ const StudentCourses = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (5 Cols on lg, 4 Cols on xl) */}
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ */}
         <div className="lg:col-span-5 xl:col-span-4 stdc-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -1147,7 +1164,7 @@ const StudentCourses = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3 pt-1">
-              <div className="stdc-subbox p-3.5 sm:p-4 rounded-2xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/70 via-teal-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3 transition-all">
+              <div className="stdc-subbox p-3.5 sm:p-4 rounded-2xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/70 via-teal-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-2xl bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-300 border border-emerald-300/50 dark:border-emerald-500/30 flex items-center justify-center shrink-0 shadow-2xs">
                     <BookOpenIcon className="h-5 w-5 sm:h-6 sm:w-6 stroke-[2.2]" />
@@ -1167,7 +1184,7 @@ const StudentCourses = () => {
                 </span>
               </div>
 
-              <div className="stdc-subbox p-3.5 sm:p-4 rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50/70 via-orange-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3 transition-all">
+              <div className="stdc-subbox p-3.5 sm:p-4 rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50/70 via-orange-50/40 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-2xl bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-300/50 dark:border-amber-500/30 flex items-center justify-center shrink-0 shadow-2xs">
                     <AcademicCapIcon className="h-5 w-5 sm:h-6 sm:w-6 stroke-[2.2]" />
@@ -1219,7 +1236,7 @@ const StudentCourses = () => {
             )}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="stdc-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
+            className="stdc-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-colors"
           />
           {searchTerm && (
             <button
@@ -1292,7 +1309,7 @@ const StudentCourses = () => {
               return (
                 <div
                   key={course.id}
-                  className={`stdc-course-card group relative bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-xs hover:-translate-y-1 ${theme.glow} transition-all duration-300 overflow-hidden flex flex-col justify-between h-full select-none`}
+                  className={`stdc-course-card group relative bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-xs hover:-translate-y-1 ${theme.glow} transition-all duration-200 overflow-hidden flex flex-col justify-between h-full select-none`}
                 >
                   <div>
                     <div
@@ -1302,18 +1319,18 @@ const StudentCourses = () => {
                       <BookOpenIcon className="absolute right-2 -bottom-3 h-16 w-16 text-white/[0.12] -rotate-12 pointer-events-none" />
 
                       <div className="relative z-10 flex items-center justify-between gap-1.5">
-                        <span className="px-2.5 py-0.5 rounded-lg bg-slate-950/35 backdrop-blur-md border border-white/20 text-[10px] sm:text-[11px] font-black tracking-wider uppercase">
+                        <span className="px-2.5 py-0.5 rounded-lg bg-slate-950/45 border border-white/20 text-[10px] sm:text-[11px] font-black tracking-wider uppercase">
                           {course.course_code || 'COURSE'}
                         </span>
 
-                        <span className="px-2.5 py-0.5 rounded-lg bg-white/20 backdrop-blur-md border border-white/25 text-[10px] sm:text-[11px] font-extrabold">
+                        <span className="px-2.5 py-0.5 rounded-lg bg-white/20 border border-white/25 text-[10px] sm:text-[11px] font-extrabold">
                           {credit} {t('ក្រេឌីត', 'Cr')}
                         </span>
                       </div>
 
                       <div className="relative z-10 flex justify-end">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-400/20 backdrop-blur-md border border-emerald-300/30 text-[9.5px] font-extrabold text-emerald-100">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-400/20 border border-emerald-300/30 text-[9.5px] font-extrabold text-emerald-100">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300"></span>
                           {t('កំពុងបើកបង្រៀន', 'Active')}
                         </span>
                       </div>
@@ -1346,7 +1363,6 @@ const StudentCourses = () => {
                         </p>
                       </div>
 
-                      {/* ✅ ផ្លាកមេរៀន / កិច្ចការ / កម្រងសំណួរ (ភ្ជាប់ course_id គ្រប់ប៊ូតុងទាំង ៣ ដើម្បីច្រោះមុខវិជ្ជាដោយស្វ័យប្រវត្តិ) */}
                       <div className="grid grid-cols-3 gap-1.5 mt-3.5 pt-3 border-t border-gray-100 dark:border-slate-700/70">
                         <Link
                           to={`/lessons?course_id=${course.id}`}
@@ -1393,7 +1409,7 @@ const StudentCourses = () => {
                           <img
                             src={imageUrl}
                             alt={teacherName}
-                            loading={idx < 8 ? 'eager' : 'lazy'}
+                            loading={idx < 6 ? 'eager' : 'lazy'}
                             decoding="async"
                             className="h-full w-full object-cover rounded-full"
                             onError={() =>
@@ -1501,15 +1517,22 @@ const StudentCourses = () => {
         @keyframes carouselSlideFade {
           0% {
             opacity: 0;
-            transform: translateY(8px);
+            transform: translate3d(0, 8px, 0);
           }
           100% {
             opacity: 1;
-            transform: translateY(0);
+            transform: translate3d(0, 0, 0);
           }
         }
         .std-carousel-slide {
-          animation: carouselSlideFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          animation: carouselSlideFade 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          will-change: transform, opacity;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .std-carousel-slide {
+            animation: none !important;
+          }
         }
 
         html.dark .stdc-page-bg {

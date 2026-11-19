@@ -64,6 +64,15 @@ const STUDENT_ATT_MEM_CACHE = {
   lastSyncedAt: 0,
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -91,7 +100,7 @@ const getTeacherAvatarMapSync = () => {
   return STUDENT_ATT_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដើម្បីកុំឱ្យពេញ localStorage (QuotaExceededError)
+// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដោយរត់នៅពេល Browser ទំនេរ
 const compressTeacherAvatar = (dataUrl, callback) => {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
     callback(dataUrl);
@@ -101,53 +110,57 @@ const compressTeacherAvatar = (dataUrl, callback) => {
     callback(dataUrl);
     return;
   }
-  try {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 96;
-        let width = img.width || maxSize;
-        let height = img.height || maxSize;
-        if (width > height) {
-          if (width > maxSize) {
-            height = Math.round((height * maxSize) / width);
-            width = maxSize;
+  runWhenIdle(() => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 96;
+          let width = img.width || maxSize;
+          let height = img.height || maxSize;
+          if (width > height) {
+            if (width > maxSize) {
+              height = Math.round((height * maxSize) / width);
+              width = maxSize;
+            }
+          } else {
+            if (height > maxSize) {
+              width = Math.round((width * maxSize) / height);
+              height = maxSize;
+            }
           }
-        } else {
-          if (height > maxSize) {
-            width = Math.round((width * maxSize) / height);
-            height = maxSize;
-          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/webp', 0.76);
+          callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } catch {
+          callback(dataUrl);
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        const compressed = canvas.toDataURL('image/webp', 0.78);
-        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
-      } catch {
-        callback(dataUrl);
-      }
-    };
-    img.onerror = () => callback(dataUrl);
-    img.src = dataUrl;
-  } catch {
-    callback(dataUrl);
-  }
+      };
+      img.onerror = () => callback(dataUrl);
+      img.src = dataUrl;
+    } catch {
+      callback(dataUrl);
+    }
+  }, 400);
 };
 
 let teacherAvatarSaveTimer = null;
 const schedulePersistTeacherAvatars = () => {
   if (teacherAvatarSaveTimer) clearTimeout(teacherAvatarSaveTimer);
   teacherAvatarSaveTimer = setTimeout(() => {
-    try {
-      const map = getTeacherAvatarMapSync();
-      const str = JSON.stringify(map);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
-    } catch {}
-  }, 150);
+    runWhenIdle(() => {
+      try {
+        const map = getTeacherAvatarMapSync();
+        const str = JSON.stringify(map);
+        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
+      } catch {}
+    });
+  }, 300);
 };
 
 // ✅ កំណត់ទម្រង់ស្ថានភាពវត្តមានឱ្យត្រឹមត្រូវជានិច្ច ទោះបី Database បញ្ជូនអក្សរតូច ឬអក្សរធំក៏ដោយ
@@ -168,122 +181,131 @@ const normalizeAttendanceStatus = (rawStatus) => {
   return rawStatus ? String(rawStatus).trim() : 'Present';
 };
 
-// ✅ រក្សាទុកបញ្ជីវត្តមាន និងរូបថតគ្រូដោយលឿនបំផុត
+// ✅ រក្សាទុកបញ្ជីវត្តមាន និងរូបថតគ្រូនៅពេល Browser ទំនេរ (មិនប៉ះពាល់ FPS)
 const persistStudentAttendanceFast = (uid, attList, summaryObj, metaObj) => {
   if (!Array.isArray(attList)) return;
-  const avatarMap = getTeacherAvatarMapSync();
 
-  const extractAndSlimTeacher = (person, courseIdFallback = '') => {
-    if (!person || typeof person !== 'object') return person;
-    const rawImg =
-      person.profile_image_url ||
-      person.profile_image ||
-      person.avatar ||
-      person.user?.profile_image_url ||
-      person.user?.profile_image ||
-      null;
+  runWhenIdle(() => {
+    const avatarMap = getTeacherAvatarMapSync();
 
-    const tchId = String(person.id || person.user_id || '');
-    const cid = String(courseIdFallback || '');
-    const nameKey =
-      person.name || person.full_name
-        ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
-        : '';
-
-    if (rawImg && typeof rawImg === 'string') {
-      if (cid && !avatarMap[`crs_${cid}`]) avatarMap[`crs_${cid}`] = rawImg;
-      if (tchId && !avatarMap[`tch_${tchId}`]) avatarMap[`tch_${tchId}`] = rawImg;
-      if (nameKey && !avatarMap[nameKey]) avatarMap[nameKey] = rawImg;
-
-      compressTeacherAvatar(rawImg, (tinyImg) => {
-        if (tinyImg) {
-          if (cid) avatarMap[`crs_${cid}`] = tinyImg;
-          if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
-          if (nameKey) avatarMap[nameKey] = tinyImg;
-          schedulePersistTeacherAvatars();
-        }
-      });
-    }
-
-    const isHeavyBase64 =
-      typeof rawImg === 'string' &&
-      rawImg.startsWith('data:') &&
-      rawImg.length > 25000;
-
-    const copy = { ...person };
-    if (isHeavyBase64) {
-      const cachedTiny =
-        (cid && avatarMap[`crs_${cid}`]) ||
-        (tchId && avatarMap[`tch_${tchId}`]) ||
+    const extractAndSlimTeacher = (person, courseIdFallback = '') => {
+      if (!person || typeof person !== 'object') return person;
+      const rawImg =
+        person.profile_image_url ||
+        person.profile_image ||
+        person.avatar ||
+        person.user?.profile_image_url ||
+        person.user?.profile_image ||
         null;
-      if (cachedTiny && cachedTiny.length < 25000) {
-        copy.profile_image = cachedTiny;
-        copy.profile_image_url = cachedTiny;
-      } else {
-        delete copy.profile_image;
-        delete copy.profile_image_url;
-      }
-    }
-    if (copy.user && typeof copy.user === 'object') {
-      const uCopy = { ...copy.user };
-      if (
-        typeof uCopy.profile_image === 'string' &&
-        uCopy.profile_image.startsWith('data:') &&
-        uCopy.profile_image.length > 25000
-      ) {
-        delete uCopy.profile_image;
-        delete uCopy.profile_image_url;
-      }
-      copy.user = uCopy;
-    }
-    return copy;
-  };
 
-  const slimList = attList.map((rec) => {
-    if (!rec || typeof rec !== 'object') return rec;
-    const course = rec.course || {};
-    const cid = String(course.id || rec.course_id || '');
+      const tchId = String(person.id || person.user_id || '');
+      const cid = String(courseIdFallback || '');
+      const nameKey =
+        person.name || person.full_name
+          ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
+          : '';
 
-    const copy = {
-      ...rec,
-      status: normalizeAttendanceStatus(rec.status),
+      if (rawImg && typeof rawImg === 'string') {
+        const existingCached =
+          (cid && avatarMap[`crs_${cid}`]) ||
+          (tchId && avatarMap[`tch_${tchId}`]);
+
+        if (!existingCached || existingCached.length > 18000) {
+          if (cid && !avatarMap[`crs_${cid}`]) avatarMap[`crs_${cid}`] = rawImg;
+          if (tchId && !avatarMap[`tch_${tchId}`]) avatarMap[`tch_${tchId}`] = rawImg;
+          if (nameKey && !avatarMap[nameKey]) avatarMap[nameKey] = rawImg;
+
+          compressTeacherAvatar(rawImg, (tinyImg) => {
+            if (tinyImg) {
+              if (cid) avatarMap[`crs_${cid}`] = tinyImg;
+              if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
+              if (nameKey) avatarMap[nameKey] = tinyImg;
+              schedulePersistTeacherAvatars();
+            }
+          });
+        }
+      }
+
+      const isHeavyBase64 =
+        typeof rawImg === 'string' &&
+        rawImg.startsWith('data:') &&
+        rawImg.length > 25000;
+
+      const copy = { ...person };
+      if (isHeavyBase64) {
+        const cachedTiny =
+          (cid && avatarMap[`crs_${cid}`]) ||
+          (tchId && avatarMap[`tch_${tchId}`]) ||
+          null;
+        if (cachedTiny && cachedTiny.length < 25000) {
+          copy.profile_image = cachedTiny;
+          copy.profile_image_url = cachedTiny;
+        } else {
+          delete copy.profile_image;
+          delete copy.profile_image_url;
+        }
+      }
+      if (copy.user && typeof copy.user === 'object') {
+        const uCopy = { ...copy.user };
+        if (
+          typeof uCopy.profile_image === 'string' &&
+          uCopy.profile_image.startsWith('data:') &&
+          uCopy.profile_image.length > 25000
+        ) {
+          delete uCopy.profile_image;
+          delete uCopy.profile_image_url;
+        }
+        copy.user = uCopy;
+      }
+      return copy;
     };
-    if (copy.student && typeof copy.student === 'object') {
-      const sCopy = { ...copy.student };
-      if (
-        typeof sCopy.profile_image === 'string' &&
-        sCopy.profile_image.startsWith('data:')
-      ) {
-        delete sCopy.profile_image;
+
+    const slimList = attList.map((rec) => {
+      if (!rec || typeof rec !== 'object') return rec;
+      const course = rec.course || {};
+      const cid = String(course.id || rec.course_id || '');
+
+      const copy = {
+        ...rec,
+        status: normalizeAttendanceStatus(rec.status),
+      };
+      if (copy.student && typeof copy.student === 'object') {
+        const sCopy = { ...copy.student };
+        if (
+          typeof sCopy.profile_image === 'string' &&
+          sCopy.profile_image.startsWith('data:')
+        ) {
+          delete sCopy.profile_image;
+        }
+        copy.student = sCopy;
       }
-      copy.student = sCopy;
-    }
-    if (copy.course && typeof copy.course === 'object') {
-      const cCopy = { ...copy.course };
-      if (cCopy.teacher) {
-        cCopy.teacher = extractAndSlimTeacher(cCopy.teacher, cid);
+      if (copy.course && typeof copy.course === 'object') {
+        const cCopy = { ...copy.course };
+        if (cCopy.teacher) {
+          cCopy.teacher = extractAndSlimTeacher(cCopy.teacher, cid);
+        }
+        if (cCopy.teacher_profile) {
+          cCopy.teacher_profile = extractAndSlimTeacher(cCopy.teacher_profile, cid);
+        }
+        copy.course = cCopy;
       }
-      if (cCopy.teacher_profile) {
-        cCopy.teacher_profile = extractAndSlimTeacher(cCopy.teacher_profile, cid);
+      return copy;
+    });
+
+    schedulePersistTeacherAvatars();
+
+    try {
+      const slimStr = JSON.stringify(slimList);
+      localStorage.setItem(getAttListCacheKey(uid), slimStr);
+      localStorage.setItem(CACHE_KEY_SHARED_ATTENDANCE, slimStr);
+      if (summaryObj) {
+        localStorage.setItem(getAttSummaryCacheKey(uid), JSON.stringify(summaryObj));
       }
-      copy.course = cCopy;
-    }
-    return copy;
+      if (metaObj) {
+        localStorage.setItem(getAttMetaCacheKey(uid), JSON.stringify(metaObj));
+      }
+    } catch {}
   });
-
-  schedulePersistTeacherAvatars();
-
-  try {
-    const slimStr = JSON.stringify(slimList);
-    localStorage.setItem(getAttListCacheKey(uid), slimStr);
-    localStorage.setItem(CACHE_KEY_SHARED_ATTENDANCE, slimStr);
-    if (summaryObj) {
-      localStorage.setItem(getAttSummaryCacheKey(uid), JSON.stringify(summaryObj));
-    }
-    if (metaObj) {
-      localStorage.setItem(getAttMetaCacheKey(uid), JSON.stringify(metaObj));
-    }
-  } catch {}
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -432,7 +454,6 @@ const ViewAttendance = () => {
   });
 
   const [page, setPage] = useState(1);
-  // ✅ ទាញម្ដង 100 កំណត់ត្រា ដើម្បីឱ្យការច្រោះមើលតាមស្ថានភាព (ដូចជា «ច្បាប់») និងតាមមុខវិជ្ជា បង្ហាញគ្រប់កំណត់ត្រាទាំងអស់ភ្លាមៗ
   const [perPage] = useState(100);
   const [meta, setMeta] = useState(() => {
     if (STUDENT_ATT_MEM_CACHE.meta) {
@@ -475,7 +496,7 @@ const ViewAttendance = () => {
   }, [currentStudentId]);
 
   // ============================================================================
-  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យនៅផ្ទៃខាងក្រោយ + Real-Time Silent Sync (0ms)
+  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យនៅផ្ទៃខាងក្រោយ + Smart Cache (30s TTL)
   // ============================================================================
   const fetchAttendance = useCallback(
     async (forceRefresh = false) => {
@@ -504,6 +525,7 @@ const ViewAttendance = () => {
         }
       }
 
+      // ✅ ដំឡើង Cache TTL ពី 4s មក 30s ដើម្បីកាត់បន្ថយការបាញ់ API ជាន់គ្នាទៅ Server
       const now = Date.now();
       if (
         !forceRefresh &&
@@ -511,7 +533,7 @@ const ViewAttendance = () => {
         STUDENT_ATT_MEM_CACHE.uid === currentStudentId &&
         Array.isArray(STUDENT_ATT_MEM_CACHE.attendance) &&
         STUDENT_ATT_MEM_CACHE.attendance.length > 0 &&
-        now - STUDENT_ATT_MEM_CACHE.lastSyncedAt < 4000
+        now - STUDENT_ATT_MEM_CACHE.lastSyncedAt < 30000
       ) {
         return;
       }
@@ -531,7 +553,6 @@ const ViewAttendance = () => {
           signal: controller.signal,
         });
 
-        // ការពារកុំឱ្យយកបញ្ជីទទេពេលមាន Error ទៅលុបជាន់លើប្រវត្តិវត្តមានចាស់ក្នុង Cache
         if (response.data?.error_debug) {
           return;
         }
@@ -605,13 +626,15 @@ const ViewAttendance = () => {
     [page, perPage, currentStudentId]
   );
 
-  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 10 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
-  // ដើម្បីឱ្យពេលគ្រូចុចរក្សាទុក «ច្បាប់» ភ្លាម វាលោតចូលអេក្រង់សិស្សដោយស្វ័យប្រវត្តិ!
+  // ✅ Auto-Sync រៀងរាល់ 60 វិនាទី + ឆែក Cooldown 20s ពេលចុចលើអេក្រង់ (កាត់បន្ថយបន្ទុក Hosting ៦ ដង)
   useEffect(() => {
     fetchAttendance(false);
 
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
+      if (
+        document.visibilityState === 'visible' &&
+        Date.now() - STUDENT_ATT_MEM_CACHE.lastSyncedAt > 20000
+      ) {
         fetchAttendance(true);
       }
     };
@@ -620,7 +643,7 @@ const ViewAttendance = () => {
       if (document.visibilityState === 'visible') {
         fetchAttendance(true);
       }
-    }, 10000);
+    }, 60000);
 
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
@@ -909,7 +932,6 @@ const ViewAttendance = () => {
     return Array.from(map.values());
   }, [attendance, cachedCatalogCoursesById, t]);
 
-  // ✅ គណនាស្ថិតិវត្តមានផ្ទាល់តាមមុខវិជ្ជាដែលសិស្សបានជ្រើសរើស (ឬសរុបទាំងអស់បើជ្រើសរើស 'all')
   const displayedSummary = useMemo(() => {
     if (selectedCourse === 'all') {
       return summary;
@@ -1107,8 +1129,9 @@ const ViewAttendance = () => {
         {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
         <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-att-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
-          <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
-          <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
+          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+          <div className="hidden md:block absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
+          <div className="hidden md:block absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
@@ -1120,7 +1143,7 @@ const ViewAttendance = () => {
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1 sm:py-1.5 rounded-full md:backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1154,7 +1177,7 @@ const ViewAttendance = () => {
           </div>
 
           <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15">
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
+            <div className="bg-white/15 md:bg-white/[0.08] hover:bg-white/[0.14] md:backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-colors">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-blue-500/25 border border-blue-300/30 flex items-center justify-center text-cyan-300 shrink-0">
                 <DocumentCheckIcon className="h-5 w-5" />
               </div>
@@ -1168,7 +1191,7 @@ const ViewAttendance = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
+            <div className="bg-white/15 md:bg-white/[0.08] hover:bg-white/[0.14] md:backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-colors">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
                 <ChartBarIcon className="h-5 w-5" />
               </div>
@@ -1289,7 +1312,6 @@ const ViewAttendance = () => {
             )}
           </div>
         </div>
-
       </div>
 
       {/* ================================================================== */}
@@ -1307,7 +1329,7 @@ const ViewAttendance = () => {
                 'ស្វែងរកតាមមុខវិជ្ជា, គ្រូបង្រៀន ឬថ្ងៃខែ...',
                 'Search course, instructor, or date...'
               )}
-              className="std-att-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
+              className="std-att-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-colors"
             />
             {searchTerm && (
               <button
@@ -1326,7 +1348,7 @@ const ViewAttendance = () => {
               <select
                 value={selectedCourse}
                 onChange={(e) => setSelectedCourse(e.target.value)}
-                className="std-att-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-white font-medium text-gray-700 appearance-none cursor-pointer transition-all"
+                className="std-att-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-white font-medium text-gray-700 appearance-none cursor-pointer transition-colors"
               >
                 <option value="all">
                   {t('គ្រប់មុខវិជ្ជាទាំងអស់', 'All Courses')}
@@ -1366,7 +1388,7 @@ const ViewAttendance = () => {
                 setStatusFilter('all');
                 setSearchTerm('');
               }}
-              className="std-att-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-all cursor-pointer shrink-0"
+              className="std-att-badge-blue text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shrink-0"
             >
               {t('សម្អាតតម្រងស្វែងរក', 'Reset Filters')}
             </button>
@@ -1488,7 +1510,7 @@ const ViewAttendance = () => {
                               <img
                                 src={teacherMeta.image}
                                 alt={teacherMeta.name}
-                                loading={idx < 12 ? 'eager' : 'lazy'}
+                                loading={idx < 8 ? 'eager' : 'lazy'}
                                 decoding="async"
                                 className="h-full w-full object-cover rounded-full"
                                 onError={() =>
@@ -1632,6 +1654,7 @@ const ViewAttendance = () => {
                             src={teacherMeta.image}
                             alt={teacherMeta.name}
                             loading="lazy"
+                            decoding="async"
                             className="h-full w-full object-cover rounded-full"
                             onError={() =>
                               setFailedAvatars((prev) => ({
@@ -1680,7 +1703,7 @@ const ViewAttendance = () => {
                 type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={meta.current_page === 1}
-                className="std-att-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="std-att-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
                 {t('មុន', 'Previous')}
               </button>
@@ -1701,7 +1724,7 @@ const ViewAttendance = () => {
                     key={pageNum}
                     type="button"
                     onClick={() => setPage(pageNum)}
-                    className={`px-3 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                    className={`px-3 py-2 text-xs font-bold rounded-xl transition-colors cursor-pointer ${
                       meta.current_page === pageNum
                         ? 'bg-indigo-600 text-white shadow-2xs'
                         : 'std-att-code-pill bg-white border border-gray-200 hover:bg-gray-50'
@@ -1715,7 +1738,7 @@ const ViewAttendance = () => {
                 type="button"
                 onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
                 disabled={meta.current_page === meta.last_page}
-                className="std-att-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="std-att-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
                 {t('បន្ទាប់', 'Next')}
               </button>

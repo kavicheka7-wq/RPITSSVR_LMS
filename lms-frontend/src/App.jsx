@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, lazy, Suspense } from 'react';
 import {
   BrowserRouter as Router,
   Routes,
@@ -13,38 +13,50 @@ import ProtectedRoute from './components/common/ProtectedRoute';
 import Navbar from './components/common/Navbar';
 import Sidebar from './components/common/Sidebar';
 import BottomNav from './components/common/BottomNav';
-import Login from './components/auth/Login';
-import Register from './components/auth/Register';
 
-// Admin Components
-import AdminDashboard from './components/admin/AdminDashboard';
-import ManageTeachers from './components/admin/ManageTeachers';
-import ManageCourses from './components/admin/ManageCourses';
-import ManageDepartments from './components/admin/ManageDepartments';
-import AdminReports from './components/admin/AdminReports';
-import ManageStudentsYear1 from './components/admin/ManageStudentsYear1';
-import ManageStudentsYear2 from './components/admin/ManageStudentsYear2';
-import ManageStudentsYear3 from './components/admin/ManageStudentsYear3';
-import ManageStudentsYear4 from './components/admin/ManageStudentsYear4';
+// ✅ Auth Components (Lazy Loaded)
+const Login = lazy(() => import('./components/auth/Login'));
+const Register = lazy(() => import('./components/auth/Register'));
 
-// Teacher Components
-import TeacherDashboard from './components/teacher/TeacherDashboard';
-import TeacherManageCourses from './components/teacher/TeacherManageCourses';
-import TeacherManageAssignments from './components/teacher/TeacherManageAssignments';
-import TeacherManageQuizzes from './components/teacher/TeacherManageQuizzes';
-import ManageLessons from './components/teacher/ManageLessons';
-import TeacherManageStudents from './components/teacher/TeacherManageStudents';
-import TeacherManageGrades from './components/teacher/TeacherManageGrades';
-import ManageAttendance from './components/teacher/ManageAttendance';
+// ✅ Admin Components (Lazy Loaded)
+const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard'));
+const ManageTeachers = lazy(() => import('./components/admin/ManageTeachers'));
+const ManageCourses = lazy(() => import('./components/admin/ManageCourses'));
+const ManageDepartments = lazy(() => import('./components/admin/ManageDepartments'));
+const AdminReports = lazy(() => import('./components/admin/AdminReports'));
+const ManageStudentsYear1 = lazy(() => import('./components/admin/ManageStudentsYear1'));
+const ManageStudentsYear2 = lazy(() => import('./components/admin/ManageStudentsYear2'));
+const ManageStudentsYear3 = lazy(() => import('./components/admin/ManageStudentsYear3'));
+const ManageStudentsYear4 = lazy(() => import('./components/admin/ManageStudentsYear4'));
 
-// Student Components
-import StudentDashboard from './components/student/StudentDashboard';
-import ViewAttendance from './components/student/ViewAttendance';
-import ViewScores from './components/student/ViewScores';
-import StudentCourses from './components/student/StudentCourses';
-import StudentLessons from './components/student/StudentLessons';
-import StudentAssignments from './components/student/StudentAssignments';
-import StudentQuizzes from './components/student/StudentQuizzes';
+// ✅ Teacher Components (Lazy Loaded)
+const TeacherDashboard = lazy(() => import('./components/teacher/TeacherDashboard'));
+const TeacherManageCourses = lazy(() => import('./components/teacher/TeacherManageCourses'));
+const TeacherManageAssignments = lazy(() => import('./components/teacher/TeacherManageAssignments'));
+const TeacherManageQuizzes = lazy(() => import('./components/teacher/TeacherManageQuizzes'));
+const ManageLessons = lazy(() => import('./components/teacher/ManageLessons'));
+const TeacherManageStudents = lazy(() => import('./components/teacher/TeacherManageStudents'));
+const TeacherManageGrades = lazy(() => import('./components/teacher/TeacherManageGrades'));
+const ManageAttendance = lazy(() => import('./components/teacher/ManageAttendance'));
+
+// ✅ Student Components (Lazy Loaded)
+const StudentDashboard = lazy(() => import('./components/student/StudentDashboard'));
+const ViewAttendance = lazy(() => import('./components/student/ViewAttendance'));
+const ViewScores = lazy(() => import('./components/student/ViewScores'));
+const StudentCourses = lazy(() => import('./components/student/StudentCourses'));
+const StudentLessons = lazy(() => import('./components/student/StudentLessons'));
+const StudentAssignments = lazy(() => import('./components/student/StudentAssignments'));
+const StudentQuizzes = lazy(() => import('./components/student/StudentQuizzes'));
+
+// ✅ Lightweight Loader សម្រាប់បង្ហាញតែមួយភ្លែតពេលទាញ Chunk ទំព័រថ្មីលើកដំបូង
+const PageFallback = () => (
+  <div className="flex items-center justify-center min-h-[55vh] w-full">
+    <div className="flex items-center gap-2.5 text-indigo-600 dark:text-indigo-400 text-sm font-bold">
+      <span className="h-5 w-5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+      <span>កំពុងផ្ទុក...</span>
+    </div>
+  </div>
+);
 
 // ✅ HELPER COMPONENT: ប្ដូរ URL ទៅជា /dashboard ភ្លាមៗដោយមិនធ្វើឱ្យ React Re-render ទំព័រសាជាថ្មី
 const RootDashboardEntry = ({ children }) => {
@@ -168,12 +180,14 @@ const AppContent = () => {
   // If user is not logged in, show auth pages without layout on clean root '/'
   if (!effectiveUser) {
     return (
-      <Routes>
-        <Route path="/" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/login" element={<Navigate to="/" replace />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     );
   }
 
@@ -193,262 +207,264 @@ const AppContent = () => {
           id="app-main-scroll"
           className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-20 md:pb-6 min-w-0"
         >
-          <Routes>
-            {/* ✅ ពេលវាយ Domain ចុច Enter ចូលដល់ផ្ទាំង Dashboard ភ្លាមៗ */}
-            <Route
-              path="/"
-              element={
-                <RootDashboardEntry>{renderRoleDashboard()}</RootDashboardEntry>
-              }
-            />
-            <Route
-              path="/login"
-              element={<Navigate to="/dashboard" replace />}
-            />
-            <Route
-              path="/register"
-              element={<Navigate to="/dashboard" replace />}
-            />
-
-            {/* ========================================================== */}
-            {/* 📌 ១. CLEAN UNIFIED ROUTES (គ្មាន /admin, /teacher, /student) */}
-            {/* ========================================================== */}
-            <Route path="/dashboard" element={renderRoleDashboard()} />
-
-            <Route
-              path="/courses"
-              element={
-                role === 'admin' ? (
-                  <ManageCourses />
-                ) : role === 'teacher' ? (
-                  <TeacherManageCourses />
-                ) : (
-                  <StudentCourses />
-                )
-              }
-            />
-
-            {/* Admin Exclusive Clean Routes */}
-            <Route element={<ProtectedRoute allowedRoles={['Admin']} />}>
-              <Route path="/teachers" element={<ManageTeachers />} />
+          <Suspense fallback={<PageFallback />}>
+            <Routes>
+              {/* ✅ ពេលវាយ Domain ចុច Enter ចូលដល់ផ្ទាំង Dashboard ភ្លាមៗ */}
               <Route
-                path="/users"
+                path="/"
+                element={
+                  <RootDashboardEntry>{renderRoleDashboard()}</RootDashboardEntry>
+                }
+              />
+              <Route
+                path="/login"
+                element={<Navigate to="/dashboard" replace />}
+              />
+              <Route
+                path="/register"
+                element={<Navigate to="/dashboard" replace />}
+              />
+
+              {/* ========================================================== */}
+              {/* 📌 ១. CLEAN UNIFIED ROUTES (គ្មាន /admin, /teacher, /student) */}
+              {/* ========================================================== */}
+              <Route path="/dashboard" element={renderRoleDashboard()} />
+
+              <Route
+                path="/courses"
+                element={
+                  role === 'admin' ? (
+                    <ManageCourses />
+                  ) : role === 'teacher' ? (
+                    <TeacherManageCourses />
+                  ) : (
+                    <StudentCourses />
+                  )
+                }
+              />
+
+              {/* Admin Exclusive Clean Routes */}
+              <Route element={<ProtectedRoute allowedRoles={['Admin']} />}>
+                <Route path="/teachers" element={<ManageTeachers />} />
+                <Route
+                  path="/users"
+                  element={<Navigate to="/students/year-1" replace />}
+                />
+                <Route
+                  path="/students/year-1"
+                  element={<ManageStudentsYear1 />}
+                />
+                <Route
+                  path="/students/year-2"
+                  element={<ManageStudentsYear2 />}
+                />
+                <Route
+                  path="/students/year-3"
+                  element={<ManageStudentsYear3 />}
+                />
+                <Route
+                  path="/students/year-4"
+                  element={<ManageStudentsYear4 />}
+                />
+                <Route path="/reports" element={<AdminReports />} />
+              </Route>
+
+              {/* Admin & Teacher Shared Clean Routes */}
+              <Route
+                element={<ProtectedRoute allowedRoles={['Admin', 'Teacher']} />}
+              >
+                <Route path="/departments" element={<ManageDepartments />} />
+                <Route
+                  path="/students"
+                  element={
+                    role === 'admin' ? (
+                      <Navigate to="/students/year-1" replace />
+                    ) : (
+                      <TeacherManageStudents />
+                    )
+                  }
+                />
+              </Route>
+
+              {/* Teacher & Student Shared Clean Routes */}
+              <Route
+                element={<ProtectedRoute allowedRoles={['Teacher', 'Student']} />}
+              >
+                <Route
+                  path="/lessons"
+                  element={
+                    role === 'teacher' ? <ManageLessons /> : <StudentLessons />
+                  }
+                />
+                <Route
+                  path="/assignments"
+                  element={
+                    role === 'teacher' ? (
+                      <TeacherManageAssignments />
+                    ) : (
+                      <StudentAssignments />
+                    )
+                  }
+                />
+                <Route
+                  path="/quizzes"
+                  element={
+                    role === 'teacher' ? (
+                      <TeacherManageQuizzes />
+                    ) : (
+                      <StudentQuizzes />
+                    )
+                  }
+                />
+                <Route
+                  path="/attendance"
+                  element={
+                    role === 'teacher' ? <ManageAttendance /> : <ViewAttendance />
+                  }
+                />
+                <Route
+                  path="/scores"
+                  element={
+                    role === 'teacher' ? <TeacherManageGrades /> : <ViewScores />
+                  }
+                />
+                <Route
+                  path="/grades"
+                  element={
+                    role === 'teacher' ? <TeacherManageGrades /> : <ViewScores />
+                  }
+                />
+              </Route>
+
+              {/* ========================================================== */}
+              {/* 📌 ២. AUTO-REDIRECT ពី URL ចាស់ៗមកកាន់ URL ថ្មីស្អាតដោយស្វ័យប្រវត្តិ */}
+              {/* ========================================================== */}
+              <Route
+                path="/admin/dashboard"
+                element={<Navigate to="/dashboard" replace />}
+              />
+              <Route
+                path="/admin/courses"
+                element={<Navigate to="/courses" replace />}
+              />
+              <Route
+                path="/admin/departments"
+                element={<Navigate to="/departments" replace />}
+              />
+              <Route
+                path="/admin/teachers"
+                element={<Navigate to="/teachers" replace />}
+              />
+              <Route
+                path="/admin/users"
                 element={<Navigate to="/students/year-1" replace />}
               />
               <Route
-                path="/students/year-1"
-                element={<ManageStudentsYear1 />}
+                path="/admin/students"
+                element={<Navigate to="/students/year-1" replace />}
               />
               <Route
-                path="/students/year-2"
-                element={<ManageStudentsYear2 />}
+                path="/admin/students/year-1"
+                element={<Navigate to="/students/year-1" replace />}
               />
               <Route
-                path="/students/year-3"
-                element={<ManageStudentsYear3 />}
+                path="/admin/students/year-2"
+                element={<Navigate to="/students/year-2" replace />}
               />
               <Route
-                path="/students/year-4"
-                element={<ManageStudentsYear4 />}
+                path="/admin/students/year-3"
+                element={<Navigate to="/students/year-3" replace />}
               />
-              <Route path="/reports" element={<AdminReports />} />
-            </Route>
+              <Route
+                path="/admin/students/year-4"
+                element={<Navigate to="/students/year-4" replace />}
+              />
+              <Route
+                path="/admin/reports"
+                element={<Navigate to="/reports" replace />}
+              />
 
-            {/* Admin & Teacher Shared Clean Routes */}
-            <Route
-              element={<ProtectedRoute allowedRoles={['Admin', 'Teacher']} />}
-            >
-              <Route path="/departments" element={<ManageDepartments />} />
               <Route
-                path="/students"
-                element={
-                  role === 'admin' ? (
-                    <Navigate to="/students/year-1" replace />
-                  ) : (
-                    <TeacherManageStudents />
-                  )
-                }
+                path="/teacher/dashboard"
+                element={<Navigate to="/dashboard" replace />}
               />
-            </Route>
+              <Route
+                path="/teacher/courses"
+                element={<Navigate to="/courses" replace />}
+              />
+              <Route
+                path="/teacher/lessons"
+                element={<Navigate to="/lessons" replace />}
+              />
+              <Route
+                path="/teacher/assignments"
+                element={<Navigate to="/assignments" replace />}
+              />
+              <Route
+                path="/teacher/quizzes"
+                element={<Navigate to="/quizzes" replace />}
+              />
+              <Route
+                path="/teacher/attendance"
+                element={<Navigate to="/attendance" replace />}
+              />
+              <Route
+                path="/teacher/scores"
+                element={<Navigate to="/scores" replace />}
+              />
+              <Route
+                path="/teacher/grades"
+                element={<Navigate to="/grades" replace />}
+              />
+              <Route
+                path="/teacher/students"
+                element={<Navigate to="/students" replace />}
+              />
+              <Route
+                path="/teacher/departments"
+                element={<Navigate to="/departments" replace />}
+              />
 
-            {/* Teacher & Student Shared Clean Routes */}
-            <Route
-              element={<ProtectedRoute allowedRoles={['Teacher', 'Student']} />}
-            >
               <Route
-                path="/lessons"
-                element={
-                  role === 'teacher' ? <ManageLessons /> : <StudentLessons />
-                }
+                path="/student/dashboard"
+                element={<Navigate to="/dashboard" replace />}
               />
               <Route
-                path="/assignments"
-                element={
-                  role === 'teacher' ? (
-                    <TeacherManageAssignments />
-                  ) : (
-                    <StudentAssignments />
-                  )
-                }
+                path="/student/courses"
+                element={<Navigate to="/courses" replace />}
               />
               <Route
-                path="/quizzes"
-                element={
-                  role === 'teacher' ? (
-                    <TeacherManageQuizzes />
-                  ) : (
-                    <StudentQuizzes />
-                  )
-                }
+                path="/student/lessons"
+                element={<Navigate to="/lessons" replace />}
               />
               <Route
-                path="/attendance"
-                element={
-                  role === 'teacher' ? <ManageAttendance /> : <ViewAttendance />
-                }
+                path="/student/attendance"
+                element={<Navigate to="/attendance" replace />}
               />
               <Route
-                path="/scores"
-                element={
-                  role === 'teacher' ? <TeacherManageGrades /> : <ViewScores />
-                }
+                path="/student/scores"
+                element={<Navigate to="/scores" replace />}
               />
               <Route
-                path="/grades"
-                element={
-                  role === 'teacher' ? <TeacherManageGrades /> : <ViewScores />
-                }
+                path="/student/grades"
+                element={<Navigate to="/grades" replace />}
               />
-            </Route>
+              <Route
+                path="/student/assignments"
+                element={<Navigate to="/assignments" replace />}
+              />
+              <Route
+                path="/student/quizzes"
+                element={<Navigate to="/quizzes" replace />}
+              />
 
-            {/* ========================================================== */}
-            {/* 📌 ២. AUTO-REDIRECT ពី URL ចាស់ៗមកកាន់ URL ថ្មីស្អាតដោយស្វ័យប្រវត្តិ */}
-            {/* ========================================================== */}
-            <Route
-              path="/admin/dashboard"
-              element={<Navigate to="/dashboard" replace />}
-            />
-            <Route
-              path="/admin/courses"
-              element={<Navigate to="/courses" replace />}
-            />
-            <Route
-              path="/admin/departments"
-              element={<Navigate to="/departments" replace />}
-            />
-            <Route
-              path="/admin/teachers"
-              element={<Navigate to="/teachers" replace />}
-            />
-            <Route
-              path="/admin/users"
-              element={<Navigate to="/students/year-1" replace />}
-            />
-            <Route
-              path="/admin/students"
-              element={<Navigate to="/students/year-1" replace />}
-            />
-            <Route
-              path="/admin/students/year-1"
-              element={<Navigate to="/students/year-1" replace />}
-            />
-            <Route
-              path="/admin/students/year-2"
-              element={<Navigate to="/students/year-2" replace />}
-            />
-            <Route
-              path="/admin/students/year-3"
-              element={<Navigate to="/students/year-3" replace />}
-            />
-            <Route
-              path="/admin/students/year-4"
-              element={<Navigate to="/students/year-4" replace />}
-            />
-            <Route
-              path="/admin/reports"
-              element={<Navigate to="/reports" replace />}
-            />
-
-            <Route
-              path="/teacher/dashboard"
-              element={<Navigate to="/dashboard" replace />}
-            />
-            <Route
-              path="/teacher/courses"
-              element={<Navigate to="/courses" replace />}
-            />
-            <Route
-              path="/teacher/lessons"
-              element={<Navigate to="/lessons" replace />}
-            />
-            <Route
-              path="/teacher/assignments"
-              element={<Navigate to="/assignments" replace />}
-            />
-            <Route
-              path="/teacher/quizzes"
-              element={<Navigate to="/quizzes" replace />}
-            />
-            <Route
-              path="/teacher/attendance"
-              element={<Navigate to="/attendance" replace />}
-            />
-            <Route
-              path="/teacher/scores"
-              element={<Navigate to="/scores" replace />}
-            />
-            <Route
-              path="/teacher/grades"
-              element={<Navigate to="/grades" replace />}
-            />
-            <Route
-              path="/teacher/students"
-              element={<Navigate to="/students" replace />}
-            />
-            <Route
-              path="/teacher/departments"
-              element={<Navigate to="/departments" replace />}
-            />
-
-            <Route
-              path="/student/dashboard"
-              element={<Navigate to="/dashboard" replace />}
-            />
-            <Route
-              path="/student/courses"
-              element={<Navigate to="/courses" replace />}
-            />
-            <Route
-              path="/student/lessons"
-              element={<Navigate to="/lessons" replace />}
-            />
-            <Route
-              path="/student/attendance"
-              element={<Navigate to="/attendance" replace />}
-            />
-            <Route
-              path="/student/scores"
-              element={<Navigate to="/scores" replace />}
-            />
-            <Route
-              path="/student/grades"
-              element={<Navigate to="/grades" replace />}
-            />
-            <Route
-              path="/student/assignments"
-              element={<Navigate to="/assignments" replace />}
-            />
-            <Route
-              path="/student/quizzes"
-              element={<Navigate to="/quizzes" replace />}
-            />
-
-            {/* Fallback */}
-            <Route
-              path="*"
-              element={<Navigate to={getDashboardPath()} replace />}
-            />
-          </Routes>
+              {/* Fallback */}
+              <Route
+                path="*"
+                element={<Navigate to={getDashboardPath()} replace />}
+              />
+            </Routes>
+          </Suspense>
         </main>
       </div>
 

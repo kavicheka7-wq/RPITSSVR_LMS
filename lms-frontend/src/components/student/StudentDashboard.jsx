@@ -61,6 +61,15 @@ const STUDENT_DASH_MEM_CACHE = {
   prefetchedUid: null,
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -71,7 +80,7 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដើម្បីកុំឱ្យពេញ localStorage (QuotaExceededError)
+// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដោយរត់នៅពេលទំនេរ
 const compressTeacherAvatar = (dataUrl, callback) => {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
     callback(dataUrl);
@@ -81,52 +90,56 @@ const compressTeacherAvatar = (dataUrl, callback) => {
     callback(dataUrl);
     return;
   }
-  try {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 96;
-        let width = img.width || maxSize;
-        let height = img.height || maxSize;
-        if (width > height) {
-          if (width > maxSize) {
-            height = Math.round((height * maxSize) / width);
-            width = maxSize;
+  runWhenIdle(() => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 96;
+          let width = img.width || maxSize;
+          let height = img.height || maxSize;
+          if (width > height) {
+            if (width > maxSize) {
+              height = Math.round((height * maxSize) / width);
+              width = maxSize;
+            }
+          } else {
+            if (height > maxSize) {
+              width = Math.round((width * maxSize) / height);
+              height = maxSize;
+            }
           }
-        } else {
-          if (height > maxSize) {
-            width = Math.round((width * maxSize) / height);
-            height = maxSize;
-          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/webp', 0.76);
+          callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } catch {
+          callback(dataUrl);
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        const compressed = canvas.toDataURL('image/webp', 0.78);
-        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
-      } catch {
-        callback(dataUrl);
-      }
-    };
-    img.onerror = () => callback(dataUrl);
-    img.src = dataUrl;
-  } catch {
-    callback(dataUrl);
-  }
+      };
+      img.onerror = () => callback(dataUrl);
+      img.src = dataUrl;
+    } catch {
+      callback(dataUrl);
+    }
+  }, 400);
 };
 
 let teacherAvatarSaveTimer = null;
 const schedulePersistTeacherAvatars = (avatarMap) => {
   if (teacherAvatarSaveTimer) clearTimeout(teacherAvatarSaveTimer);
   teacherAvatarSaveTimer = setTimeout(() => {
-    try {
-      const str = JSON.stringify(avatarMap);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
-    } catch {}
-  }, 150);
+    runWhenIdle(() => {
+      try {
+        const str = JSON.stringify(avatarMap);
+        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
+      } catch {}
+    });
+  }, 300);
 };
 
 // ✅ ញែករូបថតគ្រូទុកក្នុង CACHE_KEY_TEACHER_AVATARS រួមតែមួយ ហើយរក្សាទុកបញ្ជីមុខវិជ្ជា/មេរៀនយ៉ាងស្រាលបំផុត
@@ -160,27 +173,33 @@ const saveCoursesAndAvatarsFast = (coursesArr) => {
       null;
 
     if (rawImg && typeof rawImg === 'string') {
-      if (cid && !avatarMap[`crs_${cid}`]) {
-        avatarMap[`crs_${cid}`] = rawImg;
-        mapUpdated = true;
-      }
-      if (tchId && !avatarMap[`tch_${tchId}`]) {
-        avatarMap[`tch_${tchId}`] = rawImg;
-        mapUpdated = true;
-      }
-      if (nameKey && !avatarMap[nameKey]) {
-        avatarMap[nameKey] = rawImg;
-        mapUpdated = true;
-      }
+      const existingCached =
+        (cid && avatarMap[`crs_${cid}`]) ||
+        (tchId && avatarMap[`tch_${tchId}`]);
 
-      compressTeacherAvatar(rawImg, (tinyImg) => {
-        if (tinyImg) {
-          if (cid) avatarMap[`crs_${cid}`] = tinyImg;
-          if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
-          if (nameKey) avatarMap[nameKey] = tinyImg;
-          schedulePersistTeacherAvatars(avatarMap);
+      if (!existingCached || existingCached.length > 18000) {
+        if (cid && !avatarMap[`crs_${cid}`]) {
+          avatarMap[`crs_${cid}`] = rawImg;
+          mapUpdated = true;
         }
-      });
+        if (tchId && !avatarMap[`tch_${tchId}`]) {
+          avatarMap[`tch_${tchId}`] = rawImg;
+          mapUpdated = true;
+        }
+        if (nameKey && !avatarMap[nameKey]) {
+          avatarMap[nameKey] = rawImg;
+          mapUpdated = true;
+        }
+
+        compressTeacherAvatar(rawImg, (tinyImg) => {
+          if (tinyImg) {
+            if (cid) avatarMap[`crs_${cid}`] = tinyImg;
+            if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
+            if (nameKey) avatarMap[nameKey] = tinyImg;
+            schedulePersistTeacherAvatars(avatarMap);
+          }
+        });
+      }
     }
 
     const isHeavy =
@@ -287,7 +306,7 @@ const extractArrayFromRes = (resData) => {
   return [];
 };
 
-// ✅ ទាញទិន្នន័យកិច្ចការ, កម្រងសំណួរ និងពិន្ទុសម្រាប់បង្ហាញលើ Dashboard
+// ✅ ទាញទិន្នន័យកិច្ចការ, កម្រងសំណួរ និងពិន្ទុតាមលំដាប់ (Staggered) ដើម្បីកុំឱ្យស្ទះ Hosting
 const syncDashboardTasksAndPrefetch = (
   uid,
   forceRefresh,
@@ -298,117 +317,113 @@ const syncDashboardTasksAndPrefetch = (
 ) => {
   const effectiveUid = uid || 'default_student';
 
-  // ១. ទាញបញ្ជីកិច្ចការសិស្សសម្រាប់បង្ហាញក្នុងកាត «កិច្ចការថ្មីៗ» និងបូកពិន្ទុកិច្ចការនីមួយៗ
-  api
-    .get('/student/assignments', { params: { per_page: 50 } })
-    .then((res) => {
+  // ១. ទាញកិច្ចការ និងកម្រងសំណួរ (ជំហានទី១)
+  Promise.allSettled([
+    api.get('/student/assignments', { params: { per_page: 50 } }).then((res) => {
       if (res.data?.error_debug) return;
       const data = extractArrayFromRes(res.data);
       STUDENT_DASH_MEM_CACHE.assignments = data;
-      if (typeof onAssignmentsSynced === 'function') {
-        onAssignmentsSynced(data);
-      }
-      try {
-        const str = JSON.stringify(data);
-        localStorage.setItem(getAssignmentsCacheKey(effectiveUid), str);
-        localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-      } catch {}
-    })
-    .catch(() => {});
-
-  // ២. ទាញបញ្ជីកម្រងសំណួរប្រឡងសម្រាប់បង្ហាញក្នុងកាត «កម្រងសំណួរថ្មីៗ»
-  api
-    .get('/student/quizzes', { params: { per_page: 50 } })
-    .then((res) => {
+      if (typeof onAssignmentsSynced === 'function') onAssignmentsSynced(data);
+      runWhenIdle(() => {
+        try {
+          const str = JSON.stringify(data);
+          localStorage.setItem(getAssignmentsCacheKey(effectiveUid), str);
+          localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
+        } catch {}
+      });
+    }),
+    api.get('/student/quizzes', { params: { per_page: 50 } }).then((res) => {
       if (res.data?.error_debug) return;
       const data = extractArrayFromRes(res.data);
       STUDENT_DASH_MEM_CACHE.quizzes = data;
-      if (typeof onQuizzesSynced === 'function') {
-        onQuizzesSynced(data);
-      }
-      try {
-        const str = JSON.stringify(data);
-        localStorage.setItem(getQuizzesCacheKey(effectiveUid), str);
-        localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-      } catch {}
-    })
-    .catch(() => {});
+      if (typeof onQuizzesSynced === 'function') onQuizzesSynced(data);
+      runWhenIdle(() => {
+        try {
+          const str = JSON.stringify(data);
+          localStorage.setItem(getQuizzesCacheKey(effectiveUid), str);
+          localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
+        } catch {}
+      });
+    }),
+  ]).finally(() => {
+    // ២. ទាញពិន្ទុបន្ទាប់ពីកិច្ចការ និងសំណួររួចរាល់ (កាត់បន្ថយការបាញ់ព្រមគ្នាច្រើនពេក)
+    api
+      .get('/student/scores')
+      .then((res) => {
+        if (res.data?.error_debug) return;
+        const data = extractArrayFromRes(res.data);
+        const slim = saveCoursesAndAvatarsFast(data);
+        STUDENT_DASH_MEM_CACHE.scores = slim;
+        if (typeof onScoresSynced === 'function') onScoresSynced(slim);
+        runWhenIdle(() => {
+          try {
+            const str = JSON.stringify(slim);
+            localStorage.setItem(getScoresCacheKey(effectiveUid), str);
+            localStorage.setItem(CACHE_KEY_SHARED_SCORES, str);
+          } catch {}
+        });
+      })
+      .catch(() => {});
+  });
 
-  // ៣. ទាញពិន្ទុតាមមុខវិជ្ជា (រួមមានពិន្ទុកិច្ចការ + សំណួរខ្លី + ប្រឡងពាក់កណ្ដាលឆមាសលើក្រដាសក្រៅ + ប្រឡងបញ្ចប់លើក្រដាសក្រៅ ដែលគ្រូបានចុចរក្សាទុក)
-  api
-    .get('/student/scores')
-    .then((res) => {
-      if (res.data?.error_debug) return;
-      const data = extractArrayFromRes(res.data);
-      const slim = saveCoursesAndAvatarsFast(data);
-      STUDENT_DASH_MEM_CACHE.scores = slim;
-      if (typeof onScoresSynced === 'function') {
-        onScoresSynced(slim);
-      }
-      try {
-        const str = JSON.stringify(slim);
-        localStorage.setItem(getScoresCacheKey(effectiveUid), str);
-        localStorage.setItem(CACHE_KEY_SHARED_SCORES, str);
-      } catch {}
-    })
-    .catch(() => {});
-
-  // ៤. Background Prefetch សម្រាប់ទំព័រមេរៀន (ធ្វើតែ ១ ដងគត់ក្នុង ១ Session បើមិនទាន់មានក្នុង Cache)
+  // ៣. Background Prefetch សម្រាប់ទំព័រមេរៀន (ពន្យារពេល 2.5s ដើម្បីកុំឱ្យដណ្ដើម Network ពេលបើកទំព័រដំបូង)
   if (!forceRefresh && STUDENT_DASH_MEM_CACHE.prefetchedUid !== effectiveUid) {
     STUDENT_DASH_MEM_CACHE.prefetchedUid = effectiveUid;
 
     setTimeout(() => {
-      const existingLessons = readStorageJson(
-        getLessonsCacheKey(effectiveUid),
-        null
-      );
-      if (!Array.isArray(existingLessons) || existingLessons.length === 0) {
-        api
-          .get('/student/lessons')
-          .then((res) => {
-            if (res.data?.error_debug) return;
-            const lessonsData = Array.isArray(res.data?.data)
-              ? res.data.data
-              : Array.isArray(res.data)
-              ? res.data
-              : [];
-            const deptCoursesData = Array.isArray(res.data?.department_courses)
-              ? res.data.department_courses
-              : [];
+      runWhenIdle(() => {
+        const existingLessons = readStorageJson(
+          getLessonsCacheKey(effectiveUid),
+          null
+        );
+        if (!Array.isArray(existingLessons) || existingLessons.length === 0) {
+          api
+            .get('/student/lessons')
+            .then((res) => {
+              if (res.data?.error_debug) return;
+              const lessonsData = Array.isArray(res.data?.data)
+                ? res.data.data
+                : Array.isArray(res.data)
+                ? res.data
+                : [];
+              const deptCoursesData = Array.isArray(res.data?.department_courses)
+                ? res.data.department_courses
+                : [];
 
-            if (deptCoursesData.length > 0) {
-              const slimDept = saveCoursesAndAvatarsFast(deptCoursesData);
-              if (typeof onCoursesSynced === 'function') {
-                onCoursesSynced(slimDept);
+              if (deptCoursesData.length > 0) {
+                const slimDept = saveCoursesAndAvatarsFast(deptCoursesData);
+                if (typeof onCoursesSynced === 'function') {
+                  onCoursesSynced(slimDept);
+                }
+                try {
+                  const deptStr = JSON.stringify(slimDept);
+                  localStorage.setItem(
+                    getDeptCoursesCacheKey(effectiveUid),
+                    deptStr
+                  );
+                  localStorage.setItem(CACHE_KEY_SHARED_DEPT_COURSES, deptStr);
+                } catch {}
               }
-              try {
-                const deptStr = JSON.stringify(slimDept);
-                localStorage.setItem(
-                  getDeptCoursesCacheKey(effectiveUid),
-                  deptStr
-                );
-                localStorage.setItem(CACHE_KEY_SHARED_DEPT_COURSES, deptStr);
-              } catch {}
-            }
-            if (lessonsData.length > 0) {
-              try {
-                const lsnStr = JSON.stringify(lessonsData);
-                localStorage.setItem(getLessonsCacheKey(effectiveUid), lsnStr);
-                localStorage.setItem(CACHE_KEY_SHARED_LESSONS, lsnStr);
-              } catch {}
-            }
-            if (res.data?.student_current_year) {
-              try {
-                localStorage.setItem(
-                  getStudentYearCacheKey(effectiveUid),
-                  String(res.data.student_current_year)
-                );
-              } catch {}
-            }
-          })
-          .catch(() => {});
-      }
-    }, 600);
+              if (lessonsData.length > 0) {
+                try {
+                  const lsnStr = JSON.stringify(lessonsData);
+                  localStorage.setItem(getLessonsCacheKey(effectiveUid), lsnStr);
+                  localStorage.setItem(CACHE_KEY_SHARED_LESSONS, lsnStr);
+                } catch {}
+              }
+              if (res.data?.student_current_year) {
+                try {
+                  localStorage.setItem(
+                    getStudentYearCacheKey(effectiveUid),
+                    String(res.data.student_current_year)
+                  );
+                } catch {}
+              }
+            })
+            .catch(() => {});
+        }
+      });
+    }, 2500);
   }
 };
 
@@ -793,10 +808,9 @@ const StudentDashboard = () => {
   }, [quizzes]);
 
   // ============================================================================
-  // 📌 គណនាបូកពិន្ទុសរុបតាមផ្នែកដែលគ្រូបានដាក់ និងចុចរក្សាទុក (កិច្ចការ 20% + សំណួរខ្លី 20% + ពាក់កណ្ដាលឆមាស 25% + ប្រឡងឆមាស 35%)
+  // 📌 គណនាបូកពិន្ទុសរុបតាមផ្នែកដែលគ្រូបានដាក់ និងចុចរក្សាទុក
   // ============================================================================
   const scoreSummary = useMemo(() => {
-    // ១. គណនាពិន្ទុកិច្ចការនីមួយៗដែលគ្រូបានដាក់ និងរក្សាទុក តាមមុខវិជ្ជានីមួយៗ
     const assignByCourse = new Map();
     teacherAssignedHomework.forEach((a) => {
       if (a.isGraded && a.resolvedSubmission) {
@@ -820,7 +834,6 @@ const StudentDashboard = () => {
       }
     });
 
-    // ២. គណនាពិន្ទុសំណួរខ្លីនីមួយៗដែលមាន តាមមុខវិជ្ជានីមួយៗ
     const quizByCourse = new Map();
     teacherAssignedQuizzes.forEach((q) => {
       if (
@@ -841,7 +854,6 @@ const StudentDashboard = () => {
       }
     });
 
-    // ៣. បូកបញ្ចូលគ្នាជាមួយពិន្ទុក្នុងតារាងពិន្ទុ (/student/scores ដែលមានពាក់កណ្ដាលឆមាស 25% និងប្រឡងឆមាស 35% លើក្រដាសក្រៅ)
     const courseIdsSet = new Set();
     if (Array.isArray(scoresList)) {
       scoresList.forEach((r) => {
@@ -883,7 +895,6 @@ const StudentDashboard = () => {
       const midtermRaw100 = scoreRow?.midterm_score ?? null;
       const examRaw100 = scoreRow?.exam_score ?? null;
 
-      // បម្លែងជាពិន្ទុពិតប្រាកដតាមផ្នែក៖ កិច្ចការ (20ពិន្ទុ), សំណួរខ្លី (20ពិន្ទុ), ពាក់កណ្ដាលឆមាស (25ពិន្ទុ), ប្រឡងឆមាស (35ពិន្ទុ)
       const assignPts20 = toWeightedPoints(assignRaw100, 20);
       const quizPts20 = toWeightedPoints(quizRaw100, 20);
       const midtermPts25 = toWeightedPoints(midtermRaw100, 25);
@@ -956,7 +967,6 @@ const StudentDashboard = () => {
   const exactTotalPoints = scoreSummary.totalPoints;
 
   const masteryInfo = useMemo(() => {
-    // ១. ករណីគ្រូមិនទាន់បានដាក់ពិន្ទុ និងចុចរក្សាទុកណាមួយសោះ (0%)
     if (!scoreSummary.hasAnyGradedScore) {
       return {
         label: t('និស្សិតកំពុងសិក្សា', 'Active Student'),
@@ -974,7 +984,6 @@ const StudentDashboard = () => {
       };
     }
 
-    // ២. ករណីពិន្ទុបូកសរុបបានចាប់ពី 50 ពិន្ទុ (50%) ឡើងទៅ
     if (exactTotalPoints >= 50) {
       return {
         label:
@@ -998,7 +1007,6 @@ const StudentDashboard = () => {
       };
     }
 
-    // ៣. ករណីគ្រូបានដាក់ពិន្ទុកិច្ចការ/សំណួរខ្លីខ្លះហើយ តែមិនទាន់បញ្ចូលពិន្ទុប្រឡងក្រដាសក្រៅ (ពាក់កណ្ដាលឆមាស និងឆមាស) គ្រប់ 100%
     if (!scoreSummary.isAllExamsComplete) {
       return {
         label: t('កំពុងសន្សំពិន្ទុ', 'In Progress'),
@@ -1016,7 +1024,6 @@ const StudentDashboard = () => {
       };
     }
 
-    // ៤. ករណីគ្រូបញ្ចូលគ្រប់ផ្នែកទាំងអស់ហើយ ប៉ុន្តែពិន្ទុសរុបតិចជាង 50 ពិន្ទុ
     return {
       label: t('ត្រូវប្រឹងប្រែងបន្ថែម', 'Needs Improvement'),
       statusText: `${t('ប្រឡងធ្លាក់', 'Failed')} (${exactTotalPoints} ${t(
@@ -1170,27 +1177,10 @@ const StudentDashboard = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ ទាញយកទិន្នន័យដោយឯករាជ្យមិនរង់ចាំគ្នា + Real-Time Silent Sync (0ms)
+  // 📌 ផ្នែកទី៥៖ ទាញយក /student/dashboard មុនគេ រួចសឹមទាញ Tasks តាមក្រោយ (មិនស្ទះ Hosting)
   // ============================================================================
   const fetchDashboardData = useCallback(
     async (forceRefresh = false) => {
-      syncDashboardTasksAndPrefetch(
-        currentStudentId,
-        forceRefresh,
-        (asgData) => {
-          setAssignments(asgData);
-        },
-        (qzData) => {
-          setQuizzes(qzData);
-        },
-        (crsData) => {
-          setEnrollments((prev) => (prev.length === 0 ? crsData : prev));
-        },
-        (scrData) => {
-          setScoresList(scrData);
-        }
-      );
-
       const now = Date.now();
       const cachedSt =
         STUDENT_DASH_MEM_CACHE.stats ||
@@ -1227,7 +1217,7 @@ const StudentDashboard = () => {
         Number(cachedSt.total_courses) > 0 &&
         Array.isArray(cachedEnr) &&
         cachedEnr.length > 0 &&
-        now - STUDENT_DASH_MEM_CACHE.lastSyncedAt < 5000
+        now - STUDENT_DASH_MEM_CACHE.lastSyncedAt < 25000
       ) {
         return;
       }
@@ -1239,94 +1229,105 @@ const StudentDashboard = () => {
       abortControllerRef.current = controller;
 
       try {
+        // ✅ ទាញ /student/dashboard មុនគេតែ ១ Request ដើម្បីឱ្យទំព័រដើមបង្ហាញលឿនបំផុត
         const dashRes = await api.get('/student/dashboard', {
           signal: controller.signal,
         });
         const resData = dashRes?.data?.data || dashRes?.data || {};
 
-        if (resData?.error_debug) {
-          return;
-        }
+        if (!resData?.error_debug) {
+          const newStats = resData?.stats || {
+            total_courses: 0,
+            average_score: 0,
+            total_assignments: 0,
+            total_quizzes: 0,
+          };
 
-        const newStats = resData?.stats || {
-          total_courses: 0,
-          average_score: 0,
-          total_assignments: 0,
-          total_quizzes: 0,
-        };
+          const rawCourses =
+            resData?.enrollments ||
+            resData?.active_courses ||
+            resData?.courses ||
+            resData?.recent_courses ||
+            [];
+          const validEnrollments = Array.isArray(rawCourses) ? rawCourses : [];
 
-        const rawCourses =
-          resData?.enrollments ||
-          resData?.active_courses ||
-          resData?.courses ||
-          resData?.recent_courses ||
-          [];
-        const validEnrollments = Array.isArray(rawCourses) ? rawCourses : [];
-
-        setStats(newStats);
-        if (
-          validEnrollments.length > 0 ||
-          !STUDENT_DASH_MEM_CACHE.enrollments?.length
-        ) {
-          setEnrollments(validEnrollments);
-          STUDENT_DASH_MEM_CACHE.enrollments = validEnrollments;
-        }
-
-        STUDENT_DASH_MEM_CACHE.uid = currentStudentId;
-        STUDENT_DASH_MEM_CACHE.stats = newStats;
-        STUDENT_DASH_MEM_CACHE.lastSyncedAt = Date.now();
-
-        if (
-          (!STUDENT_DASH_MEM_CACHE.assignments ||
-            STUDENT_DASH_MEM_CACHE.assignments.length === 0) &&
-          Array.isArray(resData?.recent_activity?.submissions) &&
-          resData.recent_activity.submissions.length > 0
-        ) {
-          const fallbackAsg = resData.recent_activity.submissions.map((sub) => ({
-            ...(sub.assignment || {}),
-            id: sub.assignment_id || sub.assignment?.id || sub.id,
-            title: sub.assignment?.title || 'កិច្ចការសិស្ស',
-            due_date: sub.assignment?.due_date || sub.submitted_at,
-            total_score: sub.assignment?.total_score ?? 20,
-            submission: sub,
-          }));
-          setAssignments((prev) => (prev.length === 0 ? fallbackAsg : prev));
-        }
-
-        if (
-          (!STUDENT_DASH_MEM_CACHE.quizzes ||
-            STUDENT_DASH_MEM_CACHE.quizzes.length === 0) &&
-          Array.isArray(resData?.recent_activity?.quiz_attempts) &&
-          resData.recent_activity.quiz_attempts.length > 0
-        ) {
-          const fallbackQz = resData.recent_activity.quiz_attempts.map((att) => ({
-            ...(att.quiz || {}),
-            id: att.quiz_id || att.quiz?.id || att.id,
-            title: att.quiz?.title || 'កម្រងសំណួរប្រឡង',
-            end_date: att.quiz?.end_date || att.submitted_at,
-            total_mark: att.quiz?.total_mark ?? 20,
-            attempt: att,
-          }));
-          setQuizzes((prev) => (prev.length === 0 ? fallbackQz : prev));
-        }
-
-        const slimEnrollments = saveCoursesAndAvatarsFast(validEnrollments);
-        try {
-          localStorage.setItem(
-            getStatsCacheKey(currentStudentId),
-            JSON.stringify(newStats)
-          );
-          if (slimEnrollments.length > 0) {
-            localStorage.setItem(
-              getEnrollmentsCacheKey(currentStudentId),
-              JSON.stringify(slimEnrollments)
-            );
-            localStorage.setItem(
-              CACHE_KEY_SHARED_ENROLLMENTS,
-              JSON.stringify(slimEnrollments)
-            );
+          setStats(newStats);
+          if (
+            validEnrollments.length > 0 ||
+            !STUDENT_DASH_MEM_CACHE.enrollments?.length
+          ) {
+            setEnrollments(validEnrollments);
+            STUDENT_DASH_MEM_CACHE.enrollments = validEnrollments;
           }
-        } catch (e) {}
+
+          STUDENT_DASH_MEM_CACHE.uid = currentStudentId;
+          STUDENT_DASH_MEM_CACHE.stats = newStats;
+          STUDENT_DASH_MEM_CACHE.lastSyncedAt = Date.now();
+
+          if (
+            (!STUDENT_DASH_MEM_CACHE.assignments ||
+              STUDENT_DASH_MEM_CACHE.assignments.length === 0) &&
+            Array.isArray(resData?.recent_activity?.submissions) &&
+            resData.recent_activity.submissions.length > 0
+          ) {
+            const fallbackAsg = resData.recent_activity.submissions.map((sub) => ({
+              ...(sub.assignment || {}),
+              id: sub.assignment_id || sub.assignment?.id || sub.id,
+              title: sub.assignment?.title || 'កិច្ចការសិស្ស',
+              due_date: sub.assignment?.due_date || sub.submitted_at,
+              total_score: sub.assignment?.total_score ?? 20,
+              submission: sub,
+            }));
+            setAssignments((prev) => (prev.length === 0 ? fallbackAsg : prev));
+          }
+
+          if (
+            (!STUDENT_DASH_MEM_CACHE.quizzes ||
+              STUDENT_DASH_MEM_CACHE.quizzes.length === 0) &&
+            Array.isArray(resData?.recent_activity?.quiz_attempts) &&
+            resData.recent_activity.quiz_attempts.length > 0
+          ) {
+            const fallbackQz = resData.recent_activity.quiz_attempts.map((att) => ({
+              ...(att.quiz || {}),
+              id: att.quiz_id || att.quiz?.id || att.id,
+              title: att.quiz?.title || 'កម្រងសំណួរប្រឡង',
+              end_date: att.quiz?.end_date || att.submitted_at,
+              total_mark: att.quiz?.total_mark ?? 20,
+              attempt: att,
+            }));
+            setQuizzes((prev) => (prev.length === 0 ? fallbackQz : prev));
+          }
+
+          runWhenIdle(() => {
+            const slimEnrollments = saveCoursesAndAvatarsFast(validEnrollments);
+            try {
+              localStorage.setItem(
+                getStatsCacheKey(currentStudentId),
+                JSON.stringify(newStats)
+              );
+              if (slimEnrollments.length > 0) {
+                localStorage.setItem(
+                  getEnrollmentsCacheKey(currentStudentId),
+                  JSON.stringify(slimEnrollments)
+                );
+                localStorage.setItem(
+                  CACHE_KEY_SHARED_ENROLLMENTS,
+                  JSON.stringify(slimEnrollments)
+                );
+              }
+            } catch (e) {}
+          });
+        }
+
+        // ✅ បន្ទាប់ពី Dashboard មកដល់ ទើបទាញ Assignments / Quizzes / Scores តាមក្រោយ
+        syncDashboardTasksAndPrefetch(
+          currentStudentId,
+          forceRefresh,
+          (asgData) => setAssignments(asgData),
+          (qzData) => setQuizzes(qzData),
+          (crsData) => setEnrollments((prev) => (prev.length === 0 ? crsData : prev)),
+          (scrData) => setScoresList(scrData)
+        );
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
           return;
@@ -1337,12 +1338,14 @@ const StudentDashboard = () => {
     [currentStudentId]
   );
 
-  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 12 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
   useEffect(() => {
     fetchDashboardData(false);
 
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
+      if (
+        document.visibilityState === 'visible' &&
+        Date.now() - STUDENT_DASH_MEM_CACHE.lastSyncedAt > 20000
+      ) {
         fetchDashboardData(true);
       }
     };
@@ -1351,7 +1354,7 @@ const StudentDashboard = () => {
       if (document.visibilityState === 'visible') {
         fetchDashboardData(true);
       }
-    }, 12000);
+    }, 60000);
 
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
@@ -1382,7 +1385,6 @@ const StudentDashboard = () => {
       ? Math.round((totalCompletedActivities / totalActivitiesCount) * 100)
       : 0;
 
-  // ✅ ឱ្យកម្ពស់ទឹករលកក្នុងរង្វង់ឡើងតាមលេខ % នៃពិន្ទុបូកសរុបដែលគ្រូបានដាក់ និងរក្សាទុក ១០០%
   const liquidLevelPercent = averageScoreNum;
   const isLiquidDarkText = liquidLevelPercent < 55;
 
@@ -1439,11 +1441,12 @@ const StudentDashboard = () => {
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ផ្ទាំងស្វាគមន៍សិស្សបែបឌីជីថល និងប្រអប់រំកិលស្វ័យប្រវត្តិ (7 Cols on lg, 8 Cols on xl) */}
+        {/* ១.១. ផ្ទាំងស្វាគមន៍សិស្សបែបឌីជីថល និងប្រអប់រំកិលស្វ័យប្រវត្តិ */}
         <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-hero-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
-          <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
-          <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
+          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+          <div className="hidden md:block absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
+          <div className="hidden md:block absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
@@ -1456,11 +1459,11 @@ const StudentDashboard = () => {
                 </span>
 
                 <span
-                  className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
+                  className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full border text-[11px] sm:text-xs font-extrabold ${
                     isWeekendShift
                       ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                       : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
-                }`}
+                  }`}
                 >
                   <CalendarDaysIcon
                     className={`h-4 w-4 shrink-0 ${
@@ -1472,7 +1475,7 @@ const StudentDashboard = () => {
               </div>
 
               <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 border border-white/15 text-xs font-bold text-blue-100">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
+                <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
                 <span>{getGreeting()}</span>
                 <span className="text-white/40">•</span>
                 <span className="text-yellow-300">{getStudentBatchYear()}</span>
@@ -1506,7 +1509,7 @@ const StudentDashboard = () => {
               <div className="space-y-2.5">
                 <Link
                   to={currentSlide.link || '/courses'}
-                  className="block relative overflow-hidden bg-white/10 hover:bg-white/[0.14] backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 transition-all duration-300"
+                  className="block relative overflow-hidden bg-white/15 md:bg-white/10 hover:bg-white/[0.16] md:backdrop-blur-md border border-white/20 rounded-2xl p-3.5 sm:p-4 transition-colors duration-200"
                 >
                   <div
                     key={currentSlide.id}
@@ -1591,9 +1594,7 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* ================================================================ */}
-        {/* 📌 ១.២. កាតលទ្ធផលការសិក្សារួម + កងមូលមានទឹករលក (5 Cols on lg, 4 Cols on xl) */}
-        {/* ================================================================ */}
+        {/* ១.២. កាតលទ្ធផលការសិក្សារួម + កងមូលមានទឹករលក */}
         <div className="lg:col-span-5 xl:col-span-4 std-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -1614,7 +1615,7 @@ const StudentDashboard = () => {
               <div className="std-liquid-inner absolute inset-[8px] sm:inset-[9px] rounded-full overflow-hidden bg-slate-100/90 dark:bg-slate-900/90 z-0 shadow-inner">
                 {liquidLevelPercent > 0 && (
                   <div
-                    className="absolute bottom-0 left-0 right-0 transition-all duration-1000 ease-out"
+                    className="absolute bottom-0 left-0 right-0 transition-all duration-700 ease-out"
                     style={{ height: `${liquidLevelPercent}%` }}
                   >
                     <div
@@ -1652,13 +1653,13 @@ const StudentDashboard = () => {
                   strokeDashoffset={ringOffset}
                   strokeLinecap="round"
                   fill="transparent"
-                  className="transition-all duration-1000 ease-out"
+                  className="transition-all duration-700 ease-out"
                 />
               </svg>
 
               <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
                 <span
-                  className={`text-xl sm:text-2xl font-black tracking-tight transition-colors duration-500 ${
+                  className={`text-xl sm:text-2xl font-black tracking-tight transition-colors duration-300 ${
                     isLiquidDarkText
                       ? 'std-text-primary text-slate-900'
                       : 'text-white drop-shadow-xs'
@@ -1713,7 +1714,6 @@ const StudentDashboard = () => {
             </Link>
           </div>
         </div>
-
       </div>
 
       {/* ================================================================== */}
@@ -1811,7 +1811,7 @@ const StudentDashboard = () => {
                     <Link
                       key={assign.id || idx}
                       to="/assignments"
-                      className="std-activity-item flex items-center justify-between gap-2.5 sm:gap-3.5 p-3 sm:p-4 rounded-2xl border border-gray-100 hover:border-indigo-300 bg-gray-50/60 transition-all"
+                      className="std-activity-item flex items-center justify-between gap-2.5 sm:gap-3.5 p-3 sm:p-4 rounded-2xl border border-gray-100 hover:border-indigo-300 bg-gray-50/60 transition-colors"
                     >
                       <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
                         <div
@@ -1964,7 +1964,7 @@ const StudentDashboard = () => {
                     <Link
                       key={quiz.id || idx}
                       to="/quizzes"
-                      className="std-activity-item flex items-center justify-between gap-2.5 sm:gap-3.5 p-3 sm:p-4 rounded-2xl border border-gray-100 hover:border-amber-300 bg-gray-50/60 transition-all"
+                      className="std-activity-item flex items-center justify-between gap-2.5 sm:gap-3.5 p-3 sm:p-4 rounded-2xl border border-gray-100 hover:border-amber-300 bg-gray-50/60 transition-colors"
                     >
                       <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
                         <div
@@ -2054,11 +2054,10 @@ const StudentDashboard = () => {
             </span>
           </div>
         </div>
-
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 4. CSS សម្រាប់ចលនាទឹករលកក្នុងកងមូល (LIQUID WAVE) និង DARK MODE      */}
+      {/* 📌 4. CSS សម្រាប់ចលនាទឹករលក (GPU Accelerated) និង DARK MODE          */}
       {/* ================================================================== */}
       <style>{`
         .std-hero-grid-pattern {
@@ -2069,32 +2068,43 @@ const StudentDashboard = () => {
         @keyframes carouselSlideFade {
           0% {
             opacity: 0;
-            transform: translateY(8px);
+            transform: translate3d(0, 8px, 0);
           }
           100% {
             opacity: 1;
-            transform: translateY(0);
+            transform: translate3d(0, 0, 0);
           }
         }
         .std-carousel-slide {
-          animation: carouselSlideFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          animation: carouselSlideFade 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          will-change: transform, opacity;
         }
 
         @keyframes stdLiquidSpin {
           0% {
-            transform: translate(-50%, 0) rotate(0deg);
+            transform: translate3d(-50%, 0, 0) rotate(0deg);
           }
           100% {
-            transform: translate(-50%, 0) rotate(360deg);
+            transform: translate3d(-50%, 0, 0) rotate(360deg);
           }
         }
         .std-liquid-wave-front {
           top: -8px;
           animation: stdLiquidSpin 6s linear infinite;
+          will-change: transform;
         }
         .std-liquid-wave-back {
           top: -12px;
           animation: stdLiquidSpin 9s linear infinite reverse;
+          will-change: transform;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .std-liquid-wave-front,
+          .std-liquid-wave-back,
+          .std-carousel-slide {
+            animation: none !important;
+          }
         }
 
         html.dark .std-surface-card,

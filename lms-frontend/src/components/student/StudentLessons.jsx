@@ -63,6 +63,15 @@ const STUDENT_LESSONS_MEM_CACHE = {
   lastSyncedAt: 0,
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -89,7 +98,7 @@ const getTeacherAvatarMapSync = () => {
   return STUDENT_LESSONS_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដើម្បីកុំឱ្យពេញ localStorage (QuotaExceededError) ហើយរក្សាទុកបានគ្រប់រូបថត 100%
+// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដោយរត់នៅពេល Browser ទំនេរ
 const compressTeacherAvatar = (dataUrl, callback) => {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
     callback(dataUrl);
@@ -99,174 +108,186 @@ const compressTeacherAvatar = (dataUrl, callback) => {
     callback(dataUrl);
     return;
   }
-  try {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const maxSize = 96;
-        let width = img.width || maxSize;
-        let height = img.height || maxSize;
-        if (width > height) {
-          if (width > maxSize) {
-            height = Math.round((height * maxSize) / width);
-            width = maxSize;
+  runWhenIdle(() => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 96;
+          let width = img.width || maxSize;
+          let height = img.height || maxSize;
+          if (width > height) {
+            if (width > maxSize) {
+              height = Math.round((height * maxSize) / width);
+              width = maxSize;
+            }
+          } else {
+            if (height > maxSize) {
+              width = Math.round((width * maxSize) / height);
+              height = maxSize;
+            }
           }
-        } else {
-          if (height > maxSize) {
-            width = Math.round((width * maxSize) / height);
-            height = maxSize;
-          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/webp', 0.76);
+          callback(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } catch {
+          callback(dataUrl);
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        const compressed = canvas.toDataURL('image/webp', 0.78);
-        callback(compressed.length < dataUrl.length ? compressed : dataUrl);
-      } catch {
-        callback(dataUrl);
-      }
-    };
-    img.onerror = () => callback(dataUrl);
-    img.src = dataUrl;
-  } catch {
-    callback(dataUrl);
-  }
+      };
+      img.onerror = () => callback(dataUrl);
+      img.src = dataUrl;
+    } catch {
+      callback(dataUrl);
+    }
+  }, 400);
 };
 
 let teacherAvatarSaveTimer = null;
 const schedulePersistTeacherAvatars = () => {
   if (teacherAvatarSaveTimer) clearTimeout(teacherAvatarSaveTimer);
   teacherAvatarSaveTimer = setTimeout(() => {
-    try {
-      const map = getTeacherAvatarMapSync();
-      const str = JSON.stringify(map);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-      localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
-    } catch {}
-  }, 150);
+    runWhenIdle(() => {
+      try {
+        const map = getTeacherAvatarMapSync();
+        const str = JSON.stringify(map);
+        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
+        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
+      } catch {}
+    });
+  }, 300);
 };
 
-// ✅ រក្សាទុកមេរៀន និងមុខវិជ្ជា ព្រមទាំងរូបថតគ្រូបង្រៀនដោយសុវត្ថិភាព 100%
+// ✅ រក្សាទុកមេរៀន និងមុខវិជ្ជា ព្រមទាំងរូបថតគ្រូបង្រៀននៅពេលទំនេរ (មិនប៉ះពាល់ FPS)
 const persistStudentLessonsFast = (uid, lessonsList, deptCoursesList) => {
-  const avatarMap = getTeacherAvatarMapSync();
+  runWhenIdle(() => {
+    const avatarMap = getTeacherAvatarMapSync();
 
-  const extractAndSlimTeacher = (person, courseIdFallback = '') => {
-    if (!person || typeof person !== 'object') return person;
-    const rawImg =
-      person.profile_image_url ||
-      person.profile_image ||
-      person.avatar ||
-      person.user?.profile_image_url ||
-      person.user?.profile_image ||
-      null;
-
-    const tchId = String(person.id || person.user_id || '');
-    const cid = String(courseIdFallback || '');
-    const nameKey =
-      person.name || person.full_name
-        ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
-        : '';
-
-    if (rawImg && typeof rawImg === 'string') {
-      if (cid && !avatarMap[`crs_${cid}`]) avatarMap[`crs_${cid}`] = rawImg;
-      if (tchId && !avatarMap[`tch_${tchId}`]) avatarMap[`tch_${tchId}`] = rawImg;
-      if (nameKey && !avatarMap[nameKey]) avatarMap[nameKey] = rawImg;
-
-      compressTeacherAvatar(rawImg, (tinyImg) => {
-        if (tinyImg) {
-          if (cid) avatarMap[`crs_${cid}`] = tinyImg;
-          if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
-          if (nameKey) avatarMap[nameKey] = tinyImg;
-          schedulePersistTeacherAvatars();
-        }
-      });
-    }
-
-    const isHeavyBase64 =
-      typeof rawImg === 'string' &&
-      rawImg.startsWith('data:') &&
-      rawImg.length > 25000;
-
-    const copy = { ...person };
-    if (isHeavyBase64) {
-      const cachedTiny =
-        (cid && avatarMap[`crs_${cid}`]) ||
-        (tchId && avatarMap[`tch_${tchId}`]) ||
+    const extractAndSlimTeacher = (person, courseIdFallback = '') => {
+      if (!person || typeof person !== 'object') return person;
+      const rawImg =
+        person.profile_image_url ||
+        person.profile_image ||
+        person.avatar ||
+        person.user?.profile_image_url ||
+        person.user?.profile_image ||
         null;
-      if (cachedTiny && cachedTiny.length < 25000) {
-        copy.profile_image = cachedTiny;
-        copy.profile_image_url = cachedTiny;
-      } else {
-        delete copy.profile_image;
-        delete copy.profile_image_url;
+
+      const tchId = String(person.id || person.user_id || '');
+      const cid = String(courseIdFallback || '');
+      const nameKey =
+        person.name || person.full_name
+          ? `name_${String(person.name || person.full_name).toLowerCase().trim()}`
+          : '';
+
+      if (rawImg && typeof rawImg === 'string') {
+        const existingCached =
+          (cid && avatarMap[`crs_${cid}`]) ||
+          (tchId && avatarMap[`tch_${tchId}`]);
+
+        if (!existingCached || existingCached.length > 18000) {
+          if (cid && !avatarMap[`crs_${cid}`]) avatarMap[`crs_${cid}`] = rawImg;
+          if (tchId && !avatarMap[`tch_${tchId}`]) avatarMap[`tch_${tchId}`] = rawImg;
+          if (nameKey && !avatarMap[nameKey]) avatarMap[nameKey] = rawImg;
+
+          compressTeacherAvatar(rawImg, (tinyImg) => {
+            if (tinyImg) {
+              if (cid) avatarMap[`crs_${cid}`] = tinyImg;
+              if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
+              if (nameKey) avatarMap[nameKey] = tinyImg;
+              schedulePersistTeacherAvatars();
+            }
+          });
+        }
       }
-    }
-    if (copy.user && typeof copy.user === 'object') {
-      const uCopy = { ...copy.user };
-      if (
-        typeof uCopy.profile_image === 'string' &&
-        uCopy.profile_image.startsWith('data:') &&
-        uCopy.profile_image.length > 25000
-      ) {
-        delete uCopy.profile_image;
-        delete uCopy.profile_image_url;
+
+      const isHeavyBase64 =
+        typeof rawImg === 'string' &&
+        rawImg.startsWith('data:') &&
+        rawImg.length > 25000;
+
+      const copy = { ...person };
+      if (isHeavyBase64) {
+        const cachedTiny =
+          (cid && avatarMap[`crs_${cid}`]) ||
+          (tchId && avatarMap[`tch_${tchId}`]) ||
+          null;
+        if (cachedTiny && cachedTiny.length < 25000) {
+          copy.profile_image = cachedTiny;
+          copy.profile_image_url = cachedTiny;
+        } else {
+          delete copy.profile_image;
+          delete copy.profile_image_url;
+        }
       }
-      copy.user = uCopy;
-    }
-    return copy;
-  };
+      if (copy.user && typeof copy.user === 'object') {
+        const uCopy = { ...copy.user };
+        if (
+          typeof uCopy.profile_image === 'string' &&
+          uCopy.profile_image.startsWith('data:') &&
+          uCopy.profile_image.length > 25000
+        ) {
+          delete uCopy.profile_image;
+          delete uCopy.profile_image_url;
+        }
+        copy.user = uCopy;
+      }
+      return copy;
+    };
 
-  const slimCourseObj = (crs) => {
-    if (!crs || typeof crs !== 'object') return crs;
-    const cid = String(crs.id || crs.course_id || '');
-    const copy = { ...crs };
-    if (copy.teacher) {
-      copy.teacher = extractAndSlimTeacher(copy.teacher, cid);
-    }
-    if (copy.teacher_profile) {
-      copy.teacher_profile = extractAndSlimTeacher(copy.teacher_profile, cid);
-    }
-    return copy;
-  };
-
-  if (Array.isArray(deptCoursesList) && deptCoursesList.length > 0) {
-    const slimDept = deptCoursesList.map(slimCourseObj);
-    try {
-      const deptStr = JSON.stringify(slimDept);
-      localStorage.setItem(getDeptCoursesCacheKey(uid), deptStr);
-      localStorage.setItem(CACHE_KEY_SHARED_DEPT_COURSES, deptStr);
-    } catch {}
-  }
-
-  if (Array.isArray(lessonsList)) {
-    const slimLessons = lessonsList.map((lsn) => {
-      if (!lsn || typeof lsn !== 'object') return lsn;
-      const cid = String(lsn.course?.id || lsn.course_id || '');
-      const copy = { ...lsn };
-      if (copy.course) copy.course = slimCourseObj(copy.course);
+    const slimCourseObj = (crs) => {
+      if (!crs || typeof crs !== 'object') return crs;
+      const cid = String(crs.id || crs.course_id || '');
+      const copy = { ...crs };
       if (copy.teacher) {
         copy.teacher = extractAndSlimTeacher(copy.teacher, cid);
       }
-      if (Array.isArray(copy.files)) {
-        copy.files = copy.files.map((f) => {
-          if (!f || typeof f !== 'object') return f;
-          const { file_data, ...restFile } = f;
-          return restFile;
-        });
+      if (copy.teacher_profile) {
+        copy.teacher_profile = extractAndSlimTeacher(copy.teacher_profile, cid);
       }
       return copy;
-    });
+    };
 
-    try {
-      const lsnStr = JSON.stringify(slimLessons);
-      localStorage.setItem(getLessonsCacheKey(uid), lsnStr);
-      localStorage.setItem(CACHE_KEY_SHARED_LESSONS, lsnStr);
-    } catch {}
-  }
+    if (Array.isArray(deptCoursesList) && deptCoursesList.length > 0) {
+      const slimDept = deptCoursesList.map(slimCourseObj);
+      try {
+        const deptStr = JSON.stringify(slimDept);
+        localStorage.setItem(getDeptCoursesCacheKey(uid), deptStr);
+        localStorage.setItem(CACHE_KEY_SHARED_DEPT_COURSES, deptStr);
+      } catch {}
+    }
 
-  schedulePersistTeacherAvatars();
+    if (Array.isArray(lessonsList)) {
+      const slimLessons = lessonsList.map((lsn) => {
+        if (!lsn || typeof lsn !== 'object') return lsn;
+        const cid = String(lsn.course?.id || lsn.course_id || '');
+        const copy = { ...lsn };
+        if (copy.course) copy.course = slimCourseObj(copy.course);
+        if (copy.teacher) {
+          copy.teacher = extractAndSlimTeacher(copy.teacher, cid);
+        }
+        if (Array.isArray(copy.files)) {
+          copy.files = copy.files.map((f) => {
+            if (!f || typeof f !== 'object') return f;
+            const { file_data, ...restFile } = f;
+            return restFile;
+          });
+        }
+        return copy;
+      });
+
+      try {
+        const lsnStr = JSON.stringify(slimLessons);
+        localStorage.setItem(getLessonsCacheKey(uid), lsnStr);
+        localStorage.setItem(CACHE_KEY_SHARED_LESSONS, lsnStr);
+      } catch {}
+    }
+
+    schedulePersistTeacherAvatars();
+  });
 };
 
 // ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណសិស្សឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង
@@ -467,7 +488,6 @@ const detectExplicitYearFromObj = (lessonObj) => {
   return null;
 };
 
-// ✅ បើមុខវិជ្ជានេះសិស្សកំពុងរៀន (isEnrolledCourse = true) ត្រូវធានាថាវាបង្ហាញក្នុងឆ្នាំបច្ចុប្បន្នរបស់សិស្សជានិច្ច
 const extractApplicableYears = (
   obj,
   isEnrolledCourse = false,
@@ -702,7 +722,6 @@ const StudentLessons = () => {
     return detectCurrentStudentYear(user);
   }, [apiStudentYear, lessons, user]);
 
-  // State សម្រាប់ Expandable Search និង Scroll ឈ្មោះគ្រូ
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const searchRef = useRef(null);
@@ -719,7 +738,6 @@ const StudentLessons = () => {
   const [downloadingFileId, setDownloadingFileId] = useState(null);
   const [playingVideo, setPlayingVideo] = useState(null);
 
-  // ✅ ចាក់សោរការអូសទំព័រខាងក្រោយ (Lock Body Scroll) នៅពេលបើកផ្ទាំងចាក់វីដេអូ
   useEffect(() => {
     if (playingVideo) {
       const prevOverflow = document.body.style.overflow;
@@ -983,7 +1001,7 @@ const StudentLessons = () => {
   );
 
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សាពី Backend + Real-Time Silent Sync (0ms)
+  // 📌 ផ្នែកទី៤៖ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សាពី Backend + Smart Cache (30s TTL)
   // ============================================================================
   const fetchLessons = useCallback(
     async (forceRefresh = false) => {
@@ -1008,6 +1026,7 @@ const StudentLessons = () => {
         STUDENT_LESSONS_MEM_CACHE.deptCourses = cachedDeptCrs;
       }
 
+      // ✅ ដំឡើង Cache TTL ពី 4s មក 30s ដើម្បីកាត់បន្ថយការបាញ់ API ជាន់គ្នាទៅ Server
       const now = Date.now();
       if (
         !forceRefresh &&
@@ -1016,7 +1035,7 @@ const StudentLessons = () => {
         cachedForUser.length > 0 &&
         Array.isArray(cachedDeptCrs) &&
         cachedDeptCrs.length > 0 &&
-        now - STUDENT_LESSONS_MEM_CACHE.lastSyncedAt < 4000
+        now - STUDENT_LESSONS_MEM_CACHE.lastSyncedAt < 30000
       ) {
         return;
       }
@@ -1164,13 +1183,16 @@ const StudentLessons = () => {
     [currentStudentId]
   );
 
-  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + ធ្វើបច្ចុប្បន្នភាពដោយស្ងាត់ៗនៅផ្ទៃខាងក្រោយ (Auto-Sync រៀងរាល់ 12 វិនាទី និងពេលចុចលើអេក្រង់)
-  // ដើម្បីឱ្យពេលគ្រូបង្ហោះឯកសារ ឬវីដេអូថ្មី វាលោតចូលអេក្រង់សិស្សភ្លាមៗដោយមិនបាច់ចុចចេញទៅទំព័រផ្សេង!
+  // ✅ Auto-Sync រៀងរាល់ 60 វិនាទី + ឆែក Cooldown 20s ពេលចុចលើអេក្រង់ (កាត់បន្ថយបន្ទុក Hosting ៥ ដង)
   useEffect(() => {
     fetchLessons(false);
 
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
+      if (
+        document.visibilityState === 'visible' &&
+        !playingVideo &&
+        Date.now() - STUDENT_LESSONS_MEM_CACHE.lastSyncedAt > 20000
+      ) {
         fetchLessons(true);
       }
     };
@@ -1179,7 +1201,7 @@ const StudentLessons = () => {
       if (document.visibilityState === 'visible' && !playingVideo) {
         fetchLessons(true);
       }
-    }, 12000);
+    }, 60000);
 
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
@@ -1657,8 +1679,10 @@ const StudentLessons = () => {
 
   const handleSelectCourseFolder = (folder) => {
     setSelectedCourseId(String(folder.courseId));
-    // ✅ ទាញទិន្នន័យថ្មីៗដោយស្ងាត់ៗនៅផ្ទៃខាងក្រោយ ពេលសិស្សចុចចូលក្នុងថតមុខវិជ្ជាណាមួយ
-    fetchLessons(true);
+    // ✅ ទាញទិន្នន័យថ្មីតែនៅពេល Cache ហួស 25 វិនាទីប៉ុណ្ណោះ (មិនបាញ់ API រាល់ពេលចុចទេ)
+    if (Date.now() - STUDENT_LESSONS_MEM_CACHE.lastSyncedAt > 25000) {
+      fetchLessons(true);
+    }
     if (folder.docsItems.length === 0 && folder.vidsItems.length > 0) {
       setActiveTab('videos');
     } else {
@@ -1769,11 +1793,12 @@ const StudentLessons = () => {
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង */}
         <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-lsn-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
-          <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
-          <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
+          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+          <div className="hidden md:block absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
+          <div className="hidden md:block absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
@@ -1785,7 +1810,7 @@ const StudentLessons = () => {
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1823,7 +1848,7 @@ const StudentLessons = () => {
           </div>
 
           <div className="relative z-10 grid grid-cols-3 gap-2 sm:gap-3.5 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15 select-none">
-            <div className="bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl p-2.5 sm:p-3.5 flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1.5 sm:gap-3">
+            <div className="bg-white/15 md:bg-white/[0.08] md:backdrop-blur-md border border-white/15 rounded-2xl p-2.5 sm:p-3.5 flex flex-col sm:flex-row items-center text-center sm:text-left gap-1.5 sm:gap-3">
               <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl bg-blue-500/25 border border-blue-300/30 flex items-center justify-center text-cyan-300 shrink-0">
                 <BookOpenIcon className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
@@ -1837,7 +1862,7 @@ const StudentLessons = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl p-2.5 sm:p-3.5 flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1.5 sm:gap-3">
+            <div className="bg-white/15 md:bg-white/[0.08] md:backdrop-blur-md border border-white/15 rounded-2xl p-2.5 sm:p-3.5 flex flex-col sm:flex-row items-center text-center sm:text-left gap-1.5 sm:gap-3">
               <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
                 <DocumentTextIcon className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
@@ -1851,7 +1876,7 @@ const StudentLessons = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl p-2.5 sm:p-3.5 flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1.5 sm:gap-3">
+            <div className="bg-white/15 md:bg-white/[0.08] md:backdrop-blur-md border border-white/15 rounded-2xl p-2.5 sm:p-3.5 flex flex-col sm:flex-row items-center text-center sm:text-left gap-1.5 sm:gap-3">
               <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl bg-purple-500/25 border border-purple-300/30 flex items-center justify-center text-purple-200 shrink-0">
                 <PlayCircleIcon className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
@@ -1867,7 +1892,7 @@ const StudentLessons = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ខាងស្ដាំ (5 Cols on lg, 4 Cols on xl - ជ្រើសរើសឆ្នាំសិក្សា ១-៤) */}
+        {/* ១.២. ប្រអប់ខាងស្ដាំ (ជ្រើសរើសឆ្នាំសិក្សា ១-៤) */}
         <div className="lg:col-span-5 xl:col-span-4 std-lsn-surface bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-3.5 sm:space-y-4">
             <div className="flex items-center justify-between gap-2">
@@ -1984,7 +2009,6 @@ const StudentLessons = () => {
             )}
           </div>
         </div>
-
       </div>
 
       {/* ================================================================== */}
@@ -1997,7 +2021,7 @@ const StudentLessons = () => {
             <button
               type="button"
               onClick={() => setActiveTab('documents')}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 rounded-lg sm:rounded-full text-xs font-extrabold transition-all duration-300 cursor-pointer ${
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 rounded-lg sm:rounded-full text-xs font-extrabold transition-colors duration-200 cursor-pointer ${
                 activeTab === 'documents'
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'std-lsn-tab-inactive text-gray-600 hover:text-indigo-600'
@@ -2019,7 +2043,7 @@ const StudentLessons = () => {
             <button
               type="button"
               onClick={() => setActiveTab('videos')}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 rounded-lg sm:rounded-full text-xs font-extrabold transition-all duration-300 cursor-pointer ${
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 rounded-lg sm:rounded-full text-xs font-extrabold transition-colors duration-200 cursor-pointer ${
                 activeTab === 'videos'
                   ? 'bg-purple-600 text-white shadow-sm'
                   : 'std-lsn-tab-inactive text-gray-600 hover:text-purple-600'
@@ -2069,7 +2093,7 @@ const StudentLessons = () => {
                   setSelectedTeacherKey('all');
                   setSelectedCourseId('all');
                 }}
-                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-xs font-extrabold transition-all duration-200 shrink-0 cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-xs font-extrabold transition-colors duration-200 shrink-0 cursor-pointer ${
                   selectedTeacherKey === 'all'
                     ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white border-indigo-600 shadow-xs'
                     : 'std-lsn-course-pill bg-gray-50/90 hover:bg-indigo-50/60 text-gray-700 border-gray-200/80 hover:border-indigo-300'
@@ -2089,7 +2113,7 @@ const StudentLessons = () => {
                       setSelectedTeacherKey(isSelected ? 'all' : inst.key);
                       setSelectedCourseId('all');
                     }}
-                    className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-full border text-xs font-extrabold transition-all duration-200 shrink-0 cursor-pointer ${
+                    className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-full border text-xs font-extrabold transition-colors duration-200 shrink-0 cursor-pointer ${
                       isSelected
                         ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-indigo-600 shadow-sm'
                         : 'std-lsn-course-pill bg-gray-50/90 hover:bg-indigo-50/60 text-gray-800 border-gray-200/80 hover:border-indigo-300'
@@ -2119,7 +2143,6 @@ const StudentLessons = () => {
           </div>
         )}
 
-        {/* ប្រអប់ស្វែងរក៖ ពេញទទឹងលើទូរស័ព្ទ (w-full), ប្រែជា Expandable Pill លើ iPad/Desktop */}
         <div className="flex items-center justify-end shrink-0 w-full sm:w-auto sm:ml-auto">
           <div
             ref={searchRef}
@@ -2165,7 +2188,6 @@ const StudentLessons = () => {
             )}
           </div>
         </div>
-
       </div>
 
       {/* ================================================================== */}
@@ -2220,7 +2242,6 @@ const StudentLessons = () => {
                   </div>
                 </div>
 
-                {/* ក្រឡាចត្រង្គថតមុខវិជ្ជា៖ 1 Col Phone, 2 Cols Tablet/iPad/Laptop, 3 Cols Desktop */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5 items-stretch">
                   {section.folders.map((folder, idx) => {
                     const theme = FOLDER_THEMES[idx % FOLDER_THEMES.length];
@@ -2234,7 +2255,7 @@ const StudentLessons = () => {
                       <div
                         key={`${section.yearKey}-${folder.courseId}`}
                         onClick={() => handleSelectCourseFolder(folder)}
-                        className="std-lsn-card group bg-white rounded-2xl sm:rounded-[1.5rem] border border-gray-200/80 hover:border-indigo-400 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between overflow-hidden cursor-pointer"
+                        className="std-lsn-card group bg-white rounded-2xl sm:rounded-[1.5rem] border border-gray-200/80 hover:border-indigo-400 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-200 flex flex-col justify-between overflow-hidden cursor-pointer"
                       >
                         <div>
                           <div
@@ -2310,7 +2331,7 @@ const StudentLessons = () => {
                                 <img
                                   src={tMeta.imageUrl}
                                   alt={tMeta.name}
-                                  loading={idx < 9 ? 'eager' : 'lazy'}
+                                  loading={idx < 6 ? 'eager' : 'lazy'}
                                   decoding="async"
                                   className="h-full w-full object-cover rounded-full"
                                   onError={() =>
@@ -2393,7 +2414,7 @@ const StudentLessons = () => {
               <button
                 type="button"
                 onClick={handleBackToAllCourses}
-                className="group w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl sm:rounded-full bg-indigo-50/90 hover:bg-indigo-600 text-indigo-600 hover:text-white dark:bg-indigo-500/15 dark:hover:bg-indigo-600 dark:text-indigo-300 dark:hover:text-white border border-indigo-200/80 dark:border-indigo-500/30 text-xs font-extrabold transition-all duration-200 cursor-pointer shrink-0 shadow-2xs"
+                className="group w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl sm:rounded-full bg-indigo-50/90 hover:bg-indigo-600 text-indigo-600 hover:text-white dark:bg-indigo-500/15 dark:hover:bg-indigo-600 dark:text-indigo-300 dark:hover:text-white border border-indigo-200/80 dark:border-indigo-500/30 text-xs font-extrabold transition-colors duration-200 cursor-pointer shrink-0 shadow-2xs"
               >
                 <ArrowLeftIcon className="h-4 w-4 stroke-[2.5] group-hover:-translate-x-0.5 transition-transform" />
                 <span>{t('ត្រឡប់ទៅមុខវិជ្ជាទាំងអស់', 'Back to All Courses')}</span>
@@ -2436,7 +2457,7 @@ const StudentLessons = () => {
                     return (
                       <div
                         key={doc.id || idx}
-                        className="std-lsn-card bg-white p-4 rounded-2xl border border-slate-200/80 hover:border-indigo-400 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between group overflow-hidden"
+                        className="std-lsn-card bg-white p-4 rounded-2xl border border-slate-200/80 hover:border-indigo-400 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-200 flex flex-col justify-between group overflow-hidden"
                       >
                         <div>
                           <div
@@ -2450,7 +2471,8 @@ const StudentLessons = () => {
                             }
                             className={`relative aspect-video rounded-xl overflow-hidden mb-3.5 flex items-center justify-center cursor-pointer group/doc shadow-inner bg-gradient-to-br ${fileMeta.bannerGradient} border border-slate-200/60 dark:border-slate-700/60`}
                           >
-                            <span className="absolute top-2 left-2 bg-slate-900/75 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] font-bold text-white z-10 border border-white/15">
+                            {/* ✅ ដក backdrop-blur-md លើកាតនីមួយៗ ដើម្បីឱ្យអូសរលូន 60fps លើទូរស័ព្ទ */}
+                            <span className="absolute top-2 left-2 bg-slate-900/85 px-2 py-0.5 rounded-md text-[10px] font-bold text-white z-10 border border-white/15">
                               {t('មេរៀនទី', 'Lesson')}{' '}
                               {doc.lesson?.lesson_order || 1}
                             </span>
@@ -2462,7 +2484,7 @@ const StudentLessons = () => {
                             </span>
 
                             <div
-                              className={`w-14 h-14 bg-gradient-to-br ${fileMeta.iconBoxClass} bg-white/80 dark:bg-slate-800/80 backdrop-blur-md rounded-2xl flex items-center justify-center z-10 transition-all duration-300 group-hover/doc:scale-110 shadow-md border text-3xl`}
+                              className={`w-14 h-14 bg-gradient-to-br ${fileMeta.iconBoxClass} bg-white/95 dark:bg-slate-800/95 rounded-2xl flex items-center justify-center z-10 transition-transform duration-200 group-hover/doc:scale-110 shadow-md border text-3xl`}
                             >
                               {fileMeta.iconEmoji}
                             </div>
@@ -2496,7 +2518,7 @@ const StudentLessons = () => {
                                 doc.id
                               )
                             }
-                            className="w-full flex items-center justify-center gap-2 py-2.5 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-2xs disabled:opacity-60"
+                            className="w-full flex items-center justify-center gap-2 py-2.5 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold transition-colors cursor-pointer shadow-2xs disabled:opacity-60"
                           >
                             <ArrowDownTrayIcon className="w-4 h-4 stroke-[2.2]" />
                             <span>
@@ -2547,7 +2569,7 @@ const StudentLessons = () => {
                     return (
                       <div
                         key={video.id || idx}
-                        className="std-lsn-card bg-white p-4 rounded-2xl border border-slate-200/80 hover:border-purple-400 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between group overflow-hidden"
+                        className="std-lsn-card bg-white p-4 rounded-2xl border border-slate-200/80 hover:border-purple-400 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-200 flex flex-col justify-between group overflow-hidden"
                       >
                         <div>
                           <div
@@ -2556,12 +2578,12 @@ const StudentLessons = () => {
                           >
                             {thumbnailUrl ? (
                               <div
-                                className="absolute inset-0 bg-cover bg-center group-hover/vid:scale-105 transition-transform duration-700 ease-in-out z-0"
+                                className="absolute inset-0 bg-cover bg-center group-hover/vid:scale-105 transition-transform duration-500 ease-in-out z-0"
                                 style={{
                                   backgroundImage: `url(${thumbnailUrl})`,
                                 }}
                               >
-                                <div className="absolute inset-0 bg-black/25 group-hover/vid:bg-black/40 transition-colors duration-500"></div>
+                                <div className="absolute inset-0 bg-black/25 group-hover/vid:bg-black/40 transition-colors duration-300"></div>
                               </div>
                             ) : (
                               <div className="absolute inset-0 bg-gradient-to-br from-indigo-950 via-purple-900 to-slate-950 z-0">
@@ -2569,12 +2591,12 @@ const StudentLessons = () => {
                               </div>
                             )}
 
-                            <span className="absolute top-2 left-2 bg-slate-900/75 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] font-bold text-white z-10 border border-white/15">
+                            <span className="absolute top-2 left-2 bg-slate-900/85 px-2 py-0.5 rounded-md text-[10px] font-bold text-white z-10 border border-white/15">
                               {t('មេរៀនទី', 'Lesson')}{' '}
                               {video.lesson?.lesson_order || 1}
                             </span>
 
-                            <div className="w-11 h-11 bg-white/30 group-hover/vid:bg-purple-600 backdrop-blur-md rounded-full flex items-center justify-center z-10 transition-all duration-300 group-hover/vid:scale-110 shadow-lg border border-white/40">
+                            <div className="w-11 h-11 bg-slate-900/65 group-hover/vid:bg-purple-600 rounded-full flex items-center justify-center z-10 transition-all duration-200 group-hover/vid:scale-110 shadow-lg border border-white/40">
                               <PlayIcon className="w-5 h-5 text-white ml-0.5 stroke-[2.5]" />
                             </div>
                           </div>
@@ -2600,7 +2622,7 @@ const StudentLessons = () => {
                           <button
                             type="button"
                             onClick={() => setPlayingVideo(video)}
-                            className="w-full flex items-center justify-center gap-2 py-2.5 sm:py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-2xs"
+                            className="w-full flex items-center justify-center gap-2 py-2.5 sm:py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-extrabold transition-colors cursor-pointer shadow-2xs"
                           >
                             <PlayIcon className="w-4 h-4 stroke-[2.5]" />
                             <span>{t('ចាក់វីដេអូមេរៀន', 'Watch Video')}</span>
@@ -2613,7 +2635,6 @@ const StudentLessons = () => {
               )}
             </div>
           )}
-
         </div>
       )}
 
@@ -2624,7 +2645,7 @@ const StudentLessons = () => {
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-4 animate-fadeIn"
+            className="fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-950/85 md:backdrop-blur-md p-3 sm:p-4 animate-fadeIn"
             onClick={() => setPlayingVideo(null)}
           >
             <div

@@ -65,6 +65,15 @@ const STUDENT_QUIZ_MEM_CACHE = {
   lastCoursesSyncedAt: 0,
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -100,15 +109,52 @@ const stripHeavyQuizDataDeep = (obj, depth = 0) => {
   return cleaned;
 };
 
-const safeWriteStudentQuizCache = (key, payload) => {
-  try {
-    const slim = stripHeavyQuizDataDeep(payload);
-    const str = JSON.stringify(slim);
+// ✅ រក្សាទុកបញ្ជីកម្រងសំណួរ និង Meta នៅពេល Browser ទំនេរ (Stringify តែ ១ ដងគត់)
+const persistStudentQuizzesFast = (uid, slimList, metaData = null) => {
+  runWhenIdle(() => {
     try {
-      sessionStorage.setItem(key, str);
+      const listStr = JSON.stringify(slimList);
+      try {
+        sessionStorage.setItem(getQuizzesCacheKey(uid), listStr);
+      } catch {}
+      localStorage.setItem(getQuizzesCacheKey(uid), listStr);
+      localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, listStr);
+
+      if (metaData) {
+        const metaStr = JSON.stringify(metaData);
+        try {
+          sessionStorage.setItem(getQuizzesMetaCacheKey(uid), metaStr);
+        } catch {}
+        localStorage.setItem(getQuizzesMetaCacheKey(uid), metaStr);
+      }
     } catch {}
-    localStorage.setItem(key, str);
-  } catch {}
+  });
+};
+
+const persistStudentCoursesCacheFast = (uid, slimCourses) => {
+  runWhenIdle(() => {
+    try {
+      const str = JSON.stringify(slimCourses);
+      try {
+        sessionStorage.setItem(getCoursesCacheKey(uid), str);
+      } catch {}
+      localStorage.setItem(getCoursesCacheKey(uid), str);
+      localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
+    } catch {}
+  });
+};
+
+const persistQuizReviewsFast = (uid, reviewsMap) => {
+  runWhenIdle(() => {
+    try {
+      const slim = stripHeavyQuizDataDeep(reviewsMap);
+      const str = JSON.stringify(slim);
+      try {
+        sessionStorage.setItem(getQuizReviewsCacheKey(uid), str);
+      } catch {}
+      localStorage.setItem(getQuizReviewsCacheKey(uid), str);
+    } catch {}
+  });
 };
 
 const resolveStudentUid = (contextUser) => {
@@ -542,7 +588,7 @@ const StudentQuizzes = () => {
       STUDENT_QUIZ_MEM_CACHE.uid === currentStudentId &&
       Array.isArray(STUDENT_QUIZ_MEM_CACHE.courses) &&
       STUDENT_QUIZ_MEM_CACHE.courses.length > 0 &&
-      now - STUDENT_QUIZ_MEM_CACHE.lastCoursesSyncedAt < 30000
+      now - STUDENT_QUIZ_MEM_CACHE.lastCoursesSyncedAt < 60000
     ) {
       return;
     }
@@ -561,18 +607,16 @@ const StudentQuizzes = () => {
         setCoursesList(slimCourses);
         STUDENT_QUIZ_MEM_CACHE.courses = slimCourses;
         STUDENT_QUIZ_MEM_CACHE.lastCoursesSyncedAt = Date.now();
-
-        safeWriteStudentQuizCache(
-          getCoursesCacheKey(currentStudentId),
-          slimCourses
-        );
-        safeWriteStudentQuizCache(CACHE_KEY_SHARED_COURSES, slimCourses);
+        persistStudentCoursesCacheFast(currentStudentId, slimCourses);
       }
     } catch (e) {
       console.error('Error fetching student courses', e);
     }
   }, [currentStudentId]);
 
+  // ============================================================================
+  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យកម្រងសំណួរ + Smart Cache (30s TTL)
+  // ============================================================================
   const fetchQuizzes = useCallback(
     async (forceRefresh = false) => {
       if (!forceRefresh && page === 1 && selectedCourse === 'all') {
@@ -594,6 +638,7 @@ const StudentQuizzes = () => {
         }
       }
 
+      // ✅ ដំឡើង Cache TTL ពី 4s មក 30s ដើម្បីកាត់បន្ថយការបាញ់ API ជាន់គ្នាទៅ Server
       const now = Date.now();
       if (
         !forceRefresh &&
@@ -602,7 +647,7 @@ const StudentQuizzes = () => {
         STUDENT_QUIZ_MEM_CACHE.uid === currentStudentId &&
         Array.isArray(STUDENT_QUIZ_MEM_CACHE.quizzes) &&
         STUDENT_QUIZ_MEM_CACHE.quizzes.length > 0 &&
-        now - STUDENT_QUIZ_MEM_CACHE.lastSyncedAt < 4000
+        now - STUDENT_QUIZ_MEM_CACHE.lastSyncedAt < 30000
       ) {
         return;
       }
@@ -627,7 +672,6 @@ const StudentQuizzes = () => {
           signal: controller.signal,
         });
 
-        // ការពារកុំឱ្យយកបញ្ជីទទេពេលមាន Error ទៅលុបជាន់លើកម្រងសំណួរចាស់ក្នុង Cache
         if (response.data?.error_debug) {
           return;
         }
@@ -654,16 +698,7 @@ const StudentQuizzes = () => {
           if (list.length > 0) {
             STUDENT_QUIZ_MEM_CACHE.lastSyncedAt = Date.now();
           }
-
-          safeWriteStudentQuizCache(
-            getQuizzesCacheKey(currentStudentId),
-            list
-          );
-          safeWriteStudentQuizCache(
-            getQuizzesMetaCacheKey(currentStudentId),
-            metaData
-          );
-          safeWriteStudentQuizCache(CACHE_KEY_SHARED_QUIZZES, list);
+          persistStudentQuizzesFast(currentStudentId, list, metaData);
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
@@ -679,8 +714,7 @@ const StudentQuizzes = () => {
     fetchStudentCourses();
   }, [fetchStudentCourses]);
 
-  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 12 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
-  // (ផ្អាក Auto-Sync ដោយស្វ័យប្រវត្តិនៅពេលសិស្សកំពុងធ្វើតេស្ត ឬកំពុងមើលលទ្ធផល)
+  // ✅ Auto-Sync រៀងរាល់ 60 វិនាទី + ឆែក Cooldown 20s ពេលចុចលើអេក្រង់ (កាត់បន្ថយបន្ទុក Hosting ៥ ដង)
   useEffect(() => {
     fetchQuizzes(false);
 
@@ -688,7 +722,8 @@ const StudentQuizzes = () => {
       if (
         document.visibilityState === 'visible' &&
         !activeQuizAttempt &&
-        !quizResult
+        !quizResult &&
+        Date.now() - STUDENT_QUIZ_MEM_CACHE.lastSyncedAt > 20000
       ) {
         fetchQuizzes(true);
       }
@@ -702,7 +737,7 @@ const StudentQuizzes = () => {
       ) {
         fetchQuizzes(true);
       }
-    }, 12000);
+    }, 60000);
 
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
@@ -904,7 +939,6 @@ const StudentQuizzes = () => {
       const loadedQuiz = response.data?.quiz || quiz;
       const serverAttempt = response.data?.attempt;
 
-      // ✅ ប្រសិនបើសិស្សធ្លាប់បានប្រឡងចប់រួចហើយនៅលើឧបករណ៍ផ្សេង ឱ្យបង្ហាញផ្ទាំងលទ្ធផល និងចម្លើយភ្លាមៗតែម្ដង
       if (serverAttempt && serverAttempt.submitted_at) {
         const totalMarks = formatCleanScore(
           loadedQuiz?.total_mark || quiz.total_mark || 20,
@@ -1065,10 +1099,7 @@ const StudentQuizzes = () => {
       setSavedReviewsMap((prev) => {
         const nextMap = { ...prev, [reviewKey]: finalResultPayload };
         STUDENT_QUIZ_MEM_CACHE.reviews = nextMap;
-        safeWriteStudentQuizCache(
-          getQuizReviewsCacheKey(currentStudentId),
-          nextMap
-        );
+        persistQuizReviewsFast(currentStudentId, nextMap);
         return nextMap;
       });
 
@@ -1092,11 +1123,7 @@ const StudentQuizzes = () => {
             : q
         );
         STUDENT_QUIZ_MEM_CACHE.quizzes = updated;
-        safeWriteStudentQuizCache(
-          getQuizzesCacheKey(currentStudentId),
-          updated
-        );
-        safeWriteStudentQuizCache(CACHE_KEY_SHARED_QUIZZES, updated);
+        persistStudentQuizzesFast(currentStudentId, updated);
         try {
           sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
@@ -1215,10 +1242,7 @@ const StudentQuizzes = () => {
         setSavedReviewsMap((prev) => {
           const nextMap = { ...prev, [reviewKey]: fetchedPayload };
           STUDENT_QUIZ_MEM_CACHE.reviews = nextMap;
-          safeWriteStudentQuizCache(
-            getQuizReviewsCacheKey(currentStudentId),
-            nextMap
-          );
+          persistQuizReviewsFast(currentStudentId, nextMap);
           return nextMap;
         });
         return;
@@ -1244,7 +1268,6 @@ const StudentQuizzes = () => {
       .padStart(2, '0')}`;
   };
 
-  // ✅ គណនាស្ថិតិកម្រងសំណួរផ្ទាល់តាមមុខវិជ្ជាដែលសិស្សបានជ្រើសរើស (ឬសរុបទាំងអស់បើជ្រើសរើស 'all')
   const quizStats = useMemo(() => {
     const targetList =
       selectedCourse !== 'all'
@@ -1393,8 +1416,9 @@ const StudentQuizzes = () => {
         {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
         <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-qz-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
-          <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
-          <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
+          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+          <div className="hidden md:block absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
+          <div className="hidden md:block absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
@@ -1406,7 +1430,7 @@ const StudentQuizzes = () => {
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full md:backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1440,7 +1464,7 @@ const StudentQuizzes = () => {
           </div>
 
           <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15">
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
+            <div className="bg-white/15 md:bg-white/[0.08] hover:bg-white/[0.14] md:backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-colors">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-emerald-500/25 border border-emerald-300/30 flex items-center justify-center text-emerald-300 shrink-0">
                 <CheckCircleIcon className="h-5 w-5" />
               </div>
@@ -1454,7 +1478,7 @@ const StudentQuizzes = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
+            <div className="bg-white/15 md:bg-white/[0.08] hover:bg-white/[0.14] md:backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-colors">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
                 <ChartBarIcon className="h-5 w-5" />
               </div>
@@ -1571,7 +1595,6 @@ const StudentQuizzes = () => {
             )}
           </div>
         </div>
-
       </div>
 
       {/* ================================================================== */}
@@ -1588,7 +1611,7 @@ const StudentQuizzes = () => {
             )}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="std-qz-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
+            className="std-qz-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-colors"
           />
           {searchQuery && (
             <button
@@ -1611,7 +1634,7 @@ const StudentQuizzes = () => {
                   setSelectedCourse(e.target.value);
                   setPage(1);
                 }}
-                className="std-qz-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-white font-medium text-gray-700 appearance-none cursor-pointer transition-all"
+                className="std-qz-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-white font-medium text-gray-700 appearance-none cursor-pointer transition-colors"
               >
                 <option value="all">
                   {t('គ្រប់មុខវិជ្ជាទាំងអស់', 'All Courses')}
@@ -1666,7 +1689,7 @@ const StudentQuizzes = () => {
             return (
               <div
                 key={quiz.id}
-                className="std-qz-card group bg-white border border-gray-200/80 hover:border-indigo-400 rounded-2xl sm:rounded-[1.75rem] p-4 sm:p-5 lg:p-6 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between h-full"
+                className="std-qz-card group bg-white border border-gray-200/80 hover:border-indigo-400 rounded-2xl sm:rounded-[1.75rem] p-4 sm:p-5 lg:p-6 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-200 flex flex-col justify-between h-full"
               >
                 <div className="space-y-3.5 sm:space-y-4">
                   <div className="flex items-center justify-between gap-2">
@@ -1773,7 +1796,7 @@ const StudentQuizzes = () => {
                     <button
                       type="button"
                       onClick={() => handleOpenSavedResult(quiz)}
-                      className="std-qz-badge-emerald w-full bg-emerald-50 hover:bg-emerald-100/90 border border-emerald-200 text-emerald-700 px-3.5 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-between gap-2 transition-all cursor-pointer shadow-2xs"
+                      className="std-qz-badge-emerald w-full bg-emerald-50 hover:bg-emerald-100/90 border border-emerald-200 text-emerald-700 px-3.5 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-between gap-2 transition-colors cursor-pointer shadow-2xs"
                       title={t(
                         'ចុចដើម្បីមើលលទ្ធផល និងចម្លើយ',
                         'Click to view result & answers'
@@ -1862,7 +1885,7 @@ const StudentQuizzes = () => {
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={meta.current_page === 1}
-              className="std-qz-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-qz-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {t('មុន', 'Previous')}
             </button>
@@ -1883,7 +1906,7 @@ const StudentQuizzes = () => {
                   key={pageNum}
                   type="button"
                   onClick={() => setPage(pageNum)}
-                  className={`px-3 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                  className={`px-3 py-2 text-xs font-bold rounded-xl transition-colors cursor-pointer ${
                     meta.current_page === pageNum
                       ? 'bg-indigo-600 text-white shadow-2xs'
                       : 'std-qz-code-pill bg-white border border-gray-200 hover:bg-gray-50'
@@ -1897,7 +1920,7 @@ const StudentQuizzes = () => {
               type="button"
               onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
               disabled={meta.current_page === meta.last_page}
-              className="std-qz-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-qz-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {t('បន្ទាប់', 'Next')}
             </button>
@@ -1912,7 +1935,7 @@ const StudentQuizzes = () => {
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className={`fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-md transition-all duration-300 ${
+            className={`fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-end sm:items-center justify-center bg-slate-950/80 md:backdrop-blur-md transition-all duration-300 ${
               isAttemptExpanded ? 'p-0 sm:p-2' : 'p-0 sm:p-4'
             }`}
           >
@@ -2096,7 +2119,7 @@ const StudentQuizzes = () => {
                       return (
                         <div
                           key={q.id || idx}
-                          className={`std-qz-subbox p-3.5 sm:p-5 rounded-2xl border transition-all ${
+                          className={`std-qz-subbox p-3.5 sm:p-5 rounded-2xl border transition-colors ${
                             isAnswered
                               ? 'border-indigo-300 bg-indigo-50/20 dark:border-indigo-500/40'
                               : 'border-gray-200/80 bg-gray-50/50'
@@ -2151,7 +2174,7 @@ const StudentQuizzes = () => {
                                   'សូមសរសេរចម្លើយរបស់អ្នកនៅទីនេះ...',
                                   'Type your detailed answer here...'
                                 )}
-                                className="std-qz-input w-full p-3.5 rounded-xl border border-gray-200/90 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-xs sm:text-sm font-medium text-gray-800 leading-relaxed resize-y transition-all"
+                                className="std-qz-input w-full p-3.5 rounded-xl border border-gray-200/90 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-xs sm:text-sm font-medium text-gray-800 leading-relaxed resize-y transition-colors"
                               />
                             </div>
                           ) : (
@@ -2163,7 +2186,7 @@ const StudentQuizzes = () => {
                                 return (
                                   <label
                                     key={opt.id}
-                                    className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-bold cursor-pointer transition-all duration-150 select-none ${
+                                    className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-bold cursor-pointer transition-colors duration-150 select-none ${
                                       isSelected
                                         ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                                         : 'std-qz-option bg-white border-gray-200/90 text-gray-700 hover:border-indigo-400'
@@ -2240,7 +2263,7 @@ const StudentQuizzes = () => {
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className={`fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-md transition-all duration-300 ${
+            className={`fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-end sm:items-center justify-center bg-slate-950/80 md:backdrop-blur-md transition-all duration-300 ${
               isResultExpanded ? 'p-0 sm:p-2' : 'p-0 sm:p-4'
             }`}
             onClick={() => {
@@ -2280,7 +2303,7 @@ const StudentQuizzes = () => {
                   </div>
 
                   <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2.5 sm:pt-0 border-t border-white/10 sm:border-0">
-                    <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-3.5 py-2 text-center shadow-inner">
+                    <div className="bg-white/15 md:bg-white/10 md:backdrop-blur-md border border-white/20 rounded-2xl px-3.5 py-2 text-center shadow-inner">
                       <span className="block text-[9px] font-extrabold uppercase tracking-wider text-blue-200 leading-none">
                         {t('ពិន្ទុទទួលបាន', 'Score Earned')}
                       </span>
@@ -2371,7 +2394,7 @@ const StudentQuizzes = () => {
                         return (
                           <div
                             key={item.questionId}
-                            className={`p-3.5 sm:p-4 rounded-2xl border transition-all ${
+                            className={`p-3.5 sm:p-4 rounded-2xl border transition-colors ${
                               item.isCorrect
                                 ? 'std-qz-review-correct bg-emerald-50/40 border-emerald-200/90'
                                 : 'std-qz-review-wrong bg-rose-50/40 border-rose-200/90'

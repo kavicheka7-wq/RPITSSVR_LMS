@@ -63,6 +63,15 @@ const STUDENT_ASG_MEM_CACHE = {
   lastCoursesSyncedAt: 0,
 };
 
+// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
+const runWhenIdle = (fn, fallbackDelay = 300) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(fn, { timeout: 1500 });
+  } else {
+    setTimeout(fn, fallbackDelay);
+  }
+};
+
 const readStorageJson = (key, fallback) => {
   try {
     const raw =
@@ -98,15 +107,40 @@ const stripHeavyAssignmentDataDeep = (obj, depth = 0) => {
   return cleaned;
 };
 
-const safeWriteStudentAsgCache = (key, payload) => {
-  try {
-    const slim = stripHeavyAssignmentDataDeep(payload);
-    const str = JSON.stringify(slim);
+// ✅ រក្សាទុកបញ្ជីកិច្ចការ និង Meta នៅពេល Browser ទំនេរ (Stringify តែ ១ ដងគត់)
+const persistStudentAssignmentsFast = (uid, slimList, metaData = null) => {
+  runWhenIdle(() => {
     try {
-      sessionStorage.setItem(key, str);
+      const listStr = JSON.stringify(slimList);
+      try {
+        sessionStorage.setItem(getAssignmentsCacheKey(uid), listStr);
+      } catch {}
+      localStorage.setItem(getAssignmentsCacheKey(uid), listStr);
+      localStorage.setItem(getAssignmentsLegacyCacheKey(uid), listStr);
+      localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, listStr);
+
+      if (metaData) {
+        const metaStr = JSON.stringify(metaData);
+        try {
+          sessionStorage.setItem(getAssignmentsMetaCacheKey(uid), metaStr);
+        } catch {}
+        localStorage.setItem(getAssignmentsMetaCacheKey(uid), metaStr);
+      }
     } catch {}
-    localStorage.setItem(key, str);
-  } catch {}
+  });
+};
+
+const persistStudentCoursesCacheFast = (uid, slimCourses) => {
+  runWhenIdle(() => {
+    try {
+      const str = JSON.stringify(slimCourses);
+      try {
+        sessionStorage.setItem(getCoursesCacheKey(uid), str);
+      } catch {}
+      localStorage.setItem(getCoursesCacheKey(uid), str);
+      localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
+    } catch {}
+  });
 };
 
 const resolveStudentUid = (contextUser) => {
@@ -413,7 +447,6 @@ const StudentAssignments = () => {
     }
   }, [searchParams, location.state]);
 
-  // ✅ គាំទ្រការទាញយកទាំងឯកសារលំហាត់របស់គ្រូ និងឯកសារចម្លើយដែលសិស្សបានប្រគល់លើ Railway (តាម submission_id)
   const getStorageUrl = useCallback((pathOrSub, submissionId = null) => {
     const rawPath =
       typeof pathOrSub === 'object' && pathOrSub !== null
@@ -454,7 +487,7 @@ const StudentAssignments = () => {
       STUDENT_ASG_MEM_CACHE.uid === currentStudentId &&
       Array.isArray(STUDENT_ASG_MEM_CACHE.courses) &&
       STUDENT_ASG_MEM_CACHE.courses.length > 0 &&
-      now - STUDENT_ASG_MEM_CACHE.lastCoursesSyncedAt < 30000
+      now - STUDENT_ASG_MEM_CACHE.lastCoursesSyncedAt < 60000
     ) {
       return;
     }
@@ -473,18 +506,16 @@ const StudentAssignments = () => {
         setCoursesList(slimCourses);
         STUDENT_ASG_MEM_CACHE.courses = slimCourses;
         STUDENT_ASG_MEM_CACHE.lastCoursesSyncedAt = Date.now();
-
-        safeWriteStudentAsgCache(
-          getCoursesCacheKey(currentStudentId),
-          slimCourses
-        );
-        safeWriteStudentAsgCache(CACHE_KEY_SHARED_COURSES, slimCourses);
+        persistStudentCoursesCacheFast(currentStudentId, slimCourses);
       }
     } catch (e) {
       console.error('Error fetching student courses', e);
     }
   }, [currentStudentId]);
 
+  // ============================================================================
+  // 📌 ផ្នែកទី២៖ ការទាញទិន្នន័យកិច្ចការ + Smart Cache (30s TTL)
+  // ============================================================================
   const fetchAssignments = useCallback(
     async (forceRefresh = false) => {
       if (!forceRefresh && page === 1 && selectedCourse === 'all') {
@@ -505,6 +536,7 @@ const StudentAssignments = () => {
         }
       }
 
+      // ✅ ដំឡើង Cache TTL ពី 4s មក 30s ដើម្បីកាត់បន្ថយការបាញ់ API ជាន់គ្នាទៅ Server
       const now = Date.now();
       if (
         !forceRefresh &&
@@ -513,7 +545,7 @@ const StudentAssignments = () => {
         STUDENT_ASG_MEM_CACHE.uid === currentStudentId &&
         Array.isArray(STUDENT_ASG_MEM_CACHE.assignments) &&
         STUDENT_ASG_MEM_CACHE.assignments.length > 0 &&
-        now - STUDENT_ASG_MEM_CACHE.lastSyncedAt < 4000
+        now - STUDENT_ASG_MEM_CACHE.lastSyncedAt < 30000
       ) {
         return;
       }
@@ -538,7 +570,6 @@ const StudentAssignments = () => {
           signal: controller.signal,
         });
 
-        // ការពារកុំឱ្យយកបញ្ជីទទេពេលមាន Error ទៅលុបជាន់លើកិច្ចការចាស់ក្នុង Cache
         if (response.data?.error_debug) {
           return;
         }
@@ -565,20 +596,7 @@ const StudentAssignments = () => {
           if (list.length > 0) {
             STUDENT_ASG_MEM_CACHE.lastSyncedAt = Date.now();
           }
-
-          safeWriteStudentAsgCache(
-            getAssignmentsCacheKey(currentStudentId),
-            list
-          );
-          safeWriteStudentAsgCache(
-            getAssignmentsLegacyCacheKey(currentStudentId),
-            list
-          );
-          safeWriteStudentAsgCache(
-            getAssignmentsMetaCacheKey(currentStudentId),
-            metaData
-          );
-          safeWriteStudentAsgCache(CACHE_KEY_SHARED_ASSIGNMENTS, list);
+          persistStudentAssignmentsFast(currentStudentId, list, metaData);
         }
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
@@ -594,13 +612,16 @@ const StudentAssignments = () => {
     fetchStudentCourses();
   }, [fetchStudentCourses]);
 
-  // ✅ ទាញទិន្នន័យពេលបើកទំព័រដំបូង + Auto-Sync នៅផ្ទៃខាងក្រោយរៀងរាល់ 12 វិនាទី និងពេលសិស្សចុចលើអេក្រង់
-  // ដើម្បីឱ្យពេលគ្រូបង្កើតកិច្ចការថ្មី ឬដាក់ពិន្ទុកិច្ចការរួច វាលោតចូលអេក្រង់សិស្សភ្លាមៗដោយស្វ័យប្រវត្តិ!
+  // ✅ Auto-Sync រៀងរាល់ 60 វិនាទី + ឆែក Cooldown 20s ពេលចុចលើអេក្រង់ (កាត់បន្ថយបន្ទុក Hosting ៥ ដង)
   useEffect(() => {
     fetchAssignments(false);
 
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible' && !submitModalOpen) {
+      if (
+        document.visibilityState === 'visible' &&
+        !submitModalOpen &&
+        Date.now() - STUDENT_ASG_MEM_CACHE.lastSyncedAt > 20000
+      ) {
         fetchAssignments(true);
       }
     };
@@ -609,7 +630,7 @@ const StudentAssignments = () => {
       if (document.visibilityState === 'visible' && !submitModalOpen) {
         fetchAssignments(true);
       }
-    }, 12000);
+    }, 60000);
 
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
@@ -802,7 +823,6 @@ const StudentAssignments = () => {
     formData.append('file', uploadFile);
 
     try {
-      // ✅ កំណត់ Content-Type: undefined ដើម្បីឱ្យ Browser បង្កើត multipart/form-data boundary ត្រឹមត្រូវលើ Railway
       const res = await api.post('/student/assignments/submit', formData, {
         headers: { 'Content-Type': undefined },
       });
@@ -823,11 +843,7 @@ const StudentAssignments = () => {
           a.id === selectedAssignment.id ? { ...a, submission: newSub } : a
         );
         STUDENT_ASG_MEM_CACHE.assignments = updated;
-        safeWriteStudentAsgCache(
-          getAssignmentsCacheKey(currentStudentId),
-          updated
-        );
-        safeWriteStudentAsgCache(CACHE_KEY_SHARED_ASSIGNMENTS, updated);
+        persistStudentAssignmentsFast(currentStudentId, updated);
         try {
           sessionStorage.removeItem(getScoresCacheKey(currentStudentId));
           localStorage.removeItem(getScoresCacheKey(currentStudentId));
@@ -872,7 +888,6 @@ const StudentAssignments = () => {
     }
   };
 
-  // ✅ គណនាស្ថិតិកិច្ចការផ្ទាល់តាមមុខវិជ្ជាដែលសិស្សបានជ្រើសរើស (ឬសរុបទាំងអស់បើជ្រើសរើស 'all')
   const assignmentStats = useMemo(() => {
     let total = 0;
     let submitted = 0;
@@ -1042,8 +1057,9 @@ const StudentAssignments = () => {
         {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
         <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-asg-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
-          <div className="absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
-          <div className="absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
+          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
+          <div className="hidden md:block absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
+          <div className="hidden md:block absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
           <BuildingLibraryIcon className="absolute -right-6 -bottom-10 w-44 sm:w-60 h-44 sm:h-60 text-white/[0.04] -rotate-12 pointer-events-none" />
 
@@ -1055,7 +1071,7 @@ const StudentAssignments = () => {
               </span>
 
               <span
-                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
+                className={`inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-full md:backdrop-blur-md border text-[11px] sm:text-xs font-extrabold ${
                   isWeekendShift
                     ? 'bg-amber-400/20 border-amber-300/40 text-amber-200'
                     : 'bg-emerald-400/20 border-emerald-300/40 text-emerald-200'
@@ -1089,7 +1105,7 @@ const StudentAssignments = () => {
           </div>
 
           <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-white/15">
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
+            <div className="bg-white/15 md:bg-white/[0.08] hover:bg-white/[0.14] md:backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-colors">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-emerald-500/25 border border-emerald-300/30 flex items-center justify-center text-emerald-300 shrink-0">
                 <DocumentCheckIcon className="h-5 w-5" />
               </div>
@@ -1103,7 +1119,7 @@ const StudentAssignments = () => {
               </div>
             </div>
 
-            <div className="bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-all">
+            <div className="bg-white/15 md:bg-white/[0.08] hover:bg-white/[0.14] md:backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 flex items-center gap-3 sm:gap-3.5 transition-colors">
               <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-yellow-300 shrink-0">
                 <ChartBarIcon className="h-5 w-5" />
               </div>
@@ -1222,7 +1238,6 @@ const StudentAssignments = () => {
             )}
           </div>
         </div>
-
       </div>
 
       {/* ================================================================== */}
@@ -1239,7 +1254,7 @@ const StudentAssignments = () => {
             )}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="std-asg-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all"
+            className="std-asg-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-colors"
           />
           {searchQuery && (
             <button
@@ -1262,7 +1277,7 @@ const StudentAssignments = () => {
                   setSelectedCourse(e.target.value);
                   setPage(1);
                 }}
-                className="std-asg-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-white font-medium text-gray-700 appearance-none cursor-pointer transition-all"
+                className="std-asg-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-white font-medium text-gray-700 appearance-none cursor-pointer transition-colors"
               >
                 <option value="all">
                   {t('គ្រប់មុខវិជ្ជាទាំងអស់', 'All Courses')}
@@ -1281,7 +1296,7 @@ const StudentAssignments = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. ASSIGNMENT CARDS LIST (គ្មាន Skeleton Loading)               */}
+      {/* 📌 3. ASSIGNMENT CARDS LIST                                        */}
       {/* ================================================================== */}
       {filteredAssignments.length === 0 ? (
         <div className="std-asg-surface bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-xs p-10 sm:p-14 text-center space-y-3">
@@ -1330,7 +1345,7 @@ const StudentAssignments = () => {
             return (
               <div
                 key={assign.id}
-                className="std-asg-card bg-white border border-gray-200/80 hover:border-indigo-400 rounded-2xl sm:rounded-[1.5rem] p-4 sm:p-5 lg:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6 shadow-2xs hover:shadow-lg transition-all duration-300"
+                className="std-asg-card bg-white border border-gray-200/80 hover:border-indigo-400 rounded-2xl sm:rounded-[1.5rem] p-4 sm:p-5 lg:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6 shadow-2xs hover:shadow-lg transition-all duration-200"
               >
                 <div className="space-y-2.5 sm:space-y-3 flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1530,7 +1545,7 @@ const StudentAssignments = () => {
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={meta.current_page === 1}
-              className="std-asg-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-asg-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {t('មុន', 'Previous')}
             </button>
@@ -1551,7 +1566,7 @@ const StudentAssignments = () => {
                   key={pageNum}
                   type="button"
                   onClick={() => setPage(pageNum)}
-                  className={`px-3 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                  className={`px-3 py-2 text-xs font-bold rounded-xl transition-colors cursor-pointer ${
                     meta.current_page === pageNum
                       ? 'bg-indigo-600 text-white shadow-2xs'
                       : 'std-asg-code-pill bg-white border border-gray-200 hover:bg-gray-50'
@@ -1565,7 +1580,7 @@ const StudentAssignments = () => {
               type="button"
               onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
               disabled={meta.current_page === meta.last_page}
-              className="std-asg-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+              className="std-asg-code-pill px-3.5 sm:px-4 py-2 text-xs font-bold bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {t('បន្ទាប់', 'Next')}
             </button>
@@ -1581,7 +1596,7 @@ const StudentAssignments = () => {
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-md p-0 sm:p-4 overflow-y-auto animate-fadeIn"
+            className="fixed inset-0 m-0 z-[9999] w-screen h-screen flex items-end sm:items-center justify-center bg-slate-950/75 md:backdrop-blur-md p-0 sm:p-4 overflow-y-auto animate-fadeIn"
             onClick={() => {
               setSubmitModalOpen(false);
               setSubmitError('');

@@ -117,3 +117,23 @@ html.dark .is-scrolling::-webkit-scrollbar-thumb {
 .animate-pulse-glow {
   animation: pulseGlow 3s ease-in-out infinite;
 }
+
+/* ============================================================================
+   ✅ Mobile Performance Boost (60fps): បិទ Effect ព្រាលធ្ងន់ៗលើទូរស័ព្ទ និងថេប្លេត
+   ============================================================================ */
+@media (max-width: 768px) {
+  .glass-panel,
+  .glass-panel-dark,
+  .backdrop-blur-md,
+  .backdrop-blur-lg,
+  .backdrop-blur-xl,
+  .backdrop-blur-2xl {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .blur-3xl,
+  .blur-\[120px\] {
+    display: none !important;
+  }
+}
