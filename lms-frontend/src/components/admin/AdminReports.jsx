@@ -535,6 +535,8 @@ const AdminReports = () => {
     () => ADMIN_REPORTS_MEM_CACHE.enrollmentMeta || {}
   );
   const [academicPage, setAcademicPage] = useState(1);
+  const [hideZeroAttendance, setHideZeroAttendance] = useState(false);
+  const [attendancePage, setAttendancePage] = useState(1);
   const [academicMeta, setAcademicMeta] = useState(
     () => ADMIN_REPORTS_MEM_CACHE.academicMeta || {}
   );
@@ -950,6 +952,24 @@ const AdminReports = () => {
       latePct: getPct(late),
     };
   }, [attendanceData]);
+
+  const filteredAttendanceCourses = useMemo(() => {
+    const list = Array.isArray(attendanceData?.course_breakdown)
+      ? attendanceData.course_breakdown
+      : [];
+    if (!hideZeroAttendance) return list;
+    return list.filter((item) => Number(item.total || 0) > 0);
+  }, [attendanceData, hideZeroAttendance]);
+
+  const attendancePerPage = 15;
+  const attendanceTotalPages = Math.max(
+    1,
+    Math.ceil(filteredAttendanceCourses.length / attendancePerPage)
+  );
+  const paginatedAttendanceCourses = useMemo(() => {
+    const start = (attendancePage - 1) * attendancePerPage;
+    return filteredAttendanceCourses.slice(start, start + attendancePerPage);
+  }, [filteredAttendanceCourses, attendancePage]);
 
   const enrichedAcademicRows = useMemo(() => {
     const rows = Array.isArray(academicData?.data) ? academicData.data : [];
@@ -1499,6 +1519,7 @@ const AdminReports = () => {
                   setActiveTab(tab.id);
                   setEnrollmentPage(1);
                   setAcademicPage(1);
+                  setAttendancePage(1);
                 }}
                 className={`flex items-center justify-center sm:justify-start gap-2 px-3 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm transition-colors whitespace-nowrap cursor-pointer ${
                   isActive
@@ -1545,6 +1566,7 @@ const AdminReports = () => {
                     setDebouncedSearch('');
                     setEnrollmentPage(1);
                     setAcademicPage(1);
+                    setAttendancePage(1);
                   }}
                   className="text-xs font-bold text-rose-600 hover:text-rose-700 cursor-pointer"
                 >
@@ -1565,6 +1587,7 @@ const AdminReports = () => {
                     setSelectedCourse('');
                     setEnrollmentPage(1);
                     setAcademicPage(1);
+                    setAttendancePage(1);
                   }}
                   className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                 >
@@ -1590,6 +1613,7 @@ const AdminReports = () => {
                     setSelectedCourse(e.target.value);
                     setEnrollmentPage(1);
                     setAcademicPage(1);
+                    setAttendancePage(1);
                   }}
                   className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                 >
@@ -1642,7 +1666,10 @@ const AdminReports = () => {
                     <input
                       type="date"
                       value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
+                      onChange={(e) => {
+                        setDateFrom(e.target.value);
+                        setAttendancePage(1);
+                      }}
                       className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                     />
                   </div>
@@ -1653,7 +1680,10 @@ const AdminReports = () => {
                     <input
                       type="date"
                       value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
+                      onChange={(e) => {
+                        setDateTo(e.target.value);
+                        setAttendancePage(1);
+                      }}
                       className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                     />
                   </div>
@@ -2226,19 +2256,6 @@ const AdminReports = () => {
                         </tr>
                       ) : (
                         enrollmentData.data.map((item, idx) => {
-                          const stdKey = item.student_id || item.student_code;
-                          const rawAvatar =
-                            ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] ||
-                            item.profile_image ||
-                            item.student?.profile_image ||
-                            item.student?.user?.profile_image ||
-                            item.user?.profile_image;
-                          const avatarUrl = resolveImageUrl(rawAvatar);
-                          const avatarKey = `enr_${item.id || stdKey || idx}`;
-                          const hasAvatar = Boolean(
-                            avatarUrl && !failedAvatars[avatarKey]
-                          );
-
                           const studentGender =
                             item.student?.gender ||
                             item.user?.gender ||
@@ -2254,37 +2271,20 @@ const AdminReports = () => {
                                 {item.student_code || '—'}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap sticky left-0 bg-inherit z-10">
-                                <div className="flex items-center gap-3">
-                                  {hasAvatar && (
-                                    <img
-                                      src={avatarUrl}
-                                      alt={item.student_name || 'Student'}
-                                      loading="lazy"
-                                      decoding="async"
-                                      className="no-print h-8 w-8 rounded-full object-cover shrink-0 border border-blue-200 shadow-2xs"
-                                      onError={() =>
-                                        setFailedAvatars((prev) => ({
-                                          ...prev,
-                                          [avatarKey]: true,
-                                        }))
-                                      }
-                                    />
-                                  )}
-                                  <div>
-                                    <div className="rep-text-primary font-extrabold text-gray-900 text-sm">
-                                      {item.student_name || '—'}
-                                    </div>
-                                    <div className="flex items-center gap-1.5 mt-1">
-                                      <span
-                                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
-                                          isFemale
-                                            ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
-                                            : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
-                                        }`}
-                                      >
-                                        {getGenderLabel(studentGender)}
-                                      </span>
-                                    </div>
+                                <div>
+                                  <div className="rep-text-primary font-extrabold text-gray-900 text-sm">
+                                    {item.student_name || '—'}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    <span
+                                      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
+                                        isFemale
+                                          ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
+                                          : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
+                                      }`}
+                                    >
+                                      {getGenderLabel(studentGender)}
+                                    </span>
                                   </div>
                                 </div>
                               </td>
@@ -2335,18 +2335,6 @@ const AdminReports = () => {
                     </p>
                   ) : (
                     enrollmentData.data.map((item, idx) => {
-                      const stdKey = item.student_id || item.student_code;
-                      const rawAvatar =
-                        ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] ||
-                        item.profile_image ||
-                        item.student?.profile_image ||
-                        item.student?.user?.profile_image ||
-                        item.user?.profile_image;
-                      const avatarUrl = resolveImageUrl(rawAvatar);
-                      const avatarKey = `mob_enr_${item.id || stdKey || idx}`;
-                      const hasAvatar = Boolean(
-                        avatarUrl && !failedAvatars[avatarKey]
-                      );
                       const studentGender =
                         item.student?.gender ||
                         item.user?.gender ||
@@ -2359,44 +2347,23 @@ const AdminReports = () => {
                           className="rep-surface-card bg-white rounded-2xl border border-gray-200/80 p-3.5 shadow-2xs space-y-2.5"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              {hasAvatar ? (
-                                <img
-                                  src={avatarUrl}
-                                  alt={item.student_name || 'Student'}
-                                  loading="lazy"
-                                  decoding="async"
-                                  className="h-10 w-10 rounded-full object-cover shrink-0 border border-blue-200"
-                                  onError={() =>
-                                    setFailedAvatars((prev) => ({
-                                      ...prev,
-                                      [avatarKey]: true,
-                                    }))
-                                  }
-                                />
-                              ) : (
-                                <div className="h-10 w-10 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                                  {(item.student_name || 'S')[0]}
-                                </div>
-                              )}
-                              <div className="min-w-0">
-                                <h4 className="rep-text-primary text-sm font-extrabold text-gray-900 truncate">
-                                  {item.student_name || '—'}
-                                </h4>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  <span className="text-xs font-bold font-mono text-blue-600">
-                                    {item.student_code || '—'}
-                                  </span>
-                                  <span
-                                    className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${
-                                      isFemale
-                                        ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
-                                        : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
-                                    }`}
-                                  >
-                                    {getGenderLabel(studentGender)}
-                                  </span>
-                                </div>
+                            <div className="min-w-0">
+                              <h4 className="rep-text-primary text-sm font-extrabold text-gray-900 truncate">
+                                {item.student_name || '—'}
+                              </h4>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-xs font-bold font-mono text-blue-600">
+                                  {item.student_code || '—'}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${
+                                    isFemale
+                                      ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
+                                      : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
+                                  }`}
+                                >
+                                  {getGenderLabel(studentGender)}
+                                </span>
                               </div>
                             </div>
 
@@ -2654,188 +2621,189 @@ const AdminReports = () => {
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between pb-1">
-                    <h3 className="rep-text-primary text-sm sm:text-base font-extrabold text-gray-900 flex items-center gap-2">
+                {/* ✅ តារាងរបាយការណ៍លម្អិតតាមមុខវិជ្ជា (Clean Table + លាក់លេខ 0 + Pagination) */}
+                <div className="rep-surface-card bg-white rounded-2xl sm:rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
+                  <div className="rep-table-bar px-4 sm:px-6 py-4 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
                       <BookOpenIcon className="w-5 h-5 text-indigo-600 shrink-0" />
-                      <span>
-                        {t(
-                          'របាយការណ៍លម្អិតតាមមុខវិជ្ជា',
-                          'Detailed Course Report'
-                        )}
+                      <h3 className="rep-text-primary text-sm sm:text-base font-extrabold text-gray-900">
+                        {t('របាយការណ៍លម្អិតតាមមុខវិជ្ជា', 'Detailed Course Report')}
+                      </h3>
+                      <span className="rep-total-pill text-xs font-bold text-gray-500 bg-gray-100 px-2.5 py-0.5 rounded-lg border border-gray-200">
+                        {filteredAttendanceCourses.length} {t('មុខវិជ្ជា', 'Courses')}
                       </span>
-                    </h3>
-                    <span className="rep-total-pill text-xs font-bold text-gray-500 bg-gray-200 px-3 py-1 rounded-lg border border-gray-300 shrink-0">
-                      {attendanceData.course_breakdown?.length || 0}{' '}
-                      {t('មុខវិជ្ជា', 'Courses')}
-                    </span>
+                    </div>
+
+                    <label className="inline-flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-slate-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={hideZeroAttendance}
+                        onChange={(e) => {
+                          setHideZeroAttendance(e.target.checked);
+                          setAttendancePage(1);
+                        }}
+                        className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                      />
+                      <span>{t('លាក់មុខវិជ្ជាគ្មានទិន្នន័យ (0)', 'Hide empty courses (0)')}</span>
+                    </label>
                   </div>
 
-                  {!Array.isArray(attendanceData?.course_breakdown) ||
-                  attendanceData.course_breakdown.length === 0 ? (
-                    <div className="rep-surface-card bg-white p-12 rounded-2xl border border-dashed border-gray-300 text-center">
-                      <DocumentChartBarIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                      <p className="rep-text-secondary text-gray-500 font-bold text-sm sm:text-base">
-                        {t(
-                          'មិនរកឃើញទិន្នន័យអវត្តមានទេ',
-                          'No attendance records found'
-                        )}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-3">
-                      {attendanceData.course_breakdown.map((item, index) => {
-                        const safeRate =
-                          Number(item.total || 0) > 0
-                            ? Number(item.rate ?? 0)
-                            : 0;
-                        const rateColors = getRateColor(safeRate);
+                  {/* 💻 Desktop & iPad Table */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="min-w-full border-collapse">
+                      <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
+                        <tr>
+                          <th className="px-5 py-3.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                            {t('កូដ', 'Code')}
+                          </th>
+                          <th className="px-5 py-3.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                            {t('មុខវិជ្ជា', 'Course')}
+                          </th>
+                          <th className="px-5 py-3.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                            {t('គ្រូបង្រៀន', 'Teacher')}
+                          </th>
+                          <th className="px-4 py-3.5 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                            {t('សរុប', 'Total')}
+                          </th>
+                          <th className="px-4 py-3.5 text-center text-[11px] font-bold text-emerald-600 uppercase tracking-wider whitespace-nowrap">
+                            {t('វត្តមាន', 'Present')}
+                          </th>
+                          <th className="px-4 py-3.5 text-center text-[11px] font-bold text-rose-600 uppercase tracking-wider whitespace-nowrap">
+                            {t('អវត្តមាន', 'Absent')}
+                          </th>
+                          <th className="px-4 py-3.5 text-center text-[11px] font-bold text-blue-600 uppercase tracking-wider whitespace-nowrap">
+                            {t('ច្បាប់', 'Perm')}
+                          </th>
+                          <th className="px-4 py-3.5 text-center text-[11px] font-bold text-amber-600 uppercase tracking-wider whitespace-nowrap">
+                            {t('យឺត', 'Late')}
+                          </th>
+                          <th className="px-5 py-3.5 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap w-36">
+                            {t('អត្រា', 'Rate')}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="rep-table-body bg-white">
+                        {paginatedAttendanceCourses.length === 0 ? (
+                          <tr>
+                            <td colSpan="9" className="px-6 py-12 text-center text-gray-400 font-bold text-sm">
+                              {t('មិនរកឃើញទិន្នន័យអវត្តមានទេ', 'No attendance records found')}
+                            </td>
+                          </tr>
+                        ) : (
+                          paginatedAttendanceCourses.map((item, index) => {
+                            const safeRate = Number(item.total || 0) > 0 ? Number(item.rate ?? 0) : 0;
+                            const rateColors = getRateColor(safeRate);
+                            const teacherName =
+                              item.teacher_name ||
+                              item.teacher?.name ||
+                              (item.teacher?.first_name
+                                ? `${item.teacher.last_name || ''} ${item.teacher.first_name}`.trim()
+                                : null) ||
+                              item.course?.teacher?.name ||
+                              (item.course?.teacher?.first_name
+                                ? `${item.course.teacher.last_name || ''} ${item.course.teacher.first_name}`.trim()
+                                : null) ||
+                              '—';
 
+                            return (
+                              <tr key={item.course_id || index} className="rep-table-row hover:bg-blue-50/30 transition-colors">
+                                <td className="px-5 py-3.5 whitespace-nowrap text-xs font-bold text-blue-600 font-mono">
+                                  {item.course_code || '—'}
+                                </td>
+                                <td className="rep-text-primary px-5 py-3.5 whitespace-nowrap text-sm font-extrabold text-gray-900">
+                                  {item.course_name || '—'}
+                                </td>
+                                <td className="rep-text-secondary px-5 py-3.5 whitespace-nowrap text-xs font-bold text-gray-600">
+                                  {teacherName}
+                                </td>
+                                <td className="rep-text-primary px-4 py-3.5 whitespace-nowrap text-center text-sm font-black text-gray-800">
+                                  {item.total || 0}
+                                </td>
+                                <td className="px-4 py-3.5 whitespace-nowrap text-center text-sm font-black text-emerald-600">
+                                  {item.present || 0}
+                                </td>
+                                <td className="px-4 py-3.5 whitespace-nowrap text-center text-sm font-black text-rose-600">
+                                  {item.absent || 0}
+                                </td>
+                                <td className="px-4 py-3.5 whitespace-nowrap text-center text-sm font-black text-blue-600">
+                                  {item.permission || 0}
+                                </td>
+                                <td className="px-4 py-3.5 whitespace-nowrap text-center text-sm font-black text-amber-600">
+                                  {item.late || 0}
+                                </td>
+                                <td className="px-5 py-3.5 whitespace-nowrap">
+                                  <div className="flex items-center gap-2">
+                                    <div className="rep-progress-track flex-1 bg-gray-100 h-2 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full ${rateColors.bg}`}
+                                        style={{ width: `${safeRate}%` }}
+                                      />
+                                    </div>
+                                    <span className={`text-xs font-black w-9 text-right ${rateColors.text}`}>
+                                      {safeRate}%
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* 📱 Mobile Compact Cards */}
+                  <div className="md:hidden p-3.5 space-y-2.5 bg-gray-50/40">
+                    {paginatedAttendanceCourses.length === 0 ? (
+                      <p className="py-10 text-center text-gray-400 text-xs font-bold">
+                        {t('មិនរកឃើញទិន្នន័យអវត្តមានទេ', 'No attendance records found')}
+                      </p>
+                    ) : (
+                      paginatedAttendanceCourses.map((item, index) => {
+                        const safeRate = Number(item.total || 0) > 0 ? Number(item.rate ?? 0) : 0;
+                        const rateColors = getRateColor(safeRate);
                         const teacherName =
                           item.teacher_name ||
                           item.teacher?.name ||
-                          (item.teacher?.first_name
-                            ? `${item.teacher.first_name} ${
-                                item.teacher.last_name || ''
-                              }`.trim()
-                            : null) ||
                           item.course?.teacher?.name ||
-                          (item.course?.teacher?.first_name
-                            ? `${item.course.teacher.first_name} ${
-                                item.course.teacher.last_name || ''
-                              }`.trim()
-                            : null) ||
-                          t('មិនស្គាល់គ្រូបង្រៀន', 'Unknown Teacher');
-
-                        const rawTeacherAvatar =
-                          ADMIN_REPORTS_MEM_CACHE.avatarMap[
-                            `att_t_${item.course_id || index}`
-                          ] ||
-                          item.teacher_profile_image ||
-                          item.teacher?.profile_image ||
-                          item.teacher?.user?.profile_image ||
-                          item.course?.teacher?.profile_image ||
-                          item.course?.teacher?.user?.profile_image;
-                        const teacherAvatarUrl =
-                          resolveImageUrl(rawTeacherAvatar);
-                        const teacherAvatarKey = `att_t_${
-                          item.course_id || index
-                        }`;
-                        const hasTeacherAvatar = Boolean(
-                          teacherAvatarUrl && !failedAvatars[teacherAvatarKey]
-                        );
+                          '—';
 
                         return (
-                          <div
-                            key={item.course_id || index}
-                            className="rep-surface-card bg-white p-4 lg:p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow flex flex-col md:flex-row items-start md:items-center gap-4 lg:gap-6 group"
-                          >
-                            <div className="flex items-center gap-3 md:min-w-[230px] w-full md:w-auto">
-                              <div className="rep-icon-box-indigo w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0 border border-indigo-100 shadow-inner group-hover:scale-105 transition-transform">
-                                <BookOpenIcon className="w-5 h-5 sm:w-6 sm:h-6" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h4 className="rep-text-primary font-extrabold text-gray-900 text-sm leading-tight mb-1 truncate">
-                                  {item.course_name ||
-                                    t(
-                                      'មិនមានឈ្មោះមុខវិជ្ជា',
-                                      'Unnamed Course'
-                                    )}
+                          <div key={`mob-att-${item.course_id || index}`} className="rep-surface-card bg-white p-3.5 rounded-2xl border border-gray-200/80 space-y-2.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <h4 className="rep-text-primary text-sm font-extrabold text-gray-900 truncate">
+                                  {item.course_name || '—'}
                                 </h4>
-                                <div className="flex items-center flex-wrap gap-2 mt-1">
-                                  <span className="rep-code-pill text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-md">
-                                    {item.course_code || 'N/A'}
-                                  </span>
-                                  <span className="rep-text-secondary text-[11px] font-bold text-gray-600 flex items-center gap-1.5 truncate">
-                                    {hasTeacherAvatar ? (
-                                      <img
-                                        src={teacherAvatarUrl}
-                                        alt={teacherName}
-                                        loading="lazy"
-                                        decoding="async"
-                                        className="w-4 h-4 rounded-full object-cover shrink-0 border border-indigo-200"
-                                        onError={() =>
-                                          setFailedAvatars((prev) => ({
-                                            ...prev,
-                                            [teacherAvatarKey]: true,
-                                          }))
-                                        }
-                                      />
-                                    ) : (
-                                      <UserGroupIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                                    )}
-                                    <span className="truncate">{teacherName}</span>
-                                  </span>
-                                </div>
+                                <p className="rep-text-secondary text-xs text-gray-500 font-medium truncate">
+                                  {item.course_code || '—'} &bull; {teacherName}
+                                </p>
                               </div>
+                              <span className={`text-sm font-black shrink-0 ${rateColors.text}`}>
+                                {safeRate}%
+                              </span>
                             </div>
-
-                            <div className="rep-stats-box flex-1 grid grid-cols-5 gap-1.5 sm:gap-2 w-full md:w-auto bg-gray-50/50 rounded-xl p-2 sm:p-2.5 border border-gray-100/50">
-                              <div className="text-center md:border-r border-gray-200/60 last:border-0">
-                                <p className="text-[9px] sm:text-[10px] font-extrabold text-gray-400 uppercase tracking-wider truncate">
-                                  {t('សរុប', 'Total')}
-                                </p>
-                                <p className="rep-text-primary text-sm sm:text-base font-black text-gray-700 mt-0.5">
-                                  {item.total || 0}
-                                </p>
-                              </div>
-                              <div className="text-center md:border-r border-gray-200/60 last:border-0">
-                                <p className="text-[9px] sm:text-[10px] font-extrabold text-emerald-500 uppercase tracking-wider truncate">
-                                  {t('វត្តមាន', 'Pres')}
-                                </p>
-                                <p className="text-sm sm:text-base font-black text-emerald-600 mt-0.5">
-                                  {item.present || 0}
-                                </p>
-                              </div>
-                              <div className="text-center md:border-r border-gray-200/60 last:border-0">
-                                <p className="text-[9px] sm:text-[10px] font-extrabold text-rose-500 uppercase tracking-wider truncate">
-                                  {t('អវត្តមាន', 'Abs')}
-                                </p>
-                                <p className="text-sm sm:text-base font-black text-rose-600 mt-0.5">
-                                  {item.absent || 0}
-                                </p>
-                              </div>
-                              <div className="text-center md:border-r border-gray-200/60 last:border-0">
-                                <p className="text-[9px] sm:text-[10px] font-extrabold text-blue-500 uppercase tracking-wider truncate">
-                                  {t('ច្បាប់', 'Perm')}
-                                </p>
-                                <p className="text-sm sm:text-base font-black text-blue-600 mt-0.5">
-                                  {item.permission || 0}
-                                </p>
-                              </div>
-                              <div className="text-center">
-                                <p className="text-[9px] sm:text-[10px] font-extrabold text-amber-500 uppercase tracking-wider truncate">
-                                  {t('យឺត', 'Late')}
-                                </p>
-                                <p className="text-sm sm:text-base font-black text-amber-600 mt-0.5">
-                                  {item.late || 0}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="md:min-w-[120px] w-full md:w-auto">
-                              <div className="flex justify-between items-end mb-1.5">
-                                <span className="rep-text-muted text-[10px] font-extrabold text-gray-500 uppercase tracking-wider">
-                                  {t('អត្រា', 'Rate')}
-                                </span>
-                                <span
-                                  className={`text-sm font-black ${rateColors.text}`}
-                                >
-                                  {safeRate}%
-                                </span>
-                              </div>
-                              <div className="rep-progress-track w-full bg-gray-100 h-2 rounded-full overflow-hidden shadow-inner border border-gray-200/60">
-                                <div
-                                  className={`h-full rounded-full transition-all duration-700 ${rateColors.bg}`}
-                                  style={{ width: `${safeRate}%` }}
-                                ></div>
-                              </div>
+                            <div className="rep-stats-box grid grid-cols-5 gap-1 bg-gray-50/70 rounded-xl p-2 text-center text-xs">
+                              <div><p className="text-[9px] text-gray-400 font-bold">{t('សរុប', 'Tot')}</p><p className="rep-text-primary font-black">{item.total || 0}</p></div>
+                              <div><p className="text-[9px] text-emerald-500 font-bold">{t('វត្តមាន', 'Pre')}</p><p className="text-emerald-600 font-black">{item.present || 0}</p></div>
+                              <div><p className="text-[9px] text-rose-500 font-bold">{t('អវត្តមាន', 'Abs')}</p><p className="text-rose-600 font-black">{item.absent || 0}</p></div>
+                              <div><p className="text-[9px] text-blue-500 font-bold">{t('ច្បាប់', 'Per')}</p><p className="text-blue-600 font-black">{item.permission || 0}</p></div>
+                              <div><p className="text-[9px] text-amber-500 font-bold">{t('យឺត', 'Lat')}</p><p className="text-amber-600 font-black">{item.late || 0}</p></div>
                             </div>
                           </div>
                         );
-                      })}
-                    </div>
-                  )}
+                      })
+                    )}
+                  </div>
+
+                  <Pagination
+                    meta={{
+                      current_page: attendancePage,
+                      last_page: attendanceTotalPages,
+                      total: filteredAttendanceCourses.length,
+                    }}
+                    onPageChange={setAttendancePage}
+                  />
                 </div>
               </div>
 
@@ -3253,19 +3221,6 @@ const AdminReports = () => {
                         enrichedAcademicRows.map((g, idx) => {
                           const { assignPts20, quizPts20, totalPoints, status } =
                             g.computed;
-                          const stdKey = g.student_id || g.student_code;
-                          const rawAvatar =
-                            ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] ||
-                            g.profile_image ||
-                            g.student?.profile_image ||
-                            g.student?.user?.profile_image ||
-                            g.user?.profile_image;
-                          const avatarUrl = resolveImageUrl(rawAvatar);
-                          const avatarKey = `acad_${g.id || stdKey || idx}`;
-                          const hasAvatar = Boolean(
-                            avatarUrl && !failedAvatars[avatarKey]
-                          );
-
                           const studentGender =
                             g.student?.gender || g.user?.gender || g.gender;
                           const isFemale = isFemaleGender(studentGender);
@@ -3279,37 +3234,20 @@ const AdminReports = () => {
                                 {g.student_code || '—'}
                               </td>
                               <td className="rep-text-primary px-6 py-4 whitespace-nowrap text-sm font-extrabold text-gray-900 sticky left-0 bg-inherit z-10">
-                                <div className="flex items-center gap-3">
-                                  {hasAvatar && (
-                                    <img
-                                      src={avatarUrl}
-                                      alt={g.student_name || 'Student'}
-                                      loading="lazy"
-                                      decoding="async"
-                                      className="no-print h-8 w-8 rounded-full object-cover shrink-0 border border-blue-200 shadow-2xs"
-                                      onError={() =>
-                                        setFailedAvatars((prev) => ({
-                                          ...prev,
-                                          [avatarKey]: true,
-                                        }))
-                                      }
-                                    />
-                                  )}
-                                  <div>
-                                    <div className="rep-text-primary font-extrabold text-gray-900 text-sm">
-                                      {g.student_name || '—'}
-                                    </div>
-                                    <div className="flex items-center gap-1.5 mt-1">
-                                      <span
-                                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
-                                          isFemale
-                                            ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
-                                            : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
-                                        }`}
-                                      >
-                                        {getGenderLabel(studentGender)}
-                                      </span>
-                                    </div>
+                                <div>
+                                  <div className="rep-text-primary font-extrabold text-gray-900 text-sm">
+                                    {g.student_name || '—'}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    <span
+                                      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
+                                        isFemale
+                                          ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
+                                          : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
+                                      }`}
+                                    >
+                                      {getGenderLabel(studentGender)}
+                                    </span>
                                   </div>
                                 </div>
                               </td>
@@ -3366,18 +3304,6 @@ const AdminReports = () => {
                     enrichedAcademicRows.map((g, idx) => {
                       const { assignPts20, quizPts20, totalPoints, status } =
                         g.computed;
-                      const stdKey = g.student_id || g.student_code;
-                      const rawAvatar =
-                        ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${stdKey}`] ||
-                        g.profile_image ||
-                        g.student?.profile_image ||
-                        g.student?.user?.profile_image ||
-                        g.user?.profile_image;
-                      const avatarUrl = resolveImageUrl(rawAvatar);
-                      const avatarKey = `mob_acad_${g.id || stdKey || idx}`;
-                      const hasAvatar = Boolean(
-                        avatarUrl && !failedAvatars[avatarKey]
-                      );
                       const studentGender =
                         g.student?.gender || g.user?.gender || g.gender;
                       const isFemale = isFemaleGender(studentGender);
@@ -3388,44 +3314,23 @@ const AdminReports = () => {
                           className="rep-surface-card bg-white rounded-2xl border border-gray-200/80 p-3.5 shadow-2xs space-y-3"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              {hasAvatar ? (
-                                <img
-                                  src={avatarUrl}
-                                  alt={g.student_name || 'Student'}
-                                  loading="lazy"
-                                  decoding="async"
-                                  className="h-10 w-10 rounded-full object-cover shrink-0 border border-blue-200"
-                                  onError={() =>
-                                    setFailedAvatars((prev) => ({
-                                      ...prev,
-                                      [avatarKey]: true,
-                                    }))
-                                  }
-                                />
-                              ) : (
-                                <div className="h-10 w-10 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                                  {(g.student_name || 'S')[0]}
-                                </div>
-                              )}
-                              <div className="min-w-0">
-                                <h4 className="rep-text-primary text-sm font-extrabold text-gray-900 truncate">
-                                  {g.student_name || '—'}
-                                </h4>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  <span className="text-xs font-bold font-mono text-blue-600">
-                                    {g.student_code || '—'}
-                                  </span>
-                                  <span
-                                    className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${
-                                      isFemale
-                                        ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
-                                        : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
-                                    }`}
-                                  >
-                                    {getGenderLabel(studentGender)}
-                                  </span>
-                                </div>
+                            <div className="min-w-0">
+                              <h4 className="rep-text-primary text-sm font-extrabold text-gray-900 truncate">
+                                {g.student_name || '—'}
+                              </h4>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-xs font-bold font-mono text-blue-600">
+                                  {g.student_code || '—'}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold border ${
+                                    isFemale
+                                      ? 'rep-badge-rose bg-rose-50 text-rose-600 border-rose-200'
+                                      : 'rep-badge-blue bg-blue-50 text-blue-600 border-blue-200'
+                                  }`}
+                                >
+                                  {getGenderLabel(studentGender)}
+                                </span>
                               </div>
                             </div>
 

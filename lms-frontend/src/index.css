@@ -2,8 +2,8 @@
 @config "../tailwind.config.js";
 
 :root {
-  --font-km: 'Kantumruy Pro', 'Hanuman', sans-serif;
-  --font-en: 'Inter', 'Outfit', sans-serif;
+  --font-km: 'Kantumruy Pro', 'Inter', 'Hanuman', sans-serif;
+  --font-en: 'Inter', 'Outfit', 'Kantumruy Pro', 'Hanuman', sans-serif;
 }
 
 html,
