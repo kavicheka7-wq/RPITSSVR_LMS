@@ -1759,12 +1759,15 @@ class StudentController extends Controller
                 return response()->json(['message' => 'អស់ម៉ោងប្រឡងហើយ! ប្រព័ន្ធបានបញ្ជូនចម្លើយដោយស្វ័យប្រវត្តិ។'], 400);
             }
         } else {
-            $nowLocal = now('Asia/Phnom_Penh');
-            if ($quiz->start_date && $nowLocal->lt(Carbon::parse($quiz->start_date, 'Asia/Phnom_Penh'))) {
+           $nowLocal = now('Asia/Phnom_Penh');
+            $rawStart = $quiz->getRawOriginal('start_date') ?? $quiz->start_date;
+            $rawEnd = $quiz->getRawOriginal('end_date') ?? $quiz->end_date;
+
+            if ($rawStart && $nowLocal->lt(Carbon::parse((string) $rawStart, 'Asia/Phnom_Penh'))) {
                 return response()->json(['message' => 'កម្រងសំណួរនេះមិនទាន់ដល់ម៉ោងបើកប្រឡងនៅឡើយទេ'], 400);
             }
 
-            if ($quiz->end_date && $nowLocal->gt(Carbon::parse($quiz->end_date, 'Asia/Phnom_Penh')->endOfDay())) {
+            if ($rawEnd && $nowLocal->gt(Carbon::parse((string) $rawEnd, 'Asia/Phnom_Penh')->endOfDay())) {
                 return response()->json(['message' => 'កម្រងសំណួរនេះបានផុតកំណត់ម៉ោងប្រឡងហើយ'], 400);
             }
 
