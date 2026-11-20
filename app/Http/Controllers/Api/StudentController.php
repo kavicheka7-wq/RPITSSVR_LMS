@@ -1546,7 +1546,7 @@ class StudentController extends Controller
         $studentIds = $this->getStudentAllIds($student);
         $assignment = Assignment::findOrFail($request->assignment_id);
 
-        if ($assignment->due_date && now()->gt(Carbon::parse($assignment->due_date))) {
+        if ($assignment->due_date && now('Asia/Phnom_Penh')->gt(Carbon::parse($assignment->due_date, 'Asia/Phnom_Penh'))) {
             return response()->json(['message' => 'ផុតកំណត់ថ្ងៃទទួលកិច្ចការនេះហើយ!'], 400);
         }
 
@@ -1759,11 +1759,12 @@ class StudentController extends Controller
                 return response()->json(['message' => 'អស់ម៉ោងប្រឡងហើយ! ប្រព័ន្ធបានបញ្ជូនចម្លើយដោយស្វ័យប្រវត្តិ។'], 400);
             }
         } else {
-            if ($quiz->start_date && now()->lt(Carbon::parse($quiz->start_date))) {
+            $nowLocal = now('Asia/Phnom_Penh');
+            if ($quiz->start_date && $nowLocal->lt(Carbon::parse($quiz->start_date, 'Asia/Phnom_Penh'))) {
                 return response()->json(['message' => 'កម្រងសំណួរនេះមិនទាន់ដល់ម៉ោងបើកប្រឡងនៅឡើយទេ'], 400);
             }
 
-            if ($quiz->end_date && now()->gt(Carbon::parse($quiz->end_date)->endOfDay())) {
+            if ($quiz->end_date && $nowLocal->gt(Carbon::parse($quiz->end_date, 'Asia/Phnom_Penh')->endOfDay())) {
                 return response()->json(['message' => 'កម្រងសំណួរនេះបានផុតកំណត់ម៉ោងប្រឡងហើយ'], 400);
             }
 

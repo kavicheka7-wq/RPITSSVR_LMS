@@ -544,6 +544,7 @@ const StudentQuizzes = () => {
   const [timeLeft, setTimeLeft] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [startError, setStartError] = useState('');
   const [unansweredCountPrompt, setUnansweredCountPrompt] = useState(0);
   const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const timerRef = useRef(null);
@@ -923,6 +924,7 @@ const StudentQuizzes = () => {
     setLoadingQuizId(quiz.id);
     setIsAttemptExpanded(false);
     setSubmitError('');
+    setStartError('');
     setUnansweredCountPrompt(0);
     setShowExitConfirmModal(false);
     try {
@@ -978,6 +980,14 @@ const StudentQuizzes = () => {
       endTimeRef.current = Date.now() + secondsLeft * 1000;
     } catch (error) {
       console.error('Cannot start quiz:', error);
+      const msg =
+        error.response?.data?.message ||
+        t(
+          'មិនអាចបើកកម្រងសំណួរបានទេ សូមសាកល្បងម្ដងទៀត!',
+          'Cannot start quiz. Please try again!'
+        );
+      setStartError(String(msg));
+      fetchQuizzes(true);
     } finally {
       setLoadingQuizId(null);
     }
@@ -1672,6 +1682,22 @@ const StudentQuizzes = () => {
       {/* ================================================================== */}
       {/* 📌 3. QUIZ CARDS GRID                                              */}
       {/* ================================================================== */}
+      {startError && (
+        <div className="std-qz-badge-rose p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between gap-3 text-rose-700 animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <ExclamationCircleIcon className="h-5 w-5 shrink-0" />
+            <span className="text-xs sm:text-sm font-extrabold">{startError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStartError('')}
+            className="p-1 hover:bg-rose-100 rounded-lg cursor-pointer"
+          >
+            <XMarkIcon className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {filteredQuizzes.length === 0 ? (
         <div className="std-qz-surface bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-xs p-10 sm:p-14 text-center space-y-3">
           <PencilSquareIcon className="h-14 w-14 sm:h-16 sm:w-16 mx-auto text-indigo-300" />
