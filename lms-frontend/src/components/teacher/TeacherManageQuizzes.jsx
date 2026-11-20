@@ -17,6 +17,7 @@ import {
   ExclamationTriangleIcon,
   ClockIcon,
   CheckCircleIcon,
+  XCircleIcon,
   ArrowUpTrayIcon,
   DocumentTextIcon,
   EyeIcon,
@@ -48,7 +49,6 @@ const getSelectedShiftKey = (uid) => `cached_teacher_quizzes_selected_shift_${ui
 const getQuizResultsCacheKey = (uid, quizId) =>
   `cached_teacher_quiz_results_v4_${uid}_${quizId}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ
 const QUIZZES_MEM_CACHE = {
   uid: null,
   quizzes: null,
@@ -59,7 +59,6 @@ const QUIZZES_MEM_CACHE = {
   lastSyncedAt: 0,
 };
 
-// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
 const runWhenIdle = (fn, fallbackDelay = 300) => {
   if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
     window.requestIdleCallback(fn, { timeout: 1500 });
@@ -70,15 +69,13 @@ const runWhenIdle = (fn, fallbackDelay = 300) => {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw =
-      sessionStorage.getItem(key) || localStorage.getItem(key);
+    const raw = sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ លុបទិន្នន័យធ្ងន់ៗចេញពីបញ្ជីសិស្សមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
 const stripHeavyStudentsForCache = (list) => {
   if (!Array.isArray(list)) return [];
   return list.map((stu) => {
@@ -102,7 +99,6 @@ const stripHeavyStudentsForCache = (list) => {
   });
 };
 
-// ✅ លុប Base64 ធំៗចេញពីបញ្ជីលទ្ធផលប្រឡងសិស្ស (Quiz Attempts) មុនពេល Save ចូល localStorage
 const stripHeavyQuizAttemptsForCache = (attemptsList) => {
   if (!Array.isArray(attemptsList)) return [];
   return attemptsList.map((att) => {
@@ -123,15 +119,10 @@ const stripHeavyQuizAttemptsForCache = (attemptsList) => {
   });
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
 const resolveTeacherUid = (contextUser, contextTeacher) => {
   const target = contextUser || contextTeacher;
   if (target) {
-    const id =
-      target.id ||
-      target.user_id ||
-      target.teacher?.id ||
-      target.email;
+    const id = target.id || target.user_id || target.teacher?.id || target.email;
     if (id) return String(id);
   }
   try {
@@ -152,7 +143,6 @@ const resolveTeacherUid = (contextUser, contextTeacher) => {
   return 'default_teacher';
 };
 
-// ✅ អនុគមន៍កំណត់ប្រភេទវេនសិក្សារបស់សិស្ស (ចន្ទ-សុក្រ vs សៅរ៍-អាទិត្យ)
 const normalizeShiftKey = (shiftVal) => {
   const s = (shiftVal || '').toString().trim().toLowerCase();
   if (
@@ -176,10 +166,6 @@ const normalizeShiftKey = (shiftVal) => {
   }
   return s ? shiftVal : 'Monday-Friday';
 };
-
-// ============================================================================
-// 📌 អនុគមន៍ចាប់យកថ្ងៃខែ និងម៉ោងពិតប្រាកដ ១០០% (ការពារកុំឱ្យលោតខុស +7 ម៉ោងដោយសារ UTC 'Z')
-// ============================================================================
 
 const extractExactDateTimeParts = (rawVal) => {
   if (!rawVal) return null;
@@ -248,7 +234,6 @@ const toComparableTimeMs = (val) => {
   return new Date(p.year, p.month - 1, p.day, p.hour, p.minute, 0, 0).getTime();
 };
 
-// ✅ អនុគមន៍ស្រង់យកលេខឆ្នាំសិក្សា (1, 2, 3, 4) យ៉ាងជាក់លាក់
 const detectStudentYearNum = (student) => {
   if (!student) return null;
 
@@ -285,7 +270,6 @@ const detectStudentYearNum = (student) => {
   return null;
 };
 
-// អនុគមន៍ទាញយកបញ្ជី Course IDs ដែលសិស្សបានចុះឈ្មោះរៀន
 const extractStudentCourseIds = (student) => {
   if (!student) return [];
   const ids = new Set();
@@ -312,15 +296,12 @@ const extractStudentCourseIds = (student) => {
   return Array.from(ids);
 };
 
-// ✅ អនុគមន៍ត្រួតពិនិត្យយ៉ាងជាក់លាក់ថាតើសិស្សម្នាក់ពិតជាបានចុះឈ្មោះក្នុងមុខវិជ្ជា (courseId) មែនឬអត់
 const isStudentEnrolledInCourse = (student, courseId, courseMap) => {
   if (!student || !courseId) return false;
   const cid = String(courseId);
 
   const directCourseIds = extractStudentCourseIds(student);
-  if (directCourseIds.includes(cid)) {
-    return true;
-  }
+  if (directCourseIds.includes(cid)) return true;
 
   const mappedIds = courseMap?.[cid];
   if (Array.isArray(mappedIds)) {
@@ -336,7 +317,6 @@ const isStudentEnrolledInCourse = (student, courseId, courseMap) => {
   return false;
 };
 
-// ✅ អនុគមន៍គណនាបម្លែងពិន្ទុប្រឡងរបស់សិស្សមកជាមាត្រដ្ឋាន 20 ពិន្ទុ (សំណួរខ្លី 20%)
 const toQuizWeighted20Score = (rawScore, quizTotalMark) => {
   const s = parseFloat(rawScore) || 0;
   const max = parseFloat(quizTotalMark) || 20;
@@ -346,7 +326,6 @@ const toQuizWeighted20Score = (rawScore, quizTotalMark) => {
   return Math.min(20, Math.max(0, Math.round(scaled * 100) / 100));
 };
 
-// ✅ អនុគមន៍បញ្ជូនសារជូនដំណឹងទៅកាន់រូបកណ្ដឹង (NotificationBell) លើ Navbar
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
@@ -397,6 +376,126 @@ const pushLocalNotification = (notif) => {
   }
 };
 
+// ============================================================================
+// 📌 អនុគមន៍បំបែកសំណួរឆ្លាតវៃពីអត្ថបទ Word / Text (Smart Paste Parser)
+// ============================================================================
+const parseSmartQuestionsFromText = (rawText) => {
+  if (!rawText || !rawText.trim()) return [];
+
+  const lines = rawText
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trim());
+
+  const blocks = [];
+  let currentBlock = [];
+
+  for (const line of lines) {
+    if (!line) {
+      if (currentBlock.length > 0) {
+        blocks.push(currentBlock);
+        currentBlock = [];
+      }
+      continue;
+    }
+    const isNewQuestionStart =
+      /^(?:សំណួរទី\s*\d+|Q\d+|\d+[\.\)\:])\s+/i.test(line) &&
+      currentBlock.length > 0 &&
+      currentBlock.some((l) => /^[A-Da-d][\.\)\:]\s+/.test(l));
+
+    if (isNewQuestionStart) {
+      blocks.push(currentBlock);
+      currentBlock = [line];
+    } else {
+      currentBlock.push(line);
+    }
+  }
+  if (currentBlock.length > 0) blocks.push(currentBlock);
+
+  return blocks
+    .map((blockLines, idx) => {
+      let questionLines = [];
+      let options = [];
+      let detectedAnswer = '';
+
+      blockLines.forEach((line) => {
+        const ansMatch = line.match(/^(?:ចម្លើយ|answer|ans)\s*[:៖]?\s*(.+)$/i);
+        if (ansMatch) {
+          detectedAnswer = ansMatch[1].trim();
+          return;
+        }
+
+        const optMatch = line.match(/^([A-Da-d])[\.\)\:]\s*(.+)$/);
+        if (optMatch) {
+          let optText = optMatch[2].trim();
+          let isMarkedCorrect = false;
+          if (optText.startsWith('*') || optText.endsWith('*') || /\(ត្រូវ\)|\(correct\)/i.test(optText)) {
+            isMarkedCorrect = true;
+            optText = optText.replace(/^\*+|\*+$/g, '').replace(/\(ត្រូវ\)|\(correct\)/gi, '').trim();
+          }
+          options.push({
+            letter: optMatch[1].toUpperCase(),
+            option_text: optText,
+            is_correct: isMarkedCorrect,
+          });
+          return;
+        }
+
+        questionLines.push(line);
+      });
+
+      const cleanQuestionText = questionLines
+        .join(' ')
+        .replace(/^(?:សំណួរទី\s*\d+|Q\d+|\d+[\.\)\:])\s*/i, '')
+        .trim();
+
+      if (!cleanQuestionText) return null;
+
+      let questionType = 'Essay';
+      let finalOptions = [];
+
+      if (options.length >= 2) {
+        const lowerOpts = options.map((o) => o.option_text.toLowerCase());
+        const isTf =
+          options.length === 2 &&
+          lowerOpts.some((t) => t.includes('true') || t.includes('ពិត')) &&
+          lowerOpts.some((t) => t.includes('false') || t.includes('មិនពិត'));
+
+        questionType = isTf ? 'TrueFalse' : 'MCQ';
+        const ansUpper = detectedAnswer.toUpperCase();
+        finalOptions = options.map((o) => ({
+          option_text: o.option_text,
+          is_correct:
+            o.is_correct ||
+            (ansUpper !== '' &&
+              (ansUpper === o.letter ||
+                ansUpper === o.option_text.toUpperCase())),
+        }));
+      } else if (
+        /\(ពិត\/មិនពិត\)|\(true\/false\)|ពិត\s*ឬ\s*មិនពិត/i.test(cleanQuestionText) ||
+        /^(true|false|ពិត|មិនពិត)$/i.test(detectedAnswer)
+      ) {
+        questionType = 'TrueFalse';
+        const ansLow = detectedAnswer.toLowerCase();
+        const isTrue = ansLow === 'true' || ansLow === 'ពិត' || ansLow === 't';
+        const isFalse = ansLow === 'false' || ansLow === 'មិនពិត' || ansLow === 'f';
+        finalOptions = [
+          { option_text: 'ពិត (True)', is_correct: isTrue },
+          { option_text: 'មិនពិត (False)', is_correct: isFalse },
+        ];
+      }
+
+      return {
+        id: `imp_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+        question_text: cleanQuestionText,
+        question_type: questionType,
+        mark: 2,
+        options: finalOptions,
+      };
+    })
+    .filter(Boolean);
+};
+
 export default function TeacherManageQuizzes() {
   const { t, language } = useLanguage();
   const { user, teacher } = useAuth();
@@ -407,17 +506,12 @@ export default function TeacherManageQuizzes() {
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || '';
 
-  // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentTeacherId = useMemo(
     () => resolveTeacherUid(user, teacher),
     [user, teacher]
   );
 
-  // បើប្ដូរគណនីគ្រូ ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
-  if (
-    QUIZZES_MEM_CACHE.uid &&
-    QUIZZES_MEM_CACHE.uid !== currentTeacherId
-  ) {
+  if (QUIZZES_MEM_CACHE.uid && QUIZZES_MEM_CACHE.uid !== currentTeacherId) {
     QUIZZES_MEM_CACHE.quizzes = null;
     QUIZZES_MEM_CACHE.courses = null;
     QUIZZES_MEM_CACHE.allStudents = null;
@@ -427,15 +521,9 @@ export default function TeacherManageQuizzes() {
   }
   QUIZZES_MEM_CACHE.uid = currentTeacherId;
 
-  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី
   const [quizzes, setQuizzes] = useState(() => {
-    if (Array.isArray(QUIZZES_MEM_CACHE.quizzes)) {
-      return QUIZZES_MEM_CACHE.quizzes;
-    }
-    const fromUserKey = readStorageJson(
-      getQuizzesCacheKey(currentTeacherId),
-      null
-    );
+    if (Array.isArray(QUIZZES_MEM_CACHE.quizzes)) return QUIZZES_MEM_CACHE.quizzes;
+    const fromUserKey = readStorageJson(getQuizzesCacheKey(currentTeacherId), null);
     if (Array.isArray(fromUserKey)) {
       QUIZZES_MEM_CACHE.quizzes = fromUserKey;
       return fromUserKey;
@@ -453,8 +541,7 @@ export default function TeacherManageQuizzes() {
   });
 
   const [allStudents, setAllStudents] = useState(() => {
-    if (Array.isArray(QUIZZES_MEM_CACHE.allStudents))
-      return QUIZZES_MEM_CACHE.allStudents;
+    if (Array.isArray(QUIZZES_MEM_CACHE.allStudents)) return QUIZZES_MEM_CACHE.allStudents;
     const cached =
       readStorageJson(getStudentsCacheKey(currentTeacherId), null) ||
       readStorageJson(CACHE_KEY_SHARED_STUDENTS, []);
@@ -473,16 +560,10 @@ export default function TeacherManageQuizzes() {
 
   const [searchTerm, setSearchTerm] = useState('');
 
-  // ✅ កាតឆ្នាំសិក្សា៖ 'all' | '1' | '2' | '3' | '4'
   const [selectedYear, setSelectedYear] = useState(() => {
     if (initialRouteCourseId) {
-      const enrolledInRouteCourse = (QUIZZES_MEM_CACHE.allStudents || []).find(
-        (s) =>
-          isStudentEnrolledInCourse(
-            s,
-            initialRouteCourseId,
-            QUIZZES_MEM_CACHE.courseMap
-          )
+      const enrolledInRouteCourse = (QUIZZES_MEM_CACHE.allStudents || []).find((s) =>
+        isStudentEnrolledInCourse(s, initialRouteCourseId, QUIZZES_MEM_CACHE.courseMap)
       );
       const detectedY = detectStudentYearNum(enrolledInRouteCourse);
       if (detectedY) return detectedY;
@@ -494,12 +575,10 @@ export default function TeacherManageQuizzes() {
     }
   });
 
-  // ✅ មុខវិជ្ជាដែលបានជ្រើសរើស
   const [selectedCourse, setSelectedCourse] = useState(() => {
     if (initialRouteCourseId) return String(initialRouteCourseId);
     try {
-      const savedYear =
-        sessionStorage.getItem(getSelectedYearKey(currentTeacherId)) || 'all';
+      const savedYear = sessionStorage.getItem(getSelectedYearKey(currentTeacherId)) || 'all';
       if (savedYear === 'all') return '';
       return sessionStorage.getItem(getSelectedCourseKey(currentTeacherId)) || '';
     } catch {
@@ -507,7 +586,6 @@ export default function TeacherManageQuizzes() {
     }
   });
 
-  // ✅ វេនសិក្សាដែលបានជ្រើសរើស៖ 'all' | 'Monday-Friday' | 'Saturday-Sunday'
   const [selectedShift, setSelectedShift] = useState(() => {
     try {
       return sessionStorage.getItem(getSelectedShiftKey(currentTeacherId)) || 'all';
@@ -522,30 +600,38 @@ export default function TeacherManageQuizzes() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingQuiz, setEditingQuiz] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // State សម្រាប់បង្ហាញផ្ទាំង Modal បញ្ជាក់ការលុបសំណួរនីមួយៗ
   const [deleteQuestionTarget, setDeleteQuestionTarget] = useState(null);
 
-  // Import JSON Modal State
+  // ============================================================================
+  // 📌 Smart Import Modal States (Excel + Word Paste + Quick-Check Preview)
+  // ============================================================================
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importMode, setImportMode] = useState('excel');
   const [importCourseId, setImportCourseId] = useState('');
-  const [jsonContent, setJsonContent] = useState('');
+  const [importTitle, setImportTitle] = useState('');
+  const [importDuration, setImportDuration] = useState(60);
+  const [importStartDate, setImportStartDate] = useState('');
+  const [importEndDate, setImportEndDate] = useState('');
   const [importFile, setImportFile] = useState(null);
-  const [parsedQuizzes, setParsedQuizzes] = useState([]);
+  const [importPasteText, setImportPasteText] = useState('');
+  const [importedQuestions, setImportedQuestions] = useState([]);
+  const [importError, setImportError] = useState('');
   const [isImporting, setIsImporting] = useState(false);
 
-  // Submissions Modal State
+  // Submissions Modal & Answer Review State
   const [showSubmissionsModal, setShowSubmissionsModal] = useState(false);
   const [viewingQuiz, setViewingQuiz] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [submissionSearch, setSubmissionSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // all, passed, failed
+  const [statusFilter, setStatusFilter] = useState('all');
   const [submissionShiftFilter, setSubmissionShiftFilter] = useState('all');
   const [editingAttemptId, setEditingAttemptId] = useState(null);
   const [manualAttemptScore, setManualAttemptScore] = useState('');
   const [savingAttemptScoreId, setSavingAttemptScoreId] = useState(null);
+  const [reviewingAttempt, setReviewingAttempt] = useState(null);
+  const [reviewScoreInput, setReviewScoreInput] = useState('');
 
-  // Form states for creating/editing a Quiz (កំណត់ពិន្ទុសរុបលំនាំដើមស្មើ 20 ពិន្ទុ ឱ្យត្រូវតាមសំណួរខ្លី 20%)
+  // Form states for creating/editing a Quiz
   const [formData, setFormData] = useState({
     course_id: '',
     title: '',
@@ -557,7 +643,7 @@ export default function TeacherManageQuizzes() {
 
   // Form states for adding questions (inside expanded section)
   const [questionText, setQuestionText] = useState('');
-  const [questionType, setQuestionType] = useState('MCQ'); // MCQ, TrueFalse, Essay
+  const [questionType, setQuestionType] = useState('MCQ');
   const [questionMark, setQuestionMark] = useState(2);
   const [essayModelAnswer, setEssayModelAnswer] = useState('');
   const [questionFormError, setQuestionFormError] = useState('');
@@ -567,7 +653,7 @@ export default function TeacherManageQuizzes() {
     { option_text: '', is_correct: false },
     { option_text: '', is_correct: false },
   ]);
-  const [tfCorrect, setTfCorrect] = useState('true'); // 'true' or 'false'
+  const [tfCorrect, setTfCorrect] = useState('true');
 
   const handleToggleExpandQuiz = useCallback((quizId) => {
     setExpandedQuiz((prev) => {
@@ -594,9 +680,7 @@ export default function TeacherManageQuizzes() {
         isStudentEnrolledInCourse(s, cid, courseMap)
       );
       const detectedY = detectStudentYearNum(enrolledStudent);
-      if (detectedY) {
-        setSelectedYear(detectedY);
-      }
+      if (detectedY) setSelectedYear(detectedY);
     }
   }, [initialRouteCourseId, allStudents, courseMap]);
 
@@ -630,22 +714,10 @@ export default function TeacherManageQuizzes() {
   useEffect(() => {
     let isMounted = true;
 
-    const cachedQuz = readStorageJson(
-      getQuizzesCacheKey(currentTeacherId),
-      null
-    );
-    const cachedCrs = readStorageJson(
-      getCoursesCacheKey(currentTeacherId),
-      null
-    );
-    const cachedStd = readStorageJson(
-      getStudentsCacheKey(currentTeacherId),
-      null
-    );
-    const cachedMap = readStorageJson(
-      getCourseMapCacheKey(currentTeacherId),
-      null
-    );
+    const cachedQuz = readStorageJson(getQuizzesCacheKey(currentTeacherId), null);
+    const cachedCrs = readStorageJson(getCoursesCacheKey(currentTeacherId), null);
+    const cachedStd = readStorageJson(getStudentsCacheKey(currentTeacherId), null);
+    const cachedMap = readStorageJson(getCourseMapCacheKey(currentTeacherId), null);
 
     if (Array.isArray(cachedQuz) && cachedQuz.length > 0) {
       setQuizzes(cachedQuz);
@@ -676,7 +748,6 @@ export default function TeacherManageQuizzes() {
       return;
     }
 
-    // ១. ទាញបញ្ជីកម្រងសំណួរមុនគេ
     api
       .get('/teacher/quizzes')
       .then((quzRes) => {
@@ -685,23 +756,18 @@ export default function TeacherManageQuizzes() {
         const validQuizzes = Array.isArray(rawQuz) ? rawQuz : [];
         setQuizzes(validQuizzes);
         QUIZZES_MEM_CACHE.quizzes = validQuizzes;
-        if (validQuizzes.length > 0) {
-          QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
-        }
+        if (validQuizzes.length > 0) QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
         runWhenIdle(() => {
           try {
             const str = JSON.stringify(validQuizzes);
             sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
             localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
             localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-          } catch (e) {}
+          } catch {}
         });
       })
-      .catch((error) => {
-        console.error('Error syncing quizzes data:', error);
-      });
+      .catch((error) => console.error('Error syncing quizzes data:', error));
 
-    // ២. ទាញមុខវិជ្ជានៅផ្ទៃខាងក្រោយដោយឯករាជ្យ
     api
       .get('/teacher/courses')
       .then((crsRes) => {
@@ -717,44 +783,29 @@ export default function TeacherManageQuizzes() {
               sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
               localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
               localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
-            } catch (e) {}
+            } catch {}
           });
         }
       })
       .catch(() => {});
 
-    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ
-    if (
-      !Array.isArray(QUIZZES_MEM_CACHE.allStudents) ||
-      QUIZZES_MEM_CACHE.allStudents.length === 0
-    ) {
+    if (!Array.isArray(QUIZZES_MEM_CACHE.allStudents) || QUIZZES_MEM_CACHE.allStudents.length === 0) {
       api
         .get('/teacher/students')
         .then((stdRes) => {
           if (!isMounted || stdRes.data?.error_debug) return;
           const rawStd = stdRes.data?.data ?? stdRes.data ?? [];
           const validStudents = Array.isArray(rawStd) ? rawStd : [];
-          if (
-            validStudents.length > 0 ||
-            !QUIZZES_MEM_CACHE.allStudents?.length
-          ) {
+          if (validStudents.length > 0 || !QUIZZES_MEM_CACHE.allStudents?.length) {
             setAllStudents(validStudents);
             QUIZZES_MEM_CACHE.allStudents = validStudents;
             runWhenIdle(() => {
               try {
-                const slimStr = JSON.stringify(
-                  stripHeavyStudentsForCache(validStudents)
-                );
-                sessionStorage.setItem(
-                  getStudentsCacheKey(currentTeacherId),
-                  slimStr
-                );
-                localStorage.setItem(
-                  getStudentsCacheKey(currentTeacherId),
-                  slimStr
-                );
+                const slimStr = JSON.stringify(stripHeavyStudentsForCache(validStudents));
+                sessionStorage.setItem(getStudentsCacheKey(currentTeacherId), slimStr);
+                localStorage.setItem(getStudentsCacheKey(currentTeacherId), slimStr);
                 localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
-              } catch (e) {}
+              } catch {}
             });
           }
 
@@ -764,16 +815,10 @@ export default function TeacherManageQuizzes() {
             runWhenIdle(() => {
               try {
                 const mapStr = JSON.stringify(stdRes.data.course_students_map);
-                sessionStorage.setItem(
-                  getCourseMapCacheKey(currentTeacherId),
-                  mapStr
-                );
-                localStorage.setItem(
-                  getCourseMapCacheKey(currentTeacherId),
-                  mapStr
-                );
+                sessionStorage.setItem(getCourseMapCacheKey(currentTeacherId), mapStr);
+                localStorage.setItem(getCourseMapCacheKey(currentTeacherId), mapStr);
                 localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
-              } catch (e) {}
+              } catch {}
             });
           }
         })
@@ -793,16 +838,14 @@ export default function TeacherManageQuizzes() {
       const validQuizzes = Array.isArray(quizzesData) ? quizzesData : [];
       setQuizzes(validQuizzes);
       QUIZZES_MEM_CACHE.quizzes = validQuizzes;
-      if (validQuizzes.length > 0) {
-        QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
-      }
+      if (validQuizzes.length > 0) QUIZZES_MEM_CACHE.lastSyncedAt = Date.now();
       runWhenIdle(() => {
         try {
           const str = JSON.stringify(validQuizzes);
           sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
           localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
           localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-        } catch (e) {}
+        } catch {}
       });
     } catch (error) {
       console.error('Error fetching quizzes:', error);
@@ -810,21 +853,9 @@ export default function TeacherManageQuizzes() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា (Primary Year តែមួយគត់) និងវេនសិក្សារបស់មុខវិជ្ជា
+  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា និងវេនសិក្សា
   // ============================================================================
-  const isSpecificShiftSelected =
-    selectedShift !== 'all' && selectedShift !== '';
-
-  const getYearTextLabel = useCallback(
-    (yearNum) => {
-      if (yearNum === '1') return t('ឆ្នាំទី១', 'Year 1');
-      if (yearNum === '2') return t('ឆ្នាំទី២', 'Year 2');
-      if (yearNum === '3') return t('ឆ្នាំទី៣', 'Year 3');
-      if (yearNum === '4') return t('ឆ្នាំទី៤', 'Year 4');
-      return '';
-    },
-    [t]
-  );
+  const isSpecificShiftSelected = selectedShift !== 'all' && selectedShift !== '';
 
   const getStudyShiftLabel = (shift) => {
     const norm = normalizeShiftKey(shift);
@@ -838,15 +869,12 @@ export default function TeacherManageQuizzes() {
     return norm || shift || '—';
   };
 
-  // ✅ គណនាឆ្នាំគោលតែមួយគត់ (Primary Year) និងវេនសិក្សា សម្រាប់មុខវិជ្ជានីមួយៗ (ព្រមទាំងស្រង់ពី quiz.course ជា Fallback)
   const enrichedCourses = useMemo(() => {
     const courseById = new Map();
 
     if (Array.isArray(courses)) {
       courses.forEach((c) => {
-        if (c && c.id != null) {
-          courseById.set(String(c.id), c);
-        }
+        if (c && c.id != null) courseById.set(String(c.id), c);
       });
     }
 
@@ -854,9 +882,7 @@ export default function TeacherManageQuizzes() {
       quizzes.forEach((quz) => {
         if (quz?.course && quz.course.id != null) {
           const cid = String(quz.course.id);
-          if (!courseById.has(cid)) {
-            courseById.set(cid, quz.course);
-          }
+          if (!courseById.has(cid)) courseById.set(cid, quz.course);
         }
       });
     }
@@ -872,29 +898,21 @@ export default function TeacherManageQuizzes() {
 
       enrolledList.forEach((s) => {
         const y = detectStudentYearNum(s);
-        if (y) {
-          yearFreq[y] = (yearFreq[y] || 0) + 1;
-        }
+        if (y) yearFreq[y] = (yearFreq[y] || 0) + 1;
         const normShift = normalizeShiftKey(s.study_shift);
-        if (normShift) {
-          shiftsSet.add(normShift);
-        }
+        if (normShift) shiftsSet.add(normShift);
       });
 
-      // ✅ ទី១៖ ទាញយកឆ្នាំសិក្សាពីឈ្មោះ ឬកូដមុខវិជ្ជាមុនគេ (ឧទាហរណ៍៖ "Y1" ឬ "ឆ្នាំទី១")
       let primaryYear = detectStudentYearNum({
         batch_year: `${course.course_name || ''} ${course.course_code || ''} ${
           course.description || ''
         } ${course.year || ''}`,
       });
 
-      // ✅ ទី២៖ បើមុខវិជ្ជាគ្មានបញ្ជាក់ឆ្នាំទេ យកឆ្នាំដែលមានសិស្សចុះឈ្មោះរៀនច្រើនជាងគេបំផុត
       if (!primaryYear) {
         const sortedYears = Object.keys(yearFreq);
         if (sortedYears.length > 0) {
-          primaryYear = sortedYears.reduce((a, b) =>
-            yearFreq[a] >= yearFreq[b] ? a : b
-          );
+          primaryYear = sortedYears.reduce((a, b) => (yearFreq[a] >= yearFreq[b] ? a : b));
         } else {
           primaryYear = '1';
         }
@@ -926,57 +944,42 @@ export default function TeacherManageQuizzes() {
     });
   }, [courses, quizzes, allStudents, courseMap]);
 
-  // ✅ អនុគមន៍ពិនិត្យថាតើកម្រងសំណួរមួយត្រូវនឹងវេនសិក្សាដែលបានជ្រើសរើសឬអត់
   const doesQuizHaveShift = useCallback(
     (quiz, targetShiftKey, matchedCourseObj) => {
       if (!targetShiftKey || targetShiftKey === 'all') return true;
       const cid = String(quiz?.course_id || '');
-
       const enrolledInCourse = (allStudents || []).filter((s) =>
         isStudentEnrolledInCourse(s, cid, courseMap)
       );
-
       if (enrolledInCourse.length > 0) {
-        return enrolledInCourse.some(
-          (s) => normalizeShiftKey(s.study_shift) === targetShiftKey
-        );
+        return enrolledInCourse.some((s) => normalizeShiftKey(s.study_shift) === targetShiftKey);
       }
-
       const courseShifts = matchedCourseObj?.shiftsList || ['Monday-Friday'];
       return courseShifts.includes(targetShiftKey);
     },
     [allStudents, courseMap]
   );
 
-  // ✅ អនុគមន៍ទាញយកមុខវិជ្ជាសម្រាប់ឆ្នាំណាមួយជាក់លាក់ (តាម Primary Year តែមួយគត់)
   const getCoursesForYearKey = useCallback(
     (yearKey) => {
       if (!yearKey || yearKey === 'all') return enrichedCourses;
       const targetYear = String(yearKey);
-
-      const matched = enrichedCourses.filter(
-        (course) => String(course.primaryYear) === targetYear
-      );
-
+      const matched = enrichedCourses.filter((course) => String(course.primaryYear) === targetYear);
       return matched.length > 0 ? matched : enrichedCourses;
     },
     [enrichedCourses]
   );
 
-  // ✅ ច្រោះមុខវិជ្ជាតាមឆ្នាំសិក្សាដែលបានជ្រើសរើសលើកាត
   const visibleCoursesForSelectedYear = useMemo(() => {
     if (selectedYear === 'all' || !selectedYear) return [];
     return getCoursesForYearKey(selectedYear);
   }, [getCoursesForYearKey, selectedYear]);
 
-  // ✅ ច្រោះមុខវិជ្ជាសម្រាប់បង្ហាញក្នុង Modal
   const modalAvailableCourses = useMemo(() => {
     if (selectedYear !== 'all' && selectedYear !== '') {
       const yearCourses = getCoursesForYearKey(selectedYear);
       if (editingQuiz && editingQuiz.course_id) {
-        const exists = yearCourses.some(
-          (c) => String(c.id) === String(editingQuiz.course_id)
-        );
+        const exists = yearCourses.some((c) => String(c.id) === String(editingQuiz.course_id));
         if (!exists) {
           const currentCourseObj = enrichedCourses.find(
             (c) => String(c.id) === String(editingQuiz.course_id)
@@ -999,16 +1002,13 @@ export default function TeacherManageQuizzes() {
     return enrichedCourses;
   }, [selectedYear, editingQuiz, enrichedCourses, getCoursesForYearKey]);
 
-  // ✅ គណនាចំនួនកម្រងសំណួរសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) ដោយមិនឱ្យស្ទួនកាតដាច់ខាត
   const quizYearCounts = useMemo(() => {
     const counts = { all: 0, '1': 0, '2': 0, '3': 0, '4': 0 };
     if (!Array.isArray(quizzes)) return counts;
 
     counts.all = quizzes.length;
     quizzes.forEach((quz) => {
-      const matchedCourse = enrichedCourses.find(
-        (c) => String(c.id) === String(quz.course_id)
-      );
+      const matchedCourse = enrichedCourses.find((c) => String(c.id) === String(quz.course_id));
       const py = matchedCourse?.primaryYear
         ? String(matchedCourse.primaryYear)
         : detectStudentYearNum({
@@ -1017,32 +1017,21 @@ export default function TeacherManageQuizzes() {
             } ${quz.title || ''}`,
           }) || '1';
 
-      if (counts[py] !== undefined) {
-        counts[py] += 1;
-      } else {
-        counts['1'] += 1;
-      }
+      if (counts[py] !== undefined) counts[py] += 1;
+      else counts['1'] += 1;
     });
     return counts;
   }, [quizzes, enrichedCourses]);
 
   const activeCourseObj = useMemo(() => {
     if (selectedYear === 'all' || !selectedCourse) return null;
-    return (
-      enrichedCourses.find((c) => String(c.id) === String(selectedCourse)) ||
-      null
-    );
+    return enrichedCourses.find((c) => String(c.id) === String(selectedCourse)) || null;
   }, [selectedYear, selectedCourse, enrichedCourses]);
 
-  // ✅ ច្រោះកម្រងសំណួរតាមឆ្នាំសិក្សា (Primary Year តែមួយគត់) និងមុខវិជ្ជា
   const quizzesByYearAndCourse = useMemo(() => {
     if (!Array.isArray(quizzes)) return [];
-
     return quizzes.filter((quiz) => {
-      const matchedCourse = enrichedCourses.find(
-        (c) => String(c.id) === String(quiz.course_id)
-      );
-
+      const matchedCourse = enrichedCourses.find((c) => String(c.id) === String(quiz.course_id));
       if (selectedYear !== 'all') {
         const quizPrimaryYear = matchedCourse?.primaryYear
           ? String(matchedCourse.primaryYear)
@@ -1051,12 +1040,8 @@ export default function TeacherManageQuizzes() {
                 quiz.course?.course_code || ''
               } ${quiz.title || ''}`,
             }) || '1';
-
-        if (String(quizPrimaryYear) !== String(selectedYear)) {
-          return false;
-        }
+        if (String(quizPrimaryYear) !== String(selectedYear)) return false;
       }
-
       if (
         selectedYear !== 'all' &&
         selectedCourse !== '' &&
@@ -1064,28 +1049,18 @@ export default function TeacherManageQuizzes() {
       ) {
         return false;
       }
-
       return true;
     });
   }, [quizzes, enrichedCourses, selectedYear, selectedCourse]);
 
-  // ✅ គណនាចំនួនកម្រងសំណួរតាមវេនសិក្សា (គ្រប់វេនសិក្សា, ចន្ទ-សុក្រ, សៅរ៍-អាទិត្យ)
   const shiftCounts = useMemo(() => {
     let monFri = 0;
     let satSun = 0;
-
     quizzesByYearAndCourse.forEach((quz) => {
-      const matchedCourse = enrichedCourses.find(
-        (c) => String(c.id) === String(quz.course_id)
-      );
-      if (doesQuizHaveShift(quz, 'Monday-Friday', matchedCourse)) {
-        monFri += 1;
-      }
-      if (doesQuizHaveShift(quz, 'Saturday-Sunday', matchedCourse)) {
-        satSun += 1;
-      }
+      const matchedCourse = enrichedCourses.find((c) => String(c.id) === String(quz.course_id));
+      if (doesQuizHaveShift(quz, 'Monday-Friday', matchedCourse)) monFri += 1;
+      if (doesQuizHaveShift(quz, 'Saturday-Sunday', matchedCourse)) satSun += 1;
     });
-
     return {
       all: quizzesByYearAndCourse.length,
       'Monday-Friday': monFri,
@@ -1093,31 +1068,18 @@ export default function TeacherManageQuizzes() {
     };
   }, [quizzesByYearAndCourse, enrichedCourses, doesQuizHaveShift]);
 
-  // ✅ ច្រោះបញ្ជីកម្រងសំណួរចុងក្រោយតាមវេនសិក្សា និងតាមពាក្យស្វែងរក
   const filteredQuizzes = useMemo(() => {
     const search = searchTerm.toLowerCase().trim();
-
     return quizzesByYearAndCourse.filter((quiz) => {
-      const matchedCourse = enrichedCourses.find(
-        (c) => String(c.id) === String(quiz.course_id)
-      );
-
-      if (isSpecificShiftSelected) {
-        if (!doesQuizHaveShift(quiz, selectedShift, matchedCourse)) {
-          return false;
-        }
+      const matchedCourse = enrichedCourses.find((c) => String(c.id) === String(quiz.course_id));
+      if (isSpecificShiftSelected && !doesQuizHaveShift(quiz, selectedShift, matchedCourse)) {
+        return false;
       }
-
       if (!search) return true;
       const titleMatch = (quiz.title || '').toLowerCase().includes(search);
-      const courseMatch = (
-        quiz.course?.course_name ||
-        matchedCourse?.course_name ||
-        ''
-      )
+      const courseMatch = (quiz.course?.course_name || matchedCourse?.course_name || '')
         .toLowerCase()
         .includes(search);
-
       return titleMatch || courseMatch;
     });
   }, [
@@ -1129,27 +1091,20 @@ export default function TeacherManageQuizzes() {
     doesQuizHaveShift,
   ]);
 
-  // ✅ ទាញរកវេនសិក្សារបស់សិស្សដែលបានប្រឡងក្នុង Modal
   const resolveAttemptStudentShift = useCallback(
     (attempt) => {
       const directShift =
-        attempt?.student?.study_shift ||
-        attempt?.study_shift ||
-        attempt?.student?.shift;
+        attempt?.student?.study_shift || attempt?.study_shift || attempt?.student?.shift;
       if (directShift) return normalizeShiftKey(directShift);
 
       const attUserId =
-        attempt?.student_id ||
-        attempt?.user_id ||
-        attempt?.student?.user_id ||
-        attempt?.student?.id;
+        attempt?.student_id || attempt?.user_id || attempt?.student?.user_id || attempt?.student?.id;
       const attEmail = (attempt?.student?.email || '').toLowerCase().trim();
 
       const matchedStd = (allStudents || []).find(
         (s) =>
           (attUserId &&
-            (String(s.user_id) === String(attUserId) ||
-              String(s.id) === String(attUserId))) ||
+            (String(s.user_id) === String(attUserId) || String(s.id) === String(attUserId))) ||
           (attEmail && (s.email || '').toLowerCase().trim() === attEmail)
       );
 
@@ -1158,7 +1113,6 @@ export default function TeacherManageQuizzes() {
     [allStudents]
   );
 
-  // ✅ ទាញរករូបភាពប្រវត្តិរូប (Base64 / URL) របស់សិស្សដែលបានប្រឡងក្នុង Modal
   const resolveAttemptStudentAvatar = useCallback(
     (attempt) => {
       const directImg =
@@ -1169,17 +1123,13 @@ export default function TeacherManageQuizzes() {
       if (directImg) return directImg;
 
       const attUserId =
-        attempt?.student_id ||
-        attempt?.user_id ||
-        attempt?.student?.user_id ||
-        attempt?.student?.id;
+        attempt?.student_id || attempt?.user_id || attempt?.student?.user_id || attempt?.student?.id;
       const attEmail = (attempt?.student?.email || '').toLowerCase().trim();
 
       const matchedStd = (allStudents || []).find(
         (s) =>
           (attUserId &&
-            (String(s.user_id) === String(attUserId) ||
-              String(s.id) === String(attUserId))) ||
+            (String(s.user_id) === String(attUserId) || String(s.id) === String(attUserId))) ||
           (attEmail && (s.email || '').toLowerCase().trim() === attEmail)
       );
 
@@ -1189,7 +1139,7 @@ export default function TeacherManageQuizzes() {
   );
 
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ មុខងារគ្រប់គ្រងកម្រងសំណួរ និងសំណួរនីមួយៗ (ភ្ជាប់កណ្ដឹង)
+  // 📌 ផ្នែកទី៤៖ មុខងារគ្រប់គ្រងកម្រងសំណួរ និងសំណួរនីមួយៗ
   // ============================================================================
   const getProfileImageUrl = useCallback((imagePath) => {
     if (!imagePath || typeof imagePath !== 'string') return null;
@@ -1203,9 +1153,10 @@ export default function TeacherManageQuizzes() {
     ) {
       return trimmed;
     }
-    const baseUrl = (
-      import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    ).replace(/\/api\/?$/, '');
+    const baseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(
+      /\/api\/?$/,
+      ''
+    );
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
@@ -1297,37 +1248,26 @@ export default function TeacherManageQuizzes() {
 
   const openEditModal = (quiz) => {
     setEditingQuiz(quiz);
-
-    const formattedStart = toDatetimeLocalInput(quiz.start_date);
-    const formattedEnd = toDatetimeLocalInput(quiz.end_date);
-
     setFormData({
       course_id: quiz.course_id ? String(quiz.course_id) : '',
       title: quiz.title || '',
       duration: quiz.duration ?? 60,
       total_mark: formatCleanScore(quiz.total_mark ?? 20),
-      start_date: formattedStart,
-      end_date: formattedEnd,
+      start_date: toDatetimeLocalInput(quiz.start_date),
+      end_date: toDatetimeLocalInput(quiz.end_date),
     });
     setShowAddModal(true);
   };
 
-  // ✅ អនុគមន៍សម្អាត Cache កម្រងសំណួររបស់សិស្សនៅពេលគ្រូបន្ថែម/កែ/លុបកម្រងសំណួរ ឬសំណួរ
   const clearStudentQuizCaches = () => {
     try {
       Object.keys(localStorage).forEach((k) => {
-        if (
-          k.startsWith('cached_student_quizzes_') ||
-          k.startsWith('cached_student_quiz_reviews_')
-        ) {
+        if (k.startsWith('cached_student_quizzes_') || k.startsWith('cached_student_quiz_reviews_')) {
           localStorage.removeItem(k);
         }
       });
       Object.keys(sessionStorage).forEach((k) => {
-        if (
-          k.startsWith('cached_student_quizzes_') ||
-          k.startsWith('cached_student_quiz_reviews_')
-        ) {
+        if (k.startsWith('cached_student_quizzes_') || k.startsWith('cached_student_quiz_reviews_')) {
           sessionStorage.removeItem(k);
         }
       });
@@ -1336,24 +1276,13 @@ export default function TeacherManageQuizzes() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    if (!formData.start_date || !formData.end_date) {
-      return;
-    }
+    if (!formData.start_date || !formData.end_date) return;
 
     const startMs = toComparableTimeMs(formData.start_date);
     const endMs = toComparableTimeMs(formData.end_date);
-
-    if (isNaN(startMs) || isNaN(endMs)) {
-      return;
-    }
-
-    if (endMs <= startMs) {
-      return;
-    }
+    if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) return;
 
     setIsSubmitting(true);
-
     const exactStartStr = toBackendDateTime(formData.start_date);
     const exactEndStr = toBackendDateTime(formData.end_date);
 
@@ -1366,9 +1295,7 @@ export default function TeacherManageQuizzes() {
       end_date: exactEndStr,
     };
 
-    const targetCourse = enrichedCourses.find(
-      (c) => String(c.id) === String(formData.course_id)
-    );
+    const targetCourse = enrichedCourses.find((c) => String(c.id) === String(formData.course_id));
     const courseName = targetCourse?.course_name || '';
 
     try {
@@ -1396,7 +1323,7 @@ export default function TeacherManageQuizzes() {
               sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
               localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
               localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-            } catch (e) {}
+            } catch {}
           });
           return updated;
         });
@@ -1433,7 +1360,7 @@ export default function TeacherManageQuizzes() {
               sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
               localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
               localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-            } catch (e) {}
+            } catch {}
           });
           return updated;
         });
@@ -1462,7 +1389,6 @@ export default function TeacherManageQuizzes() {
     setShowDeleteModal(true);
   };
 
-  // ✅ អនុគមន៍លុបកម្រងសំណួរចេញពី Database ពិតប្រាកដ ១០០%
   const confirmDelete = async () => {
     if (!selectedQuiz) return;
 
@@ -1482,14 +1408,13 @@ export default function TeacherManageQuizzes() {
           sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
           localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
           localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-        } catch (e) {}
+        } catch {}
       });
       return updated;
     });
 
     try {
       await api.delete(`/teacher/quizzes/${deletedId}`);
-
       clearStudentQuizCaches();
       await fetchQuizzes();
 
@@ -1505,18 +1430,9 @@ export default function TeacherManageQuizzes() {
       console.error('Delete quiz error:', error);
       setQuizzes(previousQuizzes);
       QUIZZES_MEM_CACHE.quizzes = previousQuizzes;
-      runWhenIdle(() => {
-        try {
-          const str = JSON.stringify(previousQuizzes);
-          sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-          localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-        } catch (e) {}
-      });
     }
   };
 
-  // ✅ មុខងារបន្ថែមសំណួរថ្មី (គាំទ្រទាំង MCQ, TrueFalse និងសំណួរសរសេររៀបរាប់ Essay ១០០%)
   const handleAddQuestion = async (quizId) => {
     setQuestionFormError('');
     if (!questionText.trim()) {
@@ -1528,9 +1444,7 @@ export default function TeacherManageQuizzes() {
 
     let options = [];
     if (questionType === 'MCQ') {
-      const filledOptions = mcqOptions.filter(
-        (opt) => opt.option_text.trim() !== ''
-      );
+      const filledOptions = mcqOptions.filter((opt) => opt.option_text.trim() !== '');
       if (filledOptions.length < 2) {
         setQuestionFormError(
           t(
@@ -1554,16 +1468,12 @@ export default function TeacherManageQuizzes() {
     } else if (questionType === 'TrueFalse') {
       options = [
         { option_text: t('ពិត (True)', 'True'), is_correct: tfCorrect === 'true' },
-        {
-          option_text: t('មិនពិត (False)', 'False'),
-          is_correct: tfCorrect === 'false',
-        },
+        { option_text: t('មិនពិត (False)', 'False'), is_correct: tfCorrect === 'false' },
       ];
     }
 
     const cleanModelAnswer = essayModelAnswer.trim();
 
-    // ✅ សម្រាប់សំណួរ Essay៖ មិនបញ្ជូន options ជា Array ទទេទៅឱ្យជាប់ Laravel min:2 ទៀតទេ!
     const payload = {
       question_text: questionText.trim(),
       question_type: questionType,
@@ -1599,21 +1509,9 @@ export default function TeacherManageQuizzes() {
           ...(Array.isArray(q.questions) ? q.questions : []),
           optimisticQuestion,
         ];
-        return {
-          ...q,
-          questions: nextQuestions,
-          questions_count: nextQuestions.length,
-        };
+        return { ...q, questions: nextQuestions, questions_count: nextQuestions.length };
       });
       QUIZZES_MEM_CACHE.quizzes = updated;
-      runWhenIdle(() => {
-        try {
-          const str = JSON.stringify(updated);
-          sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-          localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-        } catch (e) {}
-      });
       return updated;
     });
 
@@ -1636,21 +1534,11 @@ export default function TeacherManageQuizzes() {
           const updated = prev.map((q) => {
             if (q.id !== quizId) return q;
             const nextQuestions = (q.questions || []).map((item) =>
-              item.id === tempId
-                ? { ...optimisticQuestion, ...savedQuestion }
-                : item
+              item.id === tempId ? { ...optimisticQuestion, ...savedQuestion } : item
             );
             return { ...q, questions: nextQuestions };
           });
           QUIZZES_MEM_CACHE.quizzes = updated;
-          runWhenIdle(() => {
-            try {
-              const str = JSON.stringify(updated);
-              sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-              localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-              localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-            } catch (e) {}
-          });
           return updated;
         });
       } else {
@@ -1678,16 +1566,15 @@ export default function TeacherManageQuizzes() {
     }
   };
 
-  // ✅ មុខងារសម្រាប់ឱ្យគ្រូកែប្រែ/ផ្ដល់ពិន្ទុដោយផ្ទាល់ (Manual Essay Score Update) នៅក្នុង Modal លទ្ធផលសិស្ស
-  const handleSaveManualAttemptScore = async (attempt) => {
+  // ✅ អនុគមន៍រក្សាទុកពិន្ទុសិស្ស (ប្រើបានទាំងក្នុងតារាង និងក្នុងផ្ទាំងអានចម្លើយ)
+  const handleSaveManualAttemptScore = async (attempt, overrideScore20 = null) => {
     if (!viewingQuiz || !attempt || savingAttemptScoreId) return;
     const rawTotalVal = parseFloat(viewingQuiz.total_mark) || 20;
-    const enteredWeighted20 = parseFloat(manualAttemptScore);
-    if (isNaN(enteredWeighted20) || enteredWeighted20 < 0 || enteredWeighted20 > 20) {
-      return;
-    }
+    const enteredWeighted20 = parseFloat(
+      overrideScore20 !== null ? overrideScore20 : manualAttemptScore
+    );
+    if (isNaN(enteredWeighted20) || enteredWeighted20 < 0 || enteredWeighted20 > 20) return;
 
-    // បម្លែងពីពិន្ទុលើមាត្រដ្ឋាន 20 ទៅជាពិន្ទុពិតប្រាកដក្នុងកម្រងសំណួរ
     const newRawScore =
       rawTotalVal === 20
         ? enteredWeighted20
@@ -1696,31 +1583,30 @@ export default function TeacherManageQuizzes() {
     setSavingAttemptScoreId(attempt.id);
     try {
       const response = await api.get(`/teacher/quizzes/${viewingQuiz.id}/results`, {
-        params: {
-          attempt_id: attempt.id,
-          manual_score: newRawScore,
-        },
+        params: { attempt_id: attempt.id, manual_score: newRawScore },
       });
-      const attemptsData =
-        response.data?.attempts || response.data?.data || response.data || [];
+      const attemptsData = response.data?.attempts || response.data?.data || response.data || [];
       if (Array.isArray(attemptsData) && attemptsData.length > 0) {
         setSubmissions(attemptsData);
         QUIZZES_MEM_CACHE.resultsByQuiz[viewingQuiz.id] = attemptsData;
+        if (reviewingAttempt && reviewingAttempt.id === attempt.id) {
+          const updatedAttempt = attemptsData.find((a) => a.id === attempt.id);
+          if (updatedAttempt) setReviewingAttempt(updatedAttempt);
+        }
       } else {
         setSubmissions((prev) =>
-          prev.map((item) =>
-            item.id === attempt.id ? { ...item, score: newRawScore } : item
-          )
+          prev.map((item) => (item.id === attempt.id ? { ...item, score: newRawScore } : item))
         );
+        if (reviewingAttempt && reviewingAttempt.id === attempt.id) {
+          setReviewingAttempt((prev) => (prev ? { ...prev, score: newRawScore } : null));
+        }
       }
 
-      // ✅ សម្អាត Cache ពិន្ទុរួមនៃមុខវិជ្ជា ដើម្បីឱ្យទំព័រគ្រប់គ្រងពិន្ទុចាប់យកពិន្ទុប្រឡងថ្មីភ្លាមៗ
       if (viewingQuiz.course_id) {
-        const scoreKeysToClear = [
+        [
           `cached_teacher_course_scores_v8_${currentTeacherId}_${viewingQuiz.course_id}`,
           `cached_teacher_course_scores_v9_${currentTeacherId}_${viewingQuiz.course_id}`,
-        ];
-        scoreKeysToClear.forEach((k) => {
+        ].forEach((k) => {
           try {
             sessionStorage.removeItem(k);
             localStorage.removeItem(k);
@@ -1751,7 +1637,6 @@ export default function TeacherManageQuizzes() {
     setDeleteQuestionTarget(question);
   };
 
-  // ✅ អនុគមន៍លុបសំណួរនីមួយៗចេញពី Database ពិតប្រាកដ ១០០%
   const confirmDeleteQuestion = async () => {
     if (!deleteQuestionTarget) return;
 
@@ -1763,31 +1648,17 @@ export default function TeacherManageQuizzes() {
     setQuizzes((prev) => {
       const updated = prev.map((q) => {
         if (!Array.isArray(q.questions)) return q;
-        const filteredQs = q.questions.filter(
-          (item) => String(item.id) !== String(questionId)
-        );
-        return {
-          ...q,
-          questions: filteredQs,
-          questions_count: filteredQs.length,
-        };
+        const filteredQs = q.questions.filter((item) => String(item.id) !== String(questionId));
+        return { ...q, questions: filteredQs, questions_count: filteredQs.length };
       });
       QUIZZES_MEM_CACHE.quizzes = updated;
-      runWhenIdle(() => {
-        try {
-          const str = JSON.stringify(updated);
-          sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-          localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-        } catch (e) {}
-      });
       return updated;
     });
 
     try {
       try {
         await api.delete(`/teacher/quizzes/questions/${questionId}`);
-      } catch (err1) {
+      } catch {
         try {
           await api.delete(`/teacher/questions/${questionId}`);
         } catch {
@@ -1810,14 +1681,6 @@ export default function TeacherManageQuizzes() {
       console.error('Delete question error:', error);
       setQuizzes(previousQuizzes);
       QUIZZES_MEM_CACHE.quizzes = previousQuizzes;
-      runWhenIdle(() => {
-        try {
-          const str = JSON.stringify(previousQuizzes);
-          sessionStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-          localStorage.setItem(getQuizzesCacheKey(currentTeacherId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_QUIZZES, str);
-        } catch (e) {}
-      });
     }
   };
 
@@ -1834,129 +1697,346 @@ export default function TeacherManageQuizzes() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ មុខងារនាំចូល JSON និងនាំចេញឯកសារ Excel (.xlsx) ដោយប្រើ Dynamic Import
+  // 📌 ផ្នែកទី៥៖ នាំចូលសំណួរឆ្លាតវៃ (Excel & Word Paste + Preview & Quick-Check)
   // ============================================================================
-  const downloadSampleJson = () => {
-    const sample = [
+  const resetImportModal = () => {
+    setShowImportModal(false);
+    setImportMode('excel');
+    setImportTitle('');
+    setImportDuration(60);
+    setImportStartDate('');
+    setImportEndDate('');
+    setImportFile(null);
+    setImportPasteText('');
+    setImportedQuestions([]);
+    setImportError('');
+  };
+
+  const downloadSampleExcel = async () => {
+    const { default: XLSX } = await import('xlsx-js-style');
+    const sampleRows = [
       {
-        title: 'HTML & CSS Basics Quiz',
-        duration: 45,
-        total_mark: 20,
-        questions: [
-          {
-            question_text: 'What does HTML stand for?',
-            question_type: 'MCQ',
-            mark: 5,
-            options: [
-              { option_text: 'HyperText Markup Language', is_correct: true },
-              { option_text: 'HighText Machine Language', is_correct: false },
-              { option_text: 'Hyperlink Text Mark Language', is_correct: false },
-              { option_text: 'Home Tool Markup Language', is_correct: false },
-            ],
-          },
-          {
-            question_text: 'Is CSS used for styling web pages?',
-            question_type: 'TrueFalse',
-            mark: 5,
-            options: [
-              { option_text: 'True', is_correct: true },
-              { option_text: 'False', is_correct: false },
-            ],
-          },
-          {
-            question_text: 'Explain the CSS Box Model.',
-            question_type: 'Essay',
-            mark: 10,
-            options: [],
-          },
-        ],
+        'ប្រភេទ (MCQ/TrueFalse/Essay)': 'MCQ',
+        'ខ្លឹមសារសំណួរ': 'តើ HTML ប្រើសម្រាប់ធ្វើអ្វី?',
+        'ពិន្ទុ': 5,
+        'ជម្រើស A': 'បង្កើតគ្រោងឆ្អឹងគេហទំព័រ',
+        'ជម្រើស B': 'គ្រប់គ្រង Database',
+        'ជម្រើស C': 'រចនាប្រព័ន្ធប្រតិបត្តិការ',
+        'ជម្រើស D': 'កាត់តវីដេអូ',
+        'ចម្លើយត្រូវ (A/B/C/D ឬ ពិត/មិនពិត)': 'A',
+      },
+      {
+        'ប្រភេទ (MCQ/TrueFalse/Essay)': 'TrueFalse',
+        'ខ្លឹមសារសំណួរ': 'CSS ត្រូវបានប្រើសម្រាប់តុបតែងពណ៌ និងរូបរាងគេហទំព័រ។',
+        'ពិន្ទុ': 5,
+        'ជម្រើស A': '',
+        'ជម្រើស B': '',
+        'ជម្រើស C': '',
+        'ជម្រើស D': '',
+        'ចម្លើយត្រូវ (A/B/C/D ឬ ពិត/មិនពិត)': 'ពិត',
+      },
+      {
+        'ប្រភេទ (MCQ/TrueFalse/Essay)': 'Essay',
+        'ខ្លឹមសារសំណួរ': 'ចូរពន្យល់អំពីភាពខុសគ្នារវាង Frontend និង Backend។',
+        'ពិន្ទុ': 10,
+        'ជម្រើស A': '',
+        'ជម្រើស B': '',
+        'ជម្រើស C': '',
+        'ជម្រើស D': '',
+        'ចម្លើយត្រូវ (A/B/C/D ឬ ពិត/មិនពិត)': '',
       },
     ];
 
-    const blob = new Blob([JSON.stringify(sample, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'quiz_import_template.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const worksheet = XLSX.utils.json_to_sheet(sampleRows);
+    applyExcelStyling(
+      XLSX,
+      worksheet,
+      [
+        { wch: 26 },
+        { wch: 42 },
+        { wch: 10 },
+        { wch: 26 },
+        { wch: 24 },
+        { wch: 24 },
+        { wch: 22 },
+        { wch: 28 },
+      ],
+      []
+    );
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Questions');
+    XLSX.writeFile(workbook, 'quiz_questions_template.xlsx');
   };
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
+  const handleExcelFileUpload = async (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
     setImportFile(file);
+    setImportError('');
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const parsed = JSON.parse(event.target.result);
-        const quizArray = Array.isArray(parsed) ? parsed : [parsed];
-        setParsedQuizzes(quizArray);
-        setJsonContent(JSON.stringify(parsed, null, 2));
-      } catch (err) {
-        console.error('Invalid JSON format:', err);
-        setParsedQuizzes([]);
+    if (!importTitle.trim()) {
+      setImportTitle(file.name.replace(/\.(xlsx|xls|csv)$/i, ''));
+    }
+
+    try {
+      const { default: XLSX } = await import('xlsx-js-style');
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+
+      const parsed = rows
+        .map((row, idx) => {
+          const getVal = (keys) => {
+            for (const k of Object.keys(row)) {
+              const lower = k.toLowerCase();
+              if (keys.some((target) => lower.includes(target))) {
+                return String(row[k] ?? '').trim();
+              }
+            }
+            return '';
+          };
+
+          const qText = getVal(['ខ្លឹមសារ', 'សំណួរ', 'question']);
+          if (!qText) return null;
+
+          const rawType = getVal(['ប្រភេទ', 'type']).toLowerCase();
+          const markVal = parseFloat(getVal(['ពិន្ទុ', 'mark', 'score'])) || 2;
+          const optA = getVal(['ជម្រើស a', 'option a', 'a']);
+          const optB = getVal(['ជម្រើស b', 'option b', 'b']);
+          const optC = getVal(['ជម្រើស c', 'option c', 'c']);
+          const optD = getVal(['ជម្រើស d', 'option d', 'd']);
+          const correctRaw = getVal(['ចម្លើយ', 'correct', 'answer']).trim();
+          const correctUpper = correctRaw.toUpperCase();
+
+          let qType = 'Essay';
+          if (rawType.includes('mcq') || rawType.includes('qcm') || rawType.includes('ពហុ')) {
+            qType = 'MCQ';
+          } else if (rawType.includes('true') || rawType.includes('tf') || rawType.includes('ពិត')) {
+            qType = 'TrueFalse';
+          } else if (rawType.includes('essay') || rawType.includes('សរសេរ')) {
+            qType = 'Essay';
+          } else if (optA && optB) {
+            qType = 'MCQ';
+          }
+
+          let options = [];
+          if (qType === 'MCQ') {
+            const rawOpts = [
+              { letter: 'A', text: optA },
+              { letter: 'B', text: optB },
+              { letter: 'C', text: optC },
+              { letter: 'D', text: optD },
+            ].filter((o) => o.text !== '');
+
+            options = rawOpts.map((o) => ({
+              option_text: o.text,
+              is_correct:
+                correctUpper !== '' &&
+                (correctUpper === o.letter || correctUpper === o.text.toUpperCase()),
+            }));
+          } else if (qType === 'TrueFalse') {
+            const cLow = correctRaw.toLowerCase();
+            const isTrue = cLow === 'true' || cLow === 'ពិត' || cLow === 't' || cLow === 'a';
+            const isFalse = cLow === 'false' || cLow === 'មិនពិត' || cLow === 'f' || cLow === 'b';
+            options = [
+              { option_text: 'ពិត (True)', is_correct: isTrue },
+              { option_text: 'មិនពិត (False)', is_correct: isFalse },
+            ];
+          }
+
+          return {
+            id: `xls_${Date.now()}_${idx}`,
+            question_text: qText,
+            question_type: qType,
+            mark: markVal,
+            options,
+          };
+        })
+        .filter(Boolean);
+
+      if (parsed.length === 0) {
+        setImportError(
+          t(
+            'រកមិនឃើញសំណួរក្នុងឯកសារនេះទេ! សូមប្រើគំរូ Excel ដែលប្រព័ន្ធផ្ដល់ជូន។',
+            'No questions found in this file! Please use the Excel template.'
+          )
+        );
       }
-    };
-    reader.readAsText(file);
+      setImportedQuestions(parsed);
+    } catch (err) {
+      console.error('Excel parse error:', err);
+      setImportError(
+        t('មិនអាចអានឯកសារនេះបានទេ សូមពិនិត្យទម្រង់ .xlsx ម្ដងទៀត។', 'Failed to read Excel file.')
+      );
+      setImportedQuestions([]);
+    }
   };
+
+  const handleParsePasteText = () => {
+    setImportError('');
+    const parsed = parseSmartQuestionsFromText(importPasteText);
+    if (parsed.length === 0) {
+      setImportError(
+        t(
+          'មិនអាចបំបែកសំណួរបានទេ! សូមដកឃ្លា ១ បន្ទាត់រវាងសំណួរនីមួយៗ។',
+          'Could not parse questions. Please separate each question with a blank line.'
+        )
+      );
+      return;
+    }
+    setImportedQuestions(parsed);
+  };
+
+  const handleToggleImportedCorrectOption = (qId, optIndex) => {
+    setImportedQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== qId) return q;
+        return {
+          ...q,
+          options: q.options.map((o, i) => ({ ...o, is_correct: i === optIndex })),
+        };
+      })
+    );
+  };
+
+  const handleChangeImportedQuestionMark = (qId, newMark) => {
+    setImportedQuestions((prev) =>
+      prev.map((q) => (q.id === qId ? { ...q, mark: parseFloat(newMark) || 1 } : q))
+    );
+  };
+
+  const handleChangeImportedQuestionType = (qId, newType) => {
+    setImportedQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== qId) return q;
+        if (newType === 'Essay') {
+          return { ...q, question_type: 'Essay', options: [] };
+        }
+        if (newType === 'TrueFalse') {
+          return {
+            ...q,
+            question_type: 'TrueFalse',
+            options: [
+              { option_text: 'ពិត (True)', is_correct: false },
+              { option_text: 'មិនពិត (False)', is_correct: false },
+            ],
+          };
+        }
+        return {
+          ...q,
+          question_type: 'MCQ',
+          options:
+            q.options.length >= 2
+              ? q.options
+              : [
+                  { option_text: 'ជម្រើស A', is_correct: false },
+                  { option_text: 'ជម្រើស B', is_correct: false },
+                ],
+        };
+      })
+    );
+  };
+
+  const handleRemoveImportedQuestion = (qId) => {
+    setImportedQuestions((prev) => prev.filter((q) => q.id !== qId));
+  };
+
+  const missingAnswerCount = useMemo(() => {
+    return importedQuestions.filter((q) => {
+      if (q.question_type === 'Essay') return false;
+      return !Array.isArray(q.options) || !q.options.some((o) => o.is_correct);
+    }).length;
+  }, [importedQuestions]);
+
+  const importedTotalMark = useMemo(() => {
+    return formatCleanScore(
+      importedQuestions.reduce((sum, q) => sum + (parseFloat(q.mark) || 0), 0)
+    );
+  }, [importedQuestions]);
 
   const handleImportSubmit = async (e) => {
     e.preventDefault();
-    if (!parsedQuizzes || parsedQuizzes.length === 0) return;
-    const targetCourse =
-      importCourseId ||
-      (modalAvailableCourses.length > 0
-        ? String(modalAvailableCourses[0].id)
-        : '');
-    if (!targetCourse) {
+    setImportError('');
+
+    if (importedQuestions.length === 0) {
+      setImportError(t('សូមនាំចូលសំណួរយ៉ាងតិច ១ ជាមុនសិន!', 'Please import at least 1 question!'));
       return;
     }
 
-    const courseObj = enrichedCourses.find(
-      (c) => String(c.id) === String(targetCourse)
-    );
+    if (missingAnswerCount > 0) {
+      setImportError(
+        t(
+          `នៅសល់ ${missingAnswerCount} សំណួរទៀតដែលមិនទាន់ធីកចម្លើយត្រូវ! សូមចុចធីកលើជម្រើសជាមុនសិន។`,
+          `${missingAnswerCount} question(s) are missing a correct answer! Please select them first.`
+        )
+      );
+      return;
+    }
+
+    const targetCourse =
+      importCourseId ||
+      (modalAvailableCourses.length > 0 ? String(modalAvailableCourses[0].id) : '');
+    if (!targetCourse) return;
+
+    if (!importTitle.trim()) {
+      setImportError(t('សូមបញ្ចូលចំណងជើងកម្រងសំណួរ!', 'Please enter a quiz title!'));
+      return;
+    }
+
+    const courseObj = enrichedCourses.find((c) => String(c.id) === String(targetCourse));
 
     setIsImporting(true);
     try {
       const payload = {
         course_id: targetCourse,
-        quizzes: parsedQuizzes.map((q) => ({
-          ...q,
-          course_id: q.course_id || targetCourse,
-        })),
+        quizzes: [
+          {
+            course_id: targetCourse,
+            title: importTitle.trim(),
+            duration: parseInt(importDuration, 10) || 60,
+            total_mark: importedTotalMark || 20,
+            ...(importStartDate ? { start_date: toBackendDateTime(importStartDate) } : {}),
+            ...(importEndDate ? { end_date: toBackendDateTime(importEndDate) } : {}),
+            questions: importedQuestions.map((q) => ({
+              question_text: q.question_text,
+              question_type: q.question_type,
+              mark: parseFloat(q.mark) || 2,
+              options: q.question_type === 'Essay' ? [] : q.options,
+            })),
+          },
+        ],
       };
 
       await api.post('/teacher/quizzes/import', payload);
-
       clearStudentQuizCaches();
 
       pushLocalNotification({
-        titleKm: 'បាននាំចូលកម្រងសំណួរពី JSON',
-        titleEn: 'Quizzes Imported from JSON',
-        descKm: `បាននាំចូលកម្រងសំណួរចំនួន ${parsedQuizzes.length} ទៅក្នុងមុខវិជ្ជា «${courseObj?.course_name || ''}»។`,
-        descEn: `Imported ${parsedQuizzes.length} quizzes into "${courseObj?.course_name || ''}".`,
+        titleKm: 'បាននាំចូលកម្រងសំណួរថ្មី',
+        titleEn: 'Quiz Imported Successfully',
+        descKm: `បាននាំចូលកម្រងសំណួរ «${importTitle.trim()}» (${importedQuestions.length} សំណួរ) ទៅក្នុងមុខវិជ្ជា «${courseObj?.course_name || ''}»។`,
+        descEn: `Imported "${importTitle.trim()}" (${importedQuestions.length} questions) into "${courseObj?.course_name || ''}".`,
         category: 'quiz',
         link: '/quizzes',
       });
 
-      setShowImportModal(false);
-      setParsedQuizzes([]);
-      setJsonContent('');
-      setImportFile(null);
+      resetImportModal();
       await fetchQuizzes();
     } catch (error) {
       console.error('Import error:', error);
+      setImportError(
+        error.response?.data?.message ||
+          t('មិនអាចនាំចូលកម្រងសំណួរបានទេ សូមពិនិត្យម្ដងទៀត!', 'Failed to import quiz!')
+      );
     } finally {
       setIsImporting(false);
     }
   };
 
+  // ============================================================================
+  // 📌 លទ្ធផលប្រឡងសិស្ស និង Export Excel
+  // ============================================================================
   const openSubmissionsModal = async (quiz) => {
     setViewingQuiz(quiz);
     setShowSubmissionsModal(true);
@@ -1964,6 +2044,7 @@ export default function TeacherManageQuizzes() {
     setStatusFilter('all');
     setEditingAttemptId(null);
     setManualAttemptScore('');
+    setReviewingAttempt(null);
     setSubmissionShiftFilter(selectedShift !== 'all' ? selectedShift : 'all');
 
     const memRes = QUIZZES_MEM_CACHE.resultsByQuiz[quiz.id];
@@ -1972,12 +2053,8 @@ export default function TeacherManageQuizzes() {
     } else {
       try {
         const cached =
-          sessionStorage.getItem(
-            getQuizResultsCacheKey(currentTeacherId, quiz.id)
-          ) ||
-          localStorage.getItem(
-            getQuizResultsCacheKey(currentTeacherId, quiz.id)
-          );
+          sessionStorage.getItem(getQuizResultsCacheKey(currentTeacherId, quiz.id)) ||
+          localStorage.getItem(getQuizResultsCacheKey(currentTeacherId, quiz.id));
         if (cached) {
           const parsed = JSON.parse(cached);
           setSubmissions(parsed);
@@ -1992,33 +2069,26 @@ export default function TeacherManageQuizzes() {
 
     try {
       const response = await api.get(`/teacher/quizzes/${quiz.id}/results`);
-      const attemptsData =
-        response.data?.attempts || response.data?.data || response.data || [];
+      if (response.data?.quiz) {
+        setViewingQuiz((prev) => ({ ...(prev || {}), ...response.data.quiz }));
+      }
+      const attemptsData = response.data?.attempts || response.data?.data || response.data || [];
       const validAttempts = Array.isArray(attemptsData) ? attemptsData : [];
       setSubmissions(validAttempts);
       QUIZZES_MEM_CACHE.resultsByQuiz[quiz.id] = validAttempts;
 
       runWhenIdle(() => {
         try {
-          const slimAttemptsStr = JSON.stringify(
-            stripHeavyQuizAttemptsForCache(validAttempts)
-          );
-          sessionStorage.setItem(
-            getQuizResultsCacheKey(currentTeacherId, quiz.id),
-            slimAttemptsStr
-          );
-          localStorage.setItem(
-            getQuizResultsCacheKey(currentTeacherId, quiz.id),
-            slimAttemptsStr
-          );
-        } catch (e) {}
+          const slimAttemptsStr = JSON.stringify(stripHeavyQuizAttemptsForCache(validAttempts));
+          sessionStorage.setItem(getQuizResultsCacheKey(currentTeacherId, quiz.id), slimAttemptsStr);
+          localStorage.setItem(getQuizResultsCacheKey(currentTeacherId, quiz.id), slimAttemptsStr);
+        } catch {}
       });
     } catch (error) {
       console.error('Error fetching quiz submissions:', error);
     }
   };
 
-  // ✅ ច្រោះលទ្ធផលប្រឡងរបស់សិស្សក្នុង Modal (តាមឈ្មោះ, តាមវេនសិក្សា និងតាមស្ថានភាព ជាប់/ធ្លាក់)
   const filteredSubmissions = useMemo(() => {
     if (!Array.isArray(submissions)) return [];
     const search = submissionSearch.toLowerCase().trim();
@@ -2033,13 +2103,10 @@ export default function TeacherManageQuizzes() {
           ).toLowerCase()
         : '';
       const studentEmail = attempt.student?.email?.toLowerCase() || '';
-      const nameMatch =
-        !search || studentName.includes(search) || studentEmail.includes(search);
+      const nameMatch = !search || studentName.includes(search) || studentEmail.includes(search);
 
       const attShift = resolveAttemptStudentShift(attempt);
-      const shiftMatch =
-        submissionShiftFilter === 'all' || attShift === submissionShiftFilter;
-      if (!shiftMatch) return false;
+      if (submissionShiftFilter !== 'all' && attShift !== submissionShiftFilter) return false;
 
       const scoreVal = parseFloat(attempt.score) || 0;
       const isPassed = scoreVal / totalVal >= 0.5;
@@ -2064,9 +2131,7 @@ export default function TeacherManageQuizzes() {
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
         const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-        if (!worksheet[cellAddress]) {
-          worksheet[cellAddress] = { t: 's', v: '' };
-        }
+        if (!worksheet[cellAddress]) worksheet[cellAddress] = { t: 's', v: '' };
 
         const isHeader = R === 0;
         const isTextCol = !isHeader && textColumnIndices.includes(C);
@@ -2074,10 +2139,7 @@ export default function TeacherManageQuizzes() {
         if (isTextCol) {
           worksheet[cellAddress].t = 's';
           worksheet[cellAddress].z = '@';
-          if (
-            worksheet[cellAddress].v !== undefined &&
-            worksheet[cellAddress].v !== null
-          ) {
+          if (worksheet[cellAddress].v !== undefined && worksheet[cellAddress].v !== null) {
             worksheet[cellAddress].v = String(worksheet[cellAddress].v);
           }
         }
@@ -2090,9 +2152,7 @@ export default function TeacherManageQuizzes() {
             color: { rgb: isHeader ? 'FFFFFF' : '1E293B' },
           },
           fill: {
-            fgColor: {
-              rgb: isHeader ? '1E3A8A' : R % 2 === 1 ? 'FFFFFF' : 'F8FAFC',
-            },
+            fgColor: { rgb: isHeader ? '1E3A8A' : R % 2 === 1 ? 'FFFFFF' : 'F8FAFC' },
           },
           alignment: {
             vertical: 'center',
@@ -2118,18 +2178,12 @@ export default function TeacherManageQuizzes() {
     worksheet['!rows'] = rows;
   };
 
-  // ✅ ១. នាំចេញបញ្ជីកម្រងសំណួរទៅជា Excel (.xlsx) ដោយទាញ xlsx-js-style តែពេលចុច Export
   const handleExportQuizzesExcel = async () => {
-    if (filteredQuizzes.length === 0) {
-      return;
-    }
-
+    if (filteredQuizzes.length === 0) return;
     const { default: XLSX } = await import('xlsx-js-style');
 
     const exportData = filteredQuizzes.map((item, idx) => {
-      const matchedCourse = enrichedCourses.find(
-        (c) => String(c.id) === String(item.course_id)
-      );
+      const matchedCourse = enrichedCourses.find((c) => String(c.id) === String(item.course_id));
       const shiftLabels = (matchedCourse?.shiftsList || ['Monday-Friday'])
         .map((sh) => getStudyShiftLabel(sh))
         .join(', ');
@@ -2137,8 +2191,7 @@ export default function TeacherManageQuizzes() {
       return {
         'ល.រ': idx + 1,
         'ចំណងជើងកម្រងសំណួរ': item.title || '—',
-        'មុខវិជ្ជា':
-          item.course?.course_name || matchedCourse?.course_name || '—',
+        'មុខវិជ្ជា': item.course?.course_name || matchedCourse?.course_name || '—',
         'វេនសិក្សា': shiftLabels || '—',
         'រយៈពេល (នាទី)': item.duration || 60,
         'ពិន្ទុសរុប': `${formatCleanScore(item.total_mark ?? 20)} ${t('ពិន្ទុ', 'pts')}`,
@@ -2150,24 +2203,26 @@ export default function TeacherManageQuizzes() {
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const colWidths = [
-      { wch: 8 },
-      { wch: 28 },
-      { wch: 24 },
-      { wch: 18 },
-      { wch: 16 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 18 },
-      { wch: 26 },
-      { wch: 26 },
-    ];
-    applyExcelStyling(XLSX, worksheet, colWidths, []);
+    applyExcelStyling(
+      XLSX,
+      worksheet,
+      [
+        { wch: 8 },
+        { wch: 28 },
+        { wch: 24 },
+        { wch: 18 },
+        { wch: 16 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 26 },
+        { wch: 26 },
+      ],
+      []
+    );
 
     const yearSuffix = selectedYear !== 'all' ? `_Year${selectedYear}` : '';
-    const courseSuffix = activeCourseObj?.course_code
-      ? `_${activeCourseObj.course_code}`
-      : '';
+    const courseSuffix = activeCourseObj?.course_code ? `_${activeCourseObj.course_code}` : '';
     const shiftSuffix = isSpecificShiftSelected ? `_${selectedShift}` : '';
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Quizzes');
@@ -2186,14 +2241,9 @@ export default function TeacherManageQuizzes() {
     });
   };
 
-  // ✅ ២. នាំចេញលទ្ធផលប្រឡងរបស់សិស្សក្នុង Modal ទៅជាឯកសារ Excel (.xlsx) ដោយប្រើ Dynamic Import
   const handleExportQuizResultsExcel = async () => {
-    if (!viewingQuiz || filteredSubmissions.length === 0) {
-      return;
-    }
-
+    if (!viewingQuiz || filteredSubmissions.length === 0) return;
     const { default: XLSX } = await import('xlsx-js-style');
-
     const totalVal = parseFloat(viewingQuiz.total_mark) || 20;
 
     const exportData = filteredSubmissions.map((attempt, idx) => {
@@ -2215,32 +2265,31 @@ export default function TeacherManageQuizzes() {
         'ម៉ោងចាប់ផ្តើម': formatDate(attempt.started_at),
         'ម៉ោងប្រគល់': formatDate(attempt.submitted_at),
         'ពិន្ទុទទួលបាន': `${weighted20} ${t('ពិន្ទុ', 'pts')}`,
-        'លទ្ធផល': isPassed
-          ? t('ជាប់ (Passed)', 'Passed')
-          : t('ធ្លាក់ (Failed)', 'Failed'),
+        'លទ្ធផល': isPassed ? t('ជាប់ (Passed)', 'Passed') : t('ធ្លាក់ (Failed)', 'Failed'),
       };
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const colWidths = [
-      { wch: 8 },
-      { wch: 24 },
-      { wch: 10 },
-      { wch: 16 },
-      { wch: 26 },
-      { wch: 24 },
-      { wch: 24 },
-      { wch: 16 },
-      { wch: 16 },
-    ];
-    applyExcelStyling(XLSX, worksheet, colWidths, []);
+    applyExcelStyling(
+      XLSX,
+      worksheet,
+      [
+        { wch: 8 },
+        { wch: 24 },
+        { wch: 10 },
+        { wch: 16 },
+        { wch: 26 },
+        { wch: 24 },
+        { wch: 24 },
+        { wch: 16 },
+        { wch: 16 },
+      ],
+      []
+    );
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Quiz_Results');
-    const safeTitle = (viewingQuiz.title || 'Quiz').replace(
-      /[\\/:*?"<>|\s]+/g,
-      '_'
-    );
+    const safeTitle = (viewingQuiz.title || 'Quiz').replace(/[\\/:*?"<>|\s]+/g, '_');
     XLSX.writeFile(
       workbook,
       `Quiz_Results_${safeTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`
@@ -2256,7 +2305,6 @@ export default function TeacherManageQuizzes() {
     });
   };
 
-  // ទិន្នន័យកាតឆ្នាំសិក្សាទាំង ៥ សម្រាប់ Render
   const yearCardsConfig = [
     {
       key: 'all',
@@ -2265,8 +2313,7 @@ export default function TeacherManageQuizzes() {
       subtitleKm: 'គ្រប់ឆ្នាំសិក្សាទាំងអស់',
       subtitleEn: 'All Academic Years',
       count: quizYearCounts.all,
-      activeGradient:
-        'from-blue-600 to-indigo-700 text-white border-blue-600 shadow-blue-500/20',
+      activeGradient: 'from-blue-600 to-indigo-700 text-white border-blue-600 shadow-blue-500/20',
       iconBgActive: 'bg-white/20 text-white',
       iconBgInactive: 'bg-blue-50 text-blue-600 border-blue-100 quz-pill-blue',
     },
@@ -2280,8 +2327,7 @@ export default function TeacherManageQuizzes() {
       activeGradient:
         'from-emerald-600 to-teal-700 text-white border-emerald-600 shadow-emerald-500/20',
       iconBgActive: 'bg-white/20 text-white',
-      iconBgInactive:
-        'bg-emerald-50 text-emerald-600 border-emerald-100 quz-pill-emerald',
+      iconBgInactive: 'bg-emerald-50 text-emerald-600 border-emerald-100 quz-pill-emerald',
     },
     {
       key: '2',
@@ -2293,8 +2339,7 @@ export default function TeacherManageQuizzes() {
       activeGradient:
         'from-indigo-600 to-violet-700 text-white border-indigo-600 shadow-indigo-500/20',
       iconBgActive: 'bg-white/20 text-white',
-      iconBgInactive:
-        'bg-indigo-50 text-indigo-600 border-indigo-100 quz-pill-indigo',
+      iconBgInactive: 'bg-indigo-50 text-indigo-600 border-indigo-100 quz-pill-indigo',
     },
     {
       key: '3',
@@ -2306,8 +2351,7 @@ export default function TeacherManageQuizzes() {
       activeGradient:
         'from-amber-500 to-orange-600 text-white border-amber-500 shadow-amber-500/20',
       iconBgActive: 'bg-white/20 text-white',
-      iconBgInactive:
-        'bg-amber-50 text-amber-600 border-amber-100 quz-pill-amber',
+      iconBgInactive: 'bg-amber-50 text-amber-600 border-amber-100 quz-pill-amber',
     },
     {
       key: '4',
@@ -2316,28 +2360,22 @@ export default function TeacherManageQuizzes() {
       subtitleKm: 'កម្រិតឆ្នាំសិក្សាទី ៤',
       subtitleEn: 'Fourth Year Level',
       count: quizYearCounts['4'],
-      activeGradient:
-        'from-rose-600 to-pink-700 text-white border-rose-600 shadow-rose-500/20',
+      activeGradient: 'from-rose-600 to-pink-700 text-white border-rose-600 shadow-rose-500/20',
       iconBgActive: 'bg-white/20 text-white',
       iconBgInactive: 'bg-rose-50 text-rose-600 border-rose-100 quz-pill-rose',
     },
   ];
 
   const canShowExportExcel =
-    (selectedYear !== 'all' || selectedCourse !== '') &&
-    filteredQuizzes.length > 0;
+    (selectedYear !== 'all' || selectedCourse !== '') && filteredQuizzes.length > 0;
 
   // ============================================================================
   // 📌 ផ្នែកទី៦៖ ការបង្ហាញផ្ទៃមុខកម្មវិធី (JSX UI Rendering)
   // ============================================================================
   return (
     <div className="quz-page-bg p-4 sm:p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-6 pb-28 lg:pb-10">
-      
-      {/* ================================================================== */}
-      {/* 1. HEADER BANNER                                                   */}
-      {/* ================================================================== */}
+      {/* 1. HEADER BANNER */}
       <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 sm:p-8 shadow-xl border border-blue-900">
-        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
         <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
         <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
@@ -2390,7 +2428,7 @@ export default function TeacherManageQuizzes() {
                   className="inline-flex items-center justify-center px-4 py-3 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-sm font-bold rounded-xl transition-all cursor-pointer animate-fadeIn"
                 >
                   <ArrowUpTrayIcon className="h-5 w-5 mr-2" />
-                  {t('នាំចូលកម្រងសំណួរ', 'Import Quiz')}
+                  {t('នាំចូលសំណួរ', 'Import Questions')}
                 </button>
                 <button
                   type="button"
@@ -2406,9 +2444,7 @@ export default function TeacherManageQuizzes() {
         </div>
       </div>
 
-      {/* ================================================================== */}
-      {/* 2. INTERACTIVE YEAR CARDS (កម្រងសំណួរសរុប និង ឆ្នាំទី១ ដល់ ឆ្នាំទី៤)   */}
-      {/* ================================================================== */}
+      {/* 2. INTERACTIVE YEAR CARDS */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
         {yearCardsConfig.map((card) => {
           const isSelected = selectedYear === card.key;
@@ -2426,9 +2462,7 @@ export default function TeacherManageQuizzes() {
               <div className="flex items-start justify-between gap-2 w-full">
                 <div
                   className={`p-2.5 rounded-xl border transition-colors ${
-                    isSelected
-                      ? `${card.iconBgActive} border-white/20`
-                      : card.iconBgInactive
+                    isSelected ? `${card.iconBgActive} border-white/20` : card.iconBgInactive
                   }`}
                 >
                   <AcademicCapIcon className="h-5 w-5" />
@@ -2470,28 +2504,21 @@ export default function TeacherManageQuizzes() {
                   </p>
                 </div>
 
-                {isSelected && (
-                  <CheckBadgeIcon className="h-5 w-5 text-white shrink-0 animate-fadeIn" />
-                )}
+                {isSelected && <CheckBadgeIcon className="h-5 w-5 text-white shrink-0 animate-fadeIn" />}
               </div>
             </button>
           );
         })}
       </div>
 
-      {/* ================================================================== */}
-      {/* 3. SEARCH, COURSE FILTER & STUDY SHIFT TABS                        */}
-      {/* ================================================================== */}
+      {/* 3. SEARCH, COURSE FILTER & STUDY SHIFT TABS */}
       <div className="quz-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col xl:flex-row gap-4 items-center justify-between">
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full xl:w-auto flex-1">
           <div className="relative w-full sm:max-w-xs lg:max-w-sm flex-1">
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder={t(
-                'ស្វែងរកកម្រងសំណួរ ឬមុខវិជ្ជា...',
-                'Search quizzes or courses...'
-              )}
+              placeholder={t('ស្វែងរកកម្រងសំណួរ ឬមុខវិជ្ជា...', 'Search quizzes or courses...')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="quz-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
@@ -2515,9 +2542,7 @@ export default function TeacherManageQuizzes() {
                 onChange={handleCourseChange}
                 className="quz-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-white font-medium text-gray-700 appearance-none cursor-pointer shadow-2xs transition-all"
               >
-                <option value="">
-                  {t('គ្រប់មុខវិជ្ជាទាំងអស់', 'All Courses')}
-                </option>
+                <option value="">{t('គ្រប់មុខវិជ្ជាទាំងអស់', 'All Courses')}</option>
                 {visibleCoursesForSelectedYear.map((course) => (
                   <option key={course.id} value={course.id}>
                     {course.course_code ? `${course.course_code} - ` : ''}
@@ -2599,9 +2624,7 @@ export default function TeacherManageQuizzes() {
         </div>
       </div>
 
-      {/* ================================================================== */}
-      {/* 4. MAIN TABLE CONTENT                                              */}
-      {/* ================================================================== */}
+      {/* 4. MAIN TABLE CONTENT */}
       <div className="quz-surface-card bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
         <div className="quz-table-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -2627,9 +2650,7 @@ export default function TeacherManageQuizzes() {
               </button>
             )}
 
-            {(selectedYear !== 'all' ||
-              selectedCourse !== '' ||
-              searchTerm !== '') && (
+            {(selectedYear !== 'all' || selectedCourse !== '' || searchTerm !== '') && (
               <button
                 type="button"
                 onClick={() => {
@@ -2639,9 +2660,7 @@ export default function TeacherManageQuizzes() {
                   setSearchTerm('');
                   try {
                     sessionStorage.removeItem(getSelectedYearKey(currentTeacherId));
-                    sessionStorage.removeItem(
-                      getSelectedCourseKey(currentTeacherId)
-                    );
+                    sessionStorage.removeItem(getSelectedCourseKey(currentTeacherId));
                     sessionStorage.removeItem(getSelectedShiftKey(currentTeacherId));
                   } catch {}
                 }}
@@ -2694,10 +2713,7 @@ export default function TeacherManageQuizzes() {
                         selectedCourse ||
                         selectedYear !== 'all' ||
                         isSpecificShiftSelected
-                          ? t(
-                              'មិនឃើញមានកម្រងសំណួរតាមការស្វែងរកនេះទេ',
-                              'No matching quizzes found'
-                            )
+                          ? t('មិនឃើញមានកម្រងសំណួរតាមការស្វែងរកនេះទេ', 'No matching quizzes found')
                           : t('មិនទាន់មានកម្រងសំណួរនៅឡើយទេ', 'No quizzes available yet')}
                       </p>
                       <p className="quz-text-secondary text-sm text-gray-500 mt-1">
@@ -2717,15 +2733,12 @@ export default function TeacherManageQuizzes() {
               ) : (
                 filteredQuizzes.map((quiz, index) => {
                   const isExpanded = expandedQuiz === quiz.id;
-                  const questionsCount =
-                    quiz.questions_count || quiz.questions?.length || 0;
+                  const questionsCount = quiz.questions_count || quiz.questions?.length || 0;
                   const attemptsCount = quiz.attempts_count || 0;
                   const matchedCourse = enrichedCourses.find(
                     (c) => String(c.id) === String(quiz.course_id)
                   );
-                  const courseShifts = matchedCourse?.shiftsList || [
-                    'Monday-Friday',
-                  ];
+                  const courseShifts = matchedCourse?.shiftsList || ['Monday-Friday'];
 
                   return (
                     <React.Fragment key={quiz.id}>
@@ -2784,8 +2797,7 @@ export default function TeacherManageQuizzes() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-extrabold text-indigo-600 dark:text-indigo-400">
-                          {formatCleanScore(quiz.total_mark)}{' '}
-                          {t('ពិន្ទុ', 'pts')}
+                          {formatCleanScore(quiz.total_mark)} {t('ពិន្ទុ', 'pts')}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <span className="quz-pill-indigo inline-flex items-center px-3 py-1 rounded-lg text-xs font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-2xs">
@@ -2804,10 +2816,7 @@ export default function TeacherManageQuizzes() {
                                 ? 'quz-pill-emerald bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                                 : 'quz-code-pill bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
                             }`}
-                            title={t(
-                              'មើលការប្រឡងរបស់សិស្ស',
-                              'View Student Submissions'
-                            )}
+                            title={t('មើលការប្រឡងរបស់សិស្ស', 'View Student Submissions')}
                           >
                             <EyeIcon className="h-3.5 w-3.5 mr-1.5" />
                             {attemptsCount} {t('នាក់', 'students')}
@@ -2854,37 +2863,29 @@ export default function TeacherManageQuizzes() {
                         </td>
                       </tr>
 
-                      {/* ===================================================== */}
-                      {/* Expanded Section for managing Questions               */}
-                      {/* ===================================================== */}
+                      {/* Expanded Section for managing Questions */}
                       {isExpanded &&
                         (() => {
                           const currentSumMarks = formatCleanScore(
-                            quiz.questions?.reduce(
-                              (sum, q) => sum + parseFloat(q.mark || 0),
+                            quiz.questions?.reduce((sum, q) => sum + parseFloat(q.mark || 0), 0) ||
                               0
-                            ) || 0
                           );
                           const maxQuizMarks = formatCleanScore(quiz.total_mark);
-                          const isOverMarks =
-                            Number(currentSumMarks) > Number(maxQuizMarks);
-                          const isExactMarks =
-                            Number(currentSumMarks) === Number(maxQuizMarks);
+                          const isOverMarks = Number(currentSumMarks) > Number(maxQuizMarks);
+                          const isExactMarks = Number(currentSumMarks) === Number(maxQuizMarks);
 
                           return (
                             <tr className="quz-expanded-row bg-gray-50/70 border-b border-gray-100">
                               <td colSpan="8" className="px-6 sm:px-8 py-6">
                                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                                  
-                                  {/* Questions List (Left 2 columns) */}
+                                  {/* Questions List */}
                                   <div className="quz-surface-card xl:col-span-2 bg-white p-5 sm:p-6 rounded-2xl border border-gray-200 shadow-sm">
                                     <div className="border-b border-gray-100 dark:border-slate-700 pb-4 mb-4 flex flex-wrap justify-between items-center gap-2">
                                       <h4 className="quz-text-primary text-sm sm:text-base font-extrabold text-gray-900 flex items-center gap-2.5">
                                         <span className="quz-pill-indigo p-2 bg-indigo-50 rounded-xl text-indigo-600 border border-indigo-100">
                                           <DocumentTextIcon className="h-4 w-4" />
                                         </span>
-                                        {t('បញ្ជីសំណួរ', 'Questions List')} (
-                                        {quiz.questions?.length || 0})
+                                        {t('បញ្ជីសំណួរ', 'Questions List')} ({quiz.questions?.length || 0})
                                       </h4>
                                       <span
                                         className={`text-xs font-extrabold px-3.5 py-1.5 rounded-xl border ${
@@ -2895,8 +2896,8 @@ export default function TeacherManageQuizzes() {
                                             : 'quz-pill-indigo bg-indigo-50 text-indigo-700 border-indigo-100'
                                         }`}
                                       >
-                                        {t('ពិន្ទុសរុប៖', 'Total Mark:')}{' '}
-                                        {currentSumMarks} / {maxQuizMarks}
+                                        {t('ពិន្ទុសរុប៖', 'Total Mark:')} {currentSumMarks} /{' '}
+                                        {maxQuizMarks}
                                       </span>
                                     </div>
 
@@ -2918,41 +2919,28 @@ export default function TeacherManageQuizzes() {
                                             <div className="flex justify-between items-start mb-3">
                                               <div className="quz-text-primary text-sm font-extrabold text-gray-900 flex flex-wrap items-center gap-2">
                                                 <span>
-                                                  {t('សំណួរទី', 'Question')}{' '}
-                                                  {qIdx + 1}
+                                                  {t('សំណួរទី', 'Question')} {qIdx + 1}
                                                 </span>
                                                 <span
                                                   className={`font-extrabold text-[11px] px-2.5 py-0.5 rounded-lg border ${
-                                                    question.question_type ===
-                                                    'Essay'
+                                                    question.question_type === 'Essay'
                                                       ? 'quz-pill-amber bg-amber-50 text-amber-700 border-amber-200'
                                                       : 'quz-pill-blue bg-blue-50 text-blue-600 border-blue-100'
                                                   }`}
                                                 >
-                                                  {getQuestionTypeBadgeLabel(
-                                                    question.question_type
-                                                  )}
+                                                  {getQuestionTypeBadgeLabel(question.question_type)}
                                                 </span>
                                               </div>
                                               <div className="flex items-center gap-2">
                                                 <span className="quz-pill-indigo text-xs font-extrabold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100">
-                                                  {formatCleanScore(
-                                                    question.mark
-                                                  )}{' '}
+                                                  {formatCleanScore(question.mark)}{' '}
                                                   {t('ពិន្ទុ', 'pts')}
                                                 </span>
                                                 <button
                                                   type="button"
-                                                  onClick={() =>
-                                                    handleDeleteQuestionClick(
-                                                      question
-                                                    )
-                                                  }
+                                                  onClick={() => handleDeleteQuestionClick(question)}
                                                   className="quz-action-delete p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition cursor-pointer"
-                                                  title={t(
-                                                    'លុបសំណួរ',
-                                                    'Delete question'
-                                                  )}
+                                                  title={t('លុបសំណួរ', 'Delete question')}
                                                 >
                                                   <TrashIcon className="h-4 w-4" />
                                                 </button>
@@ -2963,77 +2951,60 @@ export default function TeacherManageQuizzes() {
                                               {question.question_text}
                                             </p>
 
-                                            {/* Display MCQ Options */}
-                                            {question.question_type ===
-                                              'MCQ' && (
+                                            {question.question_type === 'MCQ' && (
                                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                                {Array.isArray(
-                                                  question.options
-                                                ) &&
-                                                  question.options.map(
-                                                    (opt, oIdx) => (
-                                                      <div
-                                                        key={opt.id || oIdx}
-                                                        className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-xs font-bold shadow-2xs ${
-                                                          opt.is_correct
-                                                            ? 'quz-pill-emerald bg-emerald-50/90 border-emerald-400 text-emerald-800'
-                                                            : 'quz-surface-card quz-text-secondary bg-white border-gray-200 text-gray-700'
-                                                        }`}
-                                                      >
-                                                        <span
-                                                          className={
-                                                            opt.is_correct
-                                                              ? 'text-emerald-600 font-black'
-                                                              : 'text-gray-400 font-extrabold'
-                                                          }
-                                                        >
-                                                          {String.fromCharCode(
-                                                            65 + oIdx
-                                                          )}
-                                                          .
-                                                        </span>
-                                                        <span className="truncate">
-                                                          {opt.option_text}
-                                                        </span>
-                                                        {opt.is_correct && (
-                                                          <CheckCircleIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 ml-auto" />
-                                                        )}
-                                                      </div>
-                                                    )
-                                                  )}
-                                              </div>
-                                            )}
-
-                                            {/* Display True/False Options */}
-                                            {question.question_type ===
-                                              'TrueFalse' && (
-                                              <div className="flex gap-3">
-                                                {Array.isArray(
-                                                  question.options
-                                                ) &&
-                                                  question.options.map(
-                                                    (opt, oIdx) => (
+                                                {Array.isArray(question.options) &&
+                                                  question.options.map((opt, oIdx) => (
+                                                    <div
+                                                      key={opt.id || oIdx}
+                                                      className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-xs font-bold shadow-2xs ${
+                                                        opt.is_correct
+                                                          ? 'quz-pill-emerald bg-emerald-50/90 border-emerald-400 text-emerald-800'
+                                                          : 'quz-surface-card quz-text-secondary bg-white border-gray-200 text-gray-700'
+                                                      }`}
+                                                    >
                                                       <span
-                                                        key={opt.id || oIdx}
-                                                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-xs font-bold shadow-2xs ${
+                                                        className={
                                                           opt.is_correct
-                                                            ? 'quz-pill-emerald bg-emerald-50 border-emerald-400 text-emerald-800'
-                                                            : 'quz-surface-card quz-text-secondary bg-white border-gray-200 text-gray-500'
-                                                        }`}
+                                                            ? 'text-emerald-600 font-black'
+                                                            : 'text-gray-400 font-extrabold'
+                                                        }
                                                       >
-                                                        {opt.option_text}
-                                                        {opt.is_correct && (
-                                                          <CheckCircleIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                                                        )}
+                                                        {String.fromCharCode(65 + oIdx)}.
                                                       </span>
-                                                    )
-                                                  )}
+                                                      <span className="truncate">
+                                                        {opt.option_text}
+                                                      </span>
+                                                      {opt.is_correct && (
+                                                        <CheckCircleIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 ml-auto" />
+                                                      )}
+                                                    </div>
+                                                  ))}
                                               </div>
                                             )}
 
-                                            {/* ✅ Display Essay Question Info (គ្រូពិនិត្យដាក់ពិន្ទុតាមខ្លឹមសារសិស្សសរសេរ) */}
-                                            {question.question_type ===
-                                              'Essay' && (
+                                            {question.question_type === 'TrueFalse' && (
+                                              <div className="flex gap-3">
+                                                {Array.isArray(question.options) &&
+                                                  question.options.map((opt, oIdx) => (
+                                                    <span
+                                                      key={opt.id || oIdx}
+                                                      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-xs font-bold shadow-2xs ${
+                                                        opt.is_correct
+                                                          ? 'quz-pill-emerald bg-emerald-50 border-emerald-400 text-emerald-800'
+                                                          : 'quz-surface-card quz-text-secondary bg-white border-gray-200 text-gray-500'
+                                                      }`}
+                                                    >
+                                                      {opt.option_text}
+                                                      {opt.is_correct && (
+                                                        <CheckCircleIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                                                      )}
+                                                    </span>
+                                                  ))}
+                                              </div>
+                                            )}
+
+                                            {question.question_type === 'Essay' && (
                                               <div className="space-y-2">
                                                 <div className="quz-surface-card px-3.5 py-2.5 rounded-xl border border-amber-200/80 bg-amber-50/40 text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-2">
                                                   <PencilSquareIcon className="h-4 w-4 text-amber-600 shrink-0" />
@@ -3049,10 +3020,7 @@ export default function TeacherManageQuizzes() {
                                                   question.options[0]?.option_text && (
                                                     <div className="quz-surface-card px-3.5 py-2 rounded-xl border border-gray-200 bg-white text-xs">
                                                       <span className="font-extrabold text-indigo-600 dark:text-indigo-400">
-                                                        {t(
-                                                          'គោលការណ៍កែ / ចម្លើយគំរូ៖ ',
-                                                          'Model Answer / Rubric: '
-                                                        )}
+                                                        {t('គោលការណ៍កែ / ចម្លើយគំរូ៖ ', 'Model Answer / Rubric: ')}
                                                       </span>
                                                       <span className="quz-text-secondary font-medium text-gray-700">
                                                         {question.options[0].option_text}
@@ -3067,7 +3035,7 @@ export default function TeacherManageQuizzes() {
                                     </div>
                                   </div>
 
-                                  {/* Add Question Form (Right 1 column) */}
+                                  {/* Add Question Form */}
                                   <div className="quz-surface-card bg-white p-5 sm:p-6 rounded-2xl border border-gray-200 shadow-sm h-fit space-y-4">
                                     <h4 className="quz-text-primary text-sm sm:text-base font-extrabold text-gray-900 border-b border-gray-100 dark:border-slate-700 pb-4 mb-4 flex items-center gap-2.5">
                                       <span className="quz-pill-blue p-2 bg-blue-50 rounded-xl text-blue-600 border border-blue-100">
@@ -3089,14 +3057,10 @@ export default function TeacherManageQuizzes() {
                                       </label>
                                       <textarea
                                         rows={3}
-                                        placeholder={t(
-                                          'បញ្ចូលសំណួរ...',
-                                          'Enter question content...'
-                                        )}
+                                        placeholder={t('បញ្ចូលសំណួរ...', 'Enter question content...')}
                                         value={questionText}
                                         onChange={(e) => {
-                                          if (questionFormError)
-                                            setQuestionFormError('');
+                                          if (questionFormError) setQuestionFormError('');
                                           setQuestionText(e.target.value);
                                         }}
                                         className="quz-input w-full px-3.5 py-2.5 text-sm font-medium border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-gray-50/60 focus:bg-white resize-none transition-all shadow-2xs"
@@ -3117,16 +3081,10 @@ export default function TeacherManageQuizzes() {
                                           className="quz-input w-full px-3 py-2.5 text-xs font-bold border border-gray-200 rounded-xl bg-gray-50/60 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 shadow-2xs cursor-pointer"
                                         >
                                           <option value="MCQ">
-                                            {t(
-                                              'ពហុជ្រើសរើស (MCQ)',
-                                              'Multiple Choice (MCQ)'
-                                            )}
+                                            {t('ពហុជ្រើសរើស (MCQ)', 'Multiple Choice (MCQ)')}
                                           </option>
                                           <option value="TrueFalse">
-                                            {t(
-                                              'ពិត/មិនពិត (True/False)',
-                                              'True / False'
-                                            )}
+                                            {t('ពិត/មិនពិត (True/False)', 'True / False')}
                                           </option>
                                           <option value="Essay">
                                             {t('សរសេររៀបរាប់ (Essay)', 'Essay')}
@@ -3142,29 +3100,20 @@ export default function TeacherManageQuizzes() {
                                           min="0.5"
                                           step="0.5"
                                           value={questionMark}
-                                          onChange={(e) =>
-                                            setQuestionMark(e.target.value)
-                                          }
+                                          onChange={(e) => setQuestionMark(e.target.value)}
                                           className="quz-input w-full px-3.5 py-2.5 text-xs font-extrabold text-indigo-600 border border-gray-200 rounded-xl bg-gray-50/60 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 shadow-2xs"
                                         />
                                       </div>
                                     </div>
 
-                                    {/* MCQ Option Inputs */}
                                     {questionType === 'MCQ' && (
                                       <div className="quz-subbox space-y-2.5 bg-gray-50/80 p-4 rounded-2xl border border-gray-100">
                                         <div className="flex items-center justify-between mb-1">
                                           <label className="quz-label block text-xs font-bold text-gray-700">
-                                            {t(
-                                              'បញ្ចូលជម្រើស និងធីកចម្លើយត្រូវ',
-                                              'Options & Correct Answer'
-                                            )}
+                                            {t('បញ្ចូលជម្រើស និងធីកចម្លើយត្រូវ', 'Options & Correct Answer')}
                                           </label>
                                           <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
-                                            {t(
-                                              '* ចុចរង្វង់ខាងស្ដាំដើម្បីកំណត់ចម្លើយត្រូវ',
-                                              '* Click circle to mark correct'
-                                            )}
+                                            {t('* ចុចរង្វង់ខាងស្ដាំដើម្បីកំណត់ចម្លើយត្រូវ', '* Click circle to mark correct')}
                                           </span>
                                         </div>
 
@@ -3179,44 +3128,29 @@ export default function TeacherManageQuizzes() {
                                           >
                                             <span
                                               className={`text-xs font-extrabold pl-2 w-6 ${
-                                                opt.is_correct
-                                                  ? 'text-emerald-600'
-                                                  : 'text-gray-400'
+                                                opt.is_correct ? 'text-emerald-600' : 'text-gray-400'
                                               }`}
                                             >
                                               {String.fromCharCode(65 + oIdx)}.
                                             </span>
                                             <input
                                               type="text"
-                                              placeholder={`${t(
-                                                'ជម្រើស',
-                                                'Option'
-                                              )} ${String.fromCharCode(
-                                                65 + oIdx
-                                              )}...`}
+                                              placeholder={`${t('ជម្រើស', 'Option')} ${String.fromCharCode(65 + oIdx)}...`}
                                               value={opt.option_text}
                                               onChange={(e) =>
-                                                handleMcqOptionChange(
-                                                  oIdx,
-                                                  e.target.value
-                                                )
+                                                handleMcqOptionChange(oIdx, e.target.value)
                                               }
                                               className="flex-1 px-2 py-1.5 text-xs font-bold bg-transparent text-gray-800 dark:text-slate-100 focus:outline-none"
                                             />
                                             <button
                                               type="button"
-                                              onClick={() =>
-                                                handleMcqCorrectToggle(oIdx)
-                                              }
+                                              onClick={() => handleMcqCorrectToggle(oIdx)}
                                               className={`h-6 w-6 rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 mr-1 ${
                                                 opt.is_correct
                                                   ? 'bg-emerald-500 text-white shadow-xs'
                                                   : 'border-2 border-gray-300 dark:border-slate-600 hover:border-emerald-400 text-transparent'
                                               }`}
-                                              title={t(
-                                                'កំណត់ជាចម្លើយត្រឹមត្រូវ',
-                                                'Set correct answer'
-                                              )}
+                                              title={t('កំណត់ជាចម្លើយត្រឹមត្រូវ', 'Set correct answer')}
                                             >
                                               <CheckCircleIcon className="h-4 w-4 stroke-[2.5]" />
                                             </button>
@@ -3225,14 +3159,10 @@ export default function TeacherManageQuizzes() {
                                       </div>
                                     )}
 
-                                    {/* True/False Options */}
                                     {questionType === 'TrueFalse' && (
                                       <div className="quz-subbox bg-gray-50/80 p-4 rounded-2xl border border-gray-100">
                                         <label className="quz-label block text-xs font-bold text-gray-700 mb-2.5">
-                                          {t(
-                                            'កំណត់ចម្លើយត្រូវ',
-                                            'Set Correct Answer'
-                                          )}
+                                          {t('កំណត់ចម្លើយត្រូវ', 'Set Correct Answer')}
                                         </label>
                                         <div className="grid grid-cols-2 gap-3">
                                           <button
@@ -3246,9 +3176,7 @@ export default function TeacherManageQuizzes() {
                                           >
                                             <CheckCircleIcon
                                               className={`h-4 w-4 ${
-                                                tfCorrect === 'true'
-                                                  ? 'text-emerald-600'
-                                                  : 'text-gray-300'
+                                                tfCorrect === 'true' ? 'text-emerald-600' : 'text-gray-300'
                                               }`}
                                             />
                                             {t('ពិត (True)', 'True')}
@@ -3256,9 +3184,7 @@ export default function TeacherManageQuizzes() {
 
                                           <button
                                             type="button"
-                                            onClick={() =>
-                                              setTfCorrect('false')
-                                            }
+                                            onClick={() => setTfCorrect('false')}
                                             className={`flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs font-extrabold transition-all cursor-pointer ${
                                               tfCorrect === 'false'
                                                 ? 'quz-pill-emerald bg-emerald-50 border-emerald-400 text-emerald-800 shadow-2xs'
@@ -3267,9 +3193,7 @@ export default function TeacherManageQuizzes() {
                                           >
                                             <CheckCircleIcon
                                               className={`h-4 w-4 ${
-                                                tfCorrect === 'false'
-                                                  ? 'text-emerald-600'
-                                                  : 'text-gray-300'
+                                                tfCorrect === 'false' ? 'text-emerald-600' : 'text-gray-300'
                                               }`}
                                             />
                                             {t('មិនពិត (False)', 'False')}
@@ -3278,12 +3202,11 @@ export default function TeacherManageQuizzes() {
                                       </div>
                                     )}
 
-                                    {/* ✅ ប្រអប់សម្រាប់សំណួរសរសេររៀបរាប់ (Essay) */}
                                     {questionType === 'Essay' && (
                                       <div className="quz-subbox bg-amber-50/50 dark:bg-slate-900/60 p-3.5 rounded-2xl border border-amber-200/80 space-y-2.5">
                                         <p className="text-[11px] font-bold text-amber-800 dark:text-amber-300 leading-relaxed">
                                           {t(
-                                            '💡 សំណួរសរសេររៀបរាប់៖ សិស្សអាចសរសេរតាមគំនិតខ្លួនឯង (មិនតម្រូវឱ្យដូចអក្សរគំរូ ១០០% ទេ) ហើយលោកគ្រូ/អ្នកគ្រូអាចពិនិត្យដាក់ពិន្ទុតាមអត្ថន័យជាក់ស្ដែង។',
+                                            '💡 សំណួរសរសេររៀបរាប់៖ សិស្សអាចសរសេរតាមគំនិតខ្លួនឯង ហើយលោកគ្រូ/អ្នកគ្រូអាចពិនិត្យដាក់ពិន្ទុតាមអត្ថន័យជាក់ស្ដែង។',
                                             '💡 Essay Question: Students write in their own words and are graded manually by the teacher.'
                                           )}
                                         </p>
@@ -3301,9 +3224,7 @@ export default function TeacherManageQuizzes() {
                                               'Optional key points for grading reference...'
                                             )}
                                             value={essayModelAnswer}
-                                            onChange={(e) =>
-                                              setEssayModelAnswer(e.target.value)
-                                            }
+                                            onChange={(e) => setEssayModelAnswer(e.target.value)}
                                             className="quz-input w-full px-3 py-2 text-xs font-medium border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none"
                                           />
                                         </div>
@@ -3320,7 +3241,6 @@ export default function TeacherManageQuizzes() {
                                       {t('បន្ថែមសំណួរ', 'Add Question')}
                                     </button>
                                   </div>
-
                                 </div>
                               </td>
                             </tr>
@@ -3367,8 +3287,7 @@ export default function TeacherManageQuizzes() {
               <div className="p-6 sm:p-7 overflow-y-auto flex-1 space-y-5">
                 <div>
                   <label className="quz-label block text-sm font-bold text-gray-700 mb-1.5">
-                    {t('ចំណងជើងកម្រងសំណួរ', 'Quiz Title')}{' '}
-                    <span className="text-rose-500">*</span>
+                    {t('ចំណងជើងកម្រងសំណួរ', 'Quiz Title')} <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -3376,10 +3295,7 @@ export default function TeacherManageQuizzes() {
                     required
                     value={formData.title}
                     onChange={handleInputChange}
-                    placeholder={t(
-                      'បញ្ចូលចំណងជើងកម្រងសំណួរ...',
-                      'Enter quiz title...'
-                    )}
+                    placeholder={t('បញ្ចូលចំណងជើងកម្រងសំណួរ...', 'Enter quiz title...')}
                     className="quz-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                   />
                 </div>
@@ -3504,26 +3420,21 @@ export default function TeacherManageQuizzes() {
       )}
 
       {/* ================================================================== */}
-      {/* MODAL - 2: Import JSON                                             */}
+      {/* MODAL - 2: Smart Question Import (Excel + Word Paste + Quick-Check)*/}
       {/* ================================================================== */}
       {showImportModal && (
-        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-4">
-          <div className="quz-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
-            <div className="quz-modal-bar flex justify-between items-center p-6 sm:p-7 border-b border-gray-100 bg-gray-50/50 shrink-0">
-              <h2 className="quz-text-primary text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
+        <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/60 md:backdrop-blur-md p-4">
+          <div className="quz-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-transparent">
+            <div className="quz-modal-bar flex justify-between items-center px-6 py-5 border-b border-gray-100 bg-gray-50/50 shrink-0">
+              <h2 className="quz-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
                 <span className="quz-pill-emerald bg-emerald-100 text-emerald-600 p-2.5 rounded-xl border border-emerald-200">
                   <ArrowUpTrayIcon className="h-5 w-5" />
                 </span>
-                {t('នាំចូលកម្រងសំណួរតាម JSON', 'Import Quiz JSON')}
+                {t('នាំចូលសំណួរឆ្លាតវៃ (Excel / Word)', 'Smart Question Import (Excel / Word)')}
               </h2>
               <button
                 type="button"
-                onClick={() => {
-                  setShowImportModal(false);
-                  setParsedQuizzes([]);
-                  setJsonContent('');
-                  setImportFile(null);
-                }}
+                onClick={resetImportModal}
                 className="quz-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-xl transition-all bg-white border border-gray-200 cursor-pointer"
               >
                 <XMarkIcon className="h-5 w-5" />
@@ -3531,146 +3442,353 @@ export default function TeacherManageQuizzes() {
             </div>
 
             <form
-              id="importForm"
+              id="smartImportForm"
               onSubmit={handleImportSubmit}
               className="flex flex-col flex-1 overflow-hidden"
             >
-              <div className="p-6 sm:p-7 overflow-y-auto flex-1 space-y-5">
-                <div>
-                  <label className="quz-label block text-sm font-bold text-gray-700 mb-1.5">
-                    {t('ជ្រើសរើសមុខវិជ្ជាសម្រាប់នាំចូល', 'Select Course to Import')}{' '}
-                    <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={importCourseId}
-                    onChange={(e) => setImportCourseId(e.target.value)}
-                    className="quz-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600 bg-white font-medium text-gray-800 transition-all cursor-pointer shadow-sm"
-                  >
-                    <option value="" disabled>
-                      {t('ជ្រើសរើសមុខវិជ្ជា', 'Select Course')}
-                    </option>
-                    {modalAvailableCourses.map((course) => (
-                      <option key={course.id} value={course.id}>
-                        {course.course_code ? `${course.course_code} - ` : ''}
-                        {course.course_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="quz-subbox bg-gray-50/50 p-4 rounded-2xl border border-gray-100">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="quz-label block text-sm font-bold text-gray-700">
-                      {t('ជ្រើសរើសឯកសារ JSON', 'Select JSON File')}{' '}
-                      <span className="text-rose-500">*</span>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={downloadSampleJson}
-                      className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
-                    >
-                      <ArrowDownTrayIcon className="h-4 w-4" />
-                      {t('ទាញយកគំរូឯកសារ JSON', 'Download JSON Sample')}
-                    </button>
-                  </div>
-                  <label
-                    htmlFor="json-file-input"
-                    className="quz-surface-card flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-emerald-300 rounded-xl cursor-pointer bg-white hover:bg-emerald-50/50 hover:border-emerald-500 transition-all shadow-2xs"
-                  >
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                      <DocumentTextIcon className="h-10 w-10 text-emerald-500 mb-2" />
-                      <span className="quz-text-primary text-sm font-bold text-gray-800">
-                        {importFile
-                          ? importFile.name
-                          : t(
-                              'ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ .json',
-                              'Click here to select .json file'
-                            )}
-                      </span>
-                      <span className="quz-text-secondary text-xs text-gray-400 font-medium mt-1">
-                        {importFile
-                          ? `${(importFile.size / 1024).toFixed(1)} KB`
-                          : t(
-                              'ទម្រង់ឯកសារ JSON (Standard Quiz JSON)',
-                              'Standard Quiz JSON format'
-                            )}
-                      </span>
-                    </div>
-                    <input
-                      type="file"
-                      accept=".json,application/json"
-                      onChange={handleFileChange}
-                      className="hidden"
-                      id="json-file-input"
-                    />
-                  </label>
-                </div>
-
-                {parsedQuizzes.length > 0 && (
-                  <div className="quz-pill-emerald bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-800 space-y-2 shadow-2xs">
-                    <div className="font-extrabold flex items-center gap-1.5">
-                      <CheckCircleIcon className="h-5 w-5" />
-                      {t('បានរកឃើញកម្រងសំណួរចំនួន', 'Found quizzes:')}{' '}
-                      {parsedQuizzes.length} {t('កម្រង', 'quizzes')}
-                    </div>
-                    {parsedQuizzes.map((q, idx) => (
-                      <div key={idx} className="pl-6 font-bold text-xs">
-                        • {q.title || t('កម្រងសំណួរគ្មានចំណងជើង', 'Untitled Quiz')} (
-                        {q.questions?.length || 0} {t('សំណួរ', 'Qs')})
-                      </div>
-                    ))}
+              <div className="p-6 overflow-y-auto flex-1 space-y-5">
+                {importError && (
+                  <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-xs font-bold flex items-center gap-2">
+                    <ExclamationTriangleIcon className="h-5 w-5 shrink-0" />
+                    <span>{importError}</span>
                   </div>
                 )}
 
-                <div>
-                  <label className="quz-label block text-sm font-bold text-gray-700 mb-1.5">
-                    {t('ឬបិទភ្ជាប់ទិន្នន័យ JSON ផ្ទាល់នៅទីនេះ', 'Or Paste JSON Directly')}
-                  </label>
-                  <textarea
-                    rows={5}
-                    value={jsonContent}
-                    onChange={(e) => {
-                      setJsonContent(e.target.value);
-                      try {
-                        const parsed = JSON.parse(e.target.value);
-                        setParsedQuizzes(Array.isArray(parsed) ? parsed : [parsed]);
-                      } catch (err) {
-                        setParsedQuizzes([]);
-                      }
-                    }}
-                    placeholder='[ { "title": "Quiz Title", "duration": 45, "questions": [...] } ]'
-                    className="quz-input w-full px-4 py-3 font-mono text-xs border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600 transition-all bg-gray-50 focus:bg-white shadow-2xs resize-none"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <label className="quz-label block text-xs font-bold text-gray-700 mb-1.5">
+                      {t('មុខវិជ្ជា', 'Course')} <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      required
+                      value={importCourseId}
+                      onChange={(e) => setImportCourseId(e.target.value)}
+                      className="quz-input w-full px-3.5 py-2.5 text-xs sm:text-sm border border-gray-200 rounded-xl bg-white font-medium focus:outline-none focus:ring-2 focus:ring-emerald-600 cursor-pointer"
+                    >
+                      <option value="" disabled>
+                        {t('ជ្រើសរើសមុខវិជ្ជា', 'Select Course')}
+                      </option>
+                      {modalAvailableCourses.map((course) => (
+                        <option key={course.id} value={course.id}>
+                          {course.course_code ? `${course.course_code} - ` : ''}
+                          {course.course_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="quz-label block text-xs font-bold text-gray-700 mb-1.5">
+                      {t('ចំណងជើងកម្រងសំណួរ', 'Quiz Title')} <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={importTitle}
+                      onChange={(e) => setImportTitle(e.target.value)}
+                      placeholder={t('ឧ. តេស្តពាក់កណ្ដាលឆមាស...', 'e.g. Midterm Quiz...')}
+                      className="quz-input w-full px-3.5 py-2.5 text-xs sm:text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600 font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="quz-label block text-xs font-bold text-gray-700 mb-1.5">
+                      {t('រយៈពេល (នាទី)', 'Duration (Mins)')}
+                    </label>
+                    <input
+                      type="number"
+                      min="5"
+                      value={importDuration}
+                      onChange={(e) => setImportDuration(e.target.value)}
+                      className="quz-input w-full px-3.5 py-2.5 text-xs sm:text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600 font-bold"
+                    />
+                  </div>
                 </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="quz-label block text-xs font-bold text-gray-700 mb-1.5">
+                      {t('ថ្ងៃចាប់ផ្ដើម (ដាក់ក៏បាន)', 'Start Date (Optional)')}
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={importStartDate}
+                      onChange={(e) => setImportStartDate(e.target.value)}
+                      className="quz-input w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="quz-label block text-xs font-bold text-gray-700 mb-1.5">
+                      {t('ថ្ងៃបញ្ចប់ (ដាក់ក៏បាន)', 'End Date (Optional)')}
+                    </label>
+                    <input
+                      type="datetime-local"
+                      min={importStartDate || undefined}
+                      value={importEndDate}
+                      onChange={(e) => setImportEndDate(e.target.value)}
+                      className="quz-input w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                    />
+                  </div>
+                </div>
+
+                <div className="quz-shift-tabs inline-flex p-1 bg-gray-100 rounded-xl border border-gray-200/70 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setImportMode('excel')}
+                    className={`px-4 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                      importMode === 'excel'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'quz-shift-btn text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {t('១. នាំចូលពី Excel (.xlsx)', '1. Import Excel (.xlsx)')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImportMode('paste')}
+                    className={`px-4 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                      importMode === 'paste'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'quz-shift-btn text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {t('២. បិទភ្ជាប់ពី Word / អត្ថបទ', '2. Paste from Word / Text')}
+                  </button>
+                </div>
+
+                {importMode === 'excel' && (
+                  <div className="quz-subbox bg-gray-50/70 p-4 rounded-2xl border border-gray-200/80 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="quz-label text-xs font-bold text-gray-700">
+                        {t(
+                          'គាំទ្រសំណួរចម្រុះ (MCQ, ពិត/មិនពិត, សំណួរសរសេរ) ក្នុងឯកសារតែមួយ',
+                          'Supports mixed MCQ, True/False, and Essay in one file'
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={downloadSampleExcel}
+                        className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                      >
+                        <ArrowDownTrayIcon className="h-4 w-4" />
+                        {t('ទាញយកគំរូ Excel (.xlsx)', 'Download Excel Template')}
+                      </button>
+                    </div>
+                    <label
+                      htmlFor="excel-quiz-input"
+                      className="quz-surface-card flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-emerald-300 rounded-xl cursor-pointer bg-white hover:bg-emerald-50/40 transition-all"
+                    >
+                      <DocumentIcon className="h-8 w-8 text-emerald-500 mb-1.5" />
+                      <span className="quz-text-primary text-xs sm:text-sm font-bold text-gray-800">
+                        {importFile
+                          ? importFile.name
+                          : t('ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ .xlsx ឬ .csv', 'Click to select .xlsx or .csv file')}
+                      </span>
+                      <input
+                        id="excel-quiz-input"
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={handleExcelFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {importMode === 'paste' && (
+                  <div className="quz-subbox bg-gray-50/70 p-4 rounded-2xl border border-gray-200/80 space-y-3">
+                    <p className="quz-text-secondary text-xs font-medium text-gray-600">
+                      {t(
+                        'បិទភ្ជាប់សំណួរពី Word (ដកឃ្លា ១ បន្ទាត់រវាងសំណួរនីមួយៗ)។ បើមានជម្រើស A. B. C. D. ប្រព័ន្ធចាប់ជា MCQ ស្វ័យប្រវត្តិ!',
+                        'Paste questions from Word (separate each question with a blank line). A. B. C. D. options are auto-detected as MCQ.'
+                      )}
+                    </p>
+                    <textarea
+                      rows={5}
+                      value={importPasteText}
+                      onChange={(e) => setImportPasteText(e.target.value)}
+                      placeholder={`1. តើ HTML ប្រើសម្រាប់ធ្វើអ្វី?\nA. បង្កើតគ្រោងឆ្អឹងគេហទំព័រ\nB. គ្រប់គ្រង Database\nC. កាត់តវីដេអូ\n\n2. ចូរពន្យល់អំពី Frontend និង Backend។`}
+                      className="quz-input w-full px-3.5 py-2.5 text-xs font-medium border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleParsePasteText}
+                      disabled={!importPasteText.trim()}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold rounded-xl transition cursor-pointer disabled:opacity-50"
+                    >
+                      {t('បំបែកសំណួរដើម្បីត្រួតពិនិត្យ', 'Parse & Preview Questions')}
+                    </button>
+                  </div>
+                )}
+
+                {importedQuestions.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100 dark:border-slate-700">
+                      <div className="flex items-center gap-2">
+                        <span className="quz-text-primary text-sm font-extrabold text-gray-900">
+                          {t('ត្រួតពិនិត្យ និងធីកចម្លើយត្រូវ', 'Preview & Mark Correct Answers')}
+                        </span>
+                        <span className="quz-pill-blue px-2.5 py-0.5 rounded-lg text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+                          {importedQuestions.length} {t('សំណួរ', 'Qs')}
+                        </span>
+                        <span className="quz-pill-indigo px-2.5 py-0.5 rounded-lg text-xs font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          {t('សរុប', 'Total')}: {importedTotalMark} {t('ពិន្ទុ', 'pts')}
+                        </span>
+                      </div>
+
+                      {missingAnswerCount > 0 ? (
+                        <span className="quz-pill-rose px-3 py-1 rounded-xl text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1.5">
+                          <ExclamationTriangleIcon className="h-4 w-4 shrink-0" />
+                          {t(
+                            `នៅសល់ ${missingAnswerCount} សំណួរមិនទាន់ធីកចម្លើយត្រូវ`,
+                            `${missingAnswerCount} missing correct answer`
+                          )}
+                        </span>
+                      ) : (
+                        <span className="quz-pill-emerald px-3 py-1 rounded-xl text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                          <CheckCircleIcon className="h-4 w-4 shrink-0" />
+                          {t('បានធីកចម្លើយត្រូវគ្រប់អស់ហើយ', 'All answers verified')}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="quz-custom-scroll space-y-3 max-h-72 overflow-y-auto pr-1">
+                      {importedQuestions.map((q, idx) => {
+                        const isMissingAnswer =
+                          q.question_type !== 'Essay' &&
+                          (!Array.isArray(q.options) || !q.options.some((o) => o.is_correct));
+
+                        return (
+                          <div
+                            key={q.id}
+                            className={`p-4 rounded-2xl border transition-all space-y-2.5 ${
+                              isMissingAnswer
+                                ? 'bg-rose-50/40 dark:bg-rose-950/20 border-rose-300 dark:border-rose-500/50'
+                                : 'quz-subbox bg-gray-50/60 border-gray-200'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="quz-text-primary text-xs font-black text-gray-900">
+                                  #{idx + 1}
+                                </span>
+                                <select
+                                  value={q.question_type}
+                                  onChange={(e) =>
+                                    handleChangeImportedQuestionType(q.id, e.target.value)
+                                  }
+                                  className="quz-input px-2 py-1 text-[11px] font-bold border border-gray-200 rounded-lg bg-white cursor-pointer"
+                                >
+                                  <option value="MCQ">MCQ</option>
+                                  <option value="TrueFalse">{t('ពិត/មិនពិត', 'True/False')}</option>
+                                  <option value="Essay">{t('សរសេរ (Essay)', 'Essay')}</option>
+                                </select>
+                                {isMissingAnswer && (
+                                  <span className="text-[11px] font-extrabold text-rose-600 dark:text-rose-400">
+                                    ⚠️ {t('សូមចុចធីកចម្លើយត្រូវ!', 'Click to mark correct answer!')}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  min="0.5"
+                                  step="0.5"
+                                  value={q.mark}
+                                  onChange={(e) =>
+                                    handleChangeImportedQuestionMark(q.id, e.target.value)
+                                  }
+                                  className="quz-input w-16 px-2 py-1 text-xs font-extrabold text-center border border-gray-200 rounded-lg bg-white"
+                                />
+                                <span className="quz-text-secondary text-[11px] font-bold">
+                                  {t('ពិន្ទុ', 'pts')}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveImportedQuestion(q.id)}
+                                  className="p-1 text-rose-500 hover:bg-rose-100 rounded-lg cursor-pointer"
+                                  title={t('លុបចេញ', 'Remove')}
+                                >
+                                  <TrashIcon className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+
+                            <p className="quz-text-primary text-xs sm:text-sm font-bold text-gray-900">
+                              {q.question_text}
+                            </p>
+
+                            {q.question_type !== 'Essay' && Array.isArray(q.options) && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {q.options.map((opt, oIdx) => (
+                                  <button
+                                    key={oIdx}
+                                    type="button"
+                                    onClick={() => handleToggleImportedCorrectOption(q.id, oIdx)}
+                                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-left text-xs font-bold transition-all cursor-pointer ${
+                                      opt.is_correct
+                                        ? 'quz-pill-emerald bg-emerald-50 border-emerald-500 text-emerald-800 shadow-2xs'
+                                        : 'quz-surface-card quz-text-secondary bg-white border-gray-200 hover:border-emerald-300 text-gray-700'
+                                    }`}
+                                  >
+                                    <span className="font-black">
+                                      {q.question_type === 'MCQ'
+                                        ? `${String.fromCharCode(65 + oIdx)}.`
+                                        : ''}
+                                    </span>
+                                    <span className="truncate flex-1">{opt.option_text}</span>
+                                    <CheckCircleIcon
+                                      className={`h-4 w-4 shrink-0 ${
+                                        opt.is_correct ? 'text-emerald-600' : 'text-gray-300'
+                                      }`}
+                                    />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="quz-modal-bar p-6 sm:p-7 border-t border-gray-100 bg-gray-50/50 flex justify-end space-x-3 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowImportModal(false);
-                    setParsedQuizzes([]);
-                    setJsonContent('');
-                    setImportFile(null);
-                  }}
-                  className="quz-close-btn px-6 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
-                >
-                  {t('បោះបង់', 'Cancel')}
-                </button>
-                <button
-                  type="submit"
-                  form="importForm"
-                  disabled={isImporting || parsedQuizzes.length === 0}
-                  className="px-6 py-3 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-all shadow-md flex items-center gap-2 disabled:opacity-50 cursor-pointer"
-                >
-                  {isImporting ? (
-                    <ArrowPathIcon className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <ArrowUpTrayIcon className="h-5 w-5" />
-                  )}
-                  {t('នាំចូលកម្រងសំណួរ', 'Import Quizzes')} ({parsedQuizzes.length})
-                </button>
+              <div className="quz-modal-bar px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <span className="quz-text-secondary text-xs font-bold text-gray-500">
+                  {missingAnswerCount > 0
+                    ? t(
+                        `* ត្រូវធីកចម្លើយត្រូវឱ្យអស់ (${missingAnswerCount} សំណួរនៅសល់) ទើបអាចរក្សាទុកបាន`,
+                        `* Mark all ${missingAnswerCount} missing answer(s) before saving`
+                      )
+                    : t('រួចរាល់សម្រាប់នាំចូលទៅក្នុងប្រព័ន្ធ', 'Ready to import')}
+                </span>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={resetImportModal}
+                    className="quz-close-btn px-5 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+                  >
+                    {t('បោះបង់', 'Cancel')}
+                  </button>
+                  <button
+                    type="submit"
+                    form="smartImportForm"
+                    disabled={
+                      isImporting || importedQuestions.length === 0 || missingAnswerCount > 0
+                    }
+                    className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-all shadow-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {isImporting ? (
+                      <ArrowPathIcon className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <ArrowUpTrayIcon className="h-5 w-5" />
+                    )}
+                    {t('រក្សាទុក និងនាំចូល', 'Save & Import')} ({importedQuestions.length})
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -3687,9 +3805,8 @@ export default function TeacherManageQuizzes() {
           const rawTotalVal = parseFloat(viewingQuiz.total_mark) || 20;
           const modalCourseName =
             viewingQuiz.course?.course_name ||
-            enrichedCourses.find(
-              (c) => String(c.id) === String(viewingQuiz.course_id)
-            )?.course_name ||
+            enrichedCourses.find((c) => String(c.id) === String(viewingQuiz.course_id))
+              ?.course_name ||
             '—';
           const isModalSpecificShift =
             submissionShiftFilter !== 'all' && submissionShiftFilter !== '';
@@ -3703,9 +3820,7 @@ export default function TeacherManageQuizzes() {
               ? formatCleanScore(
                   (
                     submissions.reduce(
-                      (acc, curr) =>
-                        acc +
-                        toQuizWeighted20Score(curr.score ?? 0, rawTotalVal),
+                      (acc, curr) => acc + toQuizWeighted20Score(curr.score ?? 0, rawTotalVal),
                       0
                     ) / submissions.length
                   ).toFixed(1)
@@ -3715,8 +3830,6 @@ export default function TeacherManageQuizzes() {
           return (
             <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-950/65 md:backdrop-blur-md p-4 overflow-y-auto">
               <div className="quz-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col border border-gray-200 dark:border-slate-700/80 animate-fadeIn">
-                
-                {/* Modal Header */}
                 <div className="quz-modal-bar px-6 py-5 sm:px-7 border-b border-gray-100 flex justify-between items-start gap-4 bg-gray-50/50 shrink-0">
                   <div className="flex items-start sm:items-center gap-4">
                     <span className="quz-pill-emerald bg-emerald-100 text-emerald-600 p-3 rounded-2xl border border-emerald-200 shrink-0 shadow-2xs">
@@ -3730,9 +3843,7 @@ export default function TeacherManageQuizzes() {
                         <span className="quz-code-pill inline-flex items-center gap-1.5 bg-white border border-gray-200 px-3 py-1 rounded-lg">
                           <BookOpenIcon className="h-3.5 w-3.5 text-blue-500" />
                           <span>{t('មុខវិជ្ជា៖', 'Course:')}</span>
-                          <strong className="quz-text-primary text-gray-800">
-                            {modalCourseName}
-                          </strong>
+                          <strong className="quz-text-primary text-gray-800">{modalCourseName}</strong>
                         </span>
 
                         <span className="quz-code-pill inline-flex items-center gap-1.5 bg-white border border-gray-200 px-3 py-1 rounded-lg">
@@ -3770,6 +3881,7 @@ export default function TeacherManageQuizzes() {
                         setShowSubmissionsModal(false);
                         setViewingQuiz(null);
                         setSubmissions([]);
+                        setReviewingAttempt(null);
                       }}
                       className="quz-close-btn p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-xl transition-all bg-white border border-gray-200 cursor-pointer"
                     >
@@ -3779,7 +3891,6 @@ export default function TeacherManageQuizzes() {
                 </div>
 
                 <div className="p-6 sm:p-7 overflow-y-auto space-y-5 flex-1">
-                  {/* Summary Cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="quz-stat-indigo bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4 flex items-center gap-4">
                       <div className="p-3 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
@@ -3824,17 +3935,13 @@ export default function TeacherManageQuizzes() {
                     </div>
                   </div>
 
-                  {/* Filter Area */}
                   <div className="flex flex-col lg:flex-row gap-3 justify-between items-center">
                     <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full lg:w-auto flex-1">
                       <div className="relative w-full sm:w-72">
                         <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                         <input
                           type="text"
-                          placeholder={t(
-                            'ស្វែងរកឈ្មោះ ឬអ៊ីមែលសិស្ស...',
-                            'Search student name or email...'
-                          )}
+                          placeholder={t('ស្វែងរកឈ្មោះ ឬអ៊ីមែលសិស្ស...', 'Search student name or email...')}
                           value={submissionSearch}
                           onChange={(e) => setSubmissionSearch(e.target.value)}
                           className="quz-input w-full pl-10 pr-9 py-2.5 text-xs sm:text-sm font-medium border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50/70 focus:bg-white transition-all"
@@ -3852,20 +3959,12 @@ export default function TeacherManageQuizzes() {
 
                       <select
                         value={submissionShiftFilter}
-                        onChange={(e) =>
-                          setSubmissionShiftFilter(e.target.value)
-                        }
+                        onChange={(e) => setSubmissionShiftFilter(e.target.value)}
                         className="quz-input w-full sm:w-44 px-3 py-2.5 text-xs font-medium border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
                       >
-                        <option value="all">
-                          {t('គ្រប់វេនសិក្សា', 'All Shifts')}
-                        </option>
-                        <option value="Monday-Friday">
-                          {t('វេន ចន្ទ-សុក្រ', 'Mon-Fri Shift')}
-                        </option>
-                        <option value="Saturday-Sunday">
-                          {t('វេន សៅរ៍-អាទិត្យ', 'Sat-Sun Shift')}
-                        </option>
+                        <option value="all">{t('គ្រប់វេនសិក្សា', 'All Shifts')}</option>
+                        <option value="Monday-Friday">{t('វេន ចន្ទ-សុក្រ', 'Mon-Fri Shift')}</option>
+                        <option value="Saturday-Sunday">{t('វេន សៅរ៍-អាទិត្យ', 'Sat-Sun Shift')}</option>
                       </select>
                     </div>
 
@@ -3906,33 +4005,20 @@ export default function TeacherManageQuizzes() {
                     </div>
                   </div>
 
-                  {/* Submissions Table */}
                   {submissions.length === 0 ? (
                     <div className="py-14 px-6 text-center flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 dark:border-slate-700/80 bg-gray-50/40 dark:bg-slate-900/35">
                       <div className="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-slate-800/90 border border-gray-200 dark:border-slate-700 flex items-center justify-center mb-3.5 text-gray-400 dark:text-slate-400">
                         <DocumentCheckIcon className="h-7 w-7" />
                       </div>
                       <p className="quz-text-primary text-sm sm:text-base font-extrabold text-gray-700">
-                        {t(
-                          'មិនទាន់មានសិស្សប្រឡងកម្រងសំណួរនេះនៅឡើយទេ',
-                          'No students have taken this quiz yet'
-                        )}
-                      </p>
-                      <p className="quz-text-secondary text-xs text-gray-400 mt-1 max-w-md">
-                        {t(
-                          'នៅពេលសិស្សចូលប្រឡង និងបញ្ជូនចម្លើយ លទ្ធផលពិន្ទុរបស់ពួកគេនឹងបង្ហាញនៅទីនេះដោយស្វ័យប្រវត្តិ។',
-                          'When students complete the quiz, their scores and status will appear here automatically.'
-                        )}
+                        {t('មិនទាន់មានសិស្សប្រឡងកម្រងសំណួរនេះនៅឡើយទេ', 'No students have taken this quiz yet')}
                       </p>
                     </div>
                   ) : filteredSubmissions.length === 0 ? (
                     <div className="py-12 px-6 text-center flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 dark:border-slate-700/80 bg-gray-50/40 dark:bg-slate-900/35">
                       <MagnifyingGlassIcon className="h-10 w-10 text-gray-300 dark:text-slate-500 mb-2.5" />
                       <p className="quz-text-primary font-bold text-gray-700 text-sm">
-                        {t(
-                          'មិនរកឃើញសិស្សតាមការច្រោះនេះទេ',
-                          'No matching student results found'
-                        )}
+                        {t('មិនរកឃើញសិស្សតាមការច្រោះនេះទេ', 'No matching student results found')}
                       </p>
                     </div>
                   ) : (
@@ -3948,9 +4034,6 @@ export default function TeacherManageQuizzes() {
                                 {t('ព័ត៌មានសិស្ស', 'Student Info')}
                               </th>
                               <th className="px-4 py-3.5 text-center text-[11px] font-bold text-gray-500 uppercase">
-                                {t('ថ្ងៃចាប់ផ្តើម', 'Started At')}
-                              </th>
-                              <th className="px-4 py-3.5 text-center text-[11px] font-bold text-gray-500 uppercase">
                                 {t('ថ្ងៃប្រគល់', 'Submitted At')}
                               </th>
                               <th className="px-4 py-3.5 text-center text-[11px] font-bold text-gray-500 uppercase">
@@ -3958,6 +4041,9 @@ export default function TeacherManageQuizzes() {
                               </th>
                               <th className="px-4 py-3.5 text-center text-[11px] font-bold text-gray-500 uppercase">
                                 {t('ស្ថានភាព', 'Status')}
+                              </th>
+                              <th className="px-4 py-3.5 text-center text-[11px] font-bold text-gray-500 uppercase">
+                                {t('ចម្លើយសិស្ស', 'Answers')}
                               </th>
                             </tr>
                           </thead>
@@ -3973,23 +4059,16 @@ export default function TeacherManageQuizzes() {
                                 attempt.score ?? 0,
                                 rawTotalVal
                               );
-                              const isPassed =
-                                (parseFloat(attempt.score) || 0) / rawTotalVal >=
-                                0.5;
-                              const rawAvatar = resolveAttemptStudentAvatar(
-                                attempt
-                              );
+                              const isPassed = (parseFloat(attempt.score) || 0) / rawTotalVal >= 0.5;
+                              const rawAvatar = resolveAttemptStudentAvatar(attempt);
                               const avatarUrl = getProfileImageUrl(rawAvatar);
                               const avatarKey = `quz_att_${attempt.id || idx}`;
-                              const hasAvatar = Boolean(
-                                avatarUrl && !failedAvatars[avatarKey]
-                              );
+                              const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
                               const stdGender = student?.gender || '';
                               const isFemale = isFemaleGender(stdGender);
                               const stdShift = resolveAttemptStudentShift(attempt);
                               const isWeekend = stdShift === 'Saturday-Sunday';
-                              const isEditingThisScore =
-                                editingAttemptId === attempt.id;
+                              const isEditingThisScore = editingAttemptId === attempt.id;
 
                               return (
                                 <tr
@@ -4015,11 +4094,7 @@ export default function TeacherManageQuizzes() {
                                             }
                                           />
                                         ) : (
-                                          <span>
-                                            {studentName
-                                              .charAt(0)
-                                              .toUpperCase()}
-                                          </span>
+                                          <span>{studentName.charAt(0).toUpperCase()}</span>
                                         )}
                                       </div>
                                       <div>
@@ -4056,10 +4131,7 @@ export default function TeacherManageQuizzes() {
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="quz-text-secondary px-4 py-3.5 text-center text-xs text-gray-600 font-medium">
-                                    {formatDate(attempt.started_at)}
-                                  </td>
-                                  <td className="quz-text-secondary px-4 py-3.5 text-center text-xs text-gray-600 font-bold">
+                                  <td className="quz-text-secondary px-4 py-3.5 text-center text-xs text-gray-600 font-bold whitespace-nowrap">
                                     {formatDate(attempt.submitted_at)}
                                   </td>
                                   <td className="px-4 py-3.5 text-center whitespace-nowrap">
@@ -4071,19 +4143,13 @@ export default function TeacherManageQuizzes() {
                                           max="20"
                                           step="0.5"
                                           value={manualAttemptScore}
-                                          onChange={(e) =>
-                                            setManualAttemptScore(e.target.value)
-                                          }
+                                          onChange={(e) => setManualAttemptScore(e.target.value)}
                                           className="quz-input w-20 px-2.5 py-1 text-xs font-black text-center border border-indigo-400 rounded-lg focus:outline-none"
                                         />
                                         <button
                                           type="button"
-                                          disabled={
-                                            savingAttemptScoreId === attempt.id
-                                          }
-                                          onClick={() =>
-                                            handleSaveManualAttemptScore(attempt)
-                                          }
+                                          disabled={savingAttemptScoreId === attempt.id}
+                                          onClick={() => handleSaveManualAttemptScore(attempt)}
                                           className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer"
                                         >
                                           {t('រក្សាទុក', 'Save')}
@@ -4108,22 +4174,17 @@ export default function TeacherManageQuizzes() {
                                           type="button"
                                           onClick={() => {
                                             setEditingAttemptId(attempt.id);
-                                            setManualAttemptScore(
-                                              String(weighted20)
-                                            );
+                                            setManualAttemptScore(String(weighted20));
                                           }}
                                           className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition cursor-pointer"
-                                          title={t(
-                                            'កែប្រែពិន្ទុដោយផ្ទាល់ (សម្រាប់សំណួរសរសេរ)',
-                                            'Adjust score manually (Essay Grading)'
-                                          )}
+                                          title={t('កែប្រែពិន្ទុដោយផ្ទាល់', 'Adjust score manually')}
                                         >
                                           <PencilSquareIcon className="h-4 w-4" />
                                         </button>
                                       </div>
                                     )}
                                   </td>
-                                  <td className="px-4 py-3.5 text-center">
+                                  <td className="px-4 py-3.5 text-center whitespace-nowrap">
                                     <span
                                       className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-extrabold border ${
                                         isPassed
@@ -4131,10 +4192,21 @@ export default function TeacherManageQuizzes() {
                                           : 'quz-pill-rose bg-rose-100 text-rose-800 border-rose-200'
                                       }`}
                                     >
-                                      {isPassed
-                                        ? t('ជាប់ (Passed)', 'Passed')
-                                        : t('ធ្លាក់ (Failed)', 'Failed')}
+                                      {isPassed ? t('ជាប់ (Passed)', 'Passed') : t('ធ្លាក់ (Failed)', 'Failed')}
                                     </span>
+                                  </td>
+                                  <td className="px-4 py-3.5 text-center whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReviewingAttempt(attempt);
+                                        setReviewScoreInput(String(weighted20));
+                                      }}
+                                      className="quz-pill-blue inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition cursor-pointer"
+                                    >
+                                      <DocumentTextIcon className="h-4 w-4 shrink-0" />
+                                      <span>{t('អានចម្លើយ', 'Read Answers')}</span>
+                                    </button>
                                   </td>
                                 </tr>
                               );
@@ -4153,6 +4225,7 @@ export default function TeacherManageQuizzes() {
                       setShowSubmissionsModal(false);
                       setViewingQuiz(null);
                       setSubmissions([]);
+                      setReviewingAttempt(null);
                     }}
                     className="quz-close-btn px-6 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 transition-all cursor-pointer"
                   >
@@ -4165,8 +4238,208 @@ export default function TeacherManageQuizzes() {
         })()}
 
       {/* ================================================================== */}
-      {/* MODAL - 4: Delete Quiz Confirmation                                */}
+      {/* MODAL - 3.5: Read & Grade Student Answers (Essay / MCQ / TF)       */}
       {/* ================================================================== */}
+      {reviewingAttempt &&
+        viewingQuiz &&
+        (() => {
+          const student = reviewingAttempt.student;
+          const studentName = student
+            ? `${student.first_name || ''} ${student.last_name || ''}`.trim() ||
+              student.name ||
+              student.email
+            : t('មិនស្គាល់អត្តសញ្ញាណ', 'Unknown Student');
+
+          const rawAnswers = Array.isArray(reviewingAttempt.answers)
+            ? reviewingAttempt.answers
+            : [];
+          const answersByQId = new Map(
+            rawAnswers.map((a) => [String(a.question_id), a])
+          );
+          const quizQuestions = Array.isArray(viewingQuiz.questions)
+            ? viewingQuiz.questions
+            : [];
+
+          return (
+            <div className="fixed inset-0 m-0 z-[60] flex items-center justify-center bg-slate-950/75 md:backdrop-blur-md p-4">
+              <div className="quz-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden border border-gray-200 dark:border-slate-700 animate-fadeIn">
+                <div className="quz-modal-bar px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-4 bg-gray-50/70 shrink-0">
+                  <div className="min-w-0">
+                    <h3 className="quz-text-primary text-base sm:text-lg font-extrabold text-gray-900 truncate">
+                      {t('ចម្លើយប្រឡងរបស់៖', 'Submitted Answers:')} {studentName}
+                    </h3>
+                    <p className="quz-text-secondary text-xs font-bold text-gray-500 truncate mt-0.5">
+                      {viewingQuiz.title} • {formatDate(reviewingAttempt.submitted_at)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReviewingAttempt(null)}
+                    className="quz-close-btn p-2 text-gray-400 hover:text-gray-600 rounded-xl bg-white border border-gray-200 cursor-pointer shrink-0"
+                  >
+                    <XMarkIcon className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="quz-custom-scroll p-6 overflow-y-auto flex-1 space-y-4">
+                  {quizQuestions.length === 0 ? (
+                    <p className="quz-text-secondary text-center text-sm font-bold text-gray-400 py-8">
+                      {t('មិនមានទិន្នន័យសំណួរសម្រាប់បង្ហាញទេ', 'No questions found')}
+                    </p>
+                  ) : (
+                    quizQuestions.map((q, idx) => {
+                      const ansObj = answersByQId.get(String(q.id));
+                      const isEssay =
+                        String(q.question_type || '').toLowerCase() === 'essay' ||
+                        !Array.isArray(q.options) ||
+                        q.options.length <= 1;
+
+                      if (isEssay) {
+                        const writtenText = (
+                          ansObj?.answer_text ??
+                          ansObj?.selected_option ??
+                          ''
+                        )
+                          .toString()
+                          .trim();
+                        const modelAns = q.options?.[0]?.option_text || '';
+
+                        return (
+                          <div
+                            key={q.id || idx}
+                            className="quz-subbox p-4 rounded-2xl border border-amber-300/80 bg-amber-50/30 space-y-2.5"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="quz-pill-amber px-2.5 py-0.5 rounded-lg text-[11px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200">
+                                {t('សំណួរសរសេរ (Essay)', 'Essay')} • {formatCleanScore(q.mark)}{' '}
+                                {t('ពិន្ទុ', 'pts')}
+                              </span>
+                              <span className="quz-text-secondary text-xs font-bold text-gray-400">
+                                #{idx + 1}
+                              </span>
+                            </div>
+                            <p className="quz-text-primary text-sm font-extrabold text-gray-900">
+                              {q.question_text}
+                            </p>
+                            <div className="quz-surface-card p-3.5 rounded-xl border border-gray-200 bg-white space-y-1">
+                              <span className="block text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 uppercase">
+                                {t('ចម្លើយដែលសិស្សបានសរសេរ៖', 'Student Written Answer:')}
+                              </span>
+                              <p className="quz-text-primary text-sm font-semibold text-gray-800 whitespace-pre-line leading-relaxed">
+                                {writtenText || t('— សិស្សមិនបានសរសេរចម្លើយទេ —', '— No answer written —')}
+                              </p>
+                            </div>
+                            {modelAns && (
+                              <p className="quz-text-secondary text-xs font-medium text-gray-500">
+                                <strong className="text-emerald-600 dark:text-emerald-400">
+                                  {t('ចម្លើយគំរូ៖', 'Model Answer:')}
+                                </strong>{' '}
+                                {modelAns}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      const selectedOptId = ansObj?.selected_option;
+                      const selectedOpt = (q.options || []).find(
+                        (o) => String(o.id) === String(selectedOptId)
+                      );
+                      const correctOpt = (q.options || []).find((o) => Boolean(o.is_correct));
+                      const isCorrect =
+                        selectedOpt && correctOpt && String(selectedOpt.id) === String(correctOpt.id);
+
+                      return (
+                        <div
+                          key={q.id || idx}
+                          className={`p-4 rounded-2xl border space-y-2 ${
+                            isCorrect
+                              ? 'bg-emerald-50/30 dark:bg-emerald-950/15 border-emerald-200 dark:border-emerald-500/30'
+                              : 'bg-rose-50/30 dark:bg-rose-950/15 border-rose-200 dark:border-rose-500/30'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="quz-text-primary text-xs font-black text-gray-700">
+                              #{idx + 1} • {q.question_type} ({formatCleanScore(q.mark)}{' '}
+                              {t('ពិន្ទុ', 'pts')})
+                            </span>
+                            {isCorrect ? (
+                              <span className="quz-pill-emerald inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                <CheckCircleIcon className="h-3.5 w-3.5" />
+                                {t('ឆ្លើយត្រូវ', 'Correct')}
+                              </span>
+                            ) : (
+                              <span className="quz-pill-rose inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                                <XCircleIcon className="h-3.5 w-3.5" />
+                                {t('ឆ្លើយខុស', 'Incorrect')}
+                              </span>
+                            )}
+                          </div>
+                          <p className="quz-text-primary text-sm font-bold text-gray-900">
+                            {q.question_text}
+                          </p>
+                          <div className="text-xs space-y-1">
+                            <p className="quz-text-secondary">
+                              <strong>{t('សិស្សជ្រើស៖', 'Selected:')}</strong>{' '}
+                              <span className={isCorrect ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'}>
+                                {selectedOpt?.option_text || t('មិនបានឆ្លើយ', 'Not answered')}
+                              </span>
+                            </p>
+                            {!isCorrect && correctOpt && (
+                              <p className="text-emerald-700 dark:text-emerald-400 font-bold">
+                                {t('ចម្លើយត្រូវ៖', 'Correct:')} {correctOpt.option_text}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* របារដាក់ពិន្ទុផ្ទាល់ក្រោយពេលអានចម្លើយរួច */}
+                <div className="quz-modal-bar px-6 py-4 border-t border-gray-100 bg-gray-50/70 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                  <div className="flex items-center gap-2.5">
+                    <label className="quz-label text-xs font-extrabold text-gray-700">
+                      {t('កែប្រែពិន្ទុសរុប (លើ 20)៖', 'Update Total Score (/20):')}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="20"
+                      step="0.5"
+                      value={reviewScoreInput}
+                      onChange={(e) => setReviewScoreInput(e.target.value)}
+                      className="quz-input w-24 px-3 py-2 text-sm font-black text-center border border-indigo-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={savingAttemptScoreId === reviewingAttempt.id}
+                      onClick={() =>
+                        handleSaveManualAttemptScore(reviewingAttempt, reviewScoreInput)
+                      }
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-extrabold shadow-sm transition cursor-pointer disabled:opacity-50"
+                    >
+                      {savingAttemptScoreId === reviewingAttempt.id
+                        ? t('កំពុងរក្សាទុក...', 'Saving...')
+                        : t('រក្សាទុកពិន្ទុ', 'Save Score')}
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setReviewingAttempt(null)}
+                    className="quz-close-btn px-5 py-2 text-xs sm:text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 cursor-pointer"
+                  >
+                    {t('បិទ', 'Close')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+      {/* MODAL - 4: Delete Quiz Confirmation */}
       {showDeleteModal && (
         <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-4 overflow-y-auto">
           <div className="quz-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-fadeIn border border-transparent">
@@ -4174,28 +4447,12 @@ export default function TeacherManageQuizzes() {
               <div className="quz-pill-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
                 <ExclamationTriangleIcon className="h-6 w-6" />
               </div>
-              <h3 className="text-xl font-extrabold">
-                {t('បញ្ជាក់ការលុប', 'Confirm Deletion')}
-              </h3>
+              <h3 className="text-xl font-extrabold">{t('បញ្ជាក់ការលុប', 'Confirm Deletion')}</h3>
             </div>
             <p className="quz-text-secondary text-sm font-medium text-gray-600 mb-6 leading-relaxed">
-              {t(
-                'តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបកម្រងសំណួរ',
-                'Are you sure you want to delete quiz'
-              )}{' '}
-              «
-              <span className="quz-text-primary font-extrabold text-gray-900">
-                {selectedQuiz?.title}
-              </span>
-              » {t('នេះមែនទេ?', 'this quiz?')}
-              <br />
-              <br />
-              <span className="quz-pill-rose text-rose-500 text-xs font-bold bg-rose-50 p-3 rounded-lg border border-rose-100 block">
-                {t(
-                  'ការលុបកម្រងសំណួរនេះនឹងធ្វើឱ្យបាត់បង់រាល់ព័ត៌មានសំណួរ និងចម្លើយទាំងអស់ពាក់ព័ន្ធជាអចិន្ត្រៃយ៍។',
-                  'Deleting this quiz will permanently remove all associated questions and answers.'
-                )}
-              </span>
+              {t('តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបកម្រងសំណួរ', 'Are you sure you want to delete quiz')}{' '}
+              «<span className="quz-text-primary font-extrabold text-gray-900">{selectedQuiz?.title}</span>»{' '}
+              {t('នេះមែនទេ?', 'this quiz?')}
             </p>
             <div className="flex justify-end space-x-3">
               <button
@@ -4220,9 +4477,7 @@ export default function TeacherManageQuizzes() {
         </div>
       )}
 
-      {/* ================================================================== */}
-      {/* MODAL - 5: Delete Single Question Confirmation                     */}
-      {/* ================================================================== */}
+      {/* MODAL - 5: Delete Single Question Confirmation */}
       {deleteQuestionTarget && (
         <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-4 overflow-y-auto">
           <div className="quz-modal-card bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-fadeIn border border-transparent">
@@ -4230,28 +4485,12 @@ export default function TeacherManageQuizzes() {
               <div className="quz-pill-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
                 <ExclamationTriangleIcon className="h-6 w-6" />
               </div>
-              <h3 className="text-xl font-extrabold">
-                {t('បញ្ជាក់ការលុប', 'Confirm Deletion')}
-              </h3>
+              <h3 className="text-xl font-extrabold">{t('បញ្ជាក់ការលុប', 'Confirm Deletion')}</h3>
             </div>
             <p className="quz-text-secondary text-sm font-medium text-gray-600 mb-6 leading-relaxed">
-              {t(
-                'តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបសំណួរ',
-                'Are you sure you want to delete question'
-              )}{' '}
-              «
-              <span className="quz-text-primary font-extrabold text-gray-900 break-all">
-                {deleteQuestionTarget.question_text}
-              </span>
-              » {t('នេះមែនទេ?', 'this question?')}
-              <br />
-              <br />
-              <span className="quz-pill-rose text-rose-500 text-xs font-bold bg-rose-50 p-3 rounded-lg border border-rose-100 block">
-                {t(
-                  '* សំណួរនេះនឹងត្រូវលុបចោលទាំងស្រុងចេញពីកម្រងសំណួរ។',
-                  '* This question will be permanently deleted from the quiz.'
-                )}
-              </span>
+              {t('តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបសំណួរ', 'Are you sure you want to delete question')}{' '}
+              «<span className="quz-text-primary font-extrabold text-gray-900 break-all">{deleteQuestionTarget.question_text}</span>»{' '}
+              {t('នេះមែនទេ?', 'this question?')}
             </p>
             <div className="flex justify-end space-x-3">
               <button
@@ -4273,31 +4512,17 @@ export default function TeacherManageQuizzes() {
         </div>
       )}
 
-      {/* ================================================================== */}
-      {/* 📌 7. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
-      {/* ================================================================== */}
+      {/* DARK MODE STYLING */}
       <style>{`
         .quz-table-row + .quz-table-row > td {
           border-top: 1px solid #f1f5f9;
         }
+        .quz-custom-scroll::-webkit-scrollbar { width: 5px; }
+        .quz-custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .quz-custom-scroll::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.35); border-radius: 10px; }
+        .quz-custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.55); }
 
-        .quz-custom-scroll::-webkit-scrollbar {
-          width: 5px;
-        }
-        .quz-custom-scroll::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .quz-custom-scroll::-webkit-scrollbar-thumb {
-          background: rgba(148, 163, 184, 0.35);
-          border-radius: 10px;
-        }
-        .quz-custom-scroll::-webkit-scrollbar-thumb:hover {
-          background: rgba(148, 163, 184, 0.55);
-        }
-
-        html.dark .quz-page-bg {
-          background-color: transparent !important;
-        }
+        html.dark .quz-page-bg { background-color: transparent !important; }
         html.dark .quz-surface-card,
         html.dark .quz-table-bar,
         html.dark .quz-modal-card,
@@ -4305,130 +4530,42 @@ export default function TeacherManageQuizzes() {
           background-color: #1e293b !important;
           border-color: #334155 !important;
         }
-        html.dark .quz-year-card:hover {
-          background-color: #263449 !important;
-        }
+        html.dark .quz-year-card:hover { background-color: #263449 !important; }
         html.dark .quz-modal-bar,
         html.dark .quz-subbox,
         html.dark .quz-expanded-row {
           background-color: rgba(15, 23, 42, 0.65) !important;
           border-color: #334155 !important;
         }
-        html.dark .quz-stat-indigo {
-          background-color: rgba(99, 102, 241, 0.12) !important;
-          border-color: rgba(99, 102, 241, 0.25) !important;
-        }
-        html.dark .quz-stat-emerald {
-          background-color: rgba(16, 185, 129, 0.12) !important;
-          border-color: rgba(16, 185, 129, 0.25) !important;
-        }
-        html.dark .quz-stat-amber {
-          background-color: rgba(245, 158, 11, 0.12) !important;
-          border-color: rgba(245, 158, 11, 0.25) !important;
-        }
-        html.dark .quz-text-primary {
-          color: #f8fafc !important;
-        }
-        html.dark .quz-text-secondary {
-          color: #94a3b8 !important;
-        }
-        html.dark .quz-label {
-          color: #cbd5e1 !important;
-        }
-        html.dark .quz-shift-tabs {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-        }
-        html.dark .quz-shift-btn {
-          color: #94a3b8 !important;
-        }
-        html.dark .quz-shift-btn:hover {
-          background-color: #1e293b !important;
-          color: #f8fafc !important;
-        }
-        html.dark .quz-shift-count {
-          background-color: #1e293b !important;
-          color: #cbd5e1 !important;
-        }
-        html.dark .quz-input {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-          color: #f8fafc !important;
-          color-scheme: dark;
-        }
-        html.dark .quz-input::placeholder {
-          color: #64748b !important;
-        }
-        html.dark .quz-close-btn {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-          color: #cbd5e1 !important;
-        }
-        html.dark .quz-close-btn:hover {
-          background-color: #334155 !important;
-          color: #ffffff !important;
-        }
-        html.dark .quz-table-head {
-          background-color: #0f172a !important;
-          border-color: rgba(51, 65, 85, 0.7) !important;
-        }
-        html.dark .quz-table-head th {
-          color: #94a3b8 !important;
-        }
-        html.dark .quz-table-body {
-          background-color: #1e293b !important;
-          border-color: #334155 !important;
-        }
-        html.dark .quz-table-row + .quz-table-row > td {
-          border-top: 1px solid rgba(51, 65, 85, 0.55) !important;
-        }
-        html.dark .quz-table-row:hover {
-          background-color: rgba(59, 130, 246, 0.08) !important;
-        }
-        html.dark .quz-code-pill {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-          color: #cbd5e1 !important;
-        }
-        html.dark .quz-pill-blue {
-          background-color: rgba(59, 130, 246, 0.15) !important;
-          color: #60a5fa !important;
-          border-color: rgba(59, 130, 246, 0.3) !important;
-        }
-        html.dark .quz-pill-indigo {
-          background-color: rgba(99, 102, 241, 0.15) !important;
-          color: #818cf8 !important;
-          border-color: rgba(99, 102, 241, 0.3) !important;
-        }
-        html.dark .quz-pill-emerald {
-          background-color: rgba(16, 185, 129, 0.15) !important;
-          color: #34d399 !important;
-          border-color: rgba(16, 185, 129, 0.3) !important;
-        }
-        html.dark .quz-pill-amber {
-          background-color: rgba(245, 158, 11, 0.15) !important;
-          color: #fbbf24 !important;
-          border-color: rgba(245, 158, 11, 0.3) !important;
-        }
-        html.dark .quz-pill-rose {
-          background-color: rgba(244, 63, 94, 0.15) !important;
-          color: #fb7185 !important;
-          border-color: rgba(244, 63, 94, 0.3) !important;
-        }
-        html.dark .quz-action-edit {
-          color: #818cf8 !important;
-        }
-        html.dark .quz-action-edit:hover {
-          background-color: rgba(99, 102, 241, 0.18) !important;
-          border-color: rgba(99, 102, 241, 0.3) !important;
-        }
-        html.dark .quz-action-delete {
-          color: #fb7185 !important;
-        }
-        html.dark .quz-action-delete:hover {
-          background-color: rgba(244, 63, 94, 0.18) !important;
-          border-color: rgba(244, 63, 94, 0.3) !important;
-        }
+        html.dark .quz-stat-indigo { background-color: rgba(99, 102, 241, 0.12) !important; border-color: rgba(99, 102, 241, 0.25) !important; }
+        html.dark .quz-stat-emerald { background-color: rgba(16, 185, 129, 0.12) !important; border-color: rgba(16, 185, 129, 0.25) !important; }
+        html.dark .quz-stat-amber { background-color: rgba(245, 158, 11, 0.12) !important; border-color: rgba(245, 158, 11, 0.25) !important; }
+        html.dark .quz-text-primary { color: #f8fafc !important; }
+        html.dark .quz-text-secondary { color: #94a3b8 !important; }
+        html.dark .quz-label { color: #cbd5e1 !important; }
+        html.dark .quz-shift-tabs { background-color: #0f172a !important; border-color: #334155 !important; }
+        html.dark .quz-shift-btn { color: #94a3b8 !important; }
+        html.dark .quz-shift-btn:hover { background-color: #1e293b !important; color: #f8fafc !important; }
+        html.dark .quz-shift-count { background-color: #1e293b !important; color: #cbd5e1 !important; }
+        html.dark .quz-input { background-color: #0f172a !important; border-color: #334155 !important; color: #f8fafc !important; color-scheme: dark; }
+        html.dark .quz-input::placeholder { color: #64748b !important; }
+        html.dark .quz-close-btn { background-color: #0f172a !important; border-color: #334155 !important; color: #cbd5e1 !important; }
+        html.dark .quz-close-btn:hover { background-color: #334155 !important; color: #ffffff !important; }
+        html.dark .quz-table-head { background-color: #0f172a !important; border-color: rgba(51, 65, 85, 0.7) !important; }
+        html.dark .quz-table-head th { color: #94a3b8 !important; }
+        html.dark .quz-table-body { background-color: #1e293b !important; border-color: #334155 !important; }
+        html.dark .quz-table-row + .quz-table-row > td { border-top: 1px solid rgba(51, 65, 85, 0.55) !important; }
+        html.dark .quz-table-row:hover { background-color: rgba(59, 130, 246, 0.08) !important; }
+        html.dark .quz-code-pill { background-color: #0f172a !important; border-color: #334155 !important; color: #cbd5e1 !important; }
+        html.dark .quz-pill-blue { background-color: rgba(59, 130, 246, 0.15) !important; color: #60a5fa !important; border-color: rgba(59, 130, 246, 0.3) !important; }
+        html.dark .quz-pill-indigo { background-color: rgba(99, 102, 241, 0.15) !important; color: #818cf8 !important; border-color: rgba(99, 102, 241, 0.3) !important; }
+        html.dark .quz-pill-emerald { background-color: rgba(16, 185, 129, 0.15) !important; color: #34d399 !important; border-color: rgba(16, 185, 129, 0.3) !important; }
+        html.dark .quz-pill-amber { background-color: rgba(245, 158, 11, 0.15) !important; color: #fbbf24 !important; border-color: rgba(245, 158, 11, 0.3) !important; }
+        html.dark .quz-pill-rose { background-color: rgba(244, 63, 94, 0.15) !important; color: #fb7185 !important; border-color: rgba(244, 63, 94, 0.3) !important; }
+        html.dark .quz-action-edit { color: #818cf8 !important; }
+        html.dark .quz-action-edit:hover { background-color: rgba(99, 102, 241, 0.18) !important; border-color: rgba(99, 102, 241, 0.3) !important; }
+        html.dark .quz-action-delete { color: #fb7185 !important; }
+        html.dark .quz-action-delete:hover { background-color: rgba(244, 63, 94, 0.18) !important; border-color: rgba(244, 63, 94, 0.3) !important; }
       `}</style>
     </div>
   );

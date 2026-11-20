@@ -20,6 +20,7 @@ use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
 use App\Models\Video;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -124,7 +125,6 @@ class TeacherController extends Controller
         $userId = auth()->id() ?? 0;
         $cacheKey = "teacher_dashboard_v2_{$userId}";
 
-        // ✅ ប្រើ Cache ៦០ វិនាទី សម្រាប់ Teacher Dashboard ដើម្បីឱ្យលឿនដូច Admin Dashboard លើ Online
         $payload = Cache::remember($cacheKey, 60, function () {
             $teacherIds = $this->getTeacherCourseIds();
 
@@ -220,7 +220,6 @@ class TeacherController extends Controller
                 'grade_data' => $gradeData,
             ];
 
-            // ✅ មិនទាញយក file_data ឬ profile_image ធ្ងន់ៗក្នុង recent_activities ទេ
             $rawRecent = AssignmentSubmission::select([
                 'id', 'assignment_id', 'student_id', 'score', 'submitted_at', 'created_at',
             ])
@@ -427,7 +426,6 @@ class TeacherController extends Controller
                 return (int) $teacher->id;
             }
         } catch (\Throwable $e) {
-            // បន្តទៅការឆែកខាងក្រោម
         }
 
         if ($teacher) {
@@ -453,9 +451,6 @@ class TeacherController extends Controller
         return Course::whereIn('teacher_id', $this->getTeacherCourseIds());
     }
 
-    /**
-     * ✅ ពិនិត្យសិទ្ធិគ្រូលើមុខវិជ្ជា (គាំទ្រទាំងករណី teacher_id ត្រូវគ្នា ឬមុខវិជ្ជាស្ថិតក្នុងដេប៉ាតឺម៉ង់របស់គ្រូ)
-     */
     private function findAuthorizedCourse($courseId): Course
     {
         $course = $this->teacherCourseQuery()->find($courseId);
@@ -472,9 +467,6 @@ class TeacherController extends Controller
         return $this->teacherCourseQuery()->findOrFail($courseId);
     }
 
-    /**
-     * ទាញយកព័ត៌មានលម្អិតរបស់សិស្សពីតារាង students តាម user_id ឬ id
-     */
     private function resolveStudentProfile($userOrId)
     {
         $uid = is_object($userOrId) ? $userOrId->id : $userOrId;
@@ -490,7 +482,6 @@ class TeacherController extends Controller
     // --- Classroom Management ---
     public function getMyCourses()
     {
-        // ✅ មិនទាញបញ្ជី students ធ្ងន់ៗមកភ្ជាប់ជាមួយមុខវិជ្ជាទេ (ប្រើ withCount students_count ជំនួស)
         $courses = $this->teacherCourseQuery()
             ->with(['department'])
             ->withCount(['enrollments as students_count', 'lessons', 'assignments', 'quizzes'])
@@ -660,7 +651,6 @@ class TeacherController extends Controller
     {
         $this->findAuthorizedCourse($courseId);
 
-        // ✅ ទាញតែជួរឈរវត្តមានសុទ្ធ (មិនទាញ nested student មកជាមួយឱ្យធ្ងន់ទេ ព្រោះ Frontend មានបញ្ជីសិស្សរួចហើយ)
         $attendance = Attendance::select([
             'id', 'course_id', 'student_id', 'attendance_date', 'status', 'late_time', 'created_at', 'updated_at',
         ])
@@ -838,13 +828,12 @@ class TeacherController extends Controller
         ]);
     }
 
-    // --- Score Management (គាំទ្រទាំង ៤ ផ្នែក៖ កិច្ចការ 20%, សំណួរខ្លី 20%, ពាក់កណ្ដាលឆមាស 25%, និងប្រឡងបញ្ចប់ 35%) ---
+    // --- Score Management ---
     public function getScores($courseId)
     {
         try {
             $course = $this->findAuthorizedCourse($courseId);
 
-            // ✅ ទាញយកតែជួរឈរសំខាន់ៗរបស់សិស្ស (មិនទាញ profile_image ស្ទួនពីតារាង users ទេ)
             $students = $course->students()
                 ->select('users.id', 'users.first_name', 'users.last_name', 'users.email', 'users.gender')
                 ->where(function ($q) {
@@ -860,7 +849,6 @@ class TeacherController extends Controller
                     ->get();
             }
 
-            // ✅ ទាញតែជួរឈរ id និងពិន្ទុប៉ុណ្ណោះ (មិនទាញ description ឬ file_data ធ្ងន់ៗឡើយ)
             $assignments = Assignment::select('id', 'course_id', 'total_score')
                 ->where('course_id', $courseId)
                 ->get();
@@ -887,7 +875,6 @@ class TeacherController extends Controller
 
             $grades = Grade::where('course_id', $courseId)->get()->keyBy('student_id');
 
-            // ✅ សំខាន់បំផុត៖ ទាញតែ id, assignment_id, student_id, score ប៉ុណ្ណោះ (មិនទាញជួរឈរ file_data Base64 ដាច់ខាត!)
             $allSubmissions = $assignmentIds->isNotEmpty()
                 ? AssignmentSubmission::select('id', 'assignment_id', 'student_id', 'score')
                     ->whereIn('assignment_id', $assignmentIds)
@@ -904,7 +891,6 @@ class TeacherController extends Controller
                     ->groupBy('student_id')
                 : collect();
 
-            // Preload student profiles (ដោយមិនទាញរូបភាព Base64 ធំៗស្ទួន ព្រោះ Frontend មានក្នុង Cache រួចហើយ)
             $userIds = $students->pluck('id')->toArray();
             $studentProfilesByUserId = !empty($userIds)
                 ? Student::select('id', 'user_id', 'student_code', 'first_name', 'last_name', 'email', 'gender', 'batch_year', 'study_shift')
@@ -924,7 +910,6 @@ class TeacherController extends Controller
             ) {
                 $grade = $grades->get($student->id);
 
-                // Auto-calculate Assignment %
                 $autoAssignmentScore = null;
                 $studentSubmissions = $allSubmissions->get($student->id, collect());
                 if ($studentSubmissions->count() > 0 && $assignments->count() > 0) {
@@ -943,7 +928,6 @@ class TeacherController extends Controller
                     }
                 }
 
-                // Auto-calculate Quiz %
                 $autoQuizScore = null;
                 $studentAttempts = $allAttempts->get($student->id, collect());
                 if ($studentAttempts->count() > 0 && $quizzes->count() > 0) {
@@ -1045,7 +1029,6 @@ class TeacherController extends Controller
                 'scores.*.grade_letter' => 'nullable|string|max:5',
             ]);
 
-            // ✅ ពិនិត្យសិទ្ធិមុខវិជ្ជាតែ ១ ដងគត់សម្រាប់ course_id នីមួយៗនៅក្រៅ Loop (មិនរត់ Query ស្ទួន ៥០ ដងទេ)
             $uniqueCourseIds = collect($validated['scores'])
                 ->pluck('course_id')
                 ->unique()
@@ -1151,8 +1134,6 @@ class TeacherController extends Controller
     {
         try {
             $courseIds = $this->teacherCourseQuery()->pluck('id');
-
-            // ✅ កំណត់ select ជួរឈរស្រាលៗ មិនទាញជួរឈរ file_data (Base64 ធំៗ) មកក្នុង RAM ដាច់ខាត
             $fileCols = ['id', 'lesson_id', 'file_name', 'file_path', 'file_type', 'created_at', 'updated_at'];
 
             $query = Lesson::with([
@@ -1361,7 +1342,6 @@ class TeacherController extends Controller
                 ]);
             }
 
-            // ✅ ផ្ទៀងផ្ទាត់សិទ្ធិគ្រូមុនពេលលុបឯកសារ
             $lesson = Lesson::select('id', 'course_id', 'created_by')->find($lessonFile->lesson_id);
             if ($lesson && (int) $lesson->created_by !== (int) auth()->id()) {
                 $this->findAuthorizedCourse($lesson->course_id);
@@ -1442,7 +1422,6 @@ class TeacherController extends Controller
                 ]);
             }
 
-            // ✅ ផ្ទៀងផ្ទាត់សិទ្ធិគ្រូមុនពេលលុបវីដេអូ
             $lesson = Lesson::select('id', 'course_id', 'created_by')->find($video->lesson_id);
             if ($lesson && (int) $lesson->created_by !== (int) auth()->id()) {
                 $this->findAuthorizedCourse($lesson->course_id);
@@ -1653,7 +1632,6 @@ class TeacherController extends Controller
                 ], 403);
             }
 
-            // ✅ សំខាន់បំផុត៖ កំណត់ select() មិនទាញជួរឈរ file_data (Base64 រាប់មេកាបៃ) ដាច់ខាត!
             $subCols = [
                 'id', 'assignment_id', 'student_id', 'file_path', 'submitted_at', 'score', 'feedback', 'created_at', 'updated_at',
             ];
@@ -1758,7 +1736,6 @@ class TeacherController extends Controller
                 'feedback' => $validated['feedback'] ?? null,
             ]);
 
-            // ✅ គណនាភាគរយពិន្ទុកិច្ចការសរុបរបស់សិស្សក្នុងមុខវិជ្ជានេះឡើងវិញ និងធ្វើបច្ចុប្បន្នភាពក្នុងតារាង grades ភ្លាមៗ
             if ($assignment && $assignment->course_id && $submission->student_id) {
                 $courseAssignments = Assignment::select('id', 'total_score')
                     ->where('course_id', $assignment->course_id)
@@ -1925,9 +1902,12 @@ class TeacherController extends Controller
 
                     $this->findAuthorizedCourse($courseId);
 
-                    $now = now();
-                    $startDate = !empty($quizData['start_date']) ? $quizData['start_date'] : $now;
-                    $endDate = !empty($quizData['end_date']) ? $quizData['end_date'] : $now->copy()->addDays(7);
+                    $startDate = !empty($quizData['start_date'])
+                        ? Carbon::parse($quizData['start_date'])
+                        : now();
+                    $endDate = !empty($quizData['end_date'])
+                        ? Carbon::parse($quizData['end_date'])
+                        : $startDate->copy()->addDays(7);
 
                     $quiz = Quiz::create([
                         'course_id' => $courseId,
@@ -1941,14 +1921,24 @@ class TeacherController extends Controller
                     if (isset($quizData['questions']) && is_array($quizData['questions'])) {
                         foreach ($quizData['questions'] as $qData) {
                             $qType = $qData['question_type'] ?? 'MCQ';
-                            $question = Question::create([
-                                'quiz_id' => $quiz->id,
-                                'question_text' => $qData['question_text'],
-                                'question_type' => $qType,
-                                'mark' => $qData['mark'] ?? 1,
-                            ]);
+                            try {
+                                $question = Question::create([
+                                    'quiz_id' => $quiz->id,
+                                    'question_text' => trim($qData['question_text']),
+                                    'question_type' => $qType,
+                                    'mark' => $qData['mark'] ?? 1,
+                                ]);
+                            } catch (\Illuminate\Database\QueryException $qe) {
+                                DB::statement("ALTER TABLE questions MODIFY COLUMN question_type VARCHAR(50) NOT NULL DEFAULT 'MCQ'");
+                                $question = Question::create([
+                                    'quiz_id' => $quiz->id,
+                                    'question_text' => trim($qData['question_text']),
+                                    'question_type' => $qType,
+                                    'mark' => $qData['mark'] ?? 1,
+                                ]);
+                            }
 
-                            if (isset($qData['options']) && is_array($qData['options'])) {
+                            if ($qType !== 'Essay' && isset($qData['options']) && is_array($qData['options'])) {
                                 foreach ($qData['options'] as $opt) {
                                     QuestionOption::create([
                                         'question_id' => $question->id,
@@ -1964,6 +1954,7 @@ class TeacherController extends Controller
                 }
             });
 
+            Cache::forget('admin_overview_report');
             $this->clearTeacherDashboardCache();
 
             return response()->json([
@@ -1972,7 +1963,7 @@ class TeacherController extends Controller
             ], 201);
         } catch (ValidationException $e) {
             return response()->json([
-                'message' => 'ទម្រង់ទិន្នន័យ JSON មិនត្រឹមត្រូវ',
+                'message' => 'ទម្រង់ទិន្នន័យសំណួរមិនត្រឹមត្រូវ',
                 'errors' => $e->errors(),
             ], 422);
         } catch (\Throwable $e) {
@@ -2073,7 +2064,6 @@ class TeacherController extends Controller
                 'options.*.is_correct' => 'required_with:options|boolean',
             ]);
 
-            // ✅ បែងចែកការត្រួតពិនិត្យ៖ សំណួរ MCQ និង TrueFalse ត្រូវការជម្រើសចម្លើយយ៉ាងតិច ២ តែសំណួរ Essay មិនត្រូវការជម្រើសចម្លើយទេ!
             if (in_array($validated['question_type'], ['MCQ', 'TrueFalse'])) {
                 $optionsList = $validated['options'] ?? [];
                 if (!is_array($optionsList) || count($optionsList) < 2) {
@@ -2095,7 +2085,6 @@ class TeacherController extends Controller
                         'mark' => $validated['mark'],
                     ]);
                 } catch (\Illuminate\Database\QueryException $qe) {
-                    // ការពារករណីជួរឈរ question_type ក្នុង Database ជា ENUM ចាស់ដែលមិនទាន់មានពាក្យ 'Essay'
                     DB::statement("ALTER TABLE questions MODIFY COLUMN question_type VARCHAR(50) NOT NULL DEFAULT 'MCQ'");
                     $q = Question::create([
                         'quiz_id' => $quizId,
@@ -2199,7 +2188,12 @@ class TeacherController extends Controller
                 ->whereIn('course_id', $courseIds)
                 ->findOrFail($quizId);
 
-            // ✅ គាំទ្រការកែប្រែ/ផ្ដល់ពិន្ទុដោយផ្ទាល់ពីគ្រូបង្រៀន (សម្រាប់សំណួរសរសេររៀបរាប់ Essay) និងធ្វើបច្ចុប្បន្នភាពក្នុងតារាង grades ភ្លាមៗ
+                $quiz->questions->each(function ($q) {
+                $q->options->each(function ($opt) {
+                    $opt->makeVisible(['is_correct']);
+                });
+            });
+
             if ($request->filled('attempt_id') && $request->has('manual_score')) {
                 $attemptToUpdate = QuizAttempt::where('quiz_id', $quiz->id)
                     ->findOrFail($request->input('attempt_id'));

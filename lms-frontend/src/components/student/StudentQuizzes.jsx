@@ -341,7 +341,7 @@ const isOptionMarkedCorrect = (opt) => {
   );
 };
 
-// ✅ បង្កើតបញ្ជីត្រួតពិនិត្យសំណួរ និងចម្លើយ (គាំទ្រទាំង MCQ/TrueFalse និងសំណួរសរសេរ Essay)
+// ✅ បង្កើតបញ្ជីត្រួតពិនិត្យសំណួរ និងចម្លើយ (សំណួរ Essay ដែលបានសរសេរ នឹងដាក់ជា Pending រង់ចាំគ្រូពិនិត្យ)
 const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
   if (!Array.isArray(questions)) return [];
 
@@ -357,24 +357,16 @@ const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
       const modelOption = options.find((opt) => isOptionMarkedCorrect(opt)) || options[0] || null;
       const modelAnswerText = q.model_answer || modelOption?.option_text || null;
 
-      let isCorrect = false;
-      if (isAnswered) {
-        if (modelAnswerText) {
-          isCorrect = writtenText.toLowerCase() === String(modelAnswerText).trim().toLowerCase();
-        } else {
-          isCorrect = true;
-        }
-      }
-
       return {
         questionId: q.id || idx + 1,
         index: idx + 1,
         questionText: q.question_text || '',
         questionType: 'Essay',
         mark,
-        earnedMark: isCorrect ? mark : 0,
+        earnedMark: 0,
         isAnswered,
-        isCorrect,
+        isCorrect: false,
+        isPendingGrading: isAnswered,
         selectedOptionId: null,
         selectedOptionText: isAnswered ? writtenText : null,
         correctOptionId: modelOption?.id ?? null,
@@ -404,6 +396,7 @@ const buildQuizReviewItems = (questions = [], selectedAnswersMap = {}) => {
       earnedMark: isCorrect ? mark : 0,
       isAnswered,
       isCorrect,
+      isPendingGrading: false,
       selectedOptionId: selectedOption?.id ?? null,
       selectedOptionText: selectedOption?.option_text ?? null,
       correctOptionId: correctOption?.id ?? null,
@@ -638,7 +631,6 @@ const StudentQuizzes = () => {
         }
       }
 
-      // ✅ ដំឡើង Cache TTL ពី 4s មក 30s ដើម្បីកាត់បន្ថយការបាញ់ API ជាន់គ្នាទៅ Server
       const now = Date.now();
       if (
         !forceRefresh &&
@@ -714,7 +706,6 @@ const StudentQuizzes = () => {
     fetchStudentCourses();
   }, [fetchStudentCourses]);
 
-  // ✅ Auto-Sync រៀងរាល់ 60 វិនាទី + ឆែក Cooldown 20s ពេលចុចលើអេក្រង់ (កាត់បន្ថយបន្ទុក Hosting ៥ ដង)
   useEffect(() => {
     fetchQuizzes(false);
 
@@ -1405,6 +1396,31 @@ const StudentQuizzes = () => {
   const isManyResultQuestions = resultQuestionCount >= 5;
   const isManyAttemptQuestions = totalAttemptQuestions >= 5;
 
+  const resultSummaryCounts = useMemo(() => {
+    const items = Array.isArray(quizResult?.reviewItems)
+      ? quizResult.reviewItems
+      : [];
+    let autoGradedTotal = 0;
+    let correctCount = 0;
+    let pendingEssayCount = 0;
+
+    items.forEach((item) => {
+      const isEssayItem =
+        String(item.questionType || '').toLowerCase() === 'essay';
+      const isPending = Boolean(
+        item.isPendingGrading || (isEssayItem && item.isAnswered)
+      );
+      if (isPending) {
+        pendingEssayCount += 1;
+      } else {
+        autoGradedTotal += 1;
+        if (item.isCorrect) correctCount += 1;
+      }
+    });
+
+    return { autoGradedTotal, correctCount, pendingEssayCount };
+  }, [quizResult]);
+
   return (
     <div className="std-qz-page max-w-7xl mx-auto px-3 sm:px-5 lg:px-8 space-y-5 sm:space-y-6 lg:space-y-8 pb-28 md:pb-12 mt-2 md:mt-0 animate-fadeIn">
       
@@ -1413,10 +1429,9 @@ const StudentQuizzes = () => {
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង */}
         <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-qz-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
-          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
           <div className="hidden md:block absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
           <div className="hidden md:block absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -1494,7 +1509,7 @@ const StudentQuizzes = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (5 Cols on lg, 4 Cols on xl) */}
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ */}
         <div className="lg:col-span-5 xl:col-span-4 std-qz-surface bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-3.5 sm:space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -1655,7 +1670,7 @@ const StudentQuizzes = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* 📌 3. QUIZ CARDS GRID (1 Col Phone, 2 Cols Tablet/iPad/Laptop, 3 Desktop) */}
+      {/* 📌 3. QUIZ CARDS GRID                                              */}
       {/* ================================================================== */}
       {filteredQuizzes.length === 0 ? (
         <div className="std-qz-surface bg-white rounded-2xl sm:rounded-3xl border border-gray-200/80 shadow-xs p-10 sm:p-14 text-center space-y-3">
@@ -1929,7 +1944,7 @@ const StudentQuizzes = () => {
       )}
 
       {/* ================================================================== */}
-      {/* 📌 5. INTERACTIVE QUIZ ATTEMPT STUDIO MODAL (Bottom Sheet on Phone) */}
+      {/* 📌 5. INTERACTIVE QUIZ ATTEMPT STUDIO MODAL                        */}
       {/* ================================================================== */}
       {activeQuizAttempt &&
         typeof document !== 'undefined' &&
@@ -2257,7 +2272,7 @@ const StudentQuizzes = () => {
         )}
 
       {/* ================================================================== */}
-      {/* 📌 6. QUIZ RESULT & ANSWER REVIEW DIALOG (Bottom Sheet on Phone)   */}
+      {/* 📌 6. QUIZ RESULT & ANSWER REVIEW DIALOG                           */}
       {/* ================================================================== */}
       {quizResult &&
         typeof document !== 'undefined' &&
@@ -2369,11 +2384,22 @@ const StudentQuizzes = () => {
                           )}
                         </span>
                       </h3>
-                      <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/15 px-2.5 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-500/30">
-                        {t('ឆ្លើយត្រូវ៖', 'Correct:')}{' '}
-                        {quizResult.reviewItems.filter((i) => i.isCorrect).length} /{' '}
-                        {quizResult.reviewItems.length}
-                      </span>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {resultSummaryCounts.autoGradedTotal > 0 && (
+                          <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/15 px-2.5 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-500/30">
+                            {t('ឆ្លើយត្រូវ៖', 'Correct:')}{' '}
+                            {resultSummaryCounts.correctCount} /{' '}
+                            {resultSummaryCounts.autoGradedTotal}
+                          </span>
+                        )}
+                        {resultSummaryCounts.pendingEssayCount > 0 && (
+                          <span className="text-xs font-extrabold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 px-2.5 py-0.5 rounded-lg border border-amber-200 dark:border-amber-500/30">
+                            {t('រង់ចាំគ្រូពិនិត្យ៖', 'Pending Review:')}{' '}
+                            {resultSummaryCounts.pendingEssayCount}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div
@@ -2386,6 +2412,9 @@ const StudentQuizzes = () => {
                       {quizResult.reviewItems.map((item) => {
                         const isEssayItem =
                           String(item.questionType || '').toLowerCase() === 'essay';
+                        const isPendingEssay = Boolean(
+                          item.isPendingGrading || (isEssayItem && item.isAnswered)
+                        );
                         const hasCorrectAnswerText =
                           item.correctOptionText !== null &&
                           item.correctOptionText !== undefined &&
@@ -2395,7 +2424,9 @@ const StudentQuizzes = () => {
                           <div
                             key={item.questionId}
                             className={`p-3.5 sm:p-4 rounded-2xl border transition-colors ${
-                              item.isCorrect
+                              isPendingEssay
+                                ? 'std-qz-review-pending bg-amber-50/40 border-amber-200/90'
+                                : item.isCorrect
                                 ? 'std-qz-review-correct bg-emerald-50/40 border-emerald-200/90'
                                 : 'std-qz-review-wrong bg-rose-50/40 border-rose-200/90'
                             }`}
@@ -2404,7 +2435,9 @@ const StudentQuizzes = () => {
                               <div className="flex items-start gap-2.5 min-w-0">
                                 <span
                                   className={`h-6 w-6 rounded-lg flex items-center justify-center text-xs font-black shrink-0 mt-0.5 ${
-                                    item.isCorrect
+                                    isPendingEssay
+                                      ? 'bg-amber-500 text-white'
+                                      : item.isCorrect
                                       ? 'bg-emerald-600 text-white'
                                       : 'bg-rose-600 text-white'
                                   }`}
@@ -2418,12 +2451,22 @@ const StudentQuizzes = () => {
 
                               <span
                                 className={`px-2 py-0.5 rounded-lg text-[11px] font-extrabold border inline-flex items-center gap-1 shrink-0 ${
-                                  item.isCorrect
+                                  isPendingEssay
+                                    ? 'std-qz-badge-amber bg-amber-100/80 text-amber-800 border-amber-300'
+                                    : item.isCorrect
                                     ? 'std-qz-badge-emerald bg-emerald-100/80 text-emerald-800 border-emerald-300'
                                     : 'std-qz-badge-rose bg-rose-100/80 text-rose-800 border-rose-300'
                                 }`}
                               >
-                                {item.isCorrect ? (
+                                {isPendingEssay ? (
+                                  <>
+                                    <ClockIcon className="h-3.5 w-3.5 stroke-[2.5]" />
+                                    <span>
+                                      {t('រង់ចាំគ្រូពិនិត្យ', 'Pending Review')} (
+                                      {item.mark} {t('ពិន្ទុ', 'pts')})
+                                    </span>
+                                  </>
+                                ) : item.isCorrect ? (
                                   <>
                                     <CheckCircleIcon className="h-3.5 w-3.5 stroke-[2.5]" />
                                     <span>
@@ -2445,7 +2488,9 @@ const StudentQuizzes = () => {
                             <div className="mt-2.5 sm:pl-8 space-y-2">
                               <div
                                 className={`px-3.5 py-2.5 rounded-xl border flex items-start justify-between gap-2.5 ${
-                                  item.isCorrect
+                                  isPendingEssay
+                                    ? 'std-qz-ans-box-pending bg-white border-amber-300 text-amber-900'
+                                    : item.isCorrect
                                     ? 'std-qz-ans-box-correct bg-white border-emerald-300 text-emerald-900'
                                     : 'std-qz-ans-box-wrong bg-white border-rose-300 text-rose-900'
                                 }`}
@@ -2480,14 +2525,16 @@ const StudentQuizzes = () => {
                                   </div>
                                 </div>
 
-                                {item.isCorrect ? (
+                                {isPendingEssay ? (
+                                  <ClockIcon className="h-5 w-5 text-amber-500 shrink-0" />
+                                ) : item.isCorrect ? (
                                   <CheckCircleIcon className="h-5 w-5 text-emerald-500 shrink-0" />
                                 ) : (
                                   <XCircleIcon className="h-5 w-5 text-rose-500 shrink-0" />
                                 )}
                               </div>
 
-                              {!item.isCorrect && hasCorrectAnswerText && (
+                              {!isPendingEssay && !item.isCorrect && hasCorrectAnswerText && (
                                 <div className="std-qz-correct-hint px-3.5 py-2.5 rounded-xl bg-emerald-50 border border-emerald-300 flex items-start justify-between gap-2.5 shadow-2xs">
                                   <div className="flex items-start gap-2.5 min-w-0">
                                     <CheckBadgeIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
@@ -2575,6 +2622,10 @@ const StudentQuizzes = () => {
           background-color: rgba(244, 63, 94, 0.07) !important;
           border-color: rgba(244, 63, 94, 0.3) !important;
         }
+        html.dark .std-qz-review-pending {
+          background-color: rgba(245, 158, 11, 0.08) !important;
+          border-color: rgba(245, 158, 11, 0.35) !important;
+        }
         html.dark .std-qz-ans-box-correct {
           background-color: #0f172a !important;
           border-color: rgba(16, 185, 129, 0.45) !important;
@@ -2582,6 +2633,10 @@ const StudentQuizzes = () => {
         html.dark .std-qz-ans-box-wrong {
           background-color: #0f172a !important;
           border-color: rgba(244, 63, 94, 0.45) !important;
+        }
+        html.dark .std-qz-ans-box-pending {
+          background-color: #0f172a !important;
+          border-color: rgba(245, 158, 11, 0.45) !important;
         }
         html.dark .std-qz-correct-hint {
           background-color: rgba(16, 185, 129, 0.14) !important;

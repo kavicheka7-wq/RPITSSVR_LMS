@@ -216,7 +216,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ ទាញយកព័ត៌មានគ្រូបង្រៀនទាំងអស់ក្នុង Query តែ ១ ដង (ដោយកំណត់ select ជួរឈរចាំបាច់ មិនទាញរូបភាពស្ទួនពីតារាង users បើក្នុង teachers មានរួចហើយ)
+     * ✅ ទាញយកព័ត៌មានគ្រូបង្រៀនទាំងអស់ក្នុង Query តែ ១ ដង
      */
     private function preloadTeachersForCourses($courses): void
     {
@@ -277,7 +277,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ បង្រួមរូបថតគ្រូបង្រៀនមកទំហំតូចល្មម (96x96px ~4KB Base64) និងទុកក្នុង Cache ដើម្បីឱ្យបង្ហាញលើអេក្រង់សិស្សក្នុង 0ms
+     * ✅ បង្រួមរូបថតគ្រូបង្រៀនមកទំហំតូចល្មម (96x96px ~4KB Base64) និងទុកក្នុង Cache
      */
     private function optimizeTeacherAvatarFast(?string $rawImage, string $teacherCacheKey): ?string
     {
@@ -429,7 +429,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយប្រើ Preloaded Map និងរូបថតគ្រូដែលបានបង្រួមស្រាប់ (0ms Instant Avatar)
+     * ✅ រៀបចំទម្រង់ព័ត៌មានគ្រូបង្រៀនដោយប្រើ Preloaded Map
      */
     private function formatTeacherData($course, bool $includeAvatar = true)
     {
@@ -492,7 +492,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ គណនាឆ្នាំសិក្សា (1, 2, 3, 4) សម្រាប់មុខវិជ្ជានីមួយៗ (ដោយមិនទាញរូបភាព Base64 របស់សិស្សចូល RAM ដាច់ខាត!)
+     * ✅ គណនាឆ្នាំសិក្សា (1, 2, 3, 4) សម្រាប់មុខវិជ្ជានីមួយៗ
      */
     private function buildCourseYearsMap($deptCourses)
     {
@@ -517,7 +517,6 @@ class StudentController extends Controller
                     ->values()
                     ->all();
 
-                // ✅ សំខាន់បំផុត៖ ទាញតែ 5 ជួរឈរស្រាលៗប៉ុណ្ណោះ (មិនទាញ profile_image Base64 របស់សិស្សរាប់ពាន់នាក់ចូល RAM ទេ!)
                 $matchedStudents = !empty($rawStudentIds)
                     ? Student::select('id', 'user_id', 'batch_year', 'student_code', 'email')
                         ->whereIn('id', $rawStudentIds)
@@ -602,7 +601,7 @@ class StudentController extends Controller
         });
     }
 
-    // ✅ Dashboard (បើកប្រើ Cache 30 វិនាទី ដើម្បីកាត់បន្ថយបន្ទុក MySQL និងឆ្លើយតបលឿនបំផុត)
+    // ✅ Dashboard
     public function dashboard()
     {
         try {
@@ -666,7 +665,6 @@ class StudentController extends Controller
                     }
                 }
 
-                // ✅ គណនាពិន្ទុបូកបញ្ចូលគ្នាតាមផ្នែកដែលគ្រូបានដាក់ និងរក្សាទុក (កិច្ចការ 20% + សំណួរខ្លី 20% + ពាក់កណ្ដាលឆមាស 25% + ប្រឡងឆមាស 35% = 100 ពិន្ទុ)
                 $courseIds = $coursesList->pluck('id')->filter()->values();
                 $grades = Grade::whereIn('student_id', $studentIds)->get()->keyBy('course_id');
 
@@ -710,7 +708,6 @@ class StudentController extends Controller
                 foreach ($coursesList as $crs) {
                     $g = $grades->get($crs->id);
 
-                    // ១. បូកពិន្ទុកិច្ចការនីមួយៗដែលគ្រូបានដាក់ និងរក្សាទុក (គិតជាពិន្ទុក្នុងចំណោម 20 ពិន្ទុ)
                     $cAssigns = $allAssignments->where('course_id', $crs->id);
                     $earnedA = 0;
                     $maxA = 0;
@@ -730,7 +727,6 @@ class StudentController extends Controller
                     $assign100 = ($g && $g->assignment_score !== null) ? (float) $g->assignment_score : $autoAssign100;
                     $assignPts20 = $assign100 !== null ? round(($assign100 * 20) / 100, 2) : null;
 
-                    // ២. បូកពិន្ទុសំណួរខ្លីដែលមាន (គិតជាពិន្ទុក្នុងចំណោម 20 ពិន្ទុ)
                     $cQuizzes = $allQuizzes->where('course_id', $crs->id);
                     $earnedQ = 0;
                     $maxQ = 0;
@@ -750,11 +746,9 @@ class StudentController extends Controller
                     $quiz100 = ($g && $g->quiz_score !== null) ? (float) $g->quiz_score : $autoQuiz100;
                     $quizPts20 = $quiz100 !== null ? round(($quiz100 * 20) / 100, 2) : null;
 
-                    // ៣. ពិន្ទុប្រឡងពាក់កណ្ដាលឆមាសលើក្រដាសក្រៅ (25 ពិន្ទុ) ពេលគ្រូបញ្ចូលហើយចុចរក្សាទុក
                     $midterm100 = ($g && $g->midterm_score !== null) ? (float) $g->midterm_score : null;
                     $midtermPts25 = $midterm100 !== null ? round(($midterm100 * 25) / 100, 2) : null;
 
-                    // ៤. ពិន្ទុប្រឡងឆមាស/បញ្ចប់លើក្រដាសក្រៅ (35 ពិន្ទុ) ពេលគ្រូបញ្ចូលហើយចុចរក្សាទុក
                     $exam100 = ($g && isset($g->exam_score) && $g->exam_score !== null) ? (float) $g->exam_score : null;
                     $examPts35 = $exam100 !== null ? round(($exam100 * 35) / 100, 2) : null;
 
@@ -912,7 +906,7 @@ class StudentController extends Controller
         }
     }
 
-    // View Attendance (គាំទ្រស្ថានភាព Permission / ច្បាប់ ១០០%)
+    // View Attendance
     public function getAttendance(Request $request)
     {
         try {
@@ -1207,7 +1201,7 @@ class StudentController extends Controller
         return response()->json($grade);
     }
 
-    // ✅ ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សា (ឆ្នាំទី ១-៤) ក្នុងល្បឿនលឿនបំផុត (Ultra-Slim JSON សម្រាប់សិស្សរាប់ពាន់នាក់)
+    // ទាញយកមេរៀនគ្រប់ឆ្នាំសិក្សា
     public function getAllLessons(Request $request)
     {
         try {
@@ -1280,9 +1274,6 @@ class StudentController extends Controller
                 $lessonsQuery->whereIn('course_id', $deptCourseIds);
             }
 
-            // ✅ រៀបចំ Teacher Data ជា ២ ប្រភេទ៖
-            // 1. $fullTeacherByCourseId (មានរូបថត Avatar សម្រាប់ដាក់តែ ១ ដងក្នុង department_courses)
-            // 2. $slimTeacherByCourseId (គ្មាន Base64 Avatar ស្ទួន សម្រាប់ដាក់ក្នុងមេរៀននីមួយៗ កាត់បន្ថយទំហំ JSON ៨៥%!)
             $fullTeacherByCourseId = [];
             $slimTeacherByCourseId = [];
             foreach ($deptCourses as $cid => $crs) {
@@ -1410,7 +1401,7 @@ class StudentController extends Controller
         }
     }
 
-    // ✅ អានឯកសារមេរៀនជា Base64 (គាំទ្រទាំង Storage Disk និង Database Base64 លើ Railway)
+    // អានឯកសារមេរៀនជា Base64
     public function readLessonFile(Request $request)
     {
         $path = trim((string) $request->query('path', ''));
@@ -1661,7 +1652,7 @@ class StudentController extends Controller
         ]);
     }
 
-    // ✅ Quiz/Exam: ចាប់ផ្តើម ឬបន្តការធ្វើតេស្ត (បង្ហាញ is_correct តែក្រោយពេលសិស្សប្រឡងចប់ប៉ុណ្ណោះ)
+    // ✅ Quiz/Exam: ចាប់ផ្តើម ឬបន្តការធ្វើតេស្ត (សំណួរ Essay ដាក់ស្ថានភាពរង់ចាំគ្រូពិនិត្យ)
     public function getQuiz($quizId)
     {
         $student = auth()->user();
@@ -1674,7 +1665,6 @@ class StudentController extends Controller
             ->first();
 
         if ($attempt && $attempt->submitted_at) {
-            // ✅ បង្ហាញចម្លើយត្រឹមត្រូវ (is_correct) តែក្រោយពេលសិស្សបញ្ជូនចម្លើយរួចរាល់ប៉ុណ្ណោះ
             $quiz->questions->each(function ($q) {
                 $q->options->each(function ($opt) {
                     $opt->makeVisible(['is_correct']);
@@ -1704,7 +1694,7 @@ class StudentController extends Controller
                 if ($isEssay) {
                     $written = trim((string) ($ansRow['answer_text'] ?? $ansRow['selected_option'] ?? ''));
                     $modelText = $correctOpt ? $correctOpt->option_text : null;
-                    $isCorrect = $written !== '' && ($modelText ? mb_strtolower($written) === mb_strtolower(trim($modelText)) : true);
+                    $isAnswered = $written !== '';
 
                     return [
                         'questionId' => $q->id,
@@ -1712,11 +1702,12 @@ class StudentController extends Controller
                         'questionText' => $q->question_text,
                         'questionType' => 'Essay',
                         'mark' => $qMark,
-                        'earnedMark' => $isCorrect ? $qMark : 0,
-                        'isAnswered' => $written !== '',
-                        'isCorrect' => $isCorrect,
+                        'earnedMark' => 0,
+                        'isAnswered' => $isAnswered,
+                        'isCorrect' => false,
+                        'isPendingGrading' => $isAnswered,
                         'selectedOptionId' => null,
-                        'selectedOptionText' => $written !== '' ? $written : null,
+                        'selectedOptionText' => $isAnswered ? $written : null,
                         'correctOptionId' => $correctOpt?->id,
                         'correctOptionText' => $modelText,
                     ];
@@ -1737,6 +1728,7 @@ class StudentController extends Controller
                     'earnedMark' => $isCorrect ? $qMark : 0,
                     'isAnswered' => $selectedOpt !== null,
                     'isCorrect' => (bool) $isCorrect,
+                    'isPendingGrading' => false,
                     'selectedOptionId' => $selectedOpt?->id,
                     'selectedOptionText' => $selectedOpt?->option_text,
                     'correctOptionId' => $correctOpt?->id,
@@ -1790,7 +1782,7 @@ class StudentController extends Controller
         ]);
     }
 
-    // ✅ បញ្ជូនចម្លើយប្រឡង និងគណនាពិន្ទុដោយស្វ័យប្រវត្តិ (គាំទ្រទាំងសំណួរធីក MCQ/TrueFalse និងសំណួរសរសេរ Essay)
+    // ✅ បញ្ជូនចម្លើយប្រឡង (MCQ/TrueFalse គិតពិន្ទុស្វ័យប្រវត្តិ ចំណែក Essay ទុកឱ្យគ្រូពិនិត្យដាក់ពិន្ទុផ្ទាល់)
     public function submitQuiz(Request $request, $quizId)
     {
         $request->validate([
@@ -1839,20 +1831,7 @@ class StudentController extends Controller
                     ? trim((string) ($studentAnswer['answer_text'] ?? $studentAnswer['selected_option'] ?? ''))
                     : '';
                 $modelAnswerText = $correctOption ? trim((string) $correctOption->option_text) : null;
-
                 $isAnswered = $writtenText !== '';
-                $isCorrect = false;
-                if ($isAnswered) {
-                    if ($modelAnswerText !== null && $modelAnswerText !== '') {
-                        $isCorrect = mb_strtolower($writtenText) === mb_strtolower($modelAnswerText);
-                    } else {
-                        $isCorrect = true;
-                    }
-                }
-
-                if ($isCorrect) {
-                    $score += $qMark;
-                }
 
                 $reviewItems[] = [
                     'questionId' => $question->id,
@@ -1860,9 +1839,10 @@ class StudentController extends Controller
                     'questionText' => $question->question_text,
                     'questionType' => 'Essay',
                     'mark' => $qMark,
-                    'earnedMark' => $isCorrect ? $qMark : 0,
+                    'earnedMark' => 0,
                     'isAnswered' => $isAnswered,
-                    'isCorrect' => $isCorrect,
+                    'isCorrect' => false,
+                    'isPendingGrading' => $isAnswered,
                     'selectedOptionId' => null,
                     'selectedOptionText' => $isAnswered ? $writtenText : null,
                     'correctOptionId' => $correctOption?->id,
@@ -1892,6 +1872,7 @@ class StudentController extends Controller
                 'earnedMark' => $isCorrect ? $qMark : 0,
                 'isAnswered' => $isAnswered,
                 'isCorrect' => (bool) $isCorrect,
+                'isPendingGrading' => false,
                 'selectedOptionId' => $selectedOption?->id,
                 'selectedOptionText' => $selectedOption?->option_text,
                 'correctOptionId' => $correctOption?->id,
@@ -1910,12 +1891,10 @@ class StudentController extends Controller
         } catch (\Throwable $e) {
         }
 
-        $attemptUpdateData = [
+        $attempt->update([
             'score' => $score,
             'submitted_at' => now(),
-        ];
-
-        $attempt->update($attemptUpdateData);
+        ]);
 
         if (Schema::hasColumn('quiz_attempts', 'answers')) {
             DB::table('quiz_attempts')
@@ -1981,7 +1960,7 @@ class StudentController extends Controller
         ]);
     }
 
-    // ទាញយកកិច្ចការសិស្ស (កាត់បន្ថយទំហំ JSON ដោយមិនផ្ញើរូបថតគ្រូស្ទួន)
+    // ទាញយកកិច្ចការសិស្ស
     public function getAllAssignments(Request $request)
     {
         try {
@@ -2011,7 +1990,6 @@ class StudentController extends Controller
 
             $assignmentIds = $rawItems->pluck('id');
 
-            // ✅ សំខាន់បំផុត៖ ទាញតែជួរឈរស្រាលៗ មិនទាញជួរឈរ file_data (Base64 រាប់មេកាបៃ) ដាច់ខាត!
             $submissions = $assignmentIds->isNotEmpty()
                 ? AssignmentSubmission::select([
                     'id', 'assignment_id', 'student_id', 'file_path', 'submitted_at', 'score', 'feedback', 'created_at', 'updated_at',
@@ -2070,7 +2048,7 @@ class StudentController extends Controller
         }
     }
 
-    // ទាញយកកម្រងសំណួរប្រឡង (កាត់បន្ថយទំហំ JSON ដោយមិនផ្ញើរូបថតគ្រូស្ទួន)
+    // ទាញយកកម្រងសំណួរប្រឡង
     public function getAllQuizzes(Request $request)
     {
         try {
