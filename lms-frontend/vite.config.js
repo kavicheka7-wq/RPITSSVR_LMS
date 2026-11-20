@@ -15,11 +15,26 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'icons-vendor': ['@heroicons/react/24/outline'],
-          'excel-vendor': ['xlsx-js-style'],
-          'charts-vendor': ['recharts'],
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (
+              id.includes('/react/') ||
+              id.includes('/react-dom/') ||
+              id.includes('/react-router-dom/') ||
+              id.includes('/react-router/')
+            ) {
+              return 'react-vendor';
+            }
+            if (id.includes('@heroicons/react')) {
+              return 'icons-vendor';
+            }
+            if (id.includes('xlsx-js-style')) {
+              return 'excel-vendor';
+            }
+            if (id.includes('recharts')) {
+              return 'charts-vendor';
+            }
+          }
         },
       },
     },
