@@ -42,12 +42,11 @@ import {
 const CACHE_KEY_LEGACY_OVERVIEW = 'cached_admin_report_overview';
 const CACHE_KEY_SHARED_DEPTS = 'cached_admin_departments_list';
 const CACHE_KEY_SHARED_COURSES = 'cached_admin_courses_list';
-const AVATAR_REPORTS_STORAGE_KEY = 'cached_admin_reports_avatars_v8';
 
-const getOverviewCacheKey = (uid) => `cached_admin_report_overview_v8_${uid}`;
-const getEnrollmentsCacheKey = (uid) => `cached_admin_report_enrollments_v8_${uid}`;
-const getAttendanceCacheKey = (uid) => `cached_admin_report_attendance_v8_${uid}`;
-const getAcademicCacheKey = (uid) => `cached_admin_report_academic_v8_${uid}`;
+const getOverviewCacheKey = (uid) => `cached_admin_report_overview_v9_${uid}`;
+const getEnrollmentsCacheKey = (uid) => `cached_admin_report_enrollments_v9_${uid}`;
+const getAttendanceCacheKey = (uid) => `cached_admin_report_attendance_v9_${uid}`;
+const getAcademicCacheKey = (uid) => `cached_admin_report_academic_v9_${uid}`;
 const getDeptsCacheKey = (uid) => `cached_admin_departments_list_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_admin_courses_list_v8_${uid}`;
 
@@ -66,7 +65,6 @@ const DEFAULT_OVERVIEW_STATE = {
   enrollment_trend: [],
 };
 
-// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
 const runWhenIdle = (fn, fallbackDelay = 300) => {
   if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
     window.requestIdleCallback(fn, { timeout: 1500 });
@@ -77,178 +75,11 @@ const runWhenIdle = (fn, fallbackDelay = 300) => {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw =
-      sessionStorage.getItem(key) || localStorage.getItem(key);
+    const raw = sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
-};
-
-// ✅ Global Memory Cache បែងចែកតាម uid របស់អ្នកគ្រប់គ្រងម្នាក់ៗ + រក្សារូបភាពក្នុង RAM
-const ADMIN_REPORTS_MEM_CACHE = {
-  uid: null,
-  overview: null,
-  enrollments: null,
-  enrollmentMeta: null,
-  attendance: null,
-  academic: null,
-  academicMeta: null,
-  departments: null,
-  courses: null,
-  lastSyncedOverviewAt: 0,
-  avatarMap: readStorageJson(AVATAR_REPORTS_STORAGE_KEY, {}) || {},
-};
-
-let reportAvatarPersistTimer = null;
-const scheduleReportAvatarMapPersist = (uid) => {
-  if (reportAvatarPersistTimer) clearTimeout(reportAvatarPersistTimer);
-  reportAvatarPersistTimer = setTimeout(() => {
-    runWhenIdle(() => {
-      try {
-        const avStr = JSON.stringify(ADMIN_REPORTS_MEM_CACHE.avatarMap);
-        try {
-          sessionStorage.setItem(AVATAR_REPORTS_STORAGE_KEY, avStr);
-        } catch {}
-        localStorage.setItem(AVATAR_REPORTS_STORAGE_KEY, avStr);
-
-        if (
-          uid &&
-          ADMIN_REPORTS_MEM_CACHE.enrollments &&
-          Array.isArray(ADMIN_REPORTS_MEM_CACHE.enrollments.data)
-        ) {
-          const compactEnr = ADMIN_REPORTS_MEM_CACHE.enrollments.data.map((r) => {
-            const keyId = r.student_id || r.student_code;
-            const tiny = ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`];
-            return {
-              ...r,
-              profile_image: tiny && tiny.length < 25000 ? tiny : null,
-              student: r.student
-                ? { ...r.student, profile_image: null, user: null }
-                : null,
-              user: null,
-            };
-          });
-          const enrStr = JSON.stringify({
-            ...ADMIN_REPORTS_MEM_CACHE.enrollments,
-            data: compactEnr,
-          });
-          try {
-            sessionStorage.setItem(getEnrollmentsCacheKey(uid), enrStr);
-          } catch {}
-          localStorage.setItem(getEnrollmentsCacheKey(uid), enrStr);
-        }
-
-        if (
-          uid &&
-          ADMIN_REPORTS_MEM_CACHE.academic &&
-          Array.isArray(ADMIN_REPORTS_MEM_CACHE.academic.data)
-        ) {
-          const compactAcad = ADMIN_REPORTS_MEM_CACHE.academic.data.map((r) => {
-            const keyId = r.student_id || r.student_code;
-            const tiny = ADMIN_REPORTS_MEM_CACHE.avatarMap[`std_${keyId}`];
-            return {
-              ...r,
-              profile_image: tiny && tiny.length < 25000 ? tiny : null,
-              student: r.student
-                ? { ...r.student, profile_image: null, user: null }
-                : null,
-              user: null,
-            };
-          });
-          const acadStr = JSON.stringify({
-            ...ADMIN_REPORTS_MEM_CACHE.academic,
-            data: compactAcad,
-          });
-          try {
-            sessionStorage.setItem(getAcademicCacheKey(uid), acadStr);
-          } catch {}
-          localStorage.setItem(getAcademicCacheKey(uid), acadStr);
-        }
-      } catch {}
-    });
-  }, 300);
-};
-
-// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail ស្រាលបំផុត (~3KB) ដោយរត់នៅពេល Browser ទំនេរ
-const compressBase64Avatar = (dataUrl, callback) => {
-  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
-    callback(dataUrl);
-    return;
-  }
-  if (dataUrl.length < 16000) {
-    callback(dataUrl);
-    return;
-  }
-  runWhenIdle(() => {
-    try {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          const maxSize = 80;
-          let width = img.width || maxSize;
-          let height = img.height || maxSize;
-          if (width > height) {
-            if (width > maxSize) {
-              height = Math.round((height * maxSize) / width);
-              width = maxSize;
-            }
-          } else {
-            if (height > maxSize) {
-              width = Math.round((width * maxSize) / height);
-              height = maxSize;
-            }
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/webp', 0.76);
-          callback(compressed.length < dataUrl.length ? compressed : dataUrl);
-        } catch {
-          callback(dataUrl);
-        }
-      };
-      img.onerror = () => callback(dataUrl);
-      img.src = dataUrl;
-    } catch {
-      callback(dataUrl);
-    }
-  }, 400);
-};
-
-const processReportAvatars = (rows, prefix, uid) => {
-  if (!Array.isArray(rows)) return;
-  runWhenIdle(() => {
-    rows.forEach((r) => {
-      const rawImg =
-        r?.profile_image ||
-        r?.student?.profile_image ||
-        r?.student?.user?.profile_image ||
-        r?.user?.profile_image ||
-        r?.teacher_profile_image ||
-        r?.teacher?.profile_image ||
-        r?.course?.teacher?.profile_image;
-
-      const keyId = r?.student_id || r?.student_code || r?.course_id;
-      if (keyId && rawImg) {
-        const cacheKey = `${prefix}_${keyId}`;
-        const existing = ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey];
-        if (existing && existing.length < 18000 && rawImg.startsWith('data:'))
-          return;
-        if (!existing) {
-          ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey] = rawImg;
-        }
-        compressBase64Avatar(rawImg, (tiny) => {
-          if (tiny) {
-            ADMIN_REPORTS_MEM_CACHE.avatarMap[cacheKey] = tiny;
-            scheduleReportAvatarMapPersist(uid);
-          }
-        });
-      }
-    });
-  });
 };
 
 const safeWriteJsonMulti = (keys, payload) => {
@@ -267,7 +98,19 @@ const safeWriteJsonMulti = (keys, payload) => {
   });
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណអ្នកគ្រប់គ្រង
+const ADMIN_REPORTS_MEM_CACHE = {
+  uid: null,
+  overview: null,
+  enrollments: null,
+  enrollmentMeta: null,
+  attendance: null,
+  academic: null,
+  academicMeta: null,
+  departments: null,
+  courses: null,
+  lastSyncedOverviewAt: 0,
+};
+
 const resolveAdminUid = (contextUser) => {
   if (contextUser) {
     const id =
@@ -293,7 +136,6 @@ const resolveAdminUid = (contextUser) => {
   return 'default_admin';
 };
 
-// ✅ អនុគមន៍កាត់យកតែថ្ងៃខែឆ្នាំ (YYYY-MM-DD)
 const formatDateOnly = (dateVal) => {
   if (!dateVal) return '—';
   const str = String(dateVal).trim();
@@ -302,44 +144,45 @@ const formatDateOnly = (dateVal) => {
   return str;
 };
 
-// ✅ បម្លែងពិន្ទុឆៅលើ 100 មកជាពិន្ទុតាមទម្ងន់ពិតប្រាកដ
+const formatTeacherName = (item) => {
+  if (!item) return '—';
+  return (
+    item.teacher_name ||
+    item.teacher?.name ||
+    (item.teacher?.last_name || item.teacher?.first_name
+      ? `${item.teacher.last_name || ''} ${item.teacher.first_name || ''}`.trim()
+      : null) ||
+    item.course?.teacher?.name ||
+    (item.course?.teacher?.last_name || item.course?.teacher?.first_name
+      ? `${item.course.teacher.last_name || ''} ${item.course.teacher.first_name || ''}`.trim()
+      : null) ||
+    '—'
+  );
+};
+
 const toWeightedScore = (rawVal100, maxWeight) => {
-  if (rawVal100 === null || rawVal100 === undefined || rawVal100 === '')
-    return null;
+  if (rawVal100 === null || rawVal100 === undefined || rawVal100 === '') return null;
   const num = Number(rawVal100);
   if (isNaN(num)) return null;
   const scaled = (num * maxWeight) / 100;
   return Math.min(maxWeight, Math.max(0, Math.round(scaled * 100) / 100));
 };
 
-// ✅ គណនាពិន្ទុលម្អិតរបស់សិស្សម្នាក់ៗ
 const computeAcademicRowMetrics = (g) => {
-  const assignPts20 = toWeightedScore(
-    g?.assignment_score ?? g?.auto_assignment_score,
-    20
-  );
+  const assignPts20 = toWeightedScore(g?.assignment_score ?? g?.auto_assignment_score, 20);
   const quizPts20 = toWeightedScore(g?.quiz_score ?? g?.auto_quiz_score, 20);
   const midtermPts25 = toWeightedScore(g?.midterm_score, 25);
   const examPts35 = toWeightedScore(g?.exam_score, 35);
 
-  const gradedParts = [
-    assignPts20,
-    quizPts20,
-    midtermPts25,
-    examPts35,
-  ].filter((v) => v !== null && v > 0);
-
-  const anyGradedParts = [
-    assignPts20,
-    quizPts20,
-    midtermPts25,
-    examPts35,
-  ].filter((v) => v !== null);
+  const gradedParts = [assignPts20, quizPts20, midtermPts25, examPts35].filter(
+    (v) => v !== null && v > 0
+  );
+  const anyGradedParts = [assignPts20, quizPts20, midtermPts25, examPts35].filter(
+    (v) => v !== null
+  );
 
   const rawFinal =
-    g?.final_score !== null &&
-    g?.final_score !== undefined &&
-    g?.final_score !== ''
+    g?.final_score !== null && g?.final_score !== undefined && g?.final_score !== ''
       ? Math.round(Number(g.final_score) * 100) / 100
       : null;
 
@@ -353,9 +196,7 @@ const computeAcademicRowMetrics = (g) => {
     totalPoints = rawFinal;
   }
 
-  const hasAnyScore =
-    gradedParts.length > 0 || (rawFinal !== null && rawFinal > 0);
-
+  const hasAnyScore = gradedParts.length > 0 || (rawFinal !== null && rawFinal > 0);
   let status = 'pending';
   if (hasAnyScore) {
     status = totalPoints >= 50 ? 'passed' : 'failed';
@@ -373,8 +214,7 @@ const computeAcademicRowMetrics = (g) => {
 
 const pushLocalNotification = (notif) => {
   try {
-    const userObjStr =
-      localStorage.getItem('auth_user') || localStorage.getItem('user');
+    const userObjStr = localStorage.getItem('auth_user') || localStorage.getItem('user');
     let uid = 'default';
     let role = 'admin';
     if (userObjStr) {
@@ -414,13 +254,13 @@ const pushLocalNotification = (notif) => {
   }
 };
 
+// ============================================================================
+// 📌 ផ្នែកទី ២៖ Component គោលសម្រាប់របាយការណ៍ (AdminReports)
+// ============================================================================
 const AdminReports = () => {
-  // ==========================================================================
-  // 📌 ផ្នែកទី ២៖ ការប្រកាស STATES និង REFS សម្រាប់គ្រប់គ្រងទិន្នន័យរបាយការណ៍
-  // ==========================================================================
   const { t, language } = useLanguage();
   const { user } = useAuth();
-  const [failedAvatars, setFailedAvatars] = useState({});
+  const abortControllerRef = useRef(null);
 
   const getGenderLabel = useCallback(
     (gender) => {
@@ -442,31 +282,9 @@ const AdminReports = () => {
     return g === 'female' || g === 'f' || g === 'ស្រី';
   }, []);
 
-  const resolveImageUrl = useCallback((rawPath) => {
-    if (!rawPath || typeof rawPath !== 'string') return null;
-    const trimmed = rawPath.trim();
-    if (!trimmed) return null;
-    if (
-      trimmed.startsWith('data:') ||
-      trimmed.startsWith('http://') ||
-      trimmed.startsWith('https://') ||
-      trimmed.startsWith('blob:')
-    ) {
-      return trimmed;
-    }
-    const baseUrl = (
-      import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    ).replace(/\/api\/?$/, '');
-    const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
-    return `${baseUrl}/storage/${cleanPath}`;
-  }, []);
-
   const currentAdminId = useMemo(() => resolveAdminUid(user), [user]);
 
-  if (
-    ADMIN_REPORTS_MEM_CACHE.uid &&
-    ADMIN_REPORTS_MEM_CACHE.uid !== currentAdminId
-  ) {
+  if (ADMIN_REPORTS_MEM_CACHE.uid && ADMIN_REPORTS_MEM_CACHE.uid !== currentAdminId) {
     ADMIN_REPORTS_MEM_CACHE.overview = null;
     ADMIN_REPORTS_MEM_CACHE.enrollments = null;
     ADMIN_REPORTS_MEM_CACHE.enrollmentMeta = null;
@@ -476,7 +294,6 @@ const AdminReports = () => {
     ADMIN_REPORTS_MEM_CACHE.departments = null;
     ADMIN_REPORTS_MEM_CACHE.courses = null;
     ADMIN_REPORTS_MEM_CACHE.lastSyncedOverviewAt = 0;
-    ADMIN_REPORTS_MEM_CACHE.avatarMap = {};
   }
   ADMIN_REPORTS_MEM_CACHE.uid = currentAdminId;
 
@@ -535,15 +352,14 @@ const AdminReports = () => {
     () => ADMIN_REPORTS_MEM_CACHE.enrollmentMeta || {}
   );
   const [academicPage, setAcademicPage] = useState(1);
-  const [hideZeroAttendance, setHideZeroAttendance] = useState(false);
-  const [attendancePage, setAttendancePage] = useState(1);
   const [academicMeta, setAcademicMeta] = useState(
     () => ADMIN_REPORTS_MEM_CACHE.academicMeta || {}
   );
+  const [hideZeroAttendance, setHideZeroAttendance] = useState(false);
+  const [attendancePage, setAttendancePage] = useState(1);
 
   const [enrollmentData, setEnrollmentData] = useState(() => {
-    if (ADMIN_REPORTS_MEM_CACHE.enrollments)
-      return ADMIN_REPORTS_MEM_CACHE.enrollments;
+    if (ADMIN_REPORTS_MEM_CACHE.enrollments) return ADMIN_REPORTS_MEM_CACHE.enrollments;
     const cached = readStorageJson(getEnrollmentsCacheKey(currentAdminId), {
       summary: {},
       data: [],
@@ -553,8 +369,7 @@ const AdminReports = () => {
   });
 
   const [attendanceData, setAttendanceData] = useState(() => {
-    if (ADMIN_REPORTS_MEM_CACHE.attendance)
-      return ADMIN_REPORTS_MEM_CACHE.attendance;
+    if (ADMIN_REPORTS_MEM_CACHE.attendance) return ADMIN_REPORTS_MEM_CACHE.attendance;
     const cached = readStorageJson(getAttendanceCacheKey(currentAdminId), {
       summary: {},
       course_breakdown: [],
@@ -573,10 +388,8 @@ const AdminReports = () => {
     return cached;
   });
 
-  const abortControllerRef = useRef(null);
-
   // ==========================================================================
-  // 📌 ផ្នែកទី ៣៖ ការទាញទិន្នន័យពី BACKEND API ដោយមិនរាំងស្ទះ UI (30s Cache TTL)
+  // 📌 ផ្នែកទី ៣៖ ការទាញទិន្នន័យពី BACKEND API (30s Cache TTL)
   // ==========================================================================
   const fetchMetadata = useCallback(async () => {
     try {
@@ -600,7 +413,7 @@ const AdminReports = () => {
           courseList
         );
       }
-    } catch (err) {}
+    } catch {}
   }, [currentAdminId]);
 
   useEffect(() => {
@@ -631,7 +444,6 @@ const AdminReports = () => {
   }, [searchQuery]);
 
   const fetchReportData = useCallback(async () => {
-    // ✅ ប្រើ 30s Cache TTL សម្រាប់ Overview ដើម្បីកុំឱ្យបាញ់ API ដដែលៗពេលចុចប្តូរ Tab ទៅមក
     if (
       activeTab === 'overview' &&
       ADMIN_REPORTS_MEM_CACHE.uid === currentAdminId &&
@@ -688,21 +500,16 @@ const AdminReports = () => {
           page: enrollmentPage,
           per_page: 200,
         };
-        res = await api.get('/admin/reports/enrollments', {
-          ...config,
-          params,
-        });
+        res = await api.get('/admin/reports/enrollments', { ...config, params });
         const d = res.data || {};
         const rows = Array.isArray(d.data) ? d.data : [];
-
-        processReportAvatars(rows, 'std', currentAdminId);
-
         const formattedEnr = { ...d, data: rows, summary: d.summary || {} };
         setEnrollmentData(formattedEnr);
         setEnrollmentMeta(d.meta || {});
         if (isDefaultFilter && enrollmentPage === 1) {
           ADMIN_REPORTS_MEM_CACHE.enrollments = formattedEnr;
           ADMIN_REPORTS_MEM_CACHE.enrollmentMeta = d.meta || {};
+          safeWriteJsonMulti([getEnrollmentsCacheKey(currentAdminId)], formattedEnr);
         }
       } else if (activeTab === 'attendance') {
         const params = {
@@ -720,20 +527,10 @@ const AdminReports = () => {
             : [],
           summary: d.summary || {},
         };
-
-        processReportAvatars(
-          formattedAtt.course_breakdown,
-          'att_t',
-          currentAdminId
-        );
-
         setAttendanceData(formattedAtt);
         if (isDefaultFilter) {
           ADMIN_REPORTS_MEM_CACHE.attendance = formattedAtt;
-          safeWriteJsonMulti(
-            [getAttendanceCacheKey(currentAdminId)],
-            formattedAtt
-          );
+          safeWriteJsonMulti([getAttendanceCacheKey(currentAdminId)], formattedAtt);
         }
       } else if (activeTab === 'academic') {
         const params = {
@@ -746,15 +543,13 @@ const AdminReports = () => {
         res = await api.get('/admin/reports/academic', { ...config, params });
         const d = res.data || {};
         const rows = Array.isArray(d.data) ? d.data : [];
-
-        processReportAvatars(rows, 'std', currentAdminId);
-
         const formattedAcad = { ...d, data: rows, summary: d.summary || {} };
         setAcademicData(formattedAcad);
         setAcademicMeta(d.meta || {});
         if (isDefaultFilter && academicPage === 1) {
           ADMIN_REPORTS_MEM_CACHE.academic = formattedAcad;
           ADMIN_REPORTS_MEM_CACHE.academicMeta = d.meta || {};
+          safeWriteJsonMulti([getAcademicCacheKey(currentAdminId)], formattedAcad);
         }
       }
     } catch (err) {
@@ -806,36 +601,24 @@ const AdminReports = () => {
     if (activeTab === 'overview') return '';
     const parts = [];
     if (selectedDept) {
-      const deptObj = departments.find(
-        (d) => String(d.id) === String(selectedDept)
-      );
+      const deptObj = departments.find((d) => String(d.id) === String(selectedDept));
       if (deptObj) {
         parts.push(
-          `${t('ដេប៉ាតឺម៉ង់៖', 'Department:')} ${
-            deptObj.department_name || deptObj.name
-          }`
+          `${t('ដេប៉ាតឺម៉ង់៖', 'Department:')} ${deptObj.department_name || deptObj.name}`
         );
       }
     }
     if (selectedCourse) {
-      const courseObj = courses.find(
-        (c) => String(c.id) === String(selectedCourse)
-      );
+      const courseObj = courses.find((c) => String(c.id) === String(selectedCourse));
       if (courseObj) {
         parts.push(`${t('មុខវិជ្ជា៖', 'Course:')} ${courseObj.course_name}`);
       }
     }
     if (activeTab === 'enrollments' && selectedStatus) {
-      parts.push(
-        `${t('ស្ថានភាព៖', 'Status:')} ${getEnrollmentStatusLabel(
-          selectedStatus
-        )}`
-      );
+      parts.push(`${t('ស្ថានភាព៖', 'Status:')} ${getEnrollmentStatusLabel(selectedStatus)}`);
     }
     if (activeTab === 'attendance' && (dateFrom || dateTo)) {
-      parts.push(
-        `${t('កាលបរិច្ឆេទ៖', 'Date:')} ${dateFrom || '...'} → ${dateTo || '...'}`
-      );
+      parts.push(`${t('កាលបរិច្ឆេទ៖', 'Date:')} ${dateFrom || '...'} → ${dateTo || '...'}`);
     }
     return parts.join(' | ');
   }, [
@@ -902,10 +685,7 @@ const AdminReports = () => {
     const sixMonths = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(baseDate.getFullYear(), baseDate.getMonth() - i, 1);
-      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-        2,
-        '0'
-      )}`;
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       sixMonths.push({
         month: ym,
         count: mapByMonth[ym] !== undefined ? mapByMonth[ym] : 0,
@@ -1022,8 +802,8 @@ const AdminReports = () => {
     };
   }, [enrichedAcademicRows, academicData]);
 
-  const passFailChartData = useMemo(() => {
-    return [
+  const passFailChartData = useMemo(
+    () => [
       {
         name: t('ប្រឡងជាប់ (≥ 50 ពិន្ទុ)', 'Passed (≥ 50 pts)'),
         count: academicSummaryComputed.passedCount,
@@ -1039,18 +819,14 @@ const AdminReports = () => {
         count: academicSummaryComputed.pendingCount,
         color: '#F59E0B',
       },
-    ];
-  }, [academicSummaryComputed, t]);
+    ],
+    [academicSummaryComputed, t]
+  );
 
   // ==========================================================================
-  // 📌 ផ្នែកទី ៥៖ មុខងារនាំចេញរបាយការណ៍ជា EXCEL (Dynamic Import) និងបោះពុម្ព (PRINT)
+  // 📌 ផ្នែកទី ៥៖ មុខងារនាំចេញរបាយការណ៍ជា EXCEL និងបោះពុម្ព (PRINT)
   // ==========================================================================
-  const applyExcelStyling = (
-    XLSX,
-    worksheet,
-    colWidths = [],
-    textColumnIndices = []
-  ) => {
+  const applyExcelStyling = (XLSX, worksheet, colWidths = [], textColumnIndices = []) => {
     if (!worksheet || !worksheet['!ref']) return;
     const range = XLSX.utils.decode_range(worksheet['!ref']);
 
@@ -1067,10 +843,7 @@ const AdminReports = () => {
         if (isTextCol) {
           worksheet[cellAddress].t = 's';
           worksheet[cellAddress].z = '@';
-          if (
-            worksheet[cellAddress].v !== undefined &&
-            worksheet[cellAddress].v !== null
-          ) {
+          if (worksheet[cellAddress].v !== undefined && worksheet[cellAddress].v !== null) {
             worksheet[cellAddress].v = String(worksheet[cellAddress].v);
           }
         }
@@ -1114,19 +887,31 @@ const AdminReports = () => {
     worksheet['!rows'] = rows;
   };
 
+  const getActiveReportTitle = () => {
+    if (activeTab === 'enrollments')
+      return t('របាយការណ៍ការចុះឈ្មោះសិក្សា', 'Student Enrollment Report');
+    if (activeTab === 'attendance')
+      return t('របាយការណ៍ស្ថិតិវត្តមានសិស្ស', 'Student Attendance Report');
+    if (activeTab === 'academic')
+      return t(
+        'របាយការណ៍លទ្ធផលសិក្សា និងពិន្ទុសិស្ស',
+        'Academic Performance & Grades Report'
+      );
+    return t('របាយការណ៍ទិដ្ឋភាពទូទៅនៃប្រព័ន្ធសិក្សា', 'System Overview Report');
+  };
+
   const handleExportExcel = async () => {
     let exportRows = [];
     let colWidths = [];
     let textCols = [];
     let sheetName = 'Report';
     const dateStr = new Date().toISOString().slice(0, 10);
-    let filename = `LMS_Report_${activeTab}_${dateStr}.xlsx`;
+    const filename = `LMS_Report_${activeTab}_${dateStr}.xlsx`;
 
     if (activeTab === 'enrollments') {
       sheetName = 'Enrollments';
       const offset =
-        ((enrollmentMeta?.current_page || 1) - 1) *
-        (enrollmentMeta?.per_page || 200);
+        ((enrollmentMeta?.current_page || 1) - 1) * (enrollmentMeta?.per_page || 200);
       exportRows = (enrollmentData.data || []).map((r, idx) => ({
         [t('ល.រ', 'No')]: offset + idx + 1,
         [t('លេខកូដសិស្ស', 'Student Code')]: r.student_code || '',
@@ -1152,33 +937,18 @@ const AdminReports = () => {
       textCols = [1, 6];
     } else if (activeTab === 'attendance') {
       sheetName = 'Attendance';
-      exportRows = (attendanceData.course_breakdown || []).map((r, idx) => {
-        const teacherName =
-          r.teacher_name ||
-          r.teacher?.name ||
-          (r.teacher?.first_name
-            ? `${r.teacher.first_name} ${r.teacher.last_name || ''}`.trim()
-            : '') ||
-          r.course?.teacher?.name ||
-          (r.course?.teacher?.first_name
-            ? `${r.course.teacher.first_name} ${
-                r.course.teacher.last_name || ''
-              }`.trim()
-            : '') ||
-          '';
-        return {
-          [t('ល.រ', 'No')]: idx + 1,
-          [t('កូដមុខវិជ្ជា', 'Course Code')]: r.course_code || '',
-          [t('ឈ្មោះមុខវិជ្ជា', 'Course Name')]: r.course_name || '',
-          [t('គ្រូបង្រៀន', 'Teacher')]: teacherName,
-          [t('សរុប', 'Total')]: r.total || 0,
-          [t('វត្តមាន', 'Present')]: r.present || 0,
-          [t('អវត្តមាន', 'Absent')]: r.absent || 0,
-          [t('ច្បាប់', 'Permission')]: r.permission || 0,
-          [t('យឺត', 'Late')]: r.late || 0,
-          [t('អត្រា (%)', 'Rate (%)')]: `${r.total > 0 ? r.rate ?? 0 : 0}%`,
-        };
-      });
+      exportRows = (filteredAttendanceCourses || []).map((r, idx) => ({
+        [t('ល.រ', 'No')]: idx + 1,
+        [t('កូដមុខវិជ្ជា', 'Course Code')]: r.course_code || '',
+        [t('ឈ្មោះមុខវិជ្ជា', 'Course Name')]: r.course_name || '',
+        [t('គ្រូបង្រៀន', 'Teacher')]: formatTeacherName(r),
+        [t('សរុប', 'Total')]: r.total || 0,
+        [t('វត្តមាន', 'Present')]: r.present || 0,
+        [t('អវត្តមាន', 'Absent')]: r.absent || 0,
+        [t('ច្បាប់', 'Permission')]: r.permission || 0,
+        [t('យឺត', 'Late')]: r.late || 0,
+        [t('អត្រា (%)', 'Rate (%)')]: `${r.total > 0 ? r.rate ?? 0 : 0}%`,
+      }));
       colWidths = [
         { wch: 8 },
         { wch: 16 },
@@ -1195,8 +965,7 @@ const AdminReports = () => {
     } else if (activeTab === 'academic') {
       sheetName = 'Grades';
       const offset =
-        ((academicMeta?.current_page || 1) - 1) *
-        (academicMeta?.per_page || 200);
+        ((academicMeta?.current_page || 1) - 1) * (academicMeta?.per_page || 200);
       exportRows = enrichedAcademicRows.map((r, idx) => {
         const { assignPts20, quizPts20, totalPoints, status } = r.computed;
         const resultLabel =
@@ -1218,10 +987,7 @@ const AdminReports = () => {
           [t('ដេប៉ាតឺម៉ង់', 'Department')]: r.department_name || '',
           [t('កិច្ចការ (20%)', 'Assignment (20%)')]: assignPts20,
           [t('សំណួរខ្លី (20%)', 'Quiz (20%)')]: quizPts20,
-          [t('ពិន្ទុសរុប', 'Total Score')]: `${totalPoints} ${t(
-            'ពិន្ទុ',
-            'pts'
-          )}`,
+          [t('ពិន្ទុសរុប', 'Total Score')]: `${totalPoints} ${t('ពិន្ទុ', 'pts')}`,
           [t('លទ្ធផល', 'Result')]: resultLabel,
         };
       });
@@ -1258,9 +1024,7 @@ const AdminReports = () => {
       textCols = [];
     }
 
-    if (exportRows.length === 0) {
-      return;
-    }
+    if (exportRows.length === 0) return;
 
     const { default: XLSX } = await import('xlsx-js-style');
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
@@ -1280,22 +1044,7 @@ const AdminReports = () => {
     });
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
-
-  const getActiveReportTitle = () => {
-    if (activeTab === 'enrollments')
-      return t('របាយការណ៍ការចុះឈ្មោះសិក្សា', 'Student Enrollment Report');
-    if (activeTab === 'attendance')
-      return t('របាយការណ៍ស្ថិតិវត្តមានសិស្ស', 'Student Attendance Report');
-    if (activeTab === 'academic')
-      return t(
-        'របាយការណ៍លទ្ធផលសិក្សា និងពិន្ទុសិស្ស',
-        'Academic Performance & Grades Report'
-      );
-    return t('របាយការណ៍ទិដ្ឋភាពទូទៅនៃប្រព័ន្ធសិក្សា', 'System Overview Report');
-  };
+  const handlePrint = () => window.print();
 
   const getRateColor = (rate) => {
     if (rate >= 80) return { bg: 'bg-emerald-500', text: 'text-emerald-600' };
@@ -1373,10 +1122,7 @@ const AdminReports = () => {
   return (
     <div className="rep-page-bg px-3 py-4 sm:p-5 lg:p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-5 sm:space-y-6 pb-28 md:pb-12 animate-fadeIn">
       <div id="admin-report-container" className="space-y-5 sm:space-y-6">
-        
-        {/* ------------------------------------------------------------------ */}
-        {/* 6.1. ក្បាលលិខិតរដ្ឋបាលផ្លូវការ (បង្ហាញតែពេលចុច Print ប៉ុណ្ណោះ - only-print) */}
-        {/* ------------------------------------------------------------------ */}
+        {/* 6.1. ក្បាលលិខិតរដ្ឋបាលផ្លូវការ (បង្ហាញតែពេលចុច Print - only-print) */}
         <div className="only-print hidden mb-6">
           <div className="text-center">
             <p className="print-muol text-[13px] text-slate-900 leading-[1.9]">
@@ -1426,19 +1172,17 @@ const AdminReports = () => {
             )}
             <p className="print-siemreap text-[11px] font-semibold text-slate-700 mt-0.5">
               {t('គិតត្រឹមថ្ងៃទី៖', 'As of Date:')}{' '}
-              {new Date().toLocaleDateString(
-                language === 'km' ? 'km-KH' : 'en-US',
-                { year: 'numeric', month: 'long', day: 'numeric' }
-              )}
+              {new Date().toLocaleDateString(language === 'km' ? 'km-KH' : 'en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              })}
             </p>
           </div>
         </div>
 
-        {/* ------------------------------------------------------------------ */}
-        {/* 6.2. ផ្ទាំងក្បាលខាងលើសម្រាប់អេក្រង់កុំព្យូទ័រ និងប៊ូតុង Excel / Print (no-print) */}
-        {/* ------------------------------------------------------------------ */}
+        {/* 6.2. ផ្ទាំងក្បាលខាងលើ និងប៊ូតុង Excel / Print */}
         <div className="no-print relative overflow-hidden rounded-2xl sm:rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-5 sm:p-7 lg:p-8 shadow-xl border border-blue-900">
-          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
           <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
           <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
@@ -1448,7 +1192,9 @@ const AdminReports = () => {
                 <div className="p-2.5 sm:p-3 bg-white/15 md:bg-white/10 md:backdrop-blur-md rounded-xl border border-white/20 shrink-0">
                   <DocumentChartBarIcon className="w-6 h-6 sm:w-7 sm:h-7 lg:w-8 lg:h-8 text-yellow-400" />
                 </div>
-                <span className="truncate">{t('របាយការណ៍ និងការវិភាគ', 'Reports & Analytics')}</span>
+                <span className="truncate">
+                  {t('របាយការណ៍ និងការវិភាគ', 'Reports & Analytics')}
+                </span>
               </h1>
               <p className="text-blue-200/80 text-xs sm:text-sm max-w-2xl font-medium leading-relaxed">
                 {t(
@@ -1483,31 +1229,13 @@ const AdminReports = () => {
           </div>
         </div>
 
-        {/* ------------------------------------------------------------------ */}
-        {/* 6.3. របារប៊ូតុងជ្រើសរើសប្រភេទរបាយការណ៍ទាំង ៤ (Navigation Tabs)     */}
-        {/* ------------------------------------------------------------------ */}
+        {/* 6.3. របារប៊ូតុងជ្រើសរើសប្រភេទរបាយការណ៍ទាំង ៤ */}
         <div className="rep-tab-container grid grid-cols-2 sm:flex sm:flex-nowrap overflow-x-auto bg-white rounded-2xl p-1.5 sm:p-2 shadow-sm border border-gray-100 no-print gap-1.5 sm:gap-1">
           {[
-            {
-              id: 'overview',
-              name: t('ទិដ្ឋភាពទូទៅ', 'Overview'),
-              icon: ChartBarIcon,
-            },
-            {
-              id: 'enrollments',
-              name: t('ការចុះឈ្មោះ', 'Enrollments'),
-              icon: UserGroupIcon,
-            },
-            {
-              id: 'academic',
-              name: t('ពិន្ទុ', 'Grades'),
-              icon: AcademicCapIcon,
-            },
-            {
-              id: 'attendance',
-              name: t('វត្តមាន', 'Attendance'),
-              icon: CheckCircleIcon,
-            },
+            { id: 'overview', name: t('ទិដ្ឋភាពទូទៅ', 'Overview'), icon: ChartBarIcon },
+            { id: 'enrollments', name: t('ការចុះឈ្មោះ', 'Enrollments'), icon: UserGroupIcon },
+            { id: 'academic', name: t('ពិន្ទុ', 'Grades'), icon: AcademicCapIcon },
+            { id: 'attendance', name: t('វត្តមាន', 'Attendance'), icon: CheckCircleIcon },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -1538,9 +1266,7 @@ const AdminReports = () => {
           })}
         </div>
 
-        {/* ------------------------------------------------------------------ */}
-        {/* 6.4. ប្រអប់តម្រងទិន្នន័យ (Filter Controls)                         */}
-        {/* ------------------------------------------------------------------ */}
+        {/* 6.4. ប្រអប់តម្រងទិន្នន័យ (Filter Controls) */}
         {activeTab !== 'overview' && (
           <div className="rep-surface-card bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-gray-100 no-print space-y-4">
             <div className="rep-filter-header flex items-center justify-between gap-2 text-gray-900 font-extrabold text-xs sm:text-sm border-b border-gray-100 pb-3">
@@ -1591,9 +1317,7 @@ const AdminReports = () => {
                   }}
                   className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                 >
-                  <option value="">
-                    {t('-- ទាំងអស់ --', '-- All Departments --')}
-                  </option>
+                  <option value="">{t('-- ទាំងអស់ --', '-- All Departments --')}</option>
                   {departments.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.department_name || d.name}{' '}
@@ -1617,9 +1341,7 @@ const AdminReports = () => {
                   }}
                   className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                 >
-                  <option value="">
-                    {t('-- ទាំងអស់ --', '-- All Courses --')}
-                  </option>
+                  <option value="">{t('-- ទាំងអស់ --', '-- All Courses --')}</option>
                   {filteredCourses.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.course_name} ({c.course_code})
@@ -1641,18 +1363,10 @@ const AdminReports = () => {
                     }}
                     className="rep-input w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-colors shadow-sm"
                   >
-                    <option value="">
-                      {t('-- គ្រប់ស្ថានភាព --', '-- All Statuses --')}
-                    </option>
-                    <option value="active">
-                      {t('កំពុងសិក្សា', 'Active')}
-                    </option>
-                    <option value="completed">
-                      {t('បានបញ្ចប់', 'Completed')}
-                    </option>
-                    <option value="dropped">
-                      {t('បោះបង់', 'Dropped')}
-                    </option>
+                    <option value="">{t('-- គ្រប់ស្ថានភាព --', '-- All Statuses --')}</option>
+                    <option value="active">{t('កំពុងសិក្សា', 'Active')}</option>
+                    <option value="completed">{t('បានបញ្ចប់', 'Completed')}</option>
+                    <option value="dropped">{t('បោះបង់', 'Dropped')}</option>
                   </select>
                 </div>
               )}
@@ -1722,7 +1436,7 @@ const AdminReports = () => {
 
         <div className="w-full space-y-5 sm:space-y-6">
           {/* ================================================================= */}
-          {/* 📌 ផ្នែកទី ៧៖ ផ្ទាំងរបាយការណ៍ទី ១ - ទិដ្ឋភាពទូទៅ (OVERVIEW TAB)     */}
+          {/* 📌 ផ្នែកទី ៧៖ ទិដ្ឋភាពទូទៅ (OVERVIEW TAB)                          */}
           {/* ================================================================= */}
           {activeTab === 'overview' && (
             <div className="space-y-5 sm:space-y-6">
@@ -1770,8 +1484,7 @@ const AdminReports = () => {
                     {overviewData?.stats?.total_courses ?? 0}
                   </h3>
                   <span className="rep-badge-amber inline-block mt-2.5 sm:mt-3 text-[11px] sm:text-xs font-bold text-amber-700 bg-amber-50 border border-amber-100 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md truncate max-w-full">
-                    {overviewData?.stats?.total_lessons ?? 0}{' '}
-                    {t('មេរៀន', 'Lessons')}
+                    {overviewData?.stats?.total_lessons ?? 0} {t('មេរៀន', 'Lessons')}
                   </span>
                 </div>
 
@@ -1794,10 +1507,7 @@ const AdminReports = () => {
 
               <div className="only-print hidden mb-5">
                 <h3 className="print-muol text-[12px] text-slate-900 mb-2 leading-[1.8]">
-                  {t(
-                    '១. តារាងសង្ខេបស្ថិតិទូទៅនៃប្រព័ន្ធ',
-                    '1. System Overview Summary'
-                  )}
+                  {t('១. តារាងសង្ខេបស្ថិតិទូទៅនៃប្រព័ន្ធ', '1. System Overview Summary')}
                 </h3>
                 <table className="min-w-full border-collapse">
                   <thead>
@@ -1854,10 +1564,7 @@ const AdminReports = () => {
                       <BuildingLibraryIcon className="w-5 h-5 text-blue-600" />
                     </div>
                     <span className="truncate">
-                      {t(
-                        'ចំនួនសិស្ស និងគ្រូតាមដេប៉ាតឺម៉ង់',
-                        'Students & Teachers by Department'
-                      )}
+                      {t('ចំនួនសិស្ស និងគ្រូតាមដេប៉ាតឺម៉ង់', 'Students & Teachers by Department')}
                     </span>
                   </h3>
                   <div className="h-64 sm:h-72">
@@ -1892,12 +1599,7 @@ const AdminReports = () => {
                             fontWeight: 'bold',
                           }}
                         />
-                        <Legend
-                          wrapperStyle={{
-                            fontWeight: 'bold',
-                            fontSize: '12px',
-                          }}
-                        />
+                        <Legend wrapperStyle={{ fontWeight: 'bold', fontSize: '12px' }} />
                         <Bar
                           dataKey="students_count"
                           name={t('សិស្ស', 'Students')}
@@ -1923,33 +1625,16 @@ const AdminReports = () => {
                       <UserGroupIcon className="w-5 h-5 text-indigo-600" />
                     </div>
                     <span className="truncate">
-                      {t(
-                        'កំណើនការចុះឈ្មោះក្នុងរយៈពេល ៦ ខែ',
-                        '6-Month Enrollment Growth'
-                      )}
+                      {t('កំណើនការចុះឈ្មោះក្នុងរយៈពេល ៦ ខែ', '6-Month Enrollment Growth')}
                     </span>
                   </h3>
                   <div className="h-64 sm:h-72">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={enrollmentTrendChartData}>
                         <defs>
-                          <linearGradient
-                            id="colorCount"
-                            x1="0"
-                            y1="0"
-                            x2="0"
-                            y2="1"
-                          >
-                            <stop
-                              offset="5%"
-                              stopColor="#6366F1"
-                              stopOpacity={0.5}
-                            />
-                            <stop
-                              offset="95%"
-                              stopColor="#6366F1"
-                              stopOpacity={0}
-                            />
+                          <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#6366F1" stopOpacity={0.5} />
+                            <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
                           </linearGradient>
                         </defs>
                         <CartesianGrid
@@ -1986,12 +1671,7 @@ const AdminReports = () => {
                           strokeWidth={3}
                           fillOpacity={1}
                           fill="url(#colorCount)"
-                          dot={{
-                            r: 4,
-                            fill: '#6366F1',
-                            strokeWidth: 2,
-                            stroke: '#fff',
-                          }}
+                          dot={{ r: 4, fill: '#6366F1', strokeWidth: 2, stroke: '#fff' }}
                           activeDot={{ r: 6 }}
                         />
                       </AreaChart>
@@ -2004,14 +1684,10 @@ const AdminReports = () => {
                 <div className="rep-table-bar px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 bg-white print:px-0 print:py-2 print:border-0">
                   <h3 className="rep-text-primary print-muol text-base sm:text-[18px] print:text-[12px] font-extrabold text-gray-900">
                     <span className="only-print hidden mr-1">២.</span>
-                    {t(
-                      'ព័ត៌មានលម្អិតតាមដេប៉ាតឺម៉ង់',
-                      'Department Breakdown Details'
-                    )}
+                    {t('ព័ត៌មានលម្អិតតាមដេប៉ាតឺម៉ង់', 'Department Breakdown Details')}
                   </h3>
                 </div>
 
-                {/* 💻 iPad, Desktop & Print Table */}
                 <div className="hidden md:block print:block overflow-x-auto">
                   <table className="min-w-full border-collapse">
                     <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
@@ -2036,10 +1712,7 @@ const AdminReports = () => {
                     <tbody className="rep-table-body bg-white">
                       {departmentChartData.length === 0 ? (
                         <tr>
-                          <td
-                            colSpan="5"
-                            className="px-6 py-10 text-center text-gray-400 font-bold"
-                          >
+                          <td colSpan="5" className="px-6 py-10 text-center text-gray-400 font-bold">
                             {t('មិនរកឃើញទិន្នន័យទេ', 'No records found')}
                           </td>
                         </tr>
@@ -2071,7 +1744,6 @@ const AdminReports = () => {
                   </table>
                 </div>
 
-                {/* 📱 Mobile Department Breakdown Cards */}
                 <div className="md:hidden no-print p-3.5 space-y-2.5 bg-gray-50/40">
                   {departmentChartData.length === 0 ? (
                     <p className="py-8 text-center text-gray-400 text-xs font-bold">
@@ -2083,11 +1755,9 @@ const AdminReports = () => {
                         key={`mob-ov-${dept.id || index}`}
                         className="rep-surface-card bg-white rounded-2xl border border-gray-200/80 p-3.5 shadow-2xs space-y-2.5"
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="rep-text-primary text-sm font-extrabold text-gray-900 truncate">
-                            {index + 1}. {dept.full_name}
-                          </span>
-                        </div>
+                        <span className="rep-text-primary text-sm font-extrabold text-gray-900 truncate block">
+                          {index + 1}. {dept.full_name}
+                        </span>
                         <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-100 dark:border-slate-700 text-center">
                           <div className="rep-stats-box bg-amber-50/60 rounded-xl p-2">
                             <p className="text-[10px] font-bold text-amber-600 uppercase">
@@ -2123,7 +1793,7 @@ const AdminReports = () => {
           )}
 
           {/* ================================================================= */}
-          {/* 📌 ផ្នែកទី ៨៖ ផ្ទាំងរបាយការណ៍ទី ២ - ការចុះឈ្មោះសិក្សា (ENROLLMENTS)  */}
+          {/* 📌 ផ្នែកទី ៨៖ ការចុះឈ្មោះសិក្សា (ENROLLMENTS TAB)                  */}
           {/* ================================================================= */}
           {activeTab === 'enrollments' && (
             <div className="space-y-5 sm:space-y-6">
@@ -2164,10 +1834,7 @@ const AdminReports = () => {
 
               <div className="only-print hidden mb-5">
                 <h3 className="print-muol text-[12px] text-slate-900 mb-2 leading-[1.8]">
-                  {t(
-                    '១. តារាងសង្ខេបស្ថិតិការចុះឈ្មោះសិក្សា',
-                    '1. Enrollment Summary'
-                  )}
+                  {t('១. តារាងសង្ខេបស្ថិតិការចុះឈ្មោះសិក្សា', '1. Enrollment Summary')}
                 </h3>
                 <table className="min-w-full border-collapse">
                   <thead>
@@ -2208,14 +1875,10 @@ const AdminReports = () => {
               <div className="rep-surface-card bg-white rounded-2xl sm:rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="only-print hidden mb-2">
                   <h3 className="print-muol text-[12px] text-slate-900 leading-[1.8]">
-                    {t(
-                      '២. បញ្ជីរាយនាមសិស្សចុះឈ្មោះសិក្សាលម្អិត',
-                      '2. Detailed Student Enrollment List'
-                    )}
+                    {t('២. បញ្ជីរាយនាមសិស្សចុះឈ្មោះសិក្សាលម្អិត', '2. Detailed Student Enrollment List')}
                   </h3>
                 </div>
 
-                {/* 💻 iPad, Desktop & Print Table */}
                 <div className="hidden md:block print:block overflow-x-auto">
                   <table className="min-w-full border-collapse">
                     <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
@@ -2244,22 +1907,14 @@ const AdminReports = () => {
                       {!Array.isArray(enrollmentData?.data) ||
                       enrollmentData.data.length === 0 ? (
                         <tr>
-                          <td
-                            colSpan="6"
-                            className="px-6 py-16 text-center text-gray-400 font-bold"
-                          >
-                            {t(
-                              'មិនរកឃើញទិន្នន័យចុះឈ្មោះទេ',
-                              'No enrollment records found'
-                            )}
+                          <td colSpan="6" className="px-6 py-16 text-center text-gray-400 font-bold">
+                            {t('មិនរកឃើញទិន្នន័យចុះឈ្មោះទេ', 'No enrollment records found')}
                           </td>
                         </tr>
                       ) : (
                         enrollmentData.data.map((item, idx) => {
                           const studentGender =
-                            item.student?.gender ||
-                            item.user?.gender ||
-                            item.gender;
+                            item.student?.gender || item.user?.gender || item.gender;
                           const isFemale = isFemaleGender(studentGender);
 
                           return (
@@ -2323,22 +1978,16 @@ const AdminReports = () => {
                   </table>
                 </div>
 
-                {/* 📱 Mobile Enrollment Cards */}
                 <div className="md:hidden no-print p-3.5 space-y-3 bg-gray-50/40">
                   {!Array.isArray(enrollmentData?.data) ||
                   enrollmentData.data.length === 0 ? (
                     <p className="py-10 text-center text-gray-400 text-xs font-bold">
-                      {t(
-                        'មិនរកឃើញទិន្នន័យចុះឈ្មោះទេ',
-                        'No enrollment records found'
-                      )}
+                      {t('មិនរកឃើញទិន្នន័យចុះឈ្មោះទេ', 'No enrollment records found')}
                     </p>
                   ) : (
                     enrollmentData.data.map((item, idx) => {
                       const studentGender =
-                        item.student?.gender ||
-                        item.user?.gender ||
-                        item.gender;
+                        item.student?.gender || item.user?.gender || item.gender;
                       const isFemale = isFemaleGender(studentGender);
 
                       return (
@@ -2402,16 +2051,13 @@ const AdminReports = () => {
                   )}
                 </div>
 
-                <Pagination
-                  meta={enrollmentMeta}
-                  onPageChange={setEnrollmentPage}
-                />
+                <Pagination meta={enrollmentMeta} onPageChange={setEnrollmentPage} />
               </div>
             </div>
           )}
 
           {/* ================================================================= */}
-          {/* 📌 ផ្នែកទី ៩៖ ផ្ទាំងរបាយការណ៍ទី ៣ - វត្តមានសិស្ស (ATTENDANCE TAB)   */}
+          {/* 📌 ផ្នែកទី ៩៖ វត្តមានសិស្ស (ATTENDANCE TAB)                         */}
           {/* ================================================================= */}
           {activeTab === 'attendance' && (
             <div className="space-y-5 sm:space-y-6">
@@ -2433,22 +2079,13 @@ const AdminReports = () => {
                         </div>
                         <p className="text-[11px] font-semibold text-blue-200/80 mt-1">
                           {attendanceStatsComputed.total > 0
-                            ? t(
-                                'គណនាពីវត្តមានសរុបទាំងអស់',
-                                'Calculated from all records'
-                              )
-                            : t(
-                                'មិនទាន់មានកំណត់ត្រាវត្តមាននៅឡើយទេ',
-                                'No attendance records yet'
-                              )}
+                            ? t('គណនាពីវត្តមានសរុបទាំងអស់', 'Calculated from all records')
+                            : t('មិនទាន់មានកំណត់ត្រាវត្តមាននៅឡើយទេ', 'No attendance records yet')}
                         </p>
                       </div>
 
                       <div className="relative w-20 h-20 shrink-0 flex items-center justify-center">
-                        <svg
-                          className="w-20 h-20 -rotate-90 transform"
-                          viewBox="0 0 76 76"
-                        >
+                        <svg className="w-20 h-20 -rotate-90 transform" viewBox="0 0 76 76">
                           <circle
                             cx="38"
                             cy="38"
@@ -2480,8 +2117,7 @@ const AdminReports = () => {
                         {t('កំណត់ត្រាសរុប', 'Total Records')}
                       </span>
                       <span className="font-black text-white bg-white/15 px-3.5 py-1 rounded-xl border border-white/15">
-                        {attendanceStatsComputed.total}{' '}
-                        {t('កំណត់ត្រា', 'records')}
+                        {attendanceStatsComputed.total} {t('កំណត់ត្រា', 'records')}
                       </span>
                     </div>
                   </div>
@@ -2513,9 +2149,7 @@ const AdminReports = () => {
                       <div className="rep-progress-track w-full h-1.5 bg-gray-100 rounded-full overflow-hidden mt-3">
                         <div
                           className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                          style={{
-                            width: `${attendanceStatsComputed.presentPct}%`,
-                          }}
+                          style={{ width: `${attendanceStatsComputed.presentPct}%` }}
                         />
                       </div>
                     </div>
@@ -2546,9 +2180,7 @@ const AdminReports = () => {
                       <div className="rep-progress-track w-full h-1.5 bg-gray-100 rounded-full overflow-hidden mt-3">
                         <div
                           className="h-full bg-rose-500 rounded-full transition-all duration-500"
-                          style={{
-                            width: `${attendanceStatsComputed.absentPct}%`,
-                          }}
+                          style={{ width: `${attendanceStatsComputed.absentPct}%` }}
                         />
                       </div>
                     </div>
@@ -2579,9 +2211,7 @@ const AdminReports = () => {
                       <div className="rep-progress-track w-full h-1.5 bg-gray-100 rounded-full overflow-hidden mt-3">
                         <div
                           className="h-full bg-blue-500 rounded-full transition-all duration-500"
-                          style={{
-                            width: `${attendanceStatsComputed.permissionPct}%`,
-                          }}
+                          style={{ width: `${attendanceStatsComputed.permissionPct}%` }}
                         />
                       </div>
                     </div>
@@ -2612,16 +2242,14 @@ const AdminReports = () => {
                       <div className="rep-progress-track w-full h-1.5 bg-gray-100 rounded-full overflow-hidden mt-3">
                         <div
                           className="h-full bg-amber-500 rounded-full transition-all duration-500"
-                          style={{
-                            width: `${attendanceStatsComputed.latePct}%`,
-                          }}
+                          style={{ width: `${attendanceStatsComputed.latePct}%` }}
                         />
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* ✅ តារាងរបាយការណ៍លម្អិតតាមមុខវិជ្ជា (Clean Table + លាក់លេខ 0 + Pagination) */}
+                {/* តារាងរបាយការណ៍លម្អិតតាមមុខវិជ្ជា (Clean Table + លាក់លេខ 0 + Pagination) */}
                 <div className="rep-surface-card bg-white rounded-2xl sm:rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
                   <div className="rep-table-bar px-4 sm:px-6 py-4 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
@@ -2648,7 +2276,6 @@ const AdminReports = () => {
                     </label>
                   </div>
 
-                  {/* 💻 Desktop & iPad Table */}
                   <div className="hidden md:block overflow-x-auto">
                     <table className="min-w-full border-collapse">
                       <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
@@ -2693,20 +2320,11 @@ const AdminReports = () => {
                           paginatedAttendanceCourses.map((item, index) => {
                             const safeRate = Number(item.total || 0) > 0 ? Number(item.rate ?? 0) : 0;
                             const rateColors = getRateColor(safeRate);
-                            const teacherName =
-                              item.teacher_name ||
-                              item.teacher?.name ||
-                              (item.teacher?.first_name
-                                ? `${item.teacher.last_name || ''} ${item.teacher.first_name}`.trim()
-                                : null) ||
-                              item.course?.teacher?.name ||
-                              (item.course?.teacher?.first_name
-                                ? `${item.course.teacher.last_name || ''} ${item.course.teacher.first_name}`.trim()
-                                : null) ||
-                              '—';
-
                             return (
-                              <tr key={item.course_id || index} className="rep-table-row hover:bg-blue-50/30 transition-colors">
+                              <tr
+                                key={item.course_id || index}
+                                className="rep-table-row hover:bg-blue-50/30 transition-colors"
+                              >
                                 <td className="px-5 py-3.5 whitespace-nowrap text-xs font-bold text-blue-600 font-mono">
                                   {item.course_code || '—'}
                                 </td>
@@ -2714,7 +2332,7 @@ const AdminReports = () => {
                                   {item.course_name || '—'}
                                 </td>
                                 <td className="rep-text-secondary px-5 py-3.5 whitespace-nowrap text-xs font-bold text-gray-600">
-                                  {teacherName}
+                                  {formatTeacherName(item)}
                                 </td>
                                 <td className="rep-text-primary px-4 py-3.5 whitespace-nowrap text-center text-sm font-black text-gray-800">
                                   {item.total || 0}
@@ -2752,7 +2370,6 @@ const AdminReports = () => {
                     </table>
                   </div>
 
-                  {/* 📱 Mobile Compact Cards */}
                   <div className="md:hidden p-3.5 space-y-2.5 bg-gray-50/40">
                     {paginatedAttendanceCourses.length === 0 ? (
                       <p className="py-10 text-center text-gray-400 text-xs font-bold">
@@ -2762,21 +2379,18 @@ const AdminReports = () => {
                       paginatedAttendanceCourses.map((item, index) => {
                         const safeRate = Number(item.total || 0) > 0 ? Number(item.rate ?? 0) : 0;
                         const rateColors = getRateColor(safeRate);
-                        const teacherName =
-                          item.teacher_name ||
-                          item.teacher?.name ||
-                          item.course?.teacher?.name ||
-                          '—';
-
                         return (
-                          <div key={`mob-att-${item.course_id || index}`} className="rep-surface-card bg-white p-3.5 rounded-2xl border border-gray-200/80 space-y-2.5">
+                          <div
+                            key={`mob-att-${item.course_id || index}`}
+                            className="rep-surface-card bg-white p-3.5 rounded-2xl border border-gray-200/80 space-y-2.5"
+                          >
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
                                 <h4 className="rep-text-primary text-sm font-extrabold text-gray-900 truncate">
                                   {item.course_name || '—'}
                                 </h4>
                                 <p className="rep-text-secondary text-xs text-gray-500 font-medium truncate">
-                                  {item.course_code || '—'} &bull; {teacherName}
+                                  {item.course_code || '—'} &bull; {formatTeacherName(item)}
                                 </p>
                               </div>
                               <span className={`text-sm font-black shrink-0 ${rateColors.text}`}>
@@ -2784,11 +2398,26 @@ const AdminReports = () => {
                               </span>
                             </div>
                             <div className="rep-stats-box grid grid-cols-5 gap-1 bg-gray-50/70 rounded-xl p-2 text-center text-xs">
-                              <div><p className="text-[9px] text-gray-400 font-bold">{t('សរុប', 'Tot')}</p><p className="rep-text-primary font-black">{item.total || 0}</p></div>
-                              <div><p className="text-[9px] text-emerald-500 font-bold">{t('វត្តមាន', 'Pre')}</p><p className="text-emerald-600 font-black">{item.present || 0}</p></div>
-                              <div><p className="text-[9px] text-rose-500 font-bold">{t('អវត្តមាន', 'Abs')}</p><p className="text-rose-600 font-black">{item.absent || 0}</p></div>
-                              <div><p className="text-[9px] text-blue-500 font-bold">{t('ច្បាប់', 'Per')}</p><p className="text-blue-600 font-black">{item.permission || 0}</p></div>
-                              <div><p className="text-[9px] text-amber-500 font-bold">{t('យឺត', 'Lat')}</p><p className="text-amber-600 font-black">{item.late || 0}</p></div>
+                              <div>
+                                <p className="text-[9px] text-gray-400 font-bold">{t('សរុប', 'Tot')}</p>
+                                <p className="rep-text-primary font-black">{item.total || 0}</p>
+                              </div>
+                              <div>
+                                <p className="text-[9px] text-emerald-500 font-bold">{t('វត្តមាន', 'Pre')}</p>
+                                <p className="text-emerald-600 font-black">{item.present || 0}</p>
+                              </div>
+                              <div>
+                                <p className="text-[9px] text-rose-500 font-bold">{t('អវត្តមាន', 'Abs')}</p>
+                                <p className="text-rose-600 font-black">{item.absent || 0}</p>
+                              </div>
+                              <div>
+                                <p className="text-[9px] text-blue-500 font-bold">{t('ច្បាប់', 'Per')}</p>
+                                <p className="text-blue-600 font-black">{item.permission || 0}</p>
+                              </div>
+                              <div>
+                                <p className="text-[9px] text-amber-500 font-bold">{t('យឺត', 'Lat')}</p>
+                                <p className="text-amber-600 font-black">{item.late || 0}</p>
+                              </div>
                             </div>
                           </div>
                         );
@@ -2810,10 +2439,7 @@ const AdminReports = () => {
               <div className="only-print hidden space-y-6">
                 <div>
                   <h3 className="print-muol text-[12px] text-slate-900 mb-2 leading-[1.8]">
-                    {t(
-                      '១. តារាងសង្ខេបស្ថិតិវត្តមានសិស្សសរុប',
-                      '1. Overall Attendance Summary'
-                    )}
+                    {t('១. តារាងសង្ខេបស្ថិតិវត្តមានសិស្សសរុប', '1. Overall Attendance Summary')}
                   </h3>
                   <table className="min-w-full border-collapse">
                     <thead>
@@ -2844,20 +2470,16 @@ const AdminReports = () => {
                           {attendanceStatsComputed.total}
                         </td>
                         <td className="text-center text-xs font-bold">
-                          {attendanceStatsComputed.present} (
-                          {attendanceStatsComputed.presentPct}%)
+                          {attendanceStatsComputed.present} ({attendanceStatsComputed.presentPct}%)
                         </td>
                         <td className="text-center text-xs font-bold">
-                          {attendanceStatsComputed.absent} (
-                          {attendanceStatsComputed.absentPct}%)
+                          {attendanceStatsComputed.absent} ({attendanceStatsComputed.absentPct}%)
                         </td>
                         <td className="text-center text-xs font-bold">
-                          {attendanceStatsComputed.permission} (
-                          {attendanceStatsComputed.permissionPct}%)
+                          {attendanceStatsComputed.permission} ({attendanceStatsComputed.permissionPct}%)
                         </td>
                         <td className="text-center text-xs font-bold">
-                          {attendanceStatsComputed.late} (
-                          {attendanceStatsComputed.latePct}%)
+                          {attendanceStatsComputed.late} ({attendanceStatsComputed.latePct}%)
                         </td>
                         <td className="text-center text-xs font-bold">
                           {attendanceStatsComputed.overallRate}%
@@ -2870,149 +2492,75 @@ const AdminReports = () => {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="print-muol text-[12px] text-slate-900 leading-[1.8]">
-                      {t(
-                        '២. តារាងរបាយការណ៍វត្តមានលម្អិតតាមមុខវិជ្ជា',
-                        '2. Detailed Attendance Breakdown by Course'
-                      )}
+                      {t('២. តារាងរបាយការណ៍វត្តមានលម្អិតតាមមុខវិជ្ជា', '2. Detailed Attendance Breakdown by Course')}
                     </h3>
                     <span className="print-siemreap text-xs font-bold text-slate-700">
-                      {t('សរុប៖', 'Total:')}{' '}
-                      {attendanceData.course_breakdown?.length || 0}{' '}
+                      {t('សរុប៖', 'Total:')} {filteredAttendanceCourses.length}{' '}
                       {t('មុខវិជ្ជា', 'Courses')}
                     </span>
                   </div>
                   <table className="min-w-full border-collapse">
                     <thead>
                       <tr>
-                        <th
-                          style={{ width: '5%' }}
-                          className="text-center text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '5%' }} className="text-center text-xs font-bold whitespace-nowrap">
                           {t('ល.រ', 'No')}
                         </th>
-                        <th
-                          style={{ width: '11%' }}
-                          className="text-center text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '11%' }} className="text-center text-xs font-bold whitespace-nowrap">
                           {t('កូដមុខវិជ្ជា', 'Code')}
                         </th>
-                        <th
-                          style={{ width: '30%' }}
-                          className="text-left text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '30%' }} className="text-left text-xs font-bold whitespace-nowrap">
                           {t('ឈ្មោះមុខវិជ្ជា', 'Course Name')}
                         </th>
-                        <th
-                          style={{ width: '22%' }}
-                          className="text-left text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '22%' }} className="text-left text-xs font-bold whitespace-nowrap">
                           {t('គ្រូបង្រៀន', 'Teacher')}
                         </th>
-                        <th
-                          style={{ width: '5%' }}
-                          className="text-center text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '5%' }} className="text-center text-xs font-bold whitespace-nowrap">
                           {t('សរុប', 'Total')}
                         </th>
-                        <th
-                          style={{ width: '5.5%' }}
-                          className="text-center text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '5.5%' }} className="text-center text-xs font-bold whitespace-nowrap">
                           {t('វត្តមាន', 'Present')}
                         </th>
-                        <th
-                          style={{ width: '6%' }}
-                          className="text-center text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '6%' }} className="text-center text-xs font-bold whitespace-nowrap">
                           {t('អវត្តមាន', 'Absent')}
                         </th>
-                        <th
-                          style={{ width: '5%' }}
-                          className="text-center text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '5%' }} className="text-center text-xs font-bold whitespace-nowrap">
                           {t('ច្បាប់', 'Perm')}
                         </th>
-                        <th
-                          style={{ width: '4.5%' }}
-                          className="text-center text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '4.5%' }} className="text-center text-xs font-bold whitespace-nowrap">
                           {t('យឺត', 'Late')}
                         </th>
-                        <th
-                          style={{ width: '6%' }}
-                          className="text-center text-xs font-bold whitespace-nowrap"
-                        >
+                        <th style={{ width: '6%' }} className="text-center text-xs font-bold whitespace-nowrap">
                           {t('អត្រា', 'Rate')}
                         </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {!Array.isArray(attendanceData?.course_breakdown) ||
-                      attendanceData.course_breakdown.length === 0 ? (
+                      {filteredAttendanceCourses.length === 0 ? (
                         <tr>
-                          <td
-                            colSpan="10"
-                            className="text-center py-6 text-xs font-bold text-slate-500"
-                          >
-                            {t(
-                              'មិនរកឃើញទិន្នន័យវត្តមានទេ',
-                              'No attendance records found'
-                            )}
+                          <td colSpan="10" className="text-center py-6 text-xs font-bold text-slate-500">
+                            {t('មិនរកឃើញទិន្នន័យវត្តមានទេ', 'No attendance records found')}
                           </td>
                         </tr>
                       ) : (
-                        attendanceData.course_breakdown.map((item, idx) => {
-                          const teacherName =
-                            item.teacher_name ||
-                            item.teacher?.name ||
-                            (item.teacher?.first_name
-                              ? `${item.teacher.first_name} ${
-                                  item.teacher.last_name || ''
-                                }`.trim()
-                              : null) ||
-                            item.course?.teacher?.name ||
-                            (item.course?.teacher?.first_name
-                              ? `${item.course.teacher.first_name} ${
-                                  item.course.teacher.last_name || ''
-                                }`.trim()
-                              : null) ||
-                            '—';
+                        filteredAttendanceCourses.map((item, idx) => {
                           const totalRec = Number(item.total || 0);
-                          const displayRate =
-                            totalRec > 0 ? `${item.rate ?? 0}%` : '0%';
-
+                          const displayRate = totalRec > 0 ? `${item.rate ?? 0}%` : '0%';
                           return (
                             <tr key={item.course_id || idx}>
-                              <td className="text-center text-xs font-bold whitespace-nowrap">
-                                {idx + 1}
-                              </td>
+                              <td className="text-center text-xs font-bold whitespace-nowrap">{idx + 1}</td>
                               <td className="text-center text-xs font-bold whitespace-nowrap">
                                 {item.course_code || '—'}
                               </td>
-                              <td className="text-left text-xs font-bold">
-                                {item.course_name || '—'}
-                              </td>
+                              <td className="text-left text-xs font-bold">{item.course_name || '—'}</td>
                               <td className="text-left text-xs font-normal whitespace-nowrap">
-                                {teacherName}
+                                {formatTeacherName(item)}
                               </td>
-                              <td className="text-center text-xs font-bold whitespace-nowrap">
-                                {totalRec}
-                              </td>
-                              <td className="text-center text-xs font-bold whitespace-nowrap">
-                                {item.present || 0}
-                              </td>
-                              <td className="text-center text-xs font-bold whitespace-nowrap">
-                                {item.absent || 0}
-                              </td>
-                              <td className="text-center text-xs font-bold whitespace-nowrap">
-                                {item.permission || 0}
-                              </td>
-                              <td className="text-center text-xs font-bold whitespace-nowrap">
-                                {item.late || 0}
-                              </td>
-                              <td className="text-center text-xs font-bold whitespace-nowrap">
-                                {displayRate}
-                              </td>
+                              <td className="text-center text-xs font-bold whitespace-nowrap">{totalRec}</td>
+                              <td className="text-center text-xs font-bold whitespace-nowrap">{item.present || 0}</td>
+                              <td className="text-center text-xs font-bold whitespace-nowrap">{item.absent || 0}</td>
+                              <td className="text-center text-xs font-bold whitespace-nowrap">{item.permission || 0}</td>
+                              <td className="text-center text-xs font-bold whitespace-nowrap">{item.late || 0}</td>
+                              <td className="text-center text-xs font-bold whitespace-nowrap">{displayRate}</td>
                             </tr>
                           );
                         })
@@ -3025,7 +2573,7 @@ const AdminReports = () => {
           )}
 
           {/* ================================================================= */}
-          {/* 📌 ផ្នែកទី ១០៖ ផ្ទាំងរបាយការណ៍ទី ៤ - លទ្ធផលសិក្សា និងពិន្ទុ (ACADEMIC) */}
+          {/* 📌 ផ្នែកទី ១០៖ លទ្ធផលសិក្សា និងពិន្ទុ (ACADEMIC TAB)               */}
           {/* ================================================================= */}
           {activeTab === 'academic' && (
             <div className="space-y-5 sm:space-y-6">
@@ -3059,18 +2607,14 @@ const AdminReports = () => {
                     {t('សិស្សប្រឡងជាប់ (≥ 50)', 'Passed Students (≥ 50)')}
                   </p>
                   <h3 className="text-2xl sm:text-3xl font-black text-indigo-900 mt-1.5 sm:mt-2">
-                    {academicSummaryComputed.passedCount} /{' '}
-                    {academicSummaryComputed.totalCount}
+                    {academicSummaryComputed.passedCount} / {academicSummaryComputed.totalCount}
                   </h3>
                 </div>
               </div>
 
               <div className="only-print hidden mb-5">
                 <h3 className="print-muol text-[12px] text-slate-900 mb-2 leading-[1.8]">
-                  {t(
-                    '១. តារាងសង្ខេបមធ្យមភាគពិន្ទុ និងលទ្ធផលសិក្សា',
-                    '1. Academic Performance Summary'
-                  )}
+                  {t('១. តារាងសង្ខេបមធ្យមភាគពិន្ទុ និងលទ្ធផលសិក្សា', '1. Academic Performance Summary')}
                 </h3>
                 <table className="min-w-full border-collapse">
                   <thead>
@@ -3091,18 +2635,13 @@ const AdminReports = () => {
                   </thead>
                   <tbody>
                     <tr>
-                      <td className="text-center text-xs font-bold">
-                        {academicSummaryComputed.assign20}
-                      </td>
-                      <td className="text-center text-xs font-bold">
-                        {academicSummaryComputed.quiz20}
-                      </td>
+                      <td className="text-center text-xs font-bold">{academicSummaryComputed.assign20}</td>
+                      <td className="text-center text-xs font-bold">{academicSummaryComputed.quiz20}</td>
                       <td className="text-center text-xs font-bold">
                         {academicSummaryComputed.final100} {t('ពិន្ទុ', 'pts')}
                       </td>
                       <td className="text-center text-xs font-bold">
-                        {academicSummaryComputed.passedCount} /{' '}
-                        {academicSummaryComputed.totalCount}
+                        {academicSummaryComputed.passedCount} / {academicSummaryComputed.totalCount}
                       </td>
                     </tr>
                   </tbody>
@@ -3130,18 +2669,8 @@ const AdminReports = () => {
                         vertical={false}
                         stroke="#F3F4F6"
                       />
-                      <XAxis
-                        dataKey="name"
-                        stroke="#6B7280"
-                        fontSize={11}
-                        fontWeight="bold"
-                      />
-                      <YAxis
-                        allowDecimals={false}
-                        stroke="#6B7280"
-                        fontSize={11}
-                        fontWeight="bold"
-                      />
+                      <XAxis dataKey="name" stroke="#6B7280" fontSize={11} fontWeight="bold" />
+                      <YAxis allowDecimals={false} stroke="#6B7280" fontSize={11} fontWeight="bold" />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: '#1E293B',
@@ -3169,14 +2698,10 @@ const AdminReports = () => {
                 <div className="rep-table-bar px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 bg-white print:px-0 print:py-2 print:border-0">
                   <h3 className="rep-text-primary print-muol text-base sm:text-[18px] print:text-[12px] font-extrabold text-gray-900">
                     <span className="only-print hidden mr-1">២.</span>
-                    {t(
-                      'បញ្ជីពិន្ទុ និងលទ្ធផលសិក្សាសិស្ស',
-                      'Detailed Student Scores & Results'
-                    )}
+                    {t('បញ្ជីពិន្ទុ និងលទ្ធផលសិក្សាសិស្ស', 'Detailed Student Scores & Results')}
                   </h3>
                 </div>
 
-                {/* 💻 iPad, Desktop & Print Table */}
                 <div className="hidden md:block print:block overflow-x-auto">
                   <table className="min-w-full border-collapse">
                     <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
@@ -3207,22 +2732,14 @@ const AdminReports = () => {
                     <tbody className="rep-table-body bg-white">
                       {enrichedAcademicRows.length === 0 ? (
                         <tr>
-                          <td
-                            colSpan="7"
-                            className="px-6 py-16 text-center text-gray-400 font-bold"
-                          >
-                            {t(
-                              'មិនរកឃើញទិន្នន័យពិន្ទុទេ',
-                              'No grade records found'
-                            )}
+                          <td colSpan="7" className="px-6 py-16 text-center text-gray-400 font-bold">
+                            {t('មិនរកឃើញទិន្នន័យពិន្ទុទេ', 'No grade records found')}
                           </td>
                         </tr>
                       ) : (
                         enrichedAcademicRows.map((g, idx) => {
-                          const { assignPts20, quizPts20, totalPoints, status } =
-                            g.computed;
-                          const studentGender =
-                            g.student?.gender || g.user?.gender || g.gender;
+                          const { assignPts20, quizPts20, totalPoints, status } = g.computed;
+                          const studentGender = g.student?.gender || g.user?.gender || g.gender;
                           const isFemale = isFemaleGender(studentGender);
 
                           return (
@@ -3294,7 +2811,6 @@ const AdminReports = () => {
                   </table>
                 </div>
 
-                {/* 📱 Mobile Academic Grade Cards */}
                 <div className="md:hidden no-print p-3.5 space-y-3 bg-gray-50/40">
                   {enrichedAcademicRows.length === 0 ? (
                     <p className="py-10 text-center text-gray-400 text-xs font-bold">
@@ -3302,10 +2818,8 @@ const AdminReports = () => {
                     </p>
                   ) : (
                     enrichedAcademicRows.map((g, idx) => {
-                      const { assignPts20, quizPts20, totalPoints, status } =
-                        g.computed;
-                      const studentGender =
-                        g.student?.gender || g.user?.gender || g.gender;
+                      const { assignPts20, quizPts20, totalPoints, status } = g.computed;
+                      const studentGender = g.student?.gender || g.user?.gender || g.gender;
                       const isFemale = isFemaleGender(studentGender);
 
                       return (
@@ -3396,9 +2910,7 @@ const AdminReports = () => {
           )}
         </div>
 
-        {/* ------------------------------------------------------------------ */}
-        {/* 10.5. កន្លែងចុះហត្ថលេខា និងត្រាខាងក្រោមពេលបោះពុម្ព (Official Print Footer) */}
-        {/* ------------------------------------------------------------------ */}
+        {/* 10.5. កន្លែងចុះហត្ថលេខា និងត្រាខាងក្រោមពេលបោះពុម្ព */}
         <div className="only-print hidden pt-4 mt-8">
           <div className="grid grid-cols-2 gap-8 text-center text-xs text-slate-900">
             <div>
@@ -3430,7 +2942,7 @@ const AdminReports = () => {
       </div>
 
       {/* ==================================================================== */}
-      {/* 📌 ផ្នែកទី ១១៖ CSS សម្រាប់កំណត់ទម្រង់យប់ (DARK MODE) និងទម្រង់បោះពុម្ព (PRINT) */}
+      {/* 📌 ផ្នែកទី ១១៖ CSS សម្រាប់ DARK MODE និង PRINT                        */}
       {/* ==================================================================== */}
       <style>{`
         .rep-table-row + .rep-table-row > td {
