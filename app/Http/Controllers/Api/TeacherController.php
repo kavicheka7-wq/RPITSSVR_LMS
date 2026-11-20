@@ -1461,7 +1461,19 @@ class TeacherController extends Controller
             $userId = auth()->id();
             $courseIds = $this->teacherCourseQuery()->pluck('id');
 
-            $query = Assignment::with(['course:id,course_code,course_name,department_id,teacher_id'])
+            $asgCols = [
+                'id', 'course_id', 'title', 'description', 'due_date',
+                'total_score', 'created_by', 'created_at', 'updated_at',
+            ];
+            if (Schema::hasColumn('assignments', 'file_path')) {
+                $asgCols[] = 'file_path';
+            }
+            if (Schema::hasColumn('assignments', 'original_filename')) {
+                $asgCols[] = 'original_filename';
+            }
+
+            $query = Assignment::select($asgCols)
+                ->with(['course:id,course_code,course_name,department_id,teacher_id'])
                 ->withCount('submissions')
                 ->where(function ($q) use ($courseIds, $userId) {
                     if ($courseIds->isNotEmpty()) {
@@ -1516,20 +1528,72 @@ class TeacherController extends Controller
         $validated = $request->validate([
             'course_id' => 'required|exists:courses,id',
             'title' => 'required|string|max:255',
-            'description' => 'required|string',
+            'description' => 'nullable|string',
             'due_date' => 'required|date',
             'total_score' => 'nullable|numeric|min:0',
+            'file' => 'nullable|file|max:20480',
         ]);
 
         $this->findAuthorizedCourse($validated['course_id']);
 
-        $assignment = DB::transaction(function () use ($validated) {
-            $validated['total_score'] = $validated['total_score'] ?? 20;
-            $validated['created_by'] = auth()->id();
+        try {
+            if (!Schema::hasColumn('assignments', 'file_path')) {
+                DB::statement('ALTER TABLE assignments ADD COLUMN file_path VARCHAR(500) NULL');
+            }
+            if (!Schema::hasColumn('assignments', 'original_filename')) {
+                DB::statement('ALTER TABLE assignments ADD COLUMN original_filename VARCHAR(255) NULL');
+            }
+            if (!Schema::hasColumn('assignments', 'file_data')) {
+                DB::statement('ALTER TABLE assignments ADD COLUMN file_data LONGTEXT NULL');
+            }
+        } catch (\Throwable $e) {
+        }
 
-            return Assignment::create($validated);
+        $filePath = null;
+        $originalName = null;
+        $fileDataBase64 = null;
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $filePath = $file->store('assignments', 'public');
+            $originalName = $file->getClientOriginalName();
+            $mime = $file->getMimeType() ?: 'application/octet-stream';
+            $realPath = $file->getRealPath() ?: $file->getPathname();
+            if ($realPath && file_exists($realPath)) {
+                $fileDataBase64 = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($realPath));
+            }
+        }
+
+        $assignment = DB::transaction(function () use ($validated, $filePath, $originalName, $fileDataBase64) {
+            $asg = Assignment::create([
+                'course_id' => $validated['course_id'],
+                'title' => trim($validated['title']),
+                'description' => trim((string) ($validated['description'] ?? '')),
+                'due_date' => $validated['due_date'],
+                'total_score' => $validated['total_score'] ?? 20,
+                'created_by' => auth()->id(),
+            ]);
+
+            $extra = [];
+            if ($filePath && Schema::hasColumn('assignments', 'file_path')) {
+                $extra['file_path'] = $filePath;
+            }
+            if ($originalName && Schema::hasColumn('assignments', 'original_filename')) {
+                $extra['original_filename'] = $originalName;
+            }
+            if ($fileDataBase64 && Schema::hasColumn('assignments', 'file_data')) {
+                $extra['file_data'] = $fileDataBase64;
+            }
+            if (!empty($extra)) {
+                DB::table('assignments')->where('id', $asg->id)->update($extra);
+                $asg->file_path = $filePath;
+                $asg->original_filename = $originalName;
+            }
+
+            return $asg;
         });
 
+        $assignment->makeHidden(['file_data']);
         Cache::forget('admin_overview_report');
         $this->clearTeacherDashboardCache();
 
@@ -1551,14 +1615,74 @@ class TeacherController extends Controller
             $validated = $request->validate([
                 'course_id' => 'required|exists:courses,id',
                 'title' => 'required|string|max:255',
-                'description' => 'required|string',
+                'description' => 'nullable|string',
                 'due_date' => 'required|date',
                 'total_score' => 'required|numeric|min:0',
+                'file' => 'nullable|file|max:20480',
+                'remove_file' => 'nullable|boolean',
             ]);
 
             $this->findAuthorizedCourse($validated['course_id']);
 
-            $assignment->update($validated);
+            try {
+                if (!Schema::hasColumn('assignments', 'file_path')) {
+                    DB::statement('ALTER TABLE assignments ADD COLUMN file_path VARCHAR(500) NULL');
+                }
+                if (!Schema::hasColumn('assignments', 'original_filename')) {
+                    DB::statement('ALTER TABLE assignments ADD COLUMN original_filename VARCHAR(255) NULL');
+                }
+                if (!Schema::hasColumn('assignments', 'file_data')) {
+                    DB::statement('ALTER TABLE assignments ADD COLUMN file_data LONGTEXT NULL');
+                }
+            } catch (\Throwable $e) {
+            }
+
+            $assignment->update([
+                'course_id' => $validated['course_id'],
+                'title' => trim($validated['title']),
+                'description' => trim((string) ($validated['description'] ?? '')),
+                'due_date' => $validated['due_date'],
+                'total_score' => $validated['total_score'],
+            ]);
+
+            if ($request->hasFile('file')) {
+                if (!empty($assignment->file_path) && !str_starts_with($assignment->file_path, 'http') && !str_starts_with($assignment->file_path, 'data:')) {
+                    Storage::disk('public')->delete($assignment->file_path);
+                }
+                $file = $request->file('file');
+                $filePath = $file->store('assignments', 'public');
+                $originalName = $file->getClientOriginalName();
+                $mime = $file->getMimeType() ?: 'application/octet-stream';
+                $realPath = $file->getRealPath() ?: $file->getPathname();
+                $fileDataBase64 = ($realPath && file_exists($realPath))
+                    ? 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($realPath))
+                    : null;
+
+                $extra = [];
+                if (Schema::hasColumn('assignments', 'file_path')) $extra['file_path'] = $filePath;
+                if (Schema::hasColumn('assignments', 'original_filename')) $extra['original_filename'] = $originalName;
+                if ($fileDataBase64 && Schema::hasColumn('assignments', 'file_data')) $extra['file_data'] = $fileDataBase64;
+                if (!empty($extra)) {
+                    DB::table('assignments')->where('id', $assignment->id)->update($extra);
+                    $assignment->file_path = $filePath;
+                    $assignment->original_filename = $originalName;
+                }
+            } elseif ($request->boolean('remove_file')) {
+                if (!empty($assignment->file_path) && !str_starts_with($assignment->file_path, 'http') && !str_starts_with($assignment->file_path, 'data:')) {
+                    Storage::disk('public')->delete($assignment->file_path);
+                }
+                $clearCols = [];
+                if (Schema::hasColumn('assignments', 'file_path')) $clearCols['file_path'] = null;
+                if (Schema::hasColumn('assignments', 'original_filename')) $clearCols['original_filename'] = null;
+                if (Schema::hasColumn('assignments', 'file_data')) $clearCols['file_data'] = null;
+                if (!empty($clearCols)) {
+                    DB::table('assignments')->where('id', $assignment->id)->update($clearCols);
+                    $assignment->file_path = null;
+                    $assignment->original_filename = null;
+                }
+            }
+
+            $assignment->makeHidden(['file_data']);
             $this->clearTeacherDashboardCache();
 
             return response()->json([
@@ -2188,7 +2312,7 @@ class TeacherController extends Controller
                 ->whereIn('course_id', $courseIds)
                 ->findOrFail($quizId);
 
-                $quiz->questions->each(function ($q) {
+            $quiz->questions->each(function ($q) {
                 $q->options->each(function ($opt) {
                     $opt->makeVisible(['is_correct']);
                 });

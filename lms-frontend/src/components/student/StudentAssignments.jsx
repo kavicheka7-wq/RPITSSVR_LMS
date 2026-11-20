@@ -447,13 +447,14 @@ const StudentAssignments = () => {
     }
   }, [searchParams, location.state]);
 
-  const getStorageUrl = useCallback((pathOrSub, submissionId = null) => {
+  // ✅ គាំទ្រទាំងឯកសារភ្ជាប់របស់គ្រូ (assignment_id) និងឯកសារដែលសិស្សផ្ញើ (submission_id)
+  const getStorageUrl = useCallback((pathOrSub, itemId = null, isAssignmentAttachment = false) => {
     const rawPath =
       typeof pathOrSub === 'object' && pathOrSub !== null
         ? pathOrSub.file_path || pathOrSub.file_url || ''
         : pathOrSub;
-    const resolvedSubId =
-      submissionId ||
+    const resolvedId =
+      itemId ||
       (typeof pathOrSub === 'object' && pathOrSub !== null
         ? pathOrSub.id
         : null);
@@ -476,9 +477,12 @@ const StudentAssignments = () => {
       'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
-    return `${backendBase}/api/download-file?path=${encodeURIComponent(
-      cleanPath
-    )}${resolvedSubId ? `&submission_id=${encodeURIComponent(resolvedSubId)}` : ''}`;
+    const idParam = resolvedId
+      ? isAssignmentAttachment
+        ? `&assignment_id=${encodeURIComponent(resolvedId)}`
+        : `&submission_id=${encodeURIComponent(resolvedId)}`
+      : '';
+    return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}${idParam}`;
   }, []);
 
   const fetchStudentCourses = useCallback(async () => {
@@ -536,7 +540,6 @@ const StudentAssignments = () => {
         }
       }
 
-      // ✅ ដំឡើង Cache TTL ពី 4s មក 30s ដើម្បីកាត់បន្ថយការបាញ់ API ជាន់គ្នាទៅ Server
       const now = Date.now();
       if (
         !forceRefresh &&
@@ -612,7 +615,6 @@ const StudentAssignments = () => {
     fetchStudentCourses();
   }, [fetchStudentCourses]);
 
-  // ✅ Auto-Sync រៀងរាល់ 60 វិនាទី + ឆែក Cooldown 20s ពេលចុចលើអេក្រង់ (កាត់បន្ថយបន្ទុក Hosting ៥ ដង)
   useEffect(() => {
     fetchAssignments(false);
 
@@ -1054,10 +1056,9 @@ const StudentAssignments = () => {
       {/* ================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
         
-        {/* ១.១. ប្រអប់ធំខាងឆ្វេង (7 Cols on lg, 8 Cols on xl) */}
+        {/* ១.១. ប្រអប់ធំខាងឆ្វេង */}
         <div className="lg:col-span-7 xl:col-span-8 relative overflow-hidden rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] bg-gradient-to-br from-blue-950 via-indigo-900 to-violet-950 p-5 sm:p-7 lg:p-8 text-white shadow-xl border border-indigo-500/30 flex flex-col justify-between">
           <div className="std-asg-grid-pattern absolute inset-0 opacity-15 pointer-events-none"></div>
-          {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
           <div className="hidden md:block absolute -top-24 -right-20 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none"></div>
           <div className="hidden md:block absolute -bottom-24 -left-20 w-72 h-72 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -1137,7 +1138,7 @@ const StudentAssignments = () => {
           </div>
         </div>
 
-        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ (5 Cols on lg, 4 Cols on xl) */}
+        {/* ១.២. ប្រអប់ពណ៌សខាងស្ដាំ */}
         <div className="lg:col-span-5 xl:col-span-4 std-asg-surface bg-white rounded-2xl sm:rounded-[1.75rem] lg:rounded-[2rem] p-5 sm:p-6 border border-gray-200/80 shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="space-y-3.5 sm:space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -1432,14 +1433,16 @@ const StudentAssignments = () => {
 
                     {teacherAttachmentPath && (
                       <a
-                        href={getStorageUrl(teacherAttachmentPath)}
+                        href={getStorageUrl(teacherAttachmentPath, assign.id, true)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        download
+                        download={assign.original_filename || true}
                         className="std-asg-badge-blue inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-extrabold transition-colors"
                       >
                         <DocumentTextIcon className="h-4 w-4 shrink-0" />
-                        <span>{t('ឯកសារលំហាត់គ្រូ', 'Assignment File')}</span>
+                        <span>
+                          {assign.original_filename || t('ឯកសារលំហាត់គ្រូ', 'Assignment File')}
+                        </span>
                       </a>
                     )}
                   </div>
@@ -1492,7 +1495,7 @@ const StudentAssignments = () => {
                           String(submission.file_path).startsWith('blob:')) && (
                           <div className="std-asg-divider pt-2 border-t border-gray-200/70 flex items-center justify-between gap-2">
                             <a
-                              href={getStorageUrl(submission, submission.id)}
+                              href={getStorageUrl(submission, submission.id, false)}
                               target="_blank"
                               rel="noopener noreferrer"
                               download
@@ -1589,7 +1592,7 @@ const StudentAssignments = () => {
       )}
 
       {/* ================================================================== */}
-      {/* 📌 5. SUBMISSION MODAL (Bottom Sheet on Phone, Centered on iPad/Desktop) */}
+      {/* 📌 5. SUBMISSION MODAL                                             */}
       {/* ================================================================== */}
       {submitModalOpen &&
         selectedAssignment &&

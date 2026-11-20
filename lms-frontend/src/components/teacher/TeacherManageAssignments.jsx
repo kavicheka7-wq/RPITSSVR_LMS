@@ -16,6 +16,8 @@ import {
   CalendarIcon,
   EyeIcon,
   ArrowDownTrayIcon,
+  ArrowUpTrayIcon,
+  PaperClipIcon,
   CheckCircleIcon,
   UserCircleIcon,
   DocumentCheckIcon,
@@ -46,7 +48,6 @@ const getSelectedShiftKey = (uid) => `cached_teacher_assignments_selected_shift_
 const getSubmissionsCacheKey = (uid, assignmentId) =>
   `cached_teacher_assignment_subs_v4_${uid}_${assignmentId}`;
 
-// ✅ Global Memory Cache បែងចែកតាម uid របស់គ្រូម្នាក់ៗ
 const ASSIGNMENTS_MEM_CACHE = {
   uid: null,
   assignments: null,
@@ -57,7 +58,6 @@ const ASSIGNMENTS_MEM_CACHE = {
   lastSyncedAt: 0,
 };
 
-// ✅ អនុគមន៍រត់ការងារធ្ងន់ៗនៅពេល Browser ទំនេរ ដើម្បីកុំឱ្យទាក់អេក្រង់
 const runWhenIdle = (fn, fallbackDelay = 300) => {
   if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
     window.requestIdleCallback(fn, { timeout: 1500 });
@@ -68,15 +68,13 @@ const runWhenIdle = (fn, fallbackDelay = 300) => {
 
 const readStorageJson = (key, fallback) => {
   try {
-    const raw =
-      sessionStorage.getItem(key) || localStorage.getItem(key);
+    const raw = sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 };
 
-// ✅ លុបទិន្នន័យធ្ងន់ៗចេញពីបញ្ជីសិស្សមុនពេល Save ចូល localStorage ការពារ QuotaExceededError
 const stripHeavyStudentsForCache = (list) => {
   if (!Array.isArray(list)) return [];
   return list.map((stu) => {
@@ -100,7 +98,6 @@ const stripHeavyStudentsForCache = (list) => {
   });
 };
 
-// ✅ លុប file_data និង Base64 ធំៗចេញពីបញ្ជីការដាក់កិច្ចការ (Submissions) មុនពេល Save ចូល localStorage
 const stripHeavySubmissionsForCache = (subsList) => {
   if (!Array.isArray(subsList)) return [];
   return subsList.map((sub) => {
@@ -135,15 +132,10 @@ const stripHeavySubmissionsForCache = (subsList) => {
   });
 };
 
-// ✅ អនុគមន៍ចាប់យកអត្តសញ្ញាណគ្រូឱ្យជាក់លាក់តាំងពីវិនាទីដំបូង (គាំទ្រទាំង sessionStorage និង localStorage)
 const resolveTeacherUid = (contextUser, contextTeacher) => {
   const target = contextUser || contextTeacher;
   if (target) {
-    const id =
-      target.id ||
-      target.user_id ||
-      target.teacher?.id ||
-      target.email;
+    const id = target.id || target.user_id || target.teacher?.id || target.email;
     if (id) return String(id);
   }
   try {
@@ -164,7 +156,6 @@ const resolveTeacherUid = (contextUser, contextTeacher) => {
   return 'default_teacher';
 };
 
-// ✅ អនុគមន៍កំណត់ប្រភេទវេនសិក្សារបស់សិស្ស (ចន្ទ-សុក្រ vs សៅរ៍-អាទិត្យ)
 const normalizeShiftKey = (shiftVal) => {
   const s = (shiftVal || '').toString().trim().toLowerCase();
   if (
@@ -188,10 +179,6 @@ const normalizeShiftKey = (shiftVal) => {
   }
   return s ? shiftVal : 'Monday-Friday';
 };
-
-// ============================================================================
-// 📌 អនុគមន៍ចាប់យកថ្ងៃខែ និងម៉ោងពិតប្រាកដ ១០០% (ការពារកុំឱ្យលោតខុស +7 ម៉ោងដោយសារ UTC 'Z')
-// ============================================================================
 
 const extractExactDateTimeParts = (rawVal) => {
   if (!rawVal) return null;
@@ -260,7 +247,6 @@ const toComparableTimeMs = (val) => {
   return new Date(p.year, p.month - 1, p.day, p.hour, p.minute, 0, 0).getTime();
 };
 
-// ✅ អនុគមន៍ស្រង់យកលេខឆ្នាំសិក្សា (1, 2, 3, 4) យ៉ាងជាក់លាក់
 const detectStudentYearNum = (student) => {
   if (!student) return null;
 
@@ -297,7 +283,6 @@ const detectStudentYearNum = (student) => {
   return null;
 };
 
-// អនុគមន៍ទាញយកបញ្ជី Course IDs ដែលសិស្សបានចុះឈ្មោះរៀន
 const extractStudentCourseIds = (student) => {
   if (!student) return [];
   const ids = new Set();
@@ -324,15 +309,12 @@ const extractStudentCourseIds = (student) => {
   return Array.from(ids);
 };
 
-// ✅ អនុគមន៍ត្រួតពិនិត្យយ៉ាងជាក់លាក់ថាតើសិស្សម្នាក់ពិតជាបានចុះឈ្មោះក្នុងមុខវិជ្ជា (courseId) មែនឬអត់
 const isStudentEnrolledInCourse = (student, courseId, courseMap) => {
   if (!student || !courseId) return false;
   const cid = String(courseId);
 
   const directCourseIds = extractStudentCourseIds(student);
-  if (directCourseIds.includes(cid)) {
-    return true;
-  }
+  if (directCourseIds.includes(cid)) return true;
 
   const mappedIds = courseMap?.[cid];
   if (Array.isArray(mappedIds)) {
@@ -348,7 +330,6 @@ const isStudentEnrolledInCourse = (student, courseId, courseMap) => {
   return false;
 };
 
-// ✅ អនុគមន៍បញ្ជូនសារជូនដំណឹងទៅកាន់រូបកណ្ដឹង (NotificationBell) លើ Navbar
 const pushLocalNotification = (notif) => {
   try {
     const userObjStr =
@@ -409,17 +390,12 @@ export default function TeacherManageAssignments() {
   const initialRouteCourseId =
     searchParams.get('course_id') || location.state?.courseId || '';
 
-  // ✅ កំណត់អត្តសញ្ញាណគ្រូបច្ចុប្បន្នឱ្យមានស្ថិរភាពតាំងពីវិនាទីដំបូង
   const currentTeacherId = useMemo(
     () => resolveTeacherUid(user, teacher),
     [user, teacher]
   );
 
-  // បើប្ដូរគណនីគ្រូ ឱ្យសម្អាត RAM Cache ចាស់ចោលភ្លាមៗ
-  if (
-    ASSIGNMENTS_MEM_CACHE.uid &&
-    ASSIGNMENTS_MEM_CACHE.uid !== currentTeacherId
-  ) {
+  if (ASSIGNMENTS_MEM_CACHE.uid && ASSIGNMENTS_MEM_CACHE.uid !== currentTeacherId) {
     ASSIGNMENTS_MEM_CACHE.assignments = null;
     ASSIGNMENTS_MEM_CACHE.courses = null;
     ASSIGNMENTS_MEM_CACHE.allStudents = null;
@@ -429,15 +405,11 @@ export default function TeacherManageAssignments() {
   }
   ASSIGNMENTS_MEM_CACHE.uid = currentTeacherId;
 
-  // ✅ ១. អានពី Cache ភ្លាមៗក្នុង 0 វិនាទី
   const [assignments, setAssignments] = useState(() => {
     if (Array.isArray(ASSIGNMENTS_MEM_CACHE.assignments)) {
       return ASSIGNMENTS_MEM_CACHE.assignments;
     }
-    const fromUserKey = readStorageJson(
-      getAssignmentsCacheKey(currentTeacherId),
-      null
-    );
+    const fromUserKey = readStorageJson(getAssignmentsCacheKey(currentTeacherId), null);
     if (Array.isArray(fromUserKey)) {
       ASSIGNMENTS_MEM_CACHE.assignments = fromUserKey;
       return fromUserKey;
@@ -446,8 +418,7 @@ export default function TeacherManageAssignments() {
   });
 
   const [courses, setCourses] = useState(() => {
-    if (Array.isArray(ASSIGNMENTS_MEM_CACHE.courses))
-      return ASSIGNMENTS_MEM_CACHE.courses;
+    if (Array.isArray(ASSIGNMENTS_MEM_CACHE.courses)) return ASSIGNMENTS_MEM_CACHE.courses;
     const cached =
       readStorageJson(getCoursesCacheKey(currentTeacherId), null) ||
       readStorageJson(CACHE_KEY_SHARED_COURSES, []);
@@ -476,17 +447,10 @@ export default function TeacherManageAssignments() {
 
   const [searchTerm, setSearchTerm] = useState('');
 
-  // ✅ កាតឆ្នាំសិក្សា៖ 'all' | '1' | '2' | '3' | '4'
   const [selectedYear, setSelectedYear] = useState(() => {
     if (initialRouteCourseId) {
-      const enrolledInRouteCourse = (
-        ASSIGNMENTS_MEM_CACHE.allStudents || []
-      ).find((s) =>
-        isStudentEnrolledInCourse(
-          s,
-          initialRouteCourseId,
-          ASSIGNMENTS_MEM_CACHE.courseMap
-        )
+      const enrolledInRouteCourse = (ASSIGNMENTS_MEM_CACHE.allStudents || []).find((s) =>
+        isStudentEnrolledInCourse(s, initialRouteCourseId, ASSIGNMENTS_MEM_CACHE.courseMap)
       );
       const detectedY = detectStudentYearNum(enrolledInRouteCourse);
       if (detectedY) return detectedY;
@@ -498,12 +462,10 @@ export default function TeacherManageAssignments() {
     }
   });
 
-  // ✅ មុខវិជ្ជាដែលបានជ្រើសរើស
   const [selectedCourse, setSelectedCourse] = useState(() => {
     if (initialRouteCourseId) return String(initialRouteCourseId);
     try {
-      const savedYear =
-        sessionStorage.getItem(getSelectedYearKey(currentTeacherId)) || 'all';
+      const savedYear = sessionStorage.getItem(getSelectedYearKey(currentTeacherId)) || 'all';
       if (savedYear === 'all') return '';
       return sessionStorage.getItem(getSelectedCourseKey(currentTeacherId)) || '';
     } catch {
@@ -511,7 +473,6 @@ export default function TeacherManageAssignments() {
     }
   });
 
-  // ✅ វេនសិក្សាដែលបានជ្រើសរើស៖ 'all' | 'Monday-Friday' | 'Saturday-Sunday'
   const [selectedShift, setSelectedShift] = useState(() => {
     try {
       return sessionStorage.getItem(getSelectedShiftKey(currentTeacherId)) || 'all';
@@ -526,6 +487,11 @@ export default function TeacherManageAssignments() {
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // ✅ ស្ថានភាពសម្រាប់ឯកសារភ្ជាប់កិច្ចការ (PDF / Word / Excel / PPT / Image / ZIP)
+  const [assignmentFile, setAssignmentFile] = useState(null);
+  const [existingFileName, setExistingFileName] = useState('');
+  const [removeExistingFile, setRemoveExistingFile] = useState(false);
+
   // Submissions Modal State
   const [showSubmissionsModal, setShowSubmissionsModal] = useState(false);
   const [viewingAssignment, setViewingAssignment] = useState(null);
@@ -535,7 +501,6 @@ export default function TeacherManageAssignments() {
   const [submissionShiftFilter, setSubmissionShiftFilter] = useState('all');
   const [gradingData, setGradingData] = useState({});
 
-  // Form state (កំណត់ពិន្ទុពេញលំនាំដើមនៃកិច្ចការស្មើ 20 ពិន្ទុ ឱ្យត្រូវតាមកិច្ចការ 20%)
   const [formData, setFormData] = useState({
     course_id: '',
     title: '',
@@ -552,9 +517,7 @@ export default function TeacherManageAssignments() {
         isStudentEnrolledInCourse(s, cid, courseMap)
       );
       const detectedY = detectStudentYearNum(enrolledStudent);
-      if (detectedY) {
-        setSelectedYear(detectedY);
-      }
+      if (detectedY) setSelectedYear(detectedY);
     }
   }, [initialRouteCourseId, allStudents, courseMap]);
 
@@ -588,22 +551,10 @@ export default function TeacherManageAssignments() {
   useEffect(() => {
     let isMounted = true;
 
-    const cachedAsg = readStorageJson(
-      getAssignmentsCacheKey(currentTeacherId),
-      null
-    );
-    const cachedCrs = readStorageJson(
-      getCoursesCacheKey(currentTeacherId),
-      null
-    );
-    const cachedStd = readStorageJson(
-      getStudentsCacheKey(currentTeacherId),
-      null
-    );
-    const cachedMap = readStorageJson(
-      getCourseMapCacheKey(currentTeacherId),
-      null
-    );
+    const cachedAsg = readStorageJson(getAssignmentsCacheKey(currentTeacherId), null);
+    const cachedCrs = readStorageJson(getCoursesCacheKey(currentTeacherId), null);
+    const cachedStd = readStorageJson(getStudentsCacheKey(currentTeacherId), null);
+    const cachedMap = readStorageJson(getCourseMapCacheKey(currentTeacherId), null);
 
     if (Array.isArray(cachedAsg) && cachedAsg.length > 0) {
       setAssignments(cachedAsg);
@@ -634,7 +585,6 @@ export default function TeacherManageAssignments() {
       return;
     }
 
-    // ១. ទាញបញ្ជីកិច្ចការមុនគេ
     api
       .get('/teacher/assignments')
       .then((asgRes) => {
@@ -643,23 +593,18 @@ export default function TeacherManageAssignments() {
         const validAssignments = Array.isArray(rawAsg) ? rawAsg : [];
         setAssignments(validAssignments);
         ASSIGNMENTS_MEM_CACHE.assignments = validAssignments;
-        if (validAssignments.length > 0) {
-          ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
-        }
+        if (validAssignments.length > 0) ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
         runWhenIdle(() => {
           try {
             const str = JSON.stringify(validAssignments);
             sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
             localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
             localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-          } catch (e) {}
+          } catch {}
         });
       })
-      .catch((error) => {
-        console.error('Error syncing assignments data:', error);
-      });
+      .catch((error) => console.error('Error syncing assignments data:', error));
 
-    // ២. ទាញមុខវិជ្ជានៅផ្ទៃខាងក្រោយដោយឯករាជ្យ
     api
       .get('/teacher/courses')
       .then((crsRes) => {
@@ -675,13 +620,12 @@ export default function TeacherManageAssignments() {
               sessionStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
               localStorage.setItem(getCoursesCacheKey(currentTeacherId), str);
               localStorage.setItem(CACHE_KEY_SHARED_COURSES, str);
-            } catch (e) {}
+            } catch {}
           });
         }
       })
       .catch(() => {});
 
-    // ៣. ទាញបញ្ជីសិស្សនៅផ្ទៃខាងក្រោយដោយឯករាជ្យ
     if (
       !Array.isArray(ASSIGNMENTS_MEM_CACHE.allStudents) ||
       ASSIGNMENTS_MEM_CACHE.allStudents.length === 0
@@ -692,27 +636,16 @@ export default function TeacherManageAssignments() {
           if (!isMounted || stdRes.data?.error_debug) return;
           const rawStd = stdRes.data?.data ?? stdRes.data ?? [];
           const validStudents = Array.isArray(rawStd) ? rawStd : [];
-          if (
-            validStudents.length > 0 ||
-            !ASSIGNMENTS_MEM_CACHE.allStudents?.length
-          ) {
+          if (validStudents.length > 0 || !ASSIGNMENTS_MEM_CACHE.allStudents?.length) {
             setAllStudents(validStudents);
             ASSIGNMENTS_MEM_CACHE.allStudents = validStudents;
             runWhenIdle(() => {
               try {
-                const slimStr = JSON.stringify(
-                  stripHeavyStudentsForCache(validStudents)
-                );
-                sessionStorage.setItem(
-                  getStudentsCacheKey(currentTeacherId),
-                  slimStr
-                );
-                localStorage.setItem(
-                  getStudentsCacheKey(currentTeacherId),
-                  slimStr
-                );
+                const slimStr = JSON.stringify(stripHeavyStudentsForCache(validStudents));
+                sessionStorage.setItem(getStudentsCacheKey(currentTeacherId), slimStr);
+                localStorage.setItem(getStudentsCacheKey(currentTeacherId), slimStr);
                 localStorage.setItem(CACHE_KEY_SHARED_STUDENTS, slimStr);
-              } catch (e) {}
+              } catch {}
             });
           }
 
@@ -722,16 +655,10 @@ export default function TeacherManageAssignments() {
             runWhenIdle(() => {
               try {
                 const mapStr = JSON.stringify(stdRes.data.course_students_map);
-                sessionStorage.setItem(
-                  getCourseMapCacheKey(currentTeacherId),
-                  mapStr
-                );
-                localStorage.setItem(
-                  getCourseMapCacheKey(currentTeacherId),
-                  mapStr
-                );
+                sessionStorage.setItem(getCourseMapCacheKey(currentTeacherId), mapStr);
+                localStorage.setItem(getCourseMapCacheKey(currentTeacherId), mapStr);
                 localStorage.setItem(CACHE_KEY_SHARED_MAP, mapStr);
-              } catch (e) {}
+              } catch {}
             });
           }
         })
@@ -748,21 +675,17 @@ export default function TeacherManageAssignments() {
       const response = await api.get('/teacher/assignments');
       if (response.data?.error_debug) return;
       const assignmentsData = response.data?.data ?? response.data ?? [];
-      const validAssignments = Array.isArray(assignmentsData)
-        ? assignmentsData
-        : [];
+      const validAssignments = Array.isArray(assignmentsData) ? assignmentsData : [];
       setAssignments(validAssignments);
       ASSIGNMENTS_MEM_CACHE.assignments = validAssignments;
-      if (validAssignments.length > 0) {
-        ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
-      }
+      if (validAssignments.length > 0) ASSIGNMENTS_MEM_CACHE.lastSyncedAt = Date.now();
       runWhenIdle(() => {
         try {
           const str = JSON.stringify(validAssignments);
           sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
           localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
           localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-        } catch (e) {}
+        } catch {}
       });
     } catch (error) {
       console.error('Error fetching assignments:', error);
@@ -770,21 +693,9 @@ export default function TeacherManageAssignments() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា (Primary Year តែមួយគត់) និងវេនសិក្សារបស់មុខវិជ្ជា
+  // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា និងវេនសិក្សា
   // ============================================================================
-  const isSpecificShiftSelected =
-    selectedShift !== 'all' && selectedShift !== '';
-
-  const getYearTextLabel = useCallback(
-    (yearNum) => {
-      if (yearNum === '1') return t('ឆ្នាំទី១', 'Year 1');
-      if (yearNum === '2') return t('ឆ្នាំទី២', 'Year 2');
-      if (yearNum === '3') return t('ឆ្នាំទី៣', 'Year 3');
-      if (yearNum === '4') return t('ឆ្នាំទី៤', 'Year 4');
-      return '';
-    },
-    [t]
-  );
+  const isSpecificShiftSelected = selectedShift !== 'all' && selectedShift !== '';
 
   const getStudyShiftLabel = (shift) => {
     const norm = normalizeShiftKey(shift);
@@ -798,15 +709,12 @@ export default function TeacherManageAssignments() {
     return norm || shift || '—';
   };
 
-  // ✅ គណនាឆ្នាំគោលតែមួយគត់ (Primary Year) និងវេនសិក្សា សម្រាប់មុខវិជ្ជានីមួយៗ (ព្រមទាំងស្រង់ពី assignment.course ជា Fallback)
   const enrichedCourses = useMemo(() => {
     const courseById = new Map();
 
     if (Array.isArray(courses)) {
       courses.forEach((c) => {
-        if (c && c.id != null) {
-          courseById.set(String(c.id), c);
-        }
+        if (c && c.id != null) courseById.set(String(c.id), c);
       });
     }
 
@@ -814,9 +722,7 @@ export default function TeacherManageAssignments() {
       assignments.forEach((asg) => {
         if (asg?.course && asg.course.id != null) {
           const cid = String(asg.course.id);
-          if (!courseById.has(cid)) {
-            courseById.set(cid, asg.course);
-          }
+          if (!courseById.has(cid)) courseById.set(cid, asg.course);
         }
       });
     }
@@ -832,29 +738,21 @@ export default function TeacherManageAssignments() {
 
       enrolledList.forEach((s) => {
         const y = detectStudentYearNum(s);
-        if (y) {
-          yearFreq[y] = (yearFreq[y] || 0) + 1;
-        }
+        if (y) yearFreq[y] = (yearFreq[y] || 0) + 1;
         const normShift = normalizeShiftKey(s.study_shift);
-        if (normShift) {
-          shiftsSet.add(normShift);
-        }
+        if (normShift) shiftsSet.add(normShift);
       });
 
-      // ✅ ទី១៖ ទាញយកឆ្នាំសិក្សាពីឈ្មោះ ឬកូដមុខវិជ្ជាមុនគេ (ឧទាហរណ៍៖ "Y1" ឬ "ឆ្នាំទី១")
       let primaryYear = detectStudentYearNum({
         batch_year: `${course.course_name || ''} ${course.course_code || ''} ${
           course.description || ''
         } ${course.year || ''}`,
       });
 
-      // ✅ ទី២៖ បើមុខវិជ្ជាគ្មានបញ្ជាក់ឆ្នាំទេ យកឆ្នាំដែលមានសិស្សចុះឈ្មោះរៀនច្រើនជាងគេបំផុត
       if (!primaryYear) {
         const sortedYears = Object.keys(yearFreq);
         if (sortedYears.length > 0) {
-          primaryYear = sortedYears.reduce((a, b) =>
-            yearFreq[a] >= yearFreq[b] ? a : b
-          );
+          primaryYear = sortedYears.reduce((a, b) => (yearFreq[a] >= yearFreq[b] ? a : b));
         } else {
           primaryYear = '1';
         }
@@ -886,50 +784,39 @@ export default function TeacherManageAssignments() {
     });
   }, [courses, assignments, allStudents, courseMap]);
 
-  // ✅ អនុគមន៍ពិនិត្យថាតើកិច្ចការមួយត្រូវនឹងវេនសិក្សាដែលបានជ្រើសរើសឬអត់
   const doesAssignmentHaveShift = useCallback(
     (assignment, targetShiftKey, matchedCourseObj) => {
       if (!targetShiftKey || targetShiftKey === 'all') return true;
       const cid = String(assignment?.course_id || '');
-
       const enrolledInCourse = (allStudents || []).filter((s) =>
         isStudentEnrolledInCourse(s, cid, courseMap)
       );
-
       if (enrolledInCourse.length > 0) {
         return enrolledInCourse.some(
           (s) => normalizeShiftKey(s.study_shift) === targetShiftKey
         );
       }
-
       const courseShifts = matchedCourseObj?.shiftsList || ['Monday-Friday'];
       return courseShifts.includes(targetShiftKey);
     },
     [allStudents, courseMap]
   );
 
-  // ✅ អនុគមន៍ទាញយកមុខវិជ្ជាសម្រាប់ឆ្នាំណាមួយជាក់លាក់ (តាម Primary Year តែមួយគត់)
   const getCoursesForYearKey = useCallback(
     (yearKey) => {
       if (!yearKey || yearKey === 'all') return enrichedCourses;
       const targetYear = String(yearKey);
-
-      const matched = enrichedCourses.filter(
-        (course) => String(course.primaryYear) === targetYear
-      );
-
+      const matched = enrichedCourses.filter((course) => String(course.primaryYear) === targetYear);
       return matched.length > 0 ? matched : enrichedCourses;
     },
     [enrichedCourses]
   );
 
-  // ✅ ច្រោះមុខវិជ្ជាតាមឆ្នាំសិក្សាដែលបានជ្រើសរើសលើកាត
   const visibleCoursesForSelectedYear = useMemo(() => {
     if (selectedYear === 'all' || !selectedYear) return [];
     return getCoursesForYearKey(selectedYear);
   }, [getCoursesForYearKey, selectedYear]);
 
-  // ✅ ច្រោះមុខវិជ្ជាសម្រាប់បង្ហាញក្នុង Modal
   const modalAvailableCourses = useMemo(() => {
     if (selectedYear !== 'all' && selectedYear !== '') {
       const yearCourses = getCoursesForYearKey(selectedYear);
@@ -959,16 +846,13 @@ export default function TeacherManageAssignments() {
     return enrichedCourses;
   }, [selectedYear, editingAssignment, enrichedCourses, getCoursesForYearKey]);
 
-  // ✅ គណនាចំនួនកិច្ចការសរុប និងតាមឆ្នាំសិក្សា (ឆ្នាំទី១ ដល់ ឆ្នាំទី៤) ដោយមិនឱ្យស្ទួនកាតដាច់ខាត
   const assignmentYearCounts = useMemo(() => {
     const counts = { all: 0, '1': 0, '2': 0, '3': 0, '4': 0 };
     if (!Array.isArray(assignments)) return counts;
 
     counts.all = assignments.length;
     assignments.forEach((asg) => {
-      const matchedCourse = enrichedCourses.find(
-        (c) => String(c.id) === String(asg.course_id)
-      );
+      const matchedCourse = enrichedCourses.find((c) => String(c.id) === String(asg.course_id));
       const py = matchedCourse?.primaryYear
         ? String(matchedCourse.primaryYear)
         : detectStudentYearNum({
@@ -977,27 +861,19 @@ export default function TeacherManageAssignments() {
             } ${asg.title || ''}`,
           }) || '1';
 
-      if (counts[py] !== undefined) {
-        counts[py] += 1;
-      } else {
-        counts['1'] += 1;
-      }
+      if (counts[py] !== undefined) counts[py] += 1;
+      else counts['1'] += 1;
     });
     return counts;
   }, [assignments, enrichedCourses]);
 
   const activeCourseObj = useMemo(() => {
     if (selectedYear === 'all' || !selectedCourse) return null;
-    return (
-      enrichedCourses.find((c) => String(c.id) === String(selectedCourse)) ||
-      null
-    );
+    return enrichedCourses.find((c) => String(c.id) === String(selectedCourse)) || null;
   }, [selectedYear, selectedCourse, enrichedCourses]);
 
-  // ✅ ច្រោះកិច្ចការតាមឆ្នាំសិក្សា (Primary Year តែមួយគត់) និងមុខវិជ្ជា
   const assignmentsByYearAndCourse = useMemo(() => {
     if (!Array.isArray(assignments)) return [];
-
     return assignments.filter((assignment) => {
       const matchedCourse = enrichedCourses.find(
         (c) => String(c.id) === String(assignment.course_id)
@@ -1012,9 +888,7 @@ export default function TeacherManageAssignments() {
               } ${assignment.title || ''}`,
             }) || '1';
 
-        if (String(asgPrimaryYear) !== String(selectedYear)) {
-          return false;
-        }
+        if (String(asgPrimaryYear) !== String(selectedYear)) return false;
       }
 
       if (
@@ -1029,23 +903,14 @@ export default function TeacherManageAssignments() {
     });
   }, [assignments, enrichedCourses, selectedYear, selectedCourse]);
 
-  // ✅ គណនាចំនួនកិច្ចការតាមវេនសិក្សា (គ្រប់វេនសិក្សា, ចន្ទ-សុក្រ, សៅរ៍-អាទិត្យ)
   const shiftCounts = useMemo(() => {
     let monFri = 0;
     let satSun = 0;
-
     assignmentsByYearAndCourse.forEach((asg) => {
-      const matchedCourse = enrichedCourses.find(
-        (c) => String(c.id) === String(asg.course_id)
-      );
-      if (doesAssignmentHaveShift(asg, 'Monday-Friday', matchedCourse)) {
-        monFri += 1;
-      }
-      if (doesAssignmentHaveShift(asg, 'Saturday-Sunday', matchedCourse)) {
-        satSun += 1;
-      }
+      const matchedCourse = enrichedCourses.find((c) => String(c.id) === String(asg.course_id));
+      if (doesAssignmentHaveShift(asg, 'Monday-Friday', matchedCourse)) monFri += 1;
+      if (doesAssignmentHaveShift(asg, 'Saturday-Sunday', matchedCourse)) satSun += 1;
     });
-
     return {
       all: assignmentsByYearAndCourse.length,
       'Monday-Friday': monFri,
@@ -1053,34 +918,21 @@ export default function TeacherManageAssignments() {
     };
   }, [assignmentsByYearAndCourse, enrichedCourses, doesAssignmentHaveShift]);
 
-  // ✅ ច្រោះបញ្ជីកិច្ចការចុងក្រោយតាមវេនសិក្សា និងតាមពាក្យស្វែងរក
   const filteredAssignments = useMemo(() => {
     const search = searchTerm.toLowerCase().trim();
-
     return assignmentsByYearAndCourse.filter((assignment) => {
       const matchedCourse = enrichedCourses.find(
         (c) => String(c.id) === String(assignment.course_id)
       );
-
-      if (isSpecificShiftSelected) {
-        if (!doesAssignmentHaveShift(assignment, selectedShift, matchedCourse)) {
-          return false;
-        }
+      if (isSpecificShiftSelected && !doesAssignmentHaveShift(assignment, selectedShift, matchedCourse)) {
+        return false;
       }
-
       if (!search) return true;
       const titleMatch = (assignment.title || '').toLowerCase().includes(search);
-      const descMatch = (assignment.description || '')
+      const descMatch = (assignment.description || '').toLowerCase().includes(search);
+      const courseMatch = (assignment.course?.course_name || matchedCourse?.course_name || '')
         .toLowerCase()
         .includes(search);
-      const courseMatch = (
-        assignment.course?.course_name ||
-        matchedCourse?.course_name ||
-        ''
-      )
-        .toLowerCase()
-        .includes(search);
-
       return titleMatch || descMatch || courseMatch;
     });
   }, [
@@ -1092,7 +944,6 @@ export default function TeacherManageAssignments() {
     doesAssignmentHaveShift,
   ]);
 
-  // ✅ ទាញរកវេនសិក្សារបស់សិស្សដែលបានប្រគល់កិច្ចការក្នុង Modal
   const resolveSubmissionStudentShift = useCallback(
     (sub) => {
       const directShift =
@@ -1106,8 +957,7 @@ export default function TeacherManageAssignments() {
       const matchedStd = (allStudents || []).find(
         (s) =>
           (subUserId &&
-            (String(s.user_id) === String(subUserId) ||
-              String(s.id) === String(subUserId))) ||
+            (String(s.user_id) === String(subUserId) || String(s.id) === String(subUserId))) ||
           (subEmail && (s.email || '').toLowerCase().trim() === subEmail)
       );
 
@@ -1116,7 +966,6 @@ export default function TeacherManageAssignments() {
     [allStudents]
   );
 
-  // ✅ ទាញរករូបភាពប្រវត្តិរូប (Base64 / URL) របស់សិស្សដែលបានប្រគល់កិច្ចការក្នុង Modal
   const resolveSubmissionStudentAvatar = useCallback(
     (sub) => {
       const directImg =
@@ -1133,8 +982,7 @@ export default function TeacherManageAssignments() {
       const matchedStd = (allStudents || []).find(
         (s) =>
           (subUserId &&
-            (String(s.user_id) === String(subUserId) ||
-              String(s.id) === String(subUserId))) ||
+            (String(s.user_id) === String(subUserId) || String(s.id) === String(subUserId))) ||
           (subEmail && (s.email || '').toLowerCase().trim() === subEmail)
       );
 
@@ -1144,7 +992,7 @@ export default function TeacherManageAssignments() {
   );
 
   // ============================================================================
-  // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបកិច្ចការ និងដាក់ពិន្ទុសិស្ស (ភ្ជាប់តែកណ្ដឹង)
+  // 📌 ផ្នែកទី៤៖ មុខងារបង្កើត កែប្រែ លុបកិច្ចការ (គាំទ្រភ្ជាប់ឯកសារ PDF/Word/ZIP)
   // ============================================================================
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -1166,59 +1014,67 @@ export default function TeacherManageAssignments() {
       due_date: '',
       total_score: 20,
     });
+    setAssignmentFile(null);
+    setExistingFileName('');
+    setRemoveExistingFile(false);
     setShowAddModal(true);
   };
 
   const openEditModal = (assignment) => {
     setEditingAssignment(assignment);
-
-    const formattedDueDate = toDatetimeLocalInput(assignment.due_date);
-
     setFormData({
       course_id: assignment.course_id ? String(assignment.course_id) : '',
       title: assignment.title || '',
       description: assignment.description || '',
-      due_date: formattedDueDate,
+      due_date: toDatetimeLocalInput(assignment.due_date),
       total_score: formatCleanScore(assignment.total_score ?? 20),
     });
+    setAssignmentFile(null);
+    setExistingFileName(
+      assignment.original_filename ||
+        (assignment.file_path ? String(assignment.file_path).split('/').pop() : '')
+    );
+    setRemoveExistingFile(false);
     setShowAddModal(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    if (!formData.due_date) {
-      return;
-    }
+    if (!formData.due_date) return;
 
     const dueMs = toComparableTimeMs(formData.due_date);
-    if (isNaN(dueMs)) {
-      return;
-    }
+    if (isNaN(dueMs)) return;
 
     setIsSubmitting(true);
-
     const exactDueStr = toBackendDateTime(formData.due_date);
+    const cleanTitle = formData.title.trim();
+    const cleanDesc = formData.description.trim();
+    const cleanScore = parseFloat(formData.total_score) || 20;
 
-    const payload = {
-      course_id: formData.course_id,
-      title: formData.title.trim(),
-      description: formData.description.trim(),
-      due_date: exactDueStr,
-      total_score: parseFloat(formData.total_score) || 20,
-    };
+    // ✅ ផ្ញើជា FormData ដើម្បីគាំទ្រការភ្ជាប់ឯកសារ PDF / Word / ZIP
+    const fd = new FormData();
+    fd.append('course_id', formData.course_id);
+    fd.append('title', cleanTitle);
+    fd.append('description', cleanDesc);
+    fd.append('due_date', exactDueStr);
+    fd.append('total_score', String(cleanScore));
 
-    const targetCourse = enrichedCourses.find(
-      (c) => String(c.id) === String(formData.course_id)
-    );
+    if (assignmentFile) {
+      fd.append('file', assignmentFile);
+    }
+    if (editingAssignment && removeExistingFile && !assignmentFile) {
+      fd.append('remove_file', '1');
+    }
+
+    const targetCourse = enrichedCourses.find((c) => String(c.id) === String(formData.course_id));
     const courseName = targetCourse?.course_name || '';
 
     try {
       if (editingAssignment) {
-        const res = await api.put(
-          `/teacher/assignments/${editingAssignment.id}`,
-          payload
-        );
+        fd.append('_method', 'PUT');
+        const res = await api.post(`/teacher/assignments/${editingAssignment.id}`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
         const serverData = res.data?.data || res.data?.assignment || res.data;
 
         setAssignments((prev) => {
@@ -1227,8 +1083,11 @@ export default function TeacherManageAssignments() {
               ? {
                   ...a,
                   ...(typeof serverData === 'object' ? serverData : {}),
-                  ...payload,
+                  course_id: formData.course_id,
+                  title: cleanTitle,
+                  description: cleanDesc,
                   due_date: exactDueStr,
+                  total_score: cleanScore,
                   course: targetCourse || a.course,
                 }
               : a
@@ -1240,7 +1099,7 @@ export default function TeacherManageAssignments() {
               sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
               localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
               localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-            } catch (e) {}
+            } catch {}
           });
           return updated;
         });
@@ -1248,20 +1107,25 @@ export default function TeacherManageAssignments() {
         pushLocalNotification({
           titleKm: 'បានកែប្រែកិច្ចការសិស្ស',
           titleEn: 'Assignment Updated',
-          descKm: `កិច្ចការ «${payload.title}» ${courseName ? `(${courseName})` : ''} ត្រូវបានកែប្រែដោយជោគជ័យ។`,
-          descEn: `Assignment "${payload.title}" was updated successfully.`,
+          descKm: `កិច្ចការ «${cleanTitle}» ${courseName ? `(${courseName})` : ''} ត្រូវបានកែប្រែដោយជោគជ័យ។`,
+          descEn: `Assignment "${cleanTitle}" was updated successfully.`,
           category: 'assignment',
           link: '/assignments',
         });
       } else {
-        const res = await api.post('/teacher/assignments', payload);
+        const res = await api.post('/teacher/assignments', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
         const serverData = res.data?.data || res.data?.assignment || res.data;
         const createdAsg = {
           id: Date.now(),
           submissions_count: 0,
           ...(typeof serverData === 'object' ? serverData : {}),
-          ...payload,
+          course_id: formData.course_id,
+          title: cleanTitle,
+          description: cleanDesc,
           due_date: exactDueStr,
+          total_score: cleanScore,
           course: targetCourse || null,
         };
 
@@ -1274,7 +1138,7 @@ export default function TeacherManageAssignments() {
               sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
               localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
               localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-            } catch (e) {}
+            } catch {}
           });
           return updated;
         });
@@ -1282,13 +1146,16 @@ export default function TeacherManageAssignments() {
         pushLocalNotification({
           titleKm: 'បានបង្កើតកិច្ចការថ្មី',
           titleEn: 'New Assignment Created',
-          descKm: `បានដាក់កិច្ចការថ្មី «${payload.title}» (${payload.total_score} ពិន្ទុ) សម្រាប់មុខវិជ្ជា «${courseName || '—'}»។`,
-          descEn: `Created new assignment "${payload.title}" (${payload.total_score} pts).`,
+          descKm: `បានដាក់កិច្ចការថ្មី «${cleanTitle}» (${cleanScore} ពិន្ទុ) សម្រាប់មុខវិជ្ជា «${courseName || '—'}»។`,
+          descEn: `Created new assignment "${cleanTitle}" (${cleanScore} pts).`,
           category: 'assignment',
           link: '/assignments',
         });
       }
       setShowAddModal(false);
+      setAssignmentFile(null);
+      setExistingFileName('');
+      setRemoveExistingFile(false);
       fetchAssignments();
     } catch (error) {
       console.error('Submit error:', error);
@@ -1321,7 +1188,7 @@ export default function TeacherManageAssignments() {
           sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
           localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
           localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-        } catch (e) {}
+        } catch {}
       });
       return updated;
     });
@@ -1341,14 +1208,6 @@ export default function TeacherManageAssignments() {
       console.error('Delete assignment error:', error);
       setAssignments(previousAssignments);
       ASSIGNMENTS_MEM_CACHE.assignments = previousAssignments;
-      runWhenIdle(() => {
-        try {
-          const str = JSON.stringify(previousAssignments);
-          sessionStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-          localStorage.setItem(getAssignmentsCacheKey(currentTeacherId), str);
-          localStorage.setItem(CACHE_KEY_SHARED_ASSIGNMENTS, str);
-        } catch (e) {}
-      });
     }
   };
 
@@ -1371,20 +1230,15 @@ export default function TeacherManageAssignments() {
     setStatusFilter('all');
     setSubmissionShiftFilter(selectedShift !== 'all' ? selectedShift : 'all');
 
-    const memSubs =
-      ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[assignment.id];
+    const memSubs = ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[assignment.id];
     if (Array.isArray(memSubs)) {
       setSubmissions(memSubs);
       initGradingState(memSubs);
     } else {
       try {
         const cachedSubs =
-          sessionStorage.getItem(
-            getSubmissionsCacheKey(currentTeacherId, assignment.id)
-          ) ||
-          localStorage.getItem(
-            getSubmissionsCacheKey(currentTeacherId, assignment.id)
-          );
+          sessionStorage.getItem(getSubmissionsCacheKey(currentTeacherId, assignment.id)) ||
+          localStorage.getItem(getSubmissionsCacheKey(currentTeacherId, assignment.id));
         if (cachedSubs) {
           const parsed = JSON.parse(cachedSubs);
           setSubmissions(parsed);
@@ -1399,21 +1253,16 @@ export default function TeacherManageAssignments() {
     }
 
     try {
-      const response = await api.get(
-        `/teacher/assignments/${assignment.id}/submissions`
-      );
+      const response = await api.get(`/teacher/assignments/${assignment.id}/submissions`);
       const subs = response.data?.submissions || response.data?.data || [];
       const validSubs = Array.isArray(subs) ? subs : [];
       setSubmissions(validSubs);
       initGradingState(validSubs);
       ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[assignment.id] = validSubs;
 
-      // ✅ សម្អាតទិន្នន័យធ្ងន់ៗមុនពេលរក្សាទុកចូល Storage នៅពេល Browser ទំនេរ
       runWhenIdle(() => {
         try {
-          const slimSubsStr = JSON.stringify(
-            stripHeavySubmissionsForCache(validSubs)
-          );
+          const slimSubsStr = JSON.stringify(stripHeavySubmissionsForCache(validSubs));
           sessionStorage.setItem(
             getSubmissionsCacheKey(currentTeacherId, assignment.id),
             slimSubsStr
@@ -1422,7 +1271,7 @@ export default function TeacherManageAssignments() {
             getSubmissionsCacheKey(currentTeacherId, assignment.id),
             slimSubsStr
           );
-        } catch (e) {}
+        } catch {}
       });
     } catch (error) {
       console.error('Fetch submissions error:', error);
@@ -1463,15 +1312,11 @@ export default function TeacherManageAssignments() {
 
     try {
       const payload = {
-        score:
-          currentGrade.score !== '' ? parseFloat(currentGrade.score) : null,
+        score: currentGrade.score !== '' ? parseFloat(currentGrade.score) : null,
         feedback: currentGrade.feedback || null,
       };
 
-      const response = await api.put(
-        `/teacher/submissions/${submissionId}/grade`,
-        payload
-      );
+      const response = await api.put(`/teacher/submissions/${submissionId}/grade`, payload);
 
       setSubmissions((prev) => {
         const updatedSubs = prev.map((sub) => {
@@ -1486,13 +1331,10 @@ export default function TeacherManageAssignments() {
         });
 
         if (viewingAssignment) {
-          ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[viewingAssignment.id] =
-            updatedSubs;
+          ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[viewingAssignment.id] = updatedSubs;
           runWhenIdle(() => {
             try {
-              const slimSubsStr = JSON.stringify(
-                stripHeavySubmissionsForCache(updatedSubs)
-              );
+              const slimSubsStr = JSON.stringify(stripHeavySubmissionsForCache(updatedSubs));
               sessionStorage.setItem(
                 getSubmissionsCacheKey(currentTeacherId, viewingAssignment.id),
                 slimSubsStr
@@ -1502,18 +1344,17 @@ export default function TeacherManageAssignments() {
                 slimSubsStr
               );
               if (viewingAssignment.course_id) {
-                const scoreKeysToClear = [
+                [
                   `cached_teacher_course_scores_v8_${currentTeacherId}_${viewingAssignment.course_id}`,
                   `cached_teacher_course_scores_v9_${currentTeacherId}_${viewingAssignment.course_id}`,
-                ];
-                scoreKeysToClear.forEach((k) => {
+                ].forEach((k) => {
                   try {
                     sessionStorage.removeItem(k);
                     localStorage.removeItem(k);
                   } catch {}
                 });
               }
-            } catch (e) {}
+            } catch {}
           });
         }
         return updatedSubs;
@@ -1538,14 +1379,14 @@ export default function TeacherManageAssignments() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ អនុគមន៍ជំនួយ និងការនាំចេញឯកសារ Excel (.xlsx) ដោយប្រើ Dynamic Import
+  // 📌 ផ្នែកទី៥៖ អនុគមន៍ជំនួយ និងការនាំចេញឯកសារ Excel (.xlsx)
   // ============================================================================
-  const getFileUrl = (fileOrSub) => {
+  const getFileUrl = (fileOrSub, isAssignmentAttachment = false) => {
     const rawPath =
       typeof fileOrSub === 'object' && fileOrSub !== null
         ? fileOrSub.file_path || fileOrSub.file_url || ''
         : fileOrSub;
-    const subId =
+    const itemId =
       typeof fileOrSub === 'object' && fileOrSub !== null ? fileOrSub.id : null;
 
     if (!rawPath || typeof rawPath !== 'string') return '#';
@@ -1566,12 +1407,16 @@ export default function TeacherManageAssignments() {
       'http://localhost:8000/api'
     ).replace(/\/api\/?$/, '');
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
-    return `${backendBase}/api/download-file?path=${encodeURIComponent(
-      cleanPath
-    )}${subId ? `&submission_id=${encodeURIComponent(subId)}` : ''}`;
+    if (isAssignmentAttachment) {
+      return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}${
+        itemId ? `&assignment_id=${encodeURIComponent(itemId)}` : ''
+      }`;
+    }
+    return `${backendBase}/api/download-file?path=${encodeURIComponent(cleanPath)}${
+      itemId ? `&submission_id=${encodeURIComponent(itemId)}` : ''
+    }`;
   };
 
-  // ✅ គាំទ្រទាំងរូបភាព Base64 Data URI ក្នុង Database លើ Railway និង URL ធម្មតា
   const getProfileImageUrl = useCallback((imagePath) => {
     if (!imagePath || typeof imagePath !== 'string') return null;
     const trimmed = imagePath.trim();
@@ -1584,9 +1429,10 @@ export default function TeacherManageAssignments() {
     ) {
       return trimmed;
     }
-    const baseUrl = (
-      import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    ).replace(/\/api\/?$/, '');
+    const baseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(
+      /\/api\/?$/,
+      ''
+    );
     const cleanPath = trimmed.replace(/^\/?storage\//, '').replace(/^\/+/, '');
     return `${baseUrl}/storage/${cleanPath}`;
   }, []);
@@ -1659,9 +1505,7 @@ export default function TeacherManageAssignments() {
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
         const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-        if (!worksheet[cellAddress]) {
-          worksheet[cellAddress] = { t: 's', v: '' };
-        }
+        if (!worksheet[cellAddress]) worksheet[cellAddress] = { t: 's', v: '' };
 
         const isHeader = R === 0;
         const isTextCol = !isHeader && textColumnIndices.includes(C);
@@ -1669,10 +1513,7 @@ export default function TeacherManageAssignments() {
         if (isTextCol) {
           worksheet[cellAddress].t = 's';
           worksheet[cellAddress].z = '@';
-          if (
-            worksheet[cellAddress].v !== undefined &&
-            worksheet[cellAddress].v !== null
-          ) {
+          if (worksheet[cellAddress].v !== undefined && worksheet[cellAddress].v !== null) {
             worksheet[cellAddress].v = String(worksheet[cellAddress].v);
           }
         }
@@ -1685,9 +1526,7 @@ export default function TeacherManageAssignments() {
             color: { rgb: isHeader ? 'FFFFFF' : '1E293B' },
           },
           fill: {
-            fgColor: {
-              rgb: isHeader ? '1E3A8A' : R % 2 === 1 ? 'FFFFFF' : 'F8FAFC',
-            },
+            fgColor: { rgb: isHeader ? '1E3A8A' : R % 2 === 1 ? 'FFFFFF' : 'F8FAFC' },
           },
           alignment: {
             vertical: 'center',
@@ -1713,18 +1552,12 @@ export default function TeacherManageAssignments() {
     worksheet['!rows'] = rows;
   };
 
-  // ✅ ១. នាំចេញបញ្ជីកិច្ចការទៅជា Excel (ទាញ xlsx-js-style តែពេលចុចប៊ូតុង Export ប៉ុណ្ណោះ)
   const handleExportAssignmentsExcel = async () => {
-    if (filteredAssignments.length === 0) {
-      return;
-    }
-
+    if (filteredAssignments.length === 0) return;
     const { default: XLSX } = await import('xlsx-js-style');
 
     const exportData = filteredAssignments.map((item, idx) => {
-      const matchedCourse = enrichedCourses.find(
-        (c) => String(c.id) === String(item.course_id)
-      );
+      const matchedCourse = enrichedCourses.find((c) => String(c.id) === String(item.course_id));
       const shiftLabels = (matchedCourse?.shiftsList || ['Monday-Friday'])
         .map((sh) => getStudyShiftLabel(sh))
         .join(', ');
@@ -1732,33 +1565,36 @@ export default function TeacherManageAssignments() {
       return {
         'ល.រ': idx + 1,
         'ចំណងជើងកិច្ចការ': item.title || '—',
-        'មុខវិជ្ជា':
-          item.course?.course_name || matchedCourse?.course_name || '—',
+        'មុខវិជ្ជា': item.course?.course_name || matchedCourse?.course_name || '—',
         'វេនសិក្សា': shiftLabels || '—',
         'ថ្ងៃកំណត់': formatDate(item.due_date),
         'ពិន្ទុសរុប': `${formatCleanScore(item.total_score ?? 20)} ${t('ពិន្ទុ', 'pts')}`,
         'ចំនួនសិស្សដាក់កិច្ចការ': item.submissions_count || 0,
+        'ឯកសារភ្ជាប់': item.original_filename || (item.file_path ? 'មានឯកសារ' : '—'),
         'ការពិពណ៌នា': item.description || '—',
       };
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const colWidths = [
-      { wch: 8 },
-      { wch: 28 },
-      { wch: 24 },
-      { wch: 18 },
-      { wch: 26 },
-      { wch: 14 },
-      { wch: 22 },
-      { wch: 36 },
-    ];
-    applyExcelStyling(XLSX, worksheet, colWidths, []);
+    applyExcelStyling(
+      XLSX,
+      worksheet,
+      [
+        { wch: 8 },
+        { wch: 28 },
+        { wch: 24 },
+        { wch: 18 },
+        { wch: 26 },
+        { wch: 14 },
+        { wch: 22 },
+        { wch: 24 },
+        { wch: 36 },
+      ],
+      []
+    );
 
     const yearSuffix = selectedYear !== 'all' ? `_Year${selectedYear}` : '';
-    const courseSuffix = activeCourseObj?.course_code
-      ? `_${activeCourseObj.course_code}`
-      : '';
+    const courseSuffix = activeCourseObj?.course_code ? `_${activeCourseObj.course_code}` : '';
     const shiftSuffix = isSpecificShiftSelected ? `_${selectedShift}` : '';
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Assignments');
@@ -1777,23 +1613,16 @@ export default function TeacherManageAssignments() {
     });
   };
 
-  // ✅ ២. នាំចេញតារាងពិន្ទុសិស្សដាក់កិច្ចការក្នុង Modal ទៅជា Excel (Dynamic Import)
   const handleExportSubmissionsExcel = async () => {
-    if (!viewingAssignment || submissions.length === 0) {
-      return;
-    }
-
+    if (!viewingAssignment || submissions.length === 0) return;
     const { default: XLSX } = await import('xlsx-js-style');
-
     const dueTimeMs = toComparableTimeMs(viewingAssignment.due_date);
 
     const exportData = submissions.map((sub, idx) => {
       const subTimeMs = toComparableTimeMs(sub.submitted_at);
-      const isLate =
-        !isNaN(dueTimeMs) && !isNaN(subTimeMs) && subTimeMs > dueTimeMs;
+      const isLate = !isNaN(dueTimeMs) && !isNaN(subTimeMs) && subTimeMs > dueTimeMs;
       const currentScore =
-        gradingData[sub.id]?.score !== undefined &&
-        gradingData[sub.id]?.score !== ''
+        gradingData[sub.id]?.score !== undefined && gradingData[sub.id]?.score !== ''
           ? `${formatCleanScore(gradingData[sub.id].score)} ${t('ពិន្ទុ', 'pts')}`
           : sub.score !== null && sub.score !== undefined
           ? `${formatCleanScore(sub.score)} ${t('ពិន្ទុ', 'pts')}`
@@ -1810,34 +1639,33 @@ export default function TeacherManageAssignments() {
         'វេនសិក្សា': getStudyShiftLabel(resolveSubmissionStudentShift(sub)),
         'អ៊ីមែល': sub.student?.email || '—',
         'ថ្ងៃដាក់កិច្ចការ': formatDate(sub.submitted_at),
-        'ស្ថានភាព': isLate
-          ? t('យឺត (Late)', 'Late')
-          : t('ទាន់ពេល (On Time)', 'On Time'),
+        'ស្ថានភាព': isLate ? t('យឺត (Late)', 'Late') : t('ទាន់ពេល (On Time)', 'On Time'),
         'ពិន្ទុទទួលបាន': currentScore,
         'មតិយោបល់': currentFeedback,
       };
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const colWidths = [
-      { wch: 8 },
-      { wch: 24 },
-      { wch: 10 },
-      { wch: 16 },
-      { wch: 28 },
-      { wch: 24 },
-      { wch: 18 },
-      { wch: 16 },
-      { wch: 32 },
-    ];
-    applyExcelStyling(XLSX, worksheet, colWidths, []);
+    applyExcelStyling(
+      XLSX,
+      worksheet,
+      [
+        { wch: 8 },
+        { wch: 24 },
+        { wch: 10 },
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 24 },
+        { wch: 18 },
+        { wch: 16 },
+        { wch: 32 },
+      ],
+      []
+    );
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Submissions');
-    const safeTitle = (viewingAssignment.title || 'Assignment').replace(
-      /[\\/:*?"<>|\s]+/g,
-      '_'
-    );
+    const safeTitle = (viewingAssignment.title || 'Assignment').replace(/[\\/:*?"<>|\s]+/g, '_');
     XLSX.writeFile(
       workbook,
       `Submissions_${safeTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`
@@ -1853,7 +1681,6 @@ export default function TeacherManageAssignments() {
     });
   };
 
-  // ទិន្នន័យកាតឆ្នាំសិក្សាទាំង ៥ សម្រាប់ Render
   const yearCardsConfig = [
     {
       key: 'all',
@@ -1862,8 +1689,7 @@ export default function TeacherManageAssignments() {
       subtitleKm: 'គ្រប់ឆ្នាំសិក្សាទាំងអស់',
       subtitleEn: 'All Academic Years',
       count: assignmentYearCounts.all,
-      activeGradient:
-        'from-blue-600 to-indigo-700 text-white border-blue-600 shadow-blue-500/20',
+      activeGradient: 'from-blue-600 to-indigo-700 text-white border-blue-600 shadow-blue-500/20',
       iconBgActive: 'bg-white/20 text-white',
       iconBgInactive: 'bg-blue-50 text-blue-600 border-blue-100 asg-pill-blue',
     },
@@ -1877,8 +1703,7 @@ export default function TeacherManageAssignments() {
       activeGradient:
         'from-emerald-600 to-teal-700 text-white border-emerald-600 shadow-emerald-500/20',
       iconBgActive: 'bg-white/20 text-white',
-      iconBgInactive:
-        'bg-emerald-50 text-emerald-600 border-emerald-100 asg-pill-emerald',
+      iconBgInactive: 'bg-emerald-50 text-emerald-600 border-emerald-100 asg-pill-emerald',
     },
     {
       key: '2',
@@ -1890,8 +1715,7 @@ export default function TeacherManageAssignments() {
       activeGradient:
         'from-indigo-600 to-violet-700 text-white border-indigo-600 shadow-indigo-500/20',
       iconBgActive: 'bg-white/20 text-white',
-      iconBgInactive:
-        'bg-indigo-50 text-indigo-600 border-indigo-100 asg-pill-indigo',
+      iconBgInactive: 'bg-indigo-50 text-indigo-600 border-indigo-100 asg-pill-indigo',
     },
     {
       key: '3',
@@ -1903,8 +1727,7 @@ export default function TeacherManageAssignments() {
       activeGradient:
         'from-amber-500 to-orange-600 text-white border-amber-500 shadow-amber-500/20',
       iconBgActive: 'bg-white/20 text-white',
-      iconBgInactive:
-        'bg-amber-50 text-amber-600 border-amber-100 asg-pill-amber',
+      iconBgInactive: 'bg-amber-50 text-amber-600 border-amber-100 asg-pill-amber',
     },
     {
       key: '4',
@@ -1913,28 +1736,22 @@ export default function TeacherManageAssignments() {
       subtitleKm: 'កម្រិតឆ្នាំសិក្សាទី ៤',
       subtitleEn: 'Fourth Year Level',
       count: assignmentYearCounts['4'],
-      activeGradient:
-        'from-rose-600 to-pink-700 text-white border-rose-600 shadow-rose-500/20',
+      activeGradient: 'from-rose-600 to-pink-700 text-white border-rose-600 shadow-rose-500/20',
       iconBgActive: 'bg-white/20 text-white',
       iconBgInactive: 'bg-rose-50 text-rose-600 border-rose-100 asg-pill-rose',
     },
   ];
 
   const canShowExportExcel =
-    (selectedYear !== 'all' || selectedCourse !== '') &&
-    filteredAssignments.length > 0;
+    (selectedYear !== 'all' || selectedCourse !== '') && filteredAssignments.length > 0;
 
   // ============================================================================
   // 📌 ផ្នែកទី៦៖ ការបង្ហាញផ្ទៃមុខកម្មវិធី (JSX UI Rendering)
   // ============================================================================
   return (
     <div className="asg-page-bg p-4 sm:p-6 max-w-7xl mx-auto bg-gray-50 min-h-screen space-y-6 pb-28 lg:pb-10">
-      
-      {/* ================================================================== */}
-      {/* 1. HEADER BANNER                                                   */}
-      {/* ================================================================== */}
+      {/* 1. HEADER BANNER */}
       <div className="relative overflow-hidden rounded-[1.5rem] bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 sm:p-8 shadow-xl border border-blue-900">
-        {/* ✅ លាក់ Blur ធំៗលើទូរស័ព្ទដើម្បីកុំឱ្យធ្លាក់ FPS ពេលអូស */}
         <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none"></div>
         <div className="hidden md:block absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
@@ -1953,8 +1770,8 @@ export default function TeacherManageAssignments() {
                     'Please select an academic year card (Year 1–4) below to filter courses, create assignments, and grade submissions.'
                   )
                 : t(
-                    'បង្កើត និងគ្រប់គ្រងកិច្ចការផ្ទះ ឬគម្រោងសម្រាប់សិស្សតាមមុខវិជ្ជា និងវេនសិក្សា រួមទាំងការពិនិត្យ និងដាក់ពិន្ទុ។',
-                    'Create and manage homework or projects for students by course and study shift, including reviewing and grading.'
+                    'បង្កើត និងគ្រប់គ្រងកិច្ចការផ្ទះ ឬគម្រោងសម្រាប់សិស្សតាមមុខវិជ្ជា និងវេនសិក្សា រួមទាំងការភ្ជាប់ឯកសារ និងដាក់ពិន្ទុ។',
+                    'Create and manage homework or projects for students by course and study shift, including file attachments and grading.'
                   )}
             </p>
           </div>
@@ -1971,7 +1788,6 @@ export default function TeacherManageAssignments() {
               </button>
             )}
 
-            {/* ✅ បង្ហាញប៊ូតុង «បន្ថែមកិច្ចការថ្មី» តែនៅពេលចុចលើកាតឆ្នាំណាមួយ (ឆ្នាំទី១-៤) ប៉ុណ្ណោះ */}
             {selectedYear !== 'all' && (
               <button
                 type="button"
@@ -1986,9 +1802,7 @@ export default function TeacherManageAssignments() {
         </div>
       </div>
 
-      {/* ================================================================== */}
-      {/* 2. INTERACTIVE YEAR CARDS (កិច្ចការសរុប និង ឆ្នាំទី១ ដល់ ឆ្នាំទី៤)     */}
-      {/* ================================================================== */}
+      {/* 2. INTERACTIVE YEAR CARDS */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
         {yearCardsConfig.map((card) => {
           const isSelected = selectedYear === card.key;
@@ -2006,9 +1820,7 @@ export default function TeacherManageAssignments() {
               <div className="flex items-start justify-between gap-2 w-full">
                 <div
                   className={`p-2.5 rounded-xl border transition-colors ${
-                    isSelected
-                      ? `${card.iconBgActive} border-white/20`
-                      : card.iconBgInactive
+                    isSelected ? `${card.iconBgActive} border-white/20` : card.iconBgInactive
                   }`}
                 >
                   {card.key === 'all' ? (
@@ -2054,29 +1866,21 @@ export default function TeacherManageAssignments() {
                   </p>
                 </div>
 
-                {isSelected && (
-                  <CheckBadgeIcon className="h-5 w-5 text-white shrink-0 animate-fadeIn" />
-                )}
+                {isSelected && <CheckBadgeIcon className="h-5 w-5 text-white shrink-0 animate-fadeIn" />}
               </div>
             </button>
           );
         })}
       </div>
 
-      {/* ================================================================== */}
-      {/* 3. SEARCH, COURSE FILTER & STUDY SHIFT TABS                        */}
-      {/* ================================================================== */}
+      {/* 3. SEARCH, COURSE FILTER & STUDY SHIFT TABS */}
       <div className="asg-surface-card bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col xl:flex-row gap-4 items-center justify-between">
-        {/* ផ្នែកខាងឆ្វេង៖ Search Input + ប្រអប់ជ្រើសរើសមុខវិជ្ជា */}
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full xl:w-auto flex-1">
           <div className="relative w-full sm:max-w-xs lg:max-w-sm flex-1">
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder={t(
-                'ស្វែងរកកិច្ចការ ឬមុខវិជ្ជា...',
-                'Search assignments or courses...'
-              )}
+              placeholder={t('ស្វែងរកកិច្ចការ ឬមុខវិជ្ជា...', 'Search assignments or courses...')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="asg-input w-full pl-11 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50/50 hover:bg-gray-50 focus:bg-white font-medium text-gray-800 transition-all shadow-2xs"
@@ -2100,9 +1904,7 @@ export default function TeacherManageAssignments() {
                 onChange={handleCourseChange}
                 className="asg-input w-full pl-10 pr-9 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-white font-medium text-gray-700 appearance-none cursor-pointer shadow-2xs transition-all"
               >
-                <option value="">
-                  {t('គ្រប់មុខវិជ្ជាទាំងអស់', 'All Courses')}
-                </option>
+                <option value="">{t('គ្រប់មុខវិជ្ជាទាំងអស់', 'All Courses')}</option>
                 {visibleCoursesForSelectedYear.map((course) => (
                   <option key={course.id} value={course.id}>
                     {course.course_code ? `${course.course_code} - ` : ''}
@@ -2115,7 +1917,6 @@ export default function TeacherManageAssignments() {
           )}
         </div>
 
-        {/* ✅ ផ្នែកខាងស្ដាំ៖ ប៊ូតុងវេនសិក្សាទាំង ៣ (គ្រប់វេនសិក្សា, ចន្ទ-សុក្រ, សៅរ៍-អាទិត្យ) */}
         <div className="asg-shift-tabs flex flex-wrap items-center gap-1.5 bg-gray-100/80 p-1.5 rounded-xl border border-gray-200/60 w-full xl:w-auto justify-center sm:justify-start shrink-0">
           <button
             type="button"
@@ -2185,9 +1986,7 @@ export default function TeacherManageAssignments() {
         </div>
       </div>
 
-      {/* ================================================================== */}
-      {/* 4. MAIN TABLE CONTENT                                              */}
-      {/* ================================================================== */}
+      {/* 4. MAIN TABLE CONTENT */}
       <div className="asg-surface-card bg-white rounded-[1.5rem] border border-gray-200 shadow-sm overflow-hidden">
         <div className="asg-table-bar px-6 py-5 border-b border-gray-100 bg-white flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -2213,9 +2012,7 @@ export default function TeacherManageAssignments() {
               </button>
             )}
 
-            {(selectedYear !== 'all' ||
-              selectedCourse !== '' ||
-              searchTerm !== '') && (
+            {(selectedYear !== 'all' || selectedCourse !== '' || searchTerm !== '') && (
               <button
                 type="button"
                 onClick={() => {
@@ -2225,9 +2022,7 @@ export default function TeacherManageAssignments() {
                   setSearchTerm('');
                   try {
                     sessionStorage.removeItem(getSelectedYearKey(currentTeacherId));
-                    sessionStorage.removeItem(
-                      getSelectedCourseKey(currentTeacherId)
-                    );
+                    sessionStorage.removeItem(getSelectedCourseKey(currentTeacherId));
                     sessionStorage.removeItem(getSelectedShiftKey(currentTeacherId));
                   } catch {}
                 }}
@@ -2277,10 +2072,7 @@ export default function TeacherManageAssignments() {
                         selectedCourse ||
                         selectedYear !== 'all' ||
                         isSpecificShiftSelected
-                          ? t(
-                              'មិនឃើញមានកិច្ចការតាមការស្វែងរកនេះទេ',
-                              'No matching assignments found'
-                            )
+                          ? t('មិនឃើញមានកិច្ចការតាមការស្វែងរកនេះទេ', 'No matching assignments found')
                           : t('មិនទាន់មានកិច្ចការនៅឡើយទេ', 'No assignments available yet')}
                       </p>
                       <p className="asg-text-secondary text-sm text-gray-500 mt-1">
@@ -2305,9 +2097,10 @@ export default function TeacherManageAssignments() {
                   const matchedCourse = enrichedCourses.find(
                     (c) => String(c.id) === String(assignment.course_id)
                   );
-                  const courseShifts = matchedCourse?.shiftsList || [
-                    'Monday-Friday',
-                  ];
+                  const courseShifts = matchedCourse?.shiftsList || ['Monday-Friday'];
+                  const attachedFileName =
+                    assignment.original_filename ||
+                    (assignment.file_path ? String(assignment.file_path).split('/').pop() : '');
 
                   return (
                     <tr
@@ -2321,9 +2114,24 @@ export default function TeacherManageAssignments() {
                         <div className="asg-text-primary text-sm font-extrabold text-gray-900">
                           {assignment.title}
                         </div>
-                        <div className="asg-text-secondary text-xs text-gray-500 line-clamp-1 mt-1 font-medium max-w-xs">
-                          {assignment.description}
-                        </div>
+                        {assignment.description && (
+                          <div className="asg-text-secondary text-xs text-gray-500 line-clamp-1 mt-1 font-medium max-w-xs">
+                            {assignment.description}
+                          </div>
+                        )}
+                        {assignment.file_path && (
+                          <a
+                            href={getFileUrl(assignment, true)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            download={attachedFileName || true}
+                            className="asg-pill-blue mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition max-w-[240px]"
+                            title={attachedFileName}
+                          >
+                            <PaperClipIcon className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{attachedFileName || t('ឯកសារភ្ជាប់', 'Attachment')}</span>
+                          </a>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="asg-text-primary text-sm text-gray-800 font-extrabold">
@@ -2369,8 +2177,7 @@ export default function TeacherManageAssignments() {
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-extrabold text-indigo-600 dark:text-indigo-400">
-                        {formatCleanScore(assignment.total_score)}{' '}
-                        {t('ពិន្ទុ', 'pts')}
+                        {formatCleanScore(assignment.total_score)} {t('ពិន្ទុ', 'pts')}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <button
@@ -2425,9 +2232,8 @@ export default function TeacherManageAssignments() {
           const cleanMaxScore = formatCleanScore(viewingAssignment.total_score);
           const modalCourseName =
             viewingAssignment.course?.course_name ||
-            enrichedCourses.find(
-              (c) => String(c.id) === String(viewingAssignment.course_id)
-            )?.course_name ||
+            enrichedCourses.find((c) => String(c.id) === String(viewingAssignment.course_id))
+              ?.course_name ||
             '—';
           const dueTimeMs = toComparableTimeMs(viewingAssignment.due_date);
           const isModalSpecificShift =
@@ -2437,30 +2243,21 @@ export default function TeacherManageAssignments() {
             const search = submissionSearch.toLowerCase().trim();
             const sName = getStudentDisplayName(sub.student).toLowerCase();
             const sEmail = (sub.student?.email || '').toLowerCase();
-            const nameMatch =
-              !search || sName.includes(search) || sEmail.includes(search);
+            const nameMatch = !search || sName.includes(search) || sEmail.includes(search);
 
             const subShift = resolveSubmissionStudentShift(sub);
-            const shiftMatch =
-              !isModalSpecificShift || subShift === submissionShiftFilter;
-            if (!shiftMatch) return false;
+            if (isModalSpecificShift && subShift !== submissionShiftFilter) return false;
 
             if (statusFilter === 'graded')
-              return (
-                nameMatch && sub.score !== null && sub.score !== undefined
-              );
+              return nameMatch && sub.score !== null && sub.score !== undefined;
             if (statusFilter === 'ungraded')
-              return (
-                nameMatch && (sub.score === null || sub.score === undefined)
-              );
+              return nameMatch && (sub.score === null || sub.score === undefined);
             return nameMatch;
           });
 
           return (
             <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-950/65 md:backdrop-blur-md p-4">
               <div className="asg-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-5xl flex flex-col max-h-[90vh] overflow-hidden border border-gray-200 dark:border-slate-700/80 animate-fadeIn">
-                
-                {/* Modal Header */}
                 <div className="asg-modal-bar px-6 py-5 sm:px-7 border-b border-gray-100 flex justify-between items-start bg-gray-50/50 shrink-0 gap-4">
                   <div className="flex items-start sm:items-center gap-4">
                     <span className="asg-pill-emerald bg-emerald-100 text-emerald-600 p-3 rounded-2xl border border-emerald-200 shrink-0 shadow-2xs">
@@ -2468,16 +2265,13 @@ export default function TeacherManageAssignments() {
                     </span>
                     <div>
                       <h2 className="asg-text-primary text-lg sm:text-xl font-extrabold text-gray-900 leading-snug">
-                        {t('បញ្ជីសិស្សដាក់កិច្ចការ៖', 'Submissions:')}{' '}
-                        {viewingAssignment.title}
+                        {t('បញ្ជីសិស្សដាក់កិច្ចការ៖', 'Submissions:')} {viewingAssignment.title}
                       </h2>
                       <div className="text-xs font-bold text-gray-500 mt-2 flex flex-wrap gap-2 items-center">
                         <span className="asg-code-pill inline-flex items-center gap-1.5 bg-white border border-gray-200 px-3 py-1 rounded-lg">
                           <BookOpenIcon className="h-3.5 w-3.5 text-blue-500" />
                           <span>{t('មុខវិជ្ជា៖', 'Course:')}</span>
-                          <strong className="asg-text-primary text-gray-800">
-                            {modalCourseName}
-                          </strong>
+                          <strong className="asg-text-primary text-gray-800">{modalCourseName}</strong>
                         </span>
 
                         <span className="asg-code-pill inline-flex items-center gap-1.5 bg-white border border-gray-200 px-3 py-1 rounded-lg">
@@ -2519,7 +2313,6 @@ export default function TeacherManageAssignments() {
                   </div>
                 </div>
 
-                {/* Modal Body */}
                 <div className="p-6 sm:p-7 overflow-y-auto flex-1 space-y-5">
                   <div className="flex flex-col lg:flex-row gap-3 justify-between items-center">
                     <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full lg:w-auto flex-1">
@@ -2527,10 +2320,7 @@ export default function TeacherManageAssignments() {
                         <MagnifyingGlassIcon className="h-5 w-5 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                         <input
                           type="text"
-                          placeholder={t(
-                            'ស្វែងរកឈ្មោះ ឬអ៊ីមែលសិស្ស...',
-                            'Search student name or email...'
-                          )}
+                          placeholder={t('ស្វែងរកឈ្មោះ ឬអ៊ីមែលសិស្ស...', 'Search student name or email...')}
                           value={submissionSearch}
                           onChange={(e) => setSubmissionSearch(e.target.value)}
                           className="asg-input w-full pl-10 pr-9 py-2.5 text-xs sm:text-sm font-medium border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50/70 focus:bg-white transition-all"
@@ -2548,20 +2338,12 @@ export default function TeacherManageAssignments() {
 
                       <select
                         value={submissionShiftFilter}
-                        onChange={(e) =>
-                          setSubmissionShiftFilter(e.target.value)
-                        }
+                        onChange={(e) => setSubmissionShiftFilter(e.target.value)}
                         className="asg-input w-full sm:w-44 px-3 py-2.5 text-xs font-medium border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
                       >
-                        <option value="all">
-                          {t('គ្រប់វេនសិក្សា', 'All Shifts')}
-                        </option>
-                        <option value="Monday-Friday">
-                          {t('វេន ចន្ទ-សុក្រ', 'Mon-Fri Shift')}
-                        </option>
-                        <option value="Saturday-Sunday">
-                          {t('វេន សៅរ៍-អាទិត្យ', 'Sat-Sun Shift')}
-                        </option>
+                        <option value="all">{t('គ្រប់វេនសិក្សា', 'All Shifts')}</option>
+                        <option value="Monday-Friday">{t('វេន ចន្ទ-សុក្រ', 'Mon-Fri Shift')}</option>
+                        <option value="Saturday-Sunday">{t('វេន សៅរ៍-អាទិត្យ', 'Sat-Sun Shift')}</option>
                       </select>
                     </div>
 
@@ -2587,12 +2369,7 @@ export default function TeacherManageAssignments() {
                         }`}
                       >
                         {t('ដាក់ពិន្ទុរួច', 'Graded')} (
-                        {
-                          submissions.filter(
-                            (s) => s.score !== null && s.score !== undefined
-                          ).length
-                        }
-                        )
+                        {submissions.filter((s) => s.score !== null && s.score !== undefined).length})
                       </button>
                       <button
                         type="button"
@@ -2604,12 +2381,7 @@ export default function TeacherManageAssignments() {
                         }`}
                       >
                         {t('មិនទាន់កែ', 'Ungraded')} (
-                        {
-                          submissions.filter(
-                            (s) => s.score === null || s.score === undefined
-                          ).length
-                        }
-                        )
+                        {submissions.filter((s) => s.score === null || s.score === undefined).length})
                       </button>
                     </div>
                   </div>
@@ -2620,26 +2392,14 @@ export default function TeacherManageAssignments() {
                         <DocumentCheckIcon className="h-7 w-7" />
                       </div>
                       <p className="asg-text-primary font-extrabold text-gray-700 text-sm sm:text-base">
-                        {t(
-                          'មិនទាន់មានសិស្សដាក់កិច្ចការនេះនៅឡើយទេ',
-                          'No students have submitted this assignment yet'
-                        )}
-                      </p>
-                      <p className="asg-text-secondary text-xs text-gray-400 mt-1 max-w-md">
-                        {t(
-                          'នៅពេលសិស្សបញ្ជូនកិច្ចការ ឯកសារ និងឈ្មោះរបស់ពួកគេនឹងបង្ហាញនៅទីនេះសម្រាប់ដាក់ពិន្ទុ។',
-                          'When students submit their work, their files and names will appear here for grading.'
-                        )}
+                        {t('មិនទាន់មានសិស្សដាក់កិច្ចការនេះនៅឡើយទេ', 'No students have submitted this assignment yet')}
                       </p>
                     </div>
                   ) : filteredModalSubmissions.length === 0 ? (
                     <div className="py-12 px-6 text-center flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 dark:border-slate-700/80 bg-gray-50/40 dark:bg-slate-900/35">
                       <MagnifyingGlassIcon className="h-10 w-10 text-gray-300 dark:text-slate-500 mb-2.5" />
                       <p className="asg-text-primary font-bold text-gray-700 text-sm">
-                        {t(
-                          'រកមិនឃើញទិន្នន័យសិស្សតាមការច្រោះនេះទេ',
-                          'No matching student submissions found'
-                        )}
+                        {t('រកមិនឃើញទិន្នន័យសិស្សតាមការច្រោះនេះទេ', 'No matching student submissions found')}
                       </p>
                     </div>
                   ) : (
@@ -2670,29 +2430,18 @@ export default function TeacherManageAssignments() {
                           </thead>
                           <tbody className="asg-table-body bg-white">
                             {filteredModalSubmissions.map((sub, subIdx) => {
-                              const subTimeMs = toComparableTimeMs(
-                                sub.submitted_at
-                              );
-                              const isLate =
-                                !isNaN(dueTimeMs) &&
-                                !isNaN(subTimeMs) &&
-                                subTimeMs > dueTimeMs;
+                              const subTimeMs = toComparableTimeMs(sub.submitted_at);
+                              const isLate = !isNaN(dueTimeMs) && !isNaN(subTimeMs) && subTimeMs > dueTimeMs;
                               const grade = gradingData[sub.id] || {
                                 score: sub.score ?? '',
                                 feedback: sub.feedback || '',
                                 isSaving: false,
                               };
-                              const displayName = getStudentDisplayName(
-                                sub.student
-                              );
-                              const rawAvatar = resolveSubmissionStudentAvatar(
-                                sub
-                              );
+                              const displayName = getStudentDisplayName(sub.student);
+                              const rawAvatar = resolveSubmissionStudentAvatar(sub);
                               const avatarUrl = getProfileImageUrl(rawAvatar);
                               const avatarKey = `sub_${sub.id || subIdx}`;
-                              const hasAvatar = Boolean(
-                                avatarUrl && !failedAvatars[avatarKey]
-                              );
+                              const hasAvatar = Boolean(avatarUrl && !failedAvatars[avatarKey]);
                               const stdGender = sub.student?.gender || '';
                               const isFemale = isFemaleGender(stdGender);
                               const stdShift = resolveSubmissionStudentShift(sub);
@@ -2719,9 +2468,7 @@ export default function TeacherManageAssignments() {
                                             }
                                           />
                                         ) : displayName !== 'Unknown' ? (
-                                          <span>
-                                            {displayName.charAt(0).toUpperCase()}
-                                          </span>
+                                          <span>{displayName.charAt(0).toUpperCase()}</span>
                                         ) : (
                                           <UserCircleIcon className="h-5 w-5" />
                                         )}
@@ -2771,9 +2518,7 @@ export default function TeacherManageAssignments() {
                                           : 'asg-pill-emerald bg-emerald-50 text-emerald-700 border-emerald-200'
                                       }`}
                                     >
-                                      {isLate
-                                        ? t('យឺត (Late)', 'Late')
-                                        : t('ទាន់ពេល (On Time)', 'On Time')}
+                                      {isLate ? t('យឺត (Late)', 'Late') : t('ទាន់ពេល (On Time)', 'On Time')}
                                     </span>
                                   </td>
                                   <td className="px-4 py-3.5 whitespace-nowrap text-center">
@@ -2801,18 +2546,8 @@ export default function TeacherManageAssignments() {
                                       max={cleanMaxScore}
                                       step="0.5"
                                       placeholder="—"
-                                      value={
-                                        grade.score !== ''
-                                          ? formatCleanScore(grade.score)
-                                          : ''
-                                      }
-                                      onChange={(e) =>
-                                        handleGradeChange(
-                                          sub.id,
-                                          'score',
-                                          e.target.value
-                                        )
-                                      }
+                                      value={grade.score !== '' ? formatCleanScore(grade.score) : ''}
+                                      onChange={(e) => handleGradeChange(sub.id, 'score', e.target.value)}
                                       title={`${t('ពិន្ទុអតិបរមា៖', 'Max Score:')} ${cleanMaxScore}`}
                                       className="asg-input w-20 px-3 py-2 text-sm font-bold border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 focus:bg-white transition-colors text-center"
                                     />
@@ -2820,18 +2555,9 @@ export default function TeacherManageAssignments() {
                                   <td className="px-4 py-3.5">
                                     <input
                                       type="text"
-                                      placeholder={t(
-                                        'មតិយោបល់...',
-                                        'Feedback...'
-                                      )}
+                                      placeholder={t('មតិយោបល់...', 'Feedback...')}
                                       value={grade.feedback}
-                                      onChange={(e) =>
-                                        handleGradeChange(
-                                          sub.id,
-                                          'feedback',
-                                          e.target.value
-                                        )
-                                      }
+                                      onChange={(e) => handleGradeChange(sub.id, 'feedback', e.target.value)}
                                       className="asg-input w-full min-w-[160px] px-3 py-2 text-sm font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 focus:bg-white transition-colors"
                                     />
                                   </td>
@@ -2860,7 +2586,6 @@ export default function TeacherManageAssignments() {
                   )}
                 </div>
 
-                {/* Modal Footer */}
                 <div className="asg-modal-bar px-6 py-4 sm:px-7 border-t border-gray-100 bg-gray-50/50 flex justify-end shrink-0">
                   <button
                     type="button"
@@ -2876,13 +2601,11 @@ export default function TeacherManageAssignments() {
         })()}
 
       {/* ================================================================== */}
-      {/* MODAL - 2: Add / Edit Assignment                                   */}
+      {/* MODAL - 2: Add / Edit Assignment (With File Attachment)            */}
       {/* ================================================================== */}
       {showAddModal && (
         <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-4">
           <div className="asg-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent">
-            
-            {/* Modal Header */}
             <div className="asg-modal-bar flex justify-between items-center p-6 sm:p-7 border-b border-gray-100 bg-gray-50/50 shrink-0">
               <h2 className="asg-text-primary text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
                 <span className="asg-pill-indigo bg-indigo-100 text-indigo-600 p-2.5 rounded-xl border border-indigo-200">
@@ -2918,10 +2641,7 @@ export default function TeacherManageAssignments() {
                     required
                     value={formData.title}
                     onChange={handleInputChange}
-                    placeholder={t(
-                      'បញ្ចូលចំណងជើងកិច្ចការ...',
-                      'Enter assignment title...'
-                    )}
+                    placeholder={t('បញ្ចូលចំណងជើងកិច្ចការ...', 'Enter assignment title...')}
                     className="asg-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all shadow-sm"
                   />
                 </div>
@@ -2982,20 +2702,102 @@ export default function TeacherManageAssignments() {
                   </div>
                 </div>
 
+                {/* ✅ ប្រអប់ភ្ជាប់ឯកសារកិច្ចការ (PDF, Word, Excel, PPT, Image, ZIP) */}
                 <div>
                   <label className="asg-label block text-sm font-bold text-gray-700 mb-1.5">
-                    {t('ការពណ៌នាពីកិច្ចការ', 'Description')}{' '}
-                    <span className="text-rose-500">*</span>
+                    {t('ភ្ជាប់ឯកសារកិច្ចការ (PDF, Word, ZIP...)', 'Attach Assignment File (PDF, Word, ZIP...)')}
+                  </label>
+
+                  {assignmentFile ? (
+                    <div className="asg-pill-emerald flex items-center justify-between gap-3 p-3.5 rounded-xl border border-emerald-300 bg-emerald-50/70">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <PaperClipIcon className="h-5 w-5 text-emerald-600 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="asg-text-primary text-xs sm:text-sm font-bold text-gray-900 truncate">
+                            {assignmentFile.name}
+                          </p>
+                          <p className="asg-text-secondary text-[11px] font-medium text-gray-500">
+                            {(assignmentFile.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAssignmentFile(null)}
+                        className="p-1.5 text-rose-500 hover:bg-rose-100 rounded-lg cursor-pointer shrink-0"
+                        title={t('ដកឯកសារចេញ', 'Remove file')}
+                      >
+                        <XMarkIcon className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : existingFileName && !removeExistingFile ? (
+                    <div className="asg-pill-blue flex items-center justify-between gap-3 p-3.5 rounded-xl border border-blue-200 bg-blue-50/70">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <PaperClipIcon className="h-5 w-5 text-blue-600 shrink-0" />
+                        <span className="asg-text-primary text-xs sm:text-sm font-bold text-gray-800 truncate">
+                          {existingFileName}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <label
+                          htmlFor="assignment-file-input"
+                          className="px-2.5 py-1 text-xs font-bold text-indigo-700 bg-white border border-indigo-200 rounded-lg hover:bg-indigo-50 cursor-pointer"
+                        >
+                          {t('ប្ដូរឯកសារ', 'Replace')}
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setRemoveExistingFile(true)}
+                          className="p-1.5 text-rose-500 hover:bg-rose-100 rounded-lg cursor-pointer"
+                          title={t('លុបឯកសារចេញ', 'Remove attachment')}
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor="assignment-file-input"
+                      className="asg-input flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-indigo-300 rounded-xl cursor-pointer bg-gray-50/60 hover:bg-indigo-50/40 transition-all"
+                    >
+                      <ArrowUpTrayIcon className="h-7 w-7 text-indigo-500 mb-1.5" />
+                      <span className="asg-text-primary text-xs sm:text-sm font-bold text-gray-700">
+                        {t('ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ PDF ឬ Word', 'Click here to upload PDF or Word file')}
+                      </span>
+                      <span className="asg-text-secondary text-[11px] text-gray-400 mt-0.5">
+                        {t('គាំទ្រ PDF, DOC, DOCX, XLS, PPT, ZIP, រូបភាព (អតិបរមា 20MB)', 'Supports PDF, DOC, DOCX, XLS, PPT, ZIP, Images (Max 20MB)')}
+                      </span>
+                    </label>
+                  )}
+
+                  <input
+                    id="assignment-file-input"
+                    type="file"
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.png,.jpg,.jpeg"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        setAssignmentFile(f);
+                        setRemoveExistingFile(false);
+                      }
+                    }}
+                    className="hidden"
+                  />
+                </div>
+
+                {/* ✅ ការពណ៌នា (Optional — ដាក់ក៏បាន មិនដាក់ក៏បាន) */}
+                <div>
+                  <label className="asg-label block text-sm font-bold text-gray-700 mb-1.5">
+                    {t('ការណែនាំបន្ថែម (ដាក់ក៏បាន មិនដាក់ក៏បាន)', 'Additional Instructions (Optional)')}
                   </label>
                   <textarea
                     name="description"
-                    required
-                    rows={4}
+                    rows={3}
                     value={formData.description}
                     onChange={handleInputChange}
                     placeholder={t(
-                      'លម្អិតអំពីចំណុចការងារ លំហាត់ ឬការណែនាំផ្សេងៗ...',
-                      'Detail instructions...'
+                      'ឧ. សូមបើកឯកសារ PDF ខាងលើ រួចធ្វើលំហាត់ទី ១ ដល់ ៣ ផ្ញើមកវិញ...',
+                      'e.g. Open the attached PDF and complete exercises 1–3...'
                     )}
                     className="asg-input w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 font-medium transition-all resize-none shadow-sm"
                   />
@@ -3031,9 +2833,7 @@ export default function TeacherManageAssignments() {
         </div>
       )}
 
-      {/* ================================================================== */}
-      {/* MODAL - 3: Delete Confirmation                                     */}
-      {/* ================================================================== */}
+      {/* MODAL - 3: Delete Confirmation */}
       {showDeleteModal && (
         <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/50 md:backdrop-blur-md p-4">
           <div className="asg-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-md p-8 animate-fadeIn border border-transparent">
@@ -3041,20 +2841,12 @@ export default function TeacherManageAssignments() {
               <div className="asg-pill-rose p-2 bg-rose-100 rounded-full mr-3 border border-rose-200">
                 <ExclamationTriangleIcon className="h-6 w-6" />
               </div>
-              <h3 className="text-xl font-extrabold">
-                {t('បញ្ជាក់ការលុប', 'Confirm Deletion')}
-              </h3>
+              <h3 className="text-xl font-extrabold">{t('បញ្ជាក់ការលុប', 'Confirm Deletion')}</h3>
             </div>
             <p className="asg-text-secondary text-sm font-medium text-gray-600 mb-6 leading-relaxed">
-              {t(
-                'តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបកិច្ចការ',
-                'Are you sure you want to delete assignment'
-              )}{' '}
-              «
-              <span className="asg-text-primary font-extrabold text-gray-900">
-                {selectedAssignment?.title}
-              </span>
-              » {t('នេះមែនទេ?', 'this assignment?')}
+              {t('តើលោកគ្រូ/អ្នកគ្រូប្រាកដជាចង់លុបកិច្ចការ', 'Are you sure you want to delete assignment')}{' '}
+              «<span className="asg-text-primary font-extrabold text-gray-900">{selectedAssignment?.title}</span>»{' '}
+              {t('នេះមែនទេ?', 'this assignment?')}
               <br />
               <br />
               <span className="asg-pill-rose text-rose-500 text-xs font-bold bg-rose-50 p-3 rounded-lg border border-rose-100 block">
@@ -3087,18 +2879,10 @@ export default function TeacherManageAssignments() {
         </div>
       )}
 
-      {/* ================================================================== */}
-      {/* 📌 7. CSS សម្រាប់កំណត់ពណ៌ក្នុងទម្រង់យប់ (DARK MODE STYLING)            */}
-      {/* ================================================================== */}
+      {/* DARK MODE STYLING */}
       <style>{`
-        /* Light mode subtle row dividers */
-        .asg-table-row + .asg-table-row > td {
-          border-top: 1px solid #f1f5f9;
-        }
-
-        html.dark .asg-page-bg {
-          background-color: transparent !important;
-        }
+        .asg-table-row + .asg-table-row > td { border-top: 1px solid #f1f5f9; }
+        html.dark .asg-page-bg { background-color: transparent !important; }
         html.dark .asg-surface-card,
         html.dark .asg-table-bar,
         html.dark .asg-modal-card,
@@ -3106,117 +2890,38 @@ export default function TeacherManageAssignments() {
           background-color: #1e293b !important;
           border-color: #334155 !important;
         }
-        html.dark .asg-year-card:hover {
-          background-color: #263449 !important;
-        }
+        html.dark .asg-year-card:hover { background-color: #263449 !important; }
         html.dark .asg-modal-bar,
         html.dark .asg-filter-subbar {
           background-color: rgba(15, 23, 42, 0.6) !important;
           border-color: #334155 !important;
         }
-        html.dark .asg-text-primary {
-          color: #f8fafc !important;
-        }
-        html.dark .asg-text-secondary {
-          color: #94a3b8 !important;
-        }
-        html.dark .asg-label {
-          color: #cbd5e1 !important;
-        }
-        html.dark .asg-shift-tabs {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-        }
-        html.dark .asg-shift-btn {
-          color: #94a3b8 !important;
-        }
-        html.dark .asg-shift-btn:hover {
-          background-color: #1e293b !important;
-          color: #f8fafc !important;
-        }
-        html.dark .asg-shift-count {
-          background-color: #1e293b !important;
-          color: #cbd5e1 !important;
-        }
-        html.dark .asg-input {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-          color: #f8fafc !important;
-          color-scheme: dark;
-        }
-        html.dark .asg-input::placeholder {
-          color: #64748b !important;
-        }
-        html.dark .asg-close-btn {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-          color: #cbd5e1 !important;
-        }
-        html.dark .asg-close-btn:hover {
-          background-color: #334155 !important;
-          color: #ffffff !important;
-        }
-        html.dark .asg-table-head {
-          background-color: #0f172a !important;
-          border-color: rgba(51, 65, 85, 0.7) !important;
-        }
-        html.dark .asg-table-head th {
-          color: #94a3b8 !important;
-        }
-        html.dark .asg-table-body {
-          background-color: #1e293b !important;
-          border-color: #334155 !important;
-        }
-        html.dark .asg-table-row + .asg-table-row > td {
-          border-top: 1px solid rgba(51, 65, 85, 0.55) !important;
-        }
-        html.dark .asg-table-row:hover {
-          background-color: rgba(59, 130, 246, 0.08) !important;
-        }
-        html.dark .asg-code-pill {
-          background-color: #0f172a !important;
-          border-color: #334155 !important;
-          color: #cbd5e1 !important;
-        }
-        html.dark .asg-pill-blue {
-          background-color: rgba(59, 130, 246, 0.15) !important;
-          color: #60a5fa !important;
-          border-color: rgba(59, 130, 246, 0.3) !important;
-        }
-        html.dark .asg-pill-indigo {
-          background-color: rgba(99, 102, 241, 0.15) !important;
-          color: #818cf8 !important;
-          border-color: rgba(99, 102, 241, 0.3) !important;
-        }
-        html.dark .asg-pill-emerald {
-          background-color: rgba(16, 185, 129, 0.15) !important;
-          color: #34d399 !important;
-          border-color: rgba(16, 185, 129, 0.3) !important;
-        }
-        html.dark .asg-pill-amber {
-          background-color: rgba(245, 158, 11, 0.15) !important;
-          color: #fbbf24 !important;
-          border-color: rgba(245, 158, 11, 0.3) !important;
-        }
-        html.dark .asg-pill-rose {
-          background-color: rgba(244, 63, 94, 0.15) !important;
-          color: #fb7185 !important;
-          border-color: rgba(244, 63, 94, 0.3) !important;
-        }
-        html.dark .asg-action-edit {
-          color: #818cf8 !important;
-        }
-        html.dark .asg-action-edit:hover {
-          background-color: rgba(99, 102, 241, 0.18) !important;
-          border-color: rgba(99, 102, 241, 0.3) !important;
-        }
-        html.dark .asg-action-delete {
-          color: #fb7185 !important;
-        }
-        html.dark .asg-action-delete:hover {
-          background-color: rgba(244, 63, 94, 0.18) !important;
-          border-color: rgba(244, 63, 94, 0.3) !important;
-        }
+        html.dark .asg-text-primary { color: #f8fafc !important; }
+        html.dark .asg-text-secondary { color: #94a3b8 !important; }
+        html.dark .asg-label { color: #cbd5e1 !important; }
+        html.dark .asg-shift-tabs { background-color: #0f172a !important; border-color: #334155 !important; }
+        html.dark .asg-shift-btn { color: #94a3b8 !important; }
+        html.dark .asg-shift-btn:hover { background-color: #1e293b !important; color: #f8fafc !important; }
+        html.dark .asg-shift-count { background-color: #1e293b !important; color: #cbd5e1 !important; }
+        html.dark .asg-input { background-color: #0f172a !important; border-color: #334155 !important; color: #f8fafc !important; color-scheme: dark; }
+        html.dark .asg-input::placeholder { color: #64748b !important; }
+        html.dark .asg-close-btn { background-color: #0f172a !important; border-color: #334155 !important; color: #cbd5e1 !important; }
+        html.dark .asg-close-btn:hover { background-color: #334155 !important; color: #ffffff !important; }
+        html.dark .asg-table-head { background-color: #0f172a !important; border-color: rgba(51, 65, 85, 0.7) !important; }
+        html.dark .asg-table-head th { color: #94a3b8 !important; }
+        html.dark .asg-table-body { background-color: #1e293b !important; border-color: #334155 !important; }
+        html.dark .asg-table-row + .asg-table-row > td { border-top: 1px solid rgba(51, 65, 85, 0.55) !important; }
+        html.dark .asg-table-row:hover { background-color: rgba(59, 130, 246, 0.08) !important; }
+        html.dark .asg-code-pill { background-color: #0f172a !important; border-color: #334155 !important; color: #cbd5e1 !important; }
+        html.dark .asg-pill-blue { background-color: rgba(59, 130, 246, 0.15) !important; color: #60a5fa !important; border-color: rgba(59, 130, 246, 0.3) !important; }
+        html.dark .asg-pill-indigo { background-color: rgba(99, 102, 241, 0.15) !important; color: #818cf8 !important; border-color: rgba(99, 102, 241, 0.3) !important; }
+        html.dark .asg-pill-emerald { background-color: rgba(16, 185, 129, 0.15) !important; color: #34d399 !important; border-color: rgba(16, 185, 129, 0.3) !important; }
+        html.dark .asg-pill-amber { background-color: rgba(245, 158, 11, 0.15) !important; color: #fbbf24 !important; border-color: rgba(245, 158, 11, 0.3) !important; }
+        html.dark .asg-pill-rose { background-color: rgba(244, 63, 94, 0.15) !important; color: #fb7185 !important; border-color: rgba(244, 63, 94, 0.3) !important; }
+        html.dark .asg-action-edit { color: #818cf8 !important; }
+        html.dark .asg-action-edit:hover { background-color: rgba(99, 102, 241, 0.18) !important; border-color: rgba(99, 102, 241, 0.3) !important; }
+        html.dark .asg-action-delete { color: #fb7185 !important; }
+        html.dark .asg-action-delete:hover { background-color: rgba(244, 63, 94, 0.18) !important; border-color: rgba(244, 63, 94, 0.3) !important; }
       `}</style>
     </div>
   );

@@ -1960,7 +1960,7 @@ class StudentController extends Controller
         ]);
     }
 
-    // ទាញយកកិច្ចការសិស្ស
+    // ទាញយកកិច្ចការសិស្ស (រួមទាំងឯកសារភ្ជាប់របស់គ្រូ ដោយមិនទាញ file_data Base64 ធំៗ)
     public function getAllAssignments(Request $request)
     {
         try {
@@ -1971,7 +1971,19 @@ class StudentController extends Controller
             $enrolledCourseIds = $this->getEnrolledCourseIdsForStudent($student);
             $deptId = $this->resolveStudentDepartmentId($student, $enrolledCourseIds);
 
-            $query = Assignment::with(['course.department'])
+            $asgCols = [
+                'id', 'course_id', 'title', 'description', 'due_date',
+                'total_score', 'created_at', 'updated_at',
+            ];
+            if (Schema::hasColumn('assignments', 'file_path')) {
+                $asgCols[] = 'file_path';
+            }
+            if (Schema::hasColumn('assignments', 'original_filename')) {
+                $asgCols[] = 'original_filename';
+            }
+
+            $query = Assignment::select($asgCols)
+                ->with(['course.department'])
                 ->orderBy('due_date', 'asc');
 
             if ($request->filled('course_id') && $request->course_id !== 'all') {
@@ -2015,6 +2027,8 @@ class StudentController extends Controller
                     'course_id' => $assignment->course_id,
                     'title' => $assignment->title,
                     'description' => $assignment->description,
+                    'file_path' => $assignment->file_path ?? null,
+                    'original_filename' => $assignment->original_filename ?? null,
                     'due_date' => $assignment->due_date,
                     'marks' => $assignment->marks ?? $assignment->total_score ?? 20,
                     'total_score' => $assignment->total_score ?? $assignment->marks ?? 20,
