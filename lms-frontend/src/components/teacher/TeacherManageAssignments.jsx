@@ -670,7 +670,7 @@ export default function TeacherManageAssignments() {
     };
   }, [currentTeacherId]);
 
-  const fetchAssignments = async () => {
+  const fetchAssignments = useCallback(async () => {
     try {
       const response = await api.get('/teacher/assignments');
       if (response.data?.error_debug) return;
@@ -690,7 +690,24 @@ export default function TeacherManageAssignments() {
     } catch (error) {
       console.error('Error fetching assignments:', error);
     }
-  };
+  }, [currentTeacherId]);
+
+  // ✅ Auto-Sync ចំនួនសិស្សដាក់កិច្ចការភ្លាមៗ ពេលប្ដូរ Tab មកវិញ ឬរៀងរាល់ 30 វិនាទី
+  useEffect(() => {
+    const syncNow = () => {
+      if (document.visibilityState === 'visible' && !showAddModal && !showSubmissionsModal) {
+        fetchAssignments();
+      }
+    };
+    const interval = setInterval(syncNow, 30000);
+    window.addEventListener('focus', syncNow);
+    document.addEventListener('visibilitychange', syncNow);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', syncNow);
+      document.removeEventListener('visibilitychange', syncNow);
+    };
+  }, [fetchAssignments, showAddModal, showSubmissionsModal]);
 
   // ============================================================================
   // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា និងវេនសិក្សា
@@ -1259,6 +1276,15 @@ export default function TeacherManageAssignments() {
       setSubmissions(validSubs);
       initGradingState(validSubs);
       ASSIGNMENTS_MEM_CACHE.submissionsByAssignment[assignment.id] = validSubs;
+
+      // ✅ Update ចំនួនសិស្សដាក់កិច្ចការក្នុងតារាងភ្លាមៗឱ្យត្រូវតាមចំនួនពិត
+      setAssignments((prev) => {
+        const updated = prev.map((a) =>
+          a.id === assignment.id ? { ...a, submissions_count: validSubs.length } : a
+        );
+        ASSIGNMENTS_MEM_CACHE.assignments = updated;
+        return updated;
+      });
 
       runWhenIdle(() => {
         try {
