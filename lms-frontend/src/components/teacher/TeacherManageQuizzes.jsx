@@ -167,6 +167,7 @@ const normalizeShiftKey = (shiftVal) => {
   return s ? shiftVal : 'Monday-Friday';
 };
 
+// ✅ កែសម្រួលអនុគមន៍ទាញយកម៉ោង (ការពារបញ្ហា Timezone)
 const extractExactDateTimeParts = (rawVal) => {
   if (!rawVal) return null;
 
@@ -181,6 +182,7 @@ const extractExactDateTimeParts = (rawVal) => {
   }
 
   const str = String(rawVal).trim();
+  // សាកល្បងចាប់យកតាមទម្រង់ YYYY-MM-DD HH:mm (String)
   const match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
   if (match) {
     return {
@@ -192,6 +194,8 @@ const extractExactDateTimeParts = (rawVal) => {
     };
   }
 
+  // បើវាជា ISO String វែង (ឧ. 2026-11-20T10:30:00.000000Z)
+  // ប្រើប្រាស់ Local Time របស់ Browser
   const d = new Date(str);
   if (!isNaN(d.getTime())) {
     return {
@@ -206,6 +210,7 @@ const extractExactDateTimeParts = (rawVal) => {
   return null;
 };
 
+// ✅ កែសម្រួលឱ្យលោតចូល input="datetime-local" ត្រឹមត្រូវតាម Local Time
 const toDatetimeLocalInput = (dateVal) => {
   const parts = extractExactDateTimeParts(dateVal);
   if (!parts) return '';
@@ -217,6 +222,7 @@ const toDatetimeLocalInput = (dateVal) => {
   return `${y}-${m}-${d}T${hr}:${min}`;
 };
 
+// ✅ កែសម្រួលពេលបញ្ជូនទៅ Backend (យកម៉ោង Local ទៅតែម្ដង មិនបាច់បំប្លែង)
 const toBackendDateTime = (inputVal) => {
   const parts = extractExactDateTimeParts(inputVal);
   if (!parts) return null;
