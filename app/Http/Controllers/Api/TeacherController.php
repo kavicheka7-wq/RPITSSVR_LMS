@@ -1564,12 +1564,15 @@ class TeacherController extends Controller
             }
         }
 
-        $assignment = DB::transaction(function () use ($validated, $filePath, $originalName, $fileDataBase64) {
+        // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
+        $dueDate = Carbon::parse($validated['due_date'])->timezone('Asia/Phnom_Penh');
+
+        $assignment = DB::transaction(function () use ($validated, $dueDate, $filePath, $originalName, $fileDataBase64) {
             $asg = Assignment::create([
                 'course_id' => $validated['course_id'],
                 'title' => trim($validated['title']),
                 'description' => trim((string) ($validated['description'] ?? '')),
-                'due_date' => $validated['due_date'],
+                'due_date' => $dueDate,
                 'total_score' => $validated['total_score'] ?? 20,
                 'created_by' => auth()->id(),
             ]);
@@ -1637,11 +1640,14 @@ class TeacherController extends Controller
             } catch (\Throwable $e) {
             }
 
+            // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
+            $dueDate = Carbon::parse($validated['due_date'])->timezone('Asia/Phnom_Penh');
+
             $assignment->update([
                 'course_id' => $validated['course_id'],
                 'title' => trim($validated['title']),
                 'description' => trim((string) ($validated['description'] ?? '')),
-                'due_date' => $validated['due_date'],
+                'due_date' => $dueDate,
                 'total_score' => $validated['total_score'],
             ]);
 
@@ -1984,8 +1990,19 @@ class TeacherController extends Controller
 
         $this->findAuthorizedCourse($validated['course_id']);
 
-        $quiz = DB::transaction(function () use ($validated) {
-            return Quiz::create($validated);
+        // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
+        $startDate = Carbon::parse($validated['start_date'])->timezone('Asia/Phnom_Penh');
+        $endDate = Carbon::parse($validated['end_date'])->timezone('Asia/Phnom_Penh');
+
+        $quiz = DB::transaction(function () use ($validated, $startDate, $endDate) {
+            return Quiz::create([
+                'course_id' => $validated['course_id'],
+                'title' => $validated['title'],
+                'duration' => $validated['duration'],
+                'total_mark' => $validated['total_mark'],
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+            ]);
         });
 
         $this->clearTeacherDashboardCache();
@@ -2116,7 +2133,19 @@ class TeacherController extends Controller
 
             $this->findAuthorizedCourse($validated['course_id']);
 
-            $quiz->update($validated);
+            // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
+            $startDate = Carbon::parse($validated['start_date'])->timezone('Asia/Phnom_Penh');
+            $endDate = Carbon::parse($validated['end_date'])->timezone('Asia/Phnom_Penh');
+
+            $quiz->update([
+                'course_id' => $validated['course_id'],
+                'title' => $validated['title'],
+                'duration' => $validated['duration'],
+                'total_mark' => $validated['total_mark'],
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+            ]);
+
             $this->clearTeacherDashboardCache();
 
             return response()->json([
