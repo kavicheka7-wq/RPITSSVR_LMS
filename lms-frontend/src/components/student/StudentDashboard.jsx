@@ -306,7 +306,7 @@ const extractArrayFromRes = (resData) => {
   return [];
 };
 
-// ✅ ទាញទិន្នន័យកិច្ចការ, កម្រងសំណួរ និងពិន្ទុតាមលំដាប់ (Staggered) ដើម្បីកុំឱ្យស្ទះ Hosting
+// ✅ ទាញទិន្នន័យកិច្ចការ, កម្រងសំណួរ និងពិន្ទុព្រមគ្នា ដើម្បីឱ្យរង្វង់មូលទឹក និងស្ថានភាពពិន្ទុលោតលឿនភ្លាមៗ
 const syncDashboardTasksAndPrefetch = (
   uid,
   forceRefresh,
@@ -317,7 +317,7 @@ const syncDashboardTasksAndPrefetch = (
 ) => {
   const effectiveUid = uid || 'default_student';
 
-  // ១. ទាញកិច្ចការ និងកម្រងសំណួរ (ជំហានទី១)
+  // ១. ទាញកិច្ចការ កម្រងសំណួរ និងពិន្ទុព្រមគ្នាភ្លាមៗ
   Promise.allSettled([
     api.get('/student/assignments', { params: { per_page: 50 } }).then((res) => {
       if (res.data?.error_debug) return;
@@ -345,28 +345,23 @@ const syncDashboardTasksAndPrefetch = (
         } catch {}
       });
     }),
-  ]).finally(() => {
-    // ២. ទាញពិន្ទុបន្ទាប់ពីកិច្ចការ និងសំណួររួចរាល់ (កាត់បន្ថយការបាញ់ព្រមគ្នាច្រើនពេក)
-    api
-      .get('/student/scores')
-      .then((res) => {
-        if (res.data?.error_debug) return;
-        const data = extractArrayFromRes(res.data);
-        const slim = saveCoursesAndAvatarsFast(data);
-        STUDENT_DASH_MEM_CACHE.scores = slim;
-        if (typeof onScoresSynced === 'function') onScoresSynced(slim);
-        runWhenIdle(() => {
-          try {
-            const str = JSON.stringify(slim);
-            localStorage.setItem(getScoresCacheKey(effectiveUid), str);
-            localStorage.setItem(CACHE_KEY_SHARED_SCORES, str);
-          } catch {}
-        });
-      })
-      .catch(() => {});
-  });
+    api.get('/student/scores').then((res) => {
+      if (res.data?.error_debug) return;
+      const data = extractArrayFromRes(res.data);
+      const slim = saveCoursesAndAvatarsFast(data);
+      STUDENT_DASH_MEM_CACHE.scores = slim;
+      if (typeof onScoresSynced === 'function') onScoresSynced(slim);
+      runWhenIdle(() => {
+        try {
+          const str = JSON.stringify(slim);
+          localStorage.setItem(getScoresCacheKey(effectiveUid), str);
+          localStorage.setItem(CACHE_KEY_SHARED_SCORES, str);
+        } catch {}
+      });
+    }),
+  ]);
 
-  // ៣. Background Prefetch សម្រាប់ទំព័រមេរៀន (ពន្យារពេល 2.5s ដើម្បីកុំឱ្យដណ្ដើម Network ពេលបើកទំព័រដំបូង)
+  // ២. Background Prefetch សម្រាប់ទំព័រមេរៀន (ពន្យារពេល 2.5s ដើម្បីកុំឱ្យដណ្ដើម Network ពេលបើកទំព័រដំបូង)
   if (!forceRefresh && STUDENT_DASH_MEM_CACHE.prefetchedUid !== effectiveUid) {
     STUDENT_DASH_MEM_CACHE.prefetchedUid = effectiveUid;
 
@@ -1177,7 +1172,7 @@ const StudentDashboard = () => {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ ទាញយក /student/dashboard មុនគេ រួចសឹមទាញ Tasks តាមក្រោយ (មិនស្ទះ Hosting)
+  // 📌 ផ្នែកទី៥៖ ទាញយក /student/dashboard និង Tasks/Scores ព្រមគ្នា ដើម្បីលោតពិន្ទុលឿនភ្លាមៗ
   // ============================================================================
   const fetchDashboardData = useCallback(
     async (forceRefresh = false) => {
@@ -1229,7 +1224,16 @@ const StudentDashboard = () => {
       abortControllerRef.current = controller;
 
       try {
-        // ✅ ទាញ /student/dashboard មុនគេតែ ១ Request ដើម្បីឱ្យទំព័រដើមបង្ហាញលឿនបំផុត
+        // ✅ ទាញ Assignments / Quizzes / Scores ព្រមគ្នាជាមួយ Dashboard (លែងរង់ចាំតង់ច្រើន)
+        syncDashboardTasksAndPrefetch(
+          currentStudentId,
+          forceRefresh,
+          (asgData) => setAssignments(asgData),
+          (qzData) => setQuizzes(qzData),
+          (crsData) => setEnrollments((prev) => (prev.length === 0 ? crsData : prev)),
+          (scrData) => setScoresList(scrData)
+        );
+
         const dashRes = await api.get('/student/dashboard', {
           signal: controller.signal,
         });
@@ -1318,16 +1322,6 @@ const StudentDashboard = () => {
             } catch (e) {}
           });
         }
-
-        // ✅ បន្ទាប់ពី Dashboard មកដល់ ទើបទាញ Assignments / Quizzes / Scores តាមក្រោយ
-        syncDashboardTasksAndPrefetch(
-          currentStudentId,
-          forceRefresh,
-          (asgData) => setAssignments(asgData),
-          (qzData) => setQuizzes(qzData),
-          (crsData) => setEnrollments((prev) => (prev.length === 0 ? crsData : prev)),
-          (scrData) => setScoresList(scrData)
-        );
       } catch (error) {
         if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
           return;
@@ -1344,7 +1338,7 @@ const StudentDashboard = () => {
     const handleVisibilityOrFocus = () => {
       if (
         document.visibilityState === 'visible' &&
-        Date.now() - STUDENT_DASH_MEM_CACHE.lastSyncedAt > 20000
+        Date.now() - STUDENT_DASH_MEM_CACHE.lastSyncedAt > 5000
       ) {
         fetchDashboardData(true);
       }
@@ -1354,7 +1348,7 @@ const StudentDashboard = () => {
       if (document.visibilityState === 'visible') {
         fetchDashboardData(true);
       }
-    }, 60000);
+    }, 30000);
 
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
