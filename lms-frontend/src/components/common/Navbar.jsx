@@ -1179,13 +1179,13 @@ const Navbar = () => {
                 className="flex items-center gap-2 sm:gap-3 group min-w-0"
               >
                 {!logoError ? (
-                  <img
-                    src={logo}
-                    alt="RPITSSVR Logo"
-                    className="h-9 sm:h-11 w-auto object-contain shrink-0"
-                    onError={() => setLogoError(true)}
-                  />
-                ) : (
+                    <img
+                      src={logo}
+                      alt="RPITSSVR Logo"
+                      className="h-10 w-10 sm:h-12 sm:w-12 rounded-full object-contain shrink-0"
+                      onError={() => setLogoError(true)}
+                    />
+                  ) : (
                   <div
                     className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center shadow-lg ring-2 ring-yellow-400/50 shrink-0 ${
                       isStudent ? 'bg-indigo-700' : 'bg-blue-700'
