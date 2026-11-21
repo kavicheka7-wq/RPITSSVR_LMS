@@ -213,6 +213,7 @@ const normalizeShiftKey = (shiftVal) => {
   return 'Monday-Friday';
 };
 
+// ✅ គាំទ្រទាំងម៉ោង UTC 'Z' ពី Laravel និងម៉ោង Local ធម្មតា
 const extractExactDateTimeParts = (rawVal) => {
   if (!rawVal) return null;
 
@@ -227,6 +228,22 @@ const extractExactDateTimeParts = (rawVal) => {
   }
 
   const str = String(rawVal).trim();
+
+  // ✅ ១. បើមានសញ្ញា Timezone នៅខាងចុង (Z ឬ +07:00) ឱ្យ new Date() បម្លែងមកម៉ោងកម្ពុជា (+07:00) ជាមុន
+  if (/([zZ]|[+-]\d{2}:?\d{2})$/.test(str)) {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      return {
+        year: d.getFullYear(),
+        month: d.getMonth() + 1,
+        day: d.getDate(),
+        hour: d.getHours(),
+        minute: d.getMinutes(),
+      };
+    }
+  }
+
+  // ✅ ២. បើគ្មានសញ្ញា Timezone ទេ ទើបកាត់យកតម្លៃផ្ទាល់
   const match = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2}))?/);
   if (match) {
     return {

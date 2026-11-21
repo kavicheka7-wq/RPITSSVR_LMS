@@ -1564,8 +1564,8 @@ class TeacherController extends Controller
             }
         }
 
-        // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
-        $dueDate = Carbon::parse($validated['due_date'])->timezone('Asia/Phnom_Penh');
+        // ✅ ដោះស្រាយបញ្ហា Timezone៖ រក្សាទុកម៉ោងពិតប្រាកដដែល Frontend ផ្ញើមក (មិនបំប្លែង)
+        $dueDate = $validated['due_date'];
 
         $assignment = DB::transaction(function () use ($validated, $dueDate, $filePath, $originalName, $fileDataBase64) {
             $asg = Assignment::create([
@@ -1640,8 +1640,8 @@ class TeacherController extends Controller
             } catch (\Throwable $e) {
             }
 
-            // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
-            $dueDate = Carbon::parse($validated['due_date'])->timezone('Asia/Phnom_Penh');
+            // ✅ ដោះស្រាយបញ្ហា Timezone៖ រក្សាទុកម៉ោងពិតប្រាកដដែល Frontend ផ្ញើមក (មិនបំប្លែង)
+            $dueDate = $validated['due_date'];
 
             $assignment->update([
                 'course_id' => $validated['course_id'],
@@ -1721,6 +1721,18 @@ class TeacherController extends Controller
                 return response()->json([
                     'message' => 'មិនអាចលុបកិច្ចការដែលមានសិស្សដាក់រួចហើយបានទេ',
                 ], 400);
+            }
+
+            if (
+                !empty($assignment->file_path) &&
+                !str_starts_with($assignment->file_path, 'http') &&
+                !str_starts_with($assignment->file_path, 'data:')
+            ) {
+                try {
+                    $cleanPath = preg_replace('/^\/?storage\//', '', ltrim($assignment->file_path, '/'));
+                    Storage::disk('public')->delete($cleanPath);
+                } catch (\Throwable $e) {
+                }
             }
 
             $assignment->delete();
@@ -1990,9 +2002,9 @@ class TeacherController extends Controller
 
         $this->findAuthorizedCourse($validated['course_id']);
 
-        // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
-        $startDate = Carbon::parse($validated['start_date'])->timezone('Asia/Phnom_Penh');
-        $endDate = Carbon::parse($validated['end_date'])->timezone('Asia/Phnom_Penh');
+        // ✅ ដោះស្រាយបញ្ហា Timezone៖ រក្សាទុកម៉ោងពិតប្រាកដដែល Frontend ផ្ញើមក (មិនបំប្លែង)
+        $startDate = $validated['start_date'];
+        $endDate = $validated['end_date'];
 
         $quiz = DB::transaction(function () use ($validated, $startDate, $endDate) {
             return Quiz::create([
@@ -2005,6 +2017,7 @@ class TeacherController extends Controller
             ]);
         });
 
+        Cache::forget('admin_overview_report');
         $this->clearTeacherDashboardCache();
 
         return response()->json([
@@ -2043,13 +2056,13 @@ class TeacherController extends Controller
 
                     $this->findAuthorizedCourse($courseId);
 
-                    // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
+                    // ✅ ដោះស្រាយបញ្ហា Timezone៖ រក្សាទុកម៉ោងពិតប្រាកដដែល Frontend ផ្ញើមក ឬបង្កើតម៉ោង Local ថ្មី
                     $startDate = !empty($quizData['start_date'])
-                        ? Carbon::parse($quizData['start_date'])->timezone('Asia/Phnom_Penh')
-                        : now()->timezone('Asia/Phnom_Penh');
+                        ? $quizData['start_date']
+                        : now()->timezone('Asia/Phnom_Penh')->format('Y-m-d H:i:s');
                     $endDate = !empty($quizData['end_date'])
-                        ? Carbon::parse($quizData['end_date'])->timezone('Asia/Phnom_Penh')
-                        : $startDate->copy()->addDays(7);
+                        ? $quizData['end_date']
+                        : Carbon::parse($startDate)->addDays(7)->format('Y-m-d H:i:s');
 
                     $quiz = Quiz::create([
                         'course_id' => $courseId,
@@ -2133,9 +2146,9 @@ class TeacherController extends Controller
 
             $this->findAuthorizedCourse($validated['course_id']);
 
-            // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
-            $startDate = Carbon::parse($validated['start_date'])->timezone('Asia/Phnom_Penh');
-            $endDate = Carbon::parse($validated['end_date'])->timezone('Asia/Phnom_Penh');
+            // ✅ ដោះស្រាយបញ្ហា Timezone៖ រក្សាទុកម៉ោងពិតប្រាកដដែល Frontend ផ្ញើមក (មិនបំប្លែង)
+            $startDate = $validated['start_date'];
+            $endDate = $validated['end_date'];
 
             $quiz->update([
                 'course_id' => $validated['course_id'],
@@ -2146,6 +2159,7 @@ class TeacherController extends Controller
                 'end_date' => $endDate,
             ]);
 
+            Cache::forget('admin_overview_report');
             $this->clearTeacherDashboardCache();
 
             return response()->json([
@@ -2192,6 +2206,7 @@ class TeacherController extends Controller
                 DB::table('quizzes')->where('id', $quiz->id)->delete();
             });
 
+            Cache::forget('admin_overview_report');
             $this->clearTeacherDashboardCache();
 
             return response()->json([

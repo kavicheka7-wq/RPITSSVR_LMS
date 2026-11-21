@@ -167,7 +167,7 @@ const normalizeShiftKey = (shiftVal) => {
   return s ? shiftVal : 'Monday-Friday';
 };
 
-// ✅ កែសម្រួលអនុគមន៍ទាញយកម៉ោង (ការពារបញ្ហា Timezone)
+// ✅ កែសម្រួលអនុគមន៍ទាញយកម៉ោង (គាំទ្រទាំងម៉ោង UTC 'Z' ពី Laravel និងម៉ោង Local ធម្មតា)
 const extractExactDateTimeParts = (rawVal) => {
   if (!rawVal) return null;
 
@@ -182,7 +182,22 @@ const extractExactDateTimeParts = (rawVal) => {
   }
 
   const str = String(rawVal).trim();
-  // សាកល្បងចាប់យកតាមទម្រង់ YYYY-MM-DD HH:mm (String)
+
+  // ✅ ១. បើមានសញ្ញា Timezone នៅខាងចុង (ដូចជា Z ឬ +07:00) ត្រូវឱ្យ new Date() បម្លែងមកម៉ោងកម្ពុជា (+07:00) ជាមុន
+  if (/([zZ]|[+-]\d{2}:?\d{2})$/.test(str)) {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      return {
+        year: d.getFullYear(),
+        month: d.getMonth() + 1,
+        day: d.getDate(),
+        hour: d.getHours(),
+        minute: d.getMinutes(),
+      };
+    }
+  }
+
+  // ✅ ២. បើគ្មានសញ្ញា Timezone ទេ (ឧ. "2026-11-21 17:40:00" ឬពី input datetime-local) ទើបកាត់យកតម្លៃផ្ទាល់
   const match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
   if (match) {
     return {
@@ -194,8 +209,6 @@ const extractExactDateTimeParts = (rawVal) => {
     };
   }
 
-  // បើវាជា ISO String វែង (ឧ. 2026-11-20T10:30:00.000000Z)
-  // ប្រើប្រាស់ Local Time របស់ Browser
   const d = new Date(str);
   if (!isNaN(d.getTime())) {
     return {

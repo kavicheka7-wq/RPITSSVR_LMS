@@ -227,6 +227,7 @@ const normalizeShiftKey = (shiftVal) => {
   return 'Monday-Friday';
 };
 
+// ✅ គាំទ្រទាំងម៉ោង UTC 'Z' ពី Laravel និងម៉ោង Local ធម្មតា
 const extractExactDateTimeParts = (rawVal, isEndBoundary = false) => {
   if (!rawVal) return null;
 
@@ -241,6 +242,22 @@ const extractExactDateTimeParts = (rawVal, isEndBoundary = false) => {
   }
 
   const str = String(rawVal).trim();
+
+  // ✅ ១. បើមានសញ្ញា Timezone នៅខាងចុង (Z ឬ +07:00) ឱ្យ new Date() បម្លែងមកម៉ោងកម្ពុជា (+07:00) ជាមុន
+  if (/([zZ]|[+-]\d{2}:?\d{2})$/.test(str)) {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      return {
+        year: d.getFullYear(),
+        month: d.getMonth() + 1,
+        day: d.getDate(),
+        hour: d.getHours(),
+        minute: d.getMinutes(),
+      };
+    }
+  }
+
+  // ✅ ២. បើគ្មានសញ្ញា Timezone ទេ ទើបកាត់យកតម្លៃផ្ទាល់
   const match = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2}))?/);
   if (match) {
     return {
@@ -1804,7 +1821,7 @@ const StudentQuizzes = () => {
                         <span>{t('ចាប់ផ្តើម៖', 'Starts:')}</span>
                       </span>
                       <span className="std-qz-text-primary font-bold text-gray-700">
-                        {formatDateTime(quiz.start_date, false)}
+                        {formatDateTime(quiz.start_date, true)}
                       </span>
                     </div>
 
@@ -1814,7 +1831,7 @@ const StudentQuizzes = () => {
                         <span>{t('ផុតកំណត់៖', 'Ends:')}</span>
                       </span>
                       <span className="std-qz-text-primary font-bold text-gray-700">
-                        {formatDateTime(quiz.end_date, false)}
+                        {formatDateTime(quiz.end_date, true)}
                       </span>
                     </div>
                   </div>

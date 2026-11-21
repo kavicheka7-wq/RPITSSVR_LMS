@@ -1759,7 +1759,7 @@ class StudentController extends Controller
                 return response()->json(['message' => 'អស់ម៉ោងប្រឡងហើយ! ប្រព័ន្ធបានបញ្ជូនចម្លើយដោយស្វ័យប្រវត្តិ។'], 400);
             }
         } else {
-           $nowLocal = now('Asia/Phnom_Penh');
+            $nowLocal = now('Asia/Phnom_Penh');
             $rawStart = $quiz->getRawOriginal('start_date') ?? $quiz->start_date;
             $rawEnd = $quiz->getRawOriginal('end_date') ?? $quiz->end_date;
 
@@ -1767,8 +1767,15 @@ class StudentController extends Controller
                 return response()->json(['message' => 'កម្រងសំណួរនេះមិនទាន់ដល់ម៉ោងបើកប្រឡងនៅឡើយទេ'], 400);
             }
 
-            if ($rawEnd && $nowLocal->gt(Carbon::parse((string) $rawEnd, 'Asia/Phnom_Penh')->endOfDay())) {
-                return response()->json(['message' => 'កម្រងសំណួរនេះបានផុតកំណត់ម៉ោងប្រឡងហើយ'], 400);
+            if ($rawEnd) {
+                $endStr = trim((string) $rawEnd);
+                $endCarbon = Carbon::parse($endStr, 'Asia/Phnom_Penh');
+                if (strlen($endStr) <= 10) {
+                    $endCarbon = $endCarbon->endOfDay();
+                }
+                if ($nowLocal->gt($endCarbon)) {
+                    return response()->json(['message' => 'កម្រងសំណួរនេះបានផុតកំណត់ម៉ោងប្រឡងហើយ'], 400);
+                }
             }
 
             $attempt = QuizAttempt::create([
