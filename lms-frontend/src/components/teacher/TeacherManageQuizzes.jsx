@@ -830,7 +830,7 @@ export default function TeacherManageQuizzes() {
     };
   }, [currentTeacherId]);
 
-  const fetchQuizzes = async () => {
+  const fetchQuizzes = useCallback(async () => {
     try {
       const response = await api.get('/teacher/quizzes');
       if (response.data?.error_debug) return;
@@ -850,7 +850,29 @@ export default function TeacherManageQuizzes() {
     } catch (error) {
       console.error('Error fetching quizzes:', error);
     }
-  };
+  }, [currentTeacherId]);
+
+  // ✅ Auto-Sync ចំនួនសិស្សប្រឡងភ្លាមៗ ពេលប្ដូរ Tab មកវិញ ឬរៀងរាល់ 30 វិនាទី
+  useEffect(() => {
+    const syncNow = () => {
+      if (
+        document.visibilityState === 'visible' &&
+        !showAddModal &&
+        !showImportModal &&
+        !showSubmissionsModal
+      ) {
+        fetchQuizzes();
+      }
+    };
+    const interval = setInterval(syncNow, 30000);
+    window.addEventListener('focus', syncNow);
+    document.addEventListener('visibilitychange', syncNow);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', syncNow);
+      document.removeEventListener('visibilitychange', syncNow);
+    };
+  }, [fetchQuizzes, showAddModal, showImportModal, showSubmissionsModal]);
 
   // ============================================================================
   // 📌 ផ្នែកទី៣៖ ការគណនាឆ្នាំសិក្សា និងវេនសិក្សា
@@ -2076,6 +2098,15 @@ export default function TeacherManageQuizzes() {
       const validAttempts = Array.isArray(attemptsData) ? attemptsData : [];
       setSubmissions(validAttempts);
       QUIZZES_MEM_CACHE.resultsByQuiz[quiz.id] = validAttempts;
+
+      // ✅ Update ចំនួនសិស្សប្រឡងក្នុងតារាងភ្លាមៗឱ្យត្រូវតាមចំនួនពិត
+      setQuizzes((prev) => {
+        const updated = prev.map((q) =>
+          q.id === quiz.id ? { ...q, attempts_count: validAttempts.length } : q
+        );
+        QUIZZES_MEM_CACHE.quizzes = updated;
+        return updated;
+      });
 
       runWhenIdle(() => {
         try {
