@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class ProfileController extends Controller
@@ -31,40 +33,95 @@ class ProfileController extends Controller
     }
 
     /**
-     * HELPER: បំប្លែងរូបភាពទៅជា Base64 Data URI
+     * ✅ HELPER: ស្រង់យកទិន្នន័យរូបភាព (Binary + Extension + Mime) ដោយមិនទាន់បំប្លែង Base64
      */
-    private function convertImageToBase64($file): string
+    private function extractImagePayload(Request $request): ?array
     {
-        $mimeType = $file->getMimeType() ?: 'image/jpeg';
-        $base64Data = base64_encode(file_get_contents($file->getRealPath()));
-        return "data:{$mimeType};base64,{$base64Data}";
-    }
-
-    /**
-     * ✅ HELPER: ស្រង់យក និងផ្ទៀងផ្ទាត់សុវត្ថិភាពរូបភាព Base64 Data URI (ការពារ SVG XSS និងទំហំធំពេក)
-     */
-    private function extractImageDataUri(Request $request): ?string
-    {
-        $rawBase64 = $request->input('profile_image_base64') ?: $request->input('profile_image');
-        if (is_string($rawBase64)) {
-            $trimmed = trim($rawBase64);
-            // អនុញ្ញាតតែ jpeg, jpg, png, gif, webp និងទំហំ Base64 មិនលើសពី ~2.8MB (~2MB file)
-            if (
-                strlen($trimmed) <= 2800000 &&
-                preg_match('/^data:image\/(jpeg|jpg|png|gif|webp);base64,[A-Za-z0-9+\/=\r\n]+$/i', $trimmed)
-            ) {
-                return $trimmed;
-            }
-        }
-
         if ($request->hasFile('profile_image')) {
             $file = $request->file('profile_image');
             if ($file && $file->isValid()) {
-                return $this->convertImageToBase64($file);
+                $mime = $file->getMimeType() ?: 'image/webp';
+                $ext = strtolower($file->getClientOriginalExtension() ?: match ($mime) {
+                    'image/png' => 'png',
+                    'image/gif' => 'gif',
+                    'image/webp' => 'webp',
+                    default => 'jpg',
+                });
+                $binary = file_get_contents($file->getRealPath());
+                return [
+                    'binary' => $binary,
+                    'mime' => $mime,
+                    'ext' => $ext === 'jpeg' ? 'jpg' : $ext,
+                    'data_uri' => null, // មិនទាន់បំប្លែង Base64 ដើម្បីសន្សំ RAM/CPU
+                ];
+            }
+        }
+
+        $rawBase64 = $request->input('profile_image_base64') ?: $request->input('profile_image');
+        if (is_string($rawBase64)) {
+            $trimmed = trim($rawBase64);
+            if (
+                strlen($trimmed) <= 2800000 &&
+                preg_match('/^data:image\/(jpeg|jpg|png|gif|webp);base64,([A-Za-z0-9+\/=\r\n]+)$/i', $trimmed, $matches)
+            ) {
+                $type = strtolower($matches[1]);
+                $binary = base64_decode($matches[2], true);
+                if ($binary !== false) {
+                    return [
+                        'binary' => $binary,
+                        'mime' => 'image/' . ($type === 'jpg' ? 'jpeg' : $type),
+                        'ext' => $type === 'jpeg' ? 'jpg' : $type,
+                        'data_uri' => $trimmed,
+                    ];
+                }
             }
         }
 
         return null;
+    }
+
+    /**
+     * ✅ HELPER: បង្ហោះរូបភាពទៅ Cloudflare R2 និងលុបរូបចាស់ចេញ
+     */
+    private function uploadToR2(array $payload, int $userId, ?string $oldImageUrl = null): ?string
+    {
+        $bucket = config('filesystems.disks.r2.bucket');
+        $key = config('filesystems.disks.r2.key');
+        $publicUrl = rtrim((string) config('filesystems.disks.r2.url'), '/');
+
+        if (!$bucket || !$key || !$publicUrl) {
+            return null;
+        }
+
+        try {
+            $filename = 'avatars/u' . $userId . '_' . time() . '_' . Str::random(6) . '.' . $payload['ext'];
+
+            $uploaded = Storage::disk('r2')->put($filename, $payload['binary'], [
+                'visibility' => 'public',
+                'ContentType' => $payload['mime'],
+            ]);
+
+            if (!$uploaded) {
+                return null;
+            }
+
+            // លុបរូបចាស់ចេញពី R2 បើមាន
+            if ($oldImageUrl && str_starts_with($oldImageUrl, $publicUrl . '/')) {
+                $oldPath = ltrim(substr($oldImageUrl, strlen($publicUrl)), '/');
+                if ($oldPath) {
+                    try {
+                        Storage::disk('r2')->delete($oldPath);
+                    } catch (\Throwable $e) {
+                        Log::warning('R2 delete old avatar failed: ' . $e->getMessage());
+                    }
+                }
+            }
+
+            return $publicUrl . '/' . $filename;
+        } catch (\Throwable $e) {
+            Log::error('R2 upload failed, falling back to Base64: ' . $e->getMessage());
+            return null;
+        }
     }
 
     /**
@@ -91,7 +148,7 @@ class ProfileController extends Controller
     }
 
     /**
-     * HELPER: រក្សាទុករូបភាពប្រវត្តិរូបចូលគ្រប់តារាងដែលពាក់ព័ន្ធ (users, teachers, students)
+     * HELPER: រក្សាទុករូបភាពប្រវត្តិរូបចូល R2 (ឬ Fallback Base64) និង Sync គ្រប់តារាង
      */
     private function handleSharedImageUpdate(Request $request)
     {
@@ -106,28 +163,34 @@ class ProfileController extends Controller
             return response()->json(['message' => 'សូមចូលប្រព័ន្ធជាមុនសិន'], 401);
         }
 
-        $dataUri = $this->extractImageDataUri($request);
+        $payload = $this->extractImagePayload($request);
 
-        if ($dataUri) {
-            $this->ensureLongTextColumns();
+        if ($payload) {
+            // ព្យាយាមបាញ់ចូល Cloudflare R2 មុន បើមិនបានទើបបំប្លែងជា Base64
+            $r2Url = $this->uploadToR2($payload, (int) $user->id, $user->profile_image);
+
+            if ($r2Url) {
+                $finalImageValue = $r2Url;
+            } else {
+                $this->ensureLongTextColumns();
+                $finalImageValue = $payload['data_uri']
+                    ?: "data:{$payload['mime']};base64," . base64_encode($payload['binary']);
+            }
 
             $hasTeacherImg = $this->hasProfileImageColumn('teachers');
             $hasStudentImg = $this->hasProfileImageColumn('students');
 
-            DB::transaction(function () use ($user, $dataUri, $hasTeacherImg, $hasStudentImg) {
-                $user->profile_image = $dataUri;
+            DB::transaction(function () use ($user, $finalImageValue, $hasTeacherImg, $hasStudentImg) {
+                $user->profile_image = $finalImageValue;
                 $user->save();
 
                 if ($hasTeacherImg) {
-                    Teacher::where('user_id', $user->id)->update(['profile_image' => $dataUri]);
+                    Teacher::where('user_id', $user->id)->update(['profile_image' => $finalImageValue]);
                 }
                 if ($hasStudentImg) {
-                    Student::where('user_id', $user->id)->update(['profile_image' => $dataUri]);
+                    Student::where('user_id', $user->id)->update(['profile_image' => $finalImageValue]);
                 }
             });
-
-            Cache::forget('admin_dashboard_stats');
-            Cache::forget('admin_overview_report');
 
             return response()->json([
                 'success' => true,

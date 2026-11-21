@@ -77,8 +77,8 @@ const readCachedTeacherSync = () => {
   }
 };
 
-// ✅ មុខងារបង្រួមទំហំរូបភាពតាមរយៈ Canvas ឱ្យតូចល្មមច្បាស់ស្អាត (ប្រហែល 35KB-50KB) សម្រាប់ Railway Database
-const compressImageToBase64 = (file, maxDimension = 360, quality = 0.82) =>
+// ✅ បង្រួមរូបភាពកម្រិតច្បាស់ HD (600px WebP) សម្រាប់ Cloudflare R2
+const compressImageToBase64 = (file, maxDimension = 600, quality = 0.9) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -102,17 +102,20 @@ const compressImageToBase64 = (file, maxDimension = 360, quality = 0.82) =>
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
 
-          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          const mime = 'image/webp';
+          const dataUrl = canvas.toDataURL(mime, quality);
           canvas.toBlob(
             (blob) => {
               const compressedFile = blob
-                ? new File([blob], 'avatar.jpg', { type: 'image/jpeg' })
+                ? new File([blob], 'avatar.webp', { type: mime })
                 : file;
               resolve({ dataUrl, compressedFile });
             },
-            'image/jpeg',
+            mime,
             quality
           );
         } catch (err) {
@@ -915,7 +918,7 @@ const Navbar = () => {
     }
   };
 
-  // ✅ មុខងារដាក់រូបភាពប្រវត្តិរូបដែលបានបង្រួមជា Base64 + Rollback ពេលបរាជ័យ
+  // ✅ មុខងារដាក់រូបភាពប្រវត្តិរូបដែលបានបង្រួមជា WebP (600px) + Rollback ពេលបរាជ័យ
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file || isUploadingAvatar) return;
@@ -937,8 +940,8 @@ const Navbar = () => {
     try {
       const { dataUrl, compressedFile } = await compressImageToBase64(
         file,
-        360,
-        0.82
+        600,
+        0.9
       );
 
       setAvatarError(false);
@@ -1179,7 +1182,7 @@ const Navbar = () => {
                   <img
                     src={logo}
                     alt="RPITSSVR Logo"
-                    className="h-8 sm:h-10 w-auto object-contain drop-shadow-lg shrink-0"
+                    className="h-9 sm:h-11 w-auto object-contain shrink-0"
                     onError={() => setLogoError(true)}
                   />
                 ) : (
@@ -2339,10 +2342,6 @@ const Navbar = () => {
       </Dialog>
 
       <style>{`
-        .nav-crisp-avatar {
-          backface-visibility: hidden;
-          transform: translateZ(0);
-        }
         html.dark body, html.dark .bg-gray-50 { background-color: #0f172a !important; color: #f1f5f9 !important; }
         html.dark .bg-white { background-color: #1e293b !important; color: #f1f5f9 !important; }
         html.dark .bg-gray-50\\/50, html.dark .bg-gray-50\\/70, html.dark .bg-gray-50\\/30 { background-color: #0f172a !important; }
