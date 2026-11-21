@@ -2026,11 +2026,12 @@ class TeacherController extends Controller
 
                     $this->findAuthorizedCourse($courseId);
 
+                    // ✅ ដោះស្រាយបញ្ហា Timezone៖ បម្លែងម៉ោងដែលគ្រូបញ្ចូល ទៅជា Local Time
                     $startDate = !empty($quizData['start_date'])
-                        ? Carbon::parse($quizData['start_date'])
-                        : now();
+                        ? Carbon::parse($quizData['start_date'])->timezone('Asia/Phnom_Penh')
+                        : now()->timezone('Asia/Phnom_Penh');
                     $endDate = !empty($quizData['end_date'])
-                        ? Carbon::parse($quizData['end_date'])
+                        ? Carbon::parse($quizData['end_date'])->timezone('Asia/Phnom_Penh')
                         : $startDate->copy()->addDays(7);
 
                     $quiz = Quiz::create([
