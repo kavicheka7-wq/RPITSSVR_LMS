@@ -277,7 +277,7 @@ class StudentController extends Controller
     }
 
     /**
-     * ✅ បង្រួមរូបថតគ្រូបង្រៀនមកទំហំតូចល្មម (96x96px ~4KB Base64) និងទុកក្នុង Cache
+     * ✅ បង្រួមរូបថតគ្រូបង្រៀនមកទំហំច្បាស់ល្អ (200x200px HD WebP) និងរំលង URL ពី Cloudflare R2 ភ្លាមៗ
      */
     private function optimizeTeacherAvatarFast(?string $rawImage, string $teacherCacheKey): ?string
     {
@@ -294,16 +294,23 @@ class StudentController extends Controller
             return $this->optimizedAvatarMemo[$teacherCacheKey];
         }
 
-        $cacheKey = 'std_fast_tch_avatar_v2_' . $teacherCacheKey . '_' . md5(substr($trimmed, 0, 120) . strlen($trimmed));
+        // ✅ បើជា URL ពី Cloudflare R2 ឬ Base64 ស្រាលស្រាប់ (<= 25KB) មិនបាច់បង្រួមទេ
+        if (
+            str_starts_with($trimmed, 'http://') ||
+            str_starts_with($trimmed, 'https://') ||
+            (str_starts_with($trimmed, 'data:image') && strlen($trimmed) <= 25000)
+        ) {
+            $this->optimizedAvatarMemo[$teacherCacheKey] = $trimmed;
+            return $trimmed;
+        }
+
+        $cacheKey = 'std_fast_tch_avatar_v3_' . $teacherCacheKey . '_' . md5(substr($trimmed, 0, 120) . strlen($trimmed));
 
         $optimized = Cache::remember($cacheKey, 86400, function () use ($trimmed) {
             $binaryData = null;
             $mimeType = 'image/jpeg';
 
             if (str_starts_with($trimmed, 'data:image')) {
-                if (strlen($trimmed) <= 18000) {
-                    return $trimmed;
-                }
                 if (preg_match('/^data:([^;]+);base64,(.+)$/s', $trimmed, $m)) {
                     $mimeType = $m[1] ?: 'image/jpeg';
                     $binaryData = base64_decode(preg_replace('/\s+/', '', $m[2]));
@@ -330,7 +337,7 @@ class StudentController extends Controller
                     if ($srcImg !== false) {
                         $w = imagesx($srcImg);
                         $h = imagesy($srcImg);
-                        $maxDim = 96;
+                        $maxDim = 200;
 
                         if ($w > $maxDim || $h > $maxDim) {
                             if ($w > $h) {
@@ -354,10 +361,10 @@ class StudentController extends Controller
 
                         ob_start();
                         if (function_exists('imagewebp')) {
-                            imagewebp($dstImg, null, 78);
+                            imagewebp($dstImg, null, 88);
                             $outMime = 'image/webp';
                         } else {
-                            imagejpeg($dstImg, null, 80);
+                            imagejpeg($dstImg, null, 88);
                             $outMime = 'image/jpeg';
                         }
                         $compressedBytes = ob_get_clean();

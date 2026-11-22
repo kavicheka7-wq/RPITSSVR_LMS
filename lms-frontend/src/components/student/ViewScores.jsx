@@ -24,8 +24,8 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យតាមគណនីសិស្សម្នាក់ៗ (User-Scoped 0ms Instant Cache)
 // ============================================================================
 const LAST_ACTIVE_STUDENT_UID_KEY = 'lms_last_active_student_uid';
-const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v15';
-const CACHE_KEY_TEACHER_AVATARS_LEGACY = 'cached_student_teacher_avatars_v2';
+const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v16';
+const CACHE_KEY_TEACHER_AVATARS_LEGACY = 'cached_student_teacher_avatars_v15';
 const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v15';
 const CACHE_KEY_SHARED_SCORES_LEGACY = 'cached_student_scores_list_v14';
 
@@ -69,32 +69,30 @@ const getTeacherAvatarMapSync = () => {
   ) {
     return STUDENT_SCORES_MEM_CACHE.teacherAvatarMap;
   }
-  const stored =
-    readStorageJson(CACHE_KEY_TEACHER_AVATARS, null) ||
-    readStorageJson(CACHE_KEY_TEACHER_AVATARS_LEGACY, null) ||
-    readStorageJson('cached_student_teacher_avatars_v1', {});
+  const stored = readStorageJson(CACHE_KEY_TEACHER_AVATARS, {});
   STUDENT_SCORES_MEM_CACHE.teacherAvatarMap =
     stored && typeof stored === 'object' ? stored : {};
   return STUDENT_SCORES_MEM_CACHE.teacherAvatarMap;
 };
 
-// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដោយរត់នៅពេល Browser ទំនេរ
+// ✅ បង្រួមរូបភាពគ្រូបង្រៀនកម្រិត HD (200x200px WebP) ដោយរត់នៅពេល Browser ទំនេរ (រក្សា URL ពី R2 ផ្ទាល់)
 const compressTeacherAvatar = (dataUrl, callback) => {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
     callback(dataUrl);
     return;
   }
-  if (dataUrl.length < 18000) {
+  if (dataUrl.length < 25000) {
     callback(dataUrl);
     return;
   }
   runWhenIdle(() => {
     try {
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
-          const maxSize = 96;
+          const maxSize = 200;
           let width = img.width || maxSize;
           let height = img.height || maxSize;
           if (width > height) {
@@ -102,17 +100,17 @@ const compressTeacherAvatar = (dataUrl, callback) => {
               height = Math.round((height * maxSize) / width);
               width = maxSize;
             }
-          } else {
-            if (height > maxSize) {
-              width = Math.round((width * maxSize) / height);
-              height = maxSize;
-            }
+          } else if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
           }
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/webp', 0.76);
+          const compressed = canvas.toDataURL('image/webp', 0.88);
           callback(compressed.length < dataUrl.length ? compressed : dataUrl);
         } catch {
           callback(dataUrl);
@@ -135,7 +133,6 @@ const schedulePersistTeacherAvatars = () => {
         const map = getTeacherAvatarMapSync();
         const str = JSON.stringify(map);
         localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
       } catch {}
     });
   }, 300);
@@ -170,7 +167,13 @@ const persistStudentScoresFast = (uid, scoresList) => {
           (cid && avatarMap[`crs_${cid}`]) ||
           (tchId && avatarMap[`tch_${tchId}`]);
 
-        if (!existingCached || existingCached.length > 18000) {
+        // ✅ បើជា URL ថ្មី (Cloudflare R2) ឱ្យជំនួសរូបចាស់ភ្លាមៗ
+        if (!rawImg.startsWith('data:image')) {
+          if (cid) avatarMap[`crs_${cid}`] = rawImg;
+          if (tchId) avatarMap[`tch_${tchId}`] = rawImg;
+          if (nameKey) avatarMap[nameKey] = rawImg;
+          schedulePersistTeacherAvatars();
+        } else if (!existingCached || existingCached.length > 25000) {
           if (cid && !avatarMap[`crs_${cid}`]) {
             avatarMap[`crs_${cid}`] = rawImg;
           }
@@ -181,11 +184,11 @@ const persistStudentScoresFast = (uid, scoresList) => {
             avatarMap[nameKey] = rawImg;
           }
 
-          compressTeacherAvatar(rawImg, (tinyImg) => {
-            if (tinyImg) {
-              if (cid) avatarMap[`crs_${cid}`] = tinyImg;
-              if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
-              if (nameKey) avatarMap[nameKey] = tinyImg;
+          compressTeacherAvatar(rawImg, (crispImg) => {
+            if (crispImg) {
+              if (cid) avatarMap[`crs_${cid}`] = crispImg;
+              if (tchId) avatarMap[`tch_${tchId}`] = crispImg;
+              if (nameKey) avatarMap[nameKey] = crispImg;
               schedulePersistTeacherAvatars();
             }
           });
@@ -203,7 +206,7 @@ const persistStudentScoresFast = (uid, scoresList) => {
           (cid && avatarMap[`crs_${cid}`]) ||
           (tchId && avatarMap[`tch_${tchId}`]) ||
           null;
-        if (cachedTiny && cachedTiny.length < 25000) {
+        if (cachedTiny && cachedTiny.length <= 25000) {
           copy.profile_image = cachedTiny;
           copy.profile_image_url = cachedTiny;
         } else {
@@ -309,6 +312,8 @@ const ensureCleanStudentSessionCache = (newUid) => {
         'cached_student_attendance_list_v3',
         CACHE_KEY_TEACHER_AVATARS,
         CACHE_KEY_TEACHER_AVATARS_LEGACY,
+        'cached_student_teacher_avatars_v2',
+        'cached_student_teacher_avatars_v1',
       ];
       legacySharedKeys.forEach((k) => {
         try {

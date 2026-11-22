@@ -35,8 +35,6 @@ const CACHE_KEY_SHARED_SCORES = 'cached_student_scores_list_v15';
 const CACHE_KEY_SHARED_ATTENDANCE = 'cached_student_attendance_list_v15';
 const CACHE_KEY_SHARED_LESSONS = 'cached_student_dept_lessons_v15';
 const CACHE_KEY_SHARED_DEPT_COURSES = 'cached_student_dept_courses_all_years_v15';
-const CACHE_KEY_TEACHER_AVATARS = 'cached_student_teacher_avatars_v15';
-const CACHE_KEY_TEACHER_AVATARS_LEGACY = 'cached_student_teacher_avatars_v2';
 
 const getStatsCacheKey = (uid) => `cached_student_dashboard_stats_v15_${uid}`;
 const getEnrollmentsCacheKey = (uid) => `cached_student_dashboard_enrollments_v15_${uid}`;
@@ -80,162 +78,55 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ បង្រួមរូបភាពគ្រូបង្រៀនឱ្យតូចល្មម (~3KB) ដោយរត់នៅពេលទំនេរ
-const compressTeacherAvatar = (dataUrl, callback) => {
-  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
-    callback(dataUrl);
-    return;
-  }
-  if (dataUrl.length < 18000) {
-    callback(dataUrl);
-    return;
-  }
-  runWhenIdle(() => {
-    try {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          const maxSize = 96;
-          let width = img.width || maxSize;
-          let height = img.height || maxSize;
-          if (width > height) {
-            if (width > maxSize) {
-              height = Math.round((height * maxSize) / width);
-              width = maxSize;
-            }
-          } else {
-            if (height > maxSize) {
-              width = Math.round((width * maxSize) / height);
-              height = maxSize;
-            }
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/webp', 0.76);
-          callback(compressed.length < dataUrl.length ? compressed : dataUrl);
-        } catch {
-          callback(dataUrl);
-        }
-      };
-      img.onerror = () => callback(dataUrl);
-      img.src = dataUrl;
-    } catch {
-      callback(dataUrl);
-    }
-  }, 400);
-};
-
-let teacherAvatarSaveTimer = null;
-const schedulePersistTeacherAvatars = (avatarMap) => {
-  if (teacherAvatarSaveTimer) clearTimeout(teacherAvatarSaveTimer);
-  teacherAvatarSaveTimer = setTimeout(() => {
-    runWhenIdle(() => {
-      try {
-        const str = JSON.stringify(avatarMap);
-        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS, str);
-        localStorage.setItem(CACHE_KEY_TEACHER_AVATARS_LEGACY, str);
-      } catch {}
-    });
-  }, 300);
-};
-
-// ✅ ញែករូបថតគ្រូទុកក្នុង CACHE_KEY_TEACHER_AVATARS រួមតែមួយ ហើយរក្សាទុកបញ្ជីមុខវិជ្ជា/មេរៀនយ៉ាងស្រាលបំផុត
-const saveCoursesAndAvatarsFast = (coursesArr) => {
+// ✅ កាត់តែ Base64 ធំៗ (> 25KB) ចេញមុន Save ចូល localStorage ការពារ QuotaExceededError (រក្សា URL ពី R2 ទុកដដែល)
+const stripHeavyBase64FromCourses = (coursesArr) => {
   if (!Array.isArray(coursesArr)) return [];
-  const avatarMap =
-    readStorageJson(CACHE_KEY_TEACHER_AVATARS, null) ||
-    readStorageJson(CACHE_KEY_TEACHER_AVATARS_LEGACY, {});
-  let mapUpdated = false;
 
-  const slimList = coursesArr.map((item) => {
-    if (!item || typeof item !== 'object') return item;
-    const courseObj = item.course || item;
-    const cid = String(item.course_id || courseObj.id || item.id || '');
-    const tch =
-      courseObj.teacher_profile ||
-      courseObj.teacher ||
-      item.teacher_profile ||
-      item.teacher;
-    const tchId = String(tch?.id || tch?.user_id || courseObj.teacher_id || '');
-    const tName = tch?.full_name || tch?.name || courseObj.teacher_name || '';
-    const nameKey =
-      tName && tName !== 'គ្រូបង្រៀន'
-        ? `name_${String(tName).toLowerCase().trim()}`
-        : '';
-
-    const rawImg =
-      tch?.profile_image_url ||
-      tch?.profile_image ||
-      tch?.user?.profile_image ||
-      null;
-
-    if (rawImg && typeof rawImg === 'string') {
-      const existingCached =
-        (cid && avatarMap[`crs_${cid}`]) ||
-        (tchId && avatarMap[`tch_${tchId}`]);
-
-      if (!existingCached || existingCached.length > 18000) {
-        if (cid && !avatarMap[`crs_${cid}`]) {
-          avatarMap[`crs_${cid}`] = rawImg;
-          mapUpdated = true;
-        }
-        if (tchId && !avatarMap[`tch_${tchId}`]) {
-          avatarMap[`tch_${tchId}`] = rawImg;
-          mapUpdated = true;
-        }
-        if (nameKey && !avatarMap[nameKey]) {
-          avatarMap[nameKey] = rawImg;
-          mapUpdated = true;
-        }
-
-        compressTeacherAvatar(rawImg, (tinyImg) => {
-          if (tinyImg) {
-            if (cid) avatarMap[`crs_${cid}`] = tinyImg;
-            if (tchId) avatarMap[`tch_${tchId}`] = tinyImg;
-            if (nameKey) avatarMap[nameKey] = tinyImg;
-            schedulePersistTeacherAvatars(avatarMap);
-          }
-        });
-      }
+  const cleanPerson = (p) => {
+    if (!p || typeof p !== 'object') return p;
+    const copy = { ...p };
+    if (
+      typeof copy.profile_image === 'string' &&
+      copy.profile_image.startsWith('data:') &&
+      copy.profile_image.length > 25000
+    ) {
+      delete copy.profile_image;
     }
+    if (
+      typeof copy.profile_image_url === 'string' &&
+      copy.profile_image_url.startsWith('data:') &&
+      copy.profile_image_url.length > 25000
+    ) {
+      delete copy.profile_image_url;
+    }
+    if (copy.user && typeof copy.user === 'object') {
+      const uCopy = { ...copy.user };
+      if (
+        typeof uCopy.profile_image === 'string' &&
+        uCopy.profile_image.startsWith('data:') &&
+        uCopy.profile_image.length > 25000
+      ) {
+        delete uCopy.profile_image;
+        delete uCopy.profile_image_url;
+      }
+      copy.user = uCopy;
+    }
+    return copy;
+  };
 
-    const isHeavy =
-      typeof rawImg === 'string' &&
-      rawImg.startsWith('data:') &&
-      rawImg.length > 20000;
-
-    if (!isHeavy) return item;
-
-    const cleanPerson = (p) => {
-      if (!p || typeof p !== 'object') return p;
-      const c = { ...p };
-      delete c.profile_image;
-      delete c.profile_image_url;
-      return c;
-    };
-
+  return coursesArr.map((item) => {
+    if (!item || typeof item !== 'object') return item;
     const copy = { ...item };
     if (copy.teacher) copy.teacher = cleanPerson(copy.teacher);
-    if (copy.teacher_profile)
-      copy.teacher_profile = cleanPerson(copy.teacher_profile);
+    if (copy.teacher_profile) copy.teacher_profile = cleanPerson(copy.teacher_profile);
     if (copy.course && typeof copy.course === 'object') {
       const cCopy = { ...copy.course };
       if (cCopy.teacher) cCopy.teacher = cleanPerson(cCopy.teacher);
-      if (cCopy.teacher_profile)
-        cCopy.teacher_profile = cleanPerson(cCopy.teacher_profile);
+      if (cCopy.teacher_profile) cCopy.teacher_profile = cleanPerson(cCopy.teacher_profile);
       copy.course = cCopy;
     }
     return copy;
   });
-
-  if (mapUpdated) {
-    schedulePersistTeacherAvatars(avatarMap);
-  }
-
-  return slimList;
 };
 
 const resolveStudentUid = (contextUser) => {
@@ -279,8 +170,9 @@ const ensureCleanStudentSessionCache = (newUid) => {
         CACHE_KEY_SHARED_ATTENDANCE,
         CACHE_KEY_SHARED_LESSONS,
         CACHE_KEY_SHARED_DEPT_COURSES,
-        CACHE_KEY_TEACHER_AVATARS,
-        CACHE_KEY_TEACHER_AVATARS_LEGACY,
+        'cached_student_teacher_avatars_v16',
+        'cached_student_teacher_avatars_v15',
+        'cached_student_teacher_avatars_v2',
       ];
       sharedLocalKeys.forEach((k) => {
         try {
@@ -348,7 +240,7 @@ const syncDashboardTasksAndPrefetch = (
     api.get('/student/scores').then((res) => {
       if (res.data?.error_debug) return;
       const data = extractArrayFromRes(res.data);
-      const slim = saveCoursesAndAvatarsFast(data);
+      const slim = stripHeavyBase64FromCourses(data);
       STUDENT_DASH_MEM_CACHE.scores = slim;
       if (typeof onScoresSynced === 'function') onScoresSynced(slim);
       runWhenIdle(() => {
@@ -386,7 +278,7 @@ const syncDashboardTasksAndPrefetch = (
                 : [];
 
               if (deptCoursesData.length > 0) {
-                const slimDept = saveCoursesAndAvatarsFast(deptCoursesData);
+                const slimDept = stripHeavyBase64FromCourses(deptCoursesData);
                 if (typeof onCoursesSynced === 'function') {
                   onCoursesSynced(slimDept);
                 }
@@ -1303,7 +1195,7 @@ const StudentDashboard = () => {
           }
 
           runWhenIdle(() => {
-            const slimEnrollments = saveCoursesAndAvatarsFast(validEnrollments);
+            const slimEnrollments = stripHeavyBase64FromCourses(validEnrollments);
             try {
               localStorage.setItem(
                 getStatsCacheKey(currentStudentId),
