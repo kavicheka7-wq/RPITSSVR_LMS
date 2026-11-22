@@ -38,7 +38,7 @@ const CACHE_KEY_LEGACY_ENROLLED_MAP = 'cached_student_enrolled_depts_map_y2';
 const CACHE_KEY_SHARED_STUDENTS = 'cached_admin_students_list';
 const CACHE_KEY_SHARED_DEPTS = 'cached_admin_departments_list';
 const CACHE_KEY_SHARED_COURSES = 'cached_admin_courses_list';
-const AVATAR_STUDENT_Y2_STORAGE_KEY = 'cached_admin_students_y2_avatars_v8';
+const AVATAR_STUDENT_Y2_STORAGE_KEY = 'cached_admin_students_y2_avatars_v9';
 
 const getStudentsY2CacheKey = (uid) => `cached_admin_students_year2_v8_${uid}`;
 const getStudentsY2MetaCacheKey = (uid) => `cached_admin_students_year2_meta_v8_${uid}`;
@@ -98,10 +98,10 @@ const scheduleAvatarY2MapPersist = (uid) => {
             return {
               ...item,
               profile_image:
-                tiny && tiny.length < 25000
-                  ? tiny
-                  : item.profile_image && !item.profile_image.startsWith('data:')
+                item.profile_image && !item.profile_image.startsWith('data:')
                   ? item.profile_image
+                  : tiny && tiny.length <= 25000
+                  ? tiny
                   : null,
               user: item.user
                 ? {
@@ -124,23 +124,24 @@ const scheduleAvatarY2MapPersist = (uid) => {
   }, 300);
 };
 
-// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail តូចច្បាស់ (~3KB) ដោយរត់នៅពេល Browser ទំនេរ
+// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail កម្រិត HD (200x200px WebP) ដោយរត់នៅពេល Browser ទំនេរ (រក្សា URL ពី R2 ផ្ទាល់)
 const compressBase64Avatar = (dataUrl, callback) => {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
     callback(dataUrl);
     return;
   }
-  if (dataUrl.length < 16000) {
+  if (dataUrl.length <= 25000) {
     callback(dataUrl);
     return;
   }
   runWhenIdle(() => {
     try {
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
-          const maxSize = 88;
+          const maxSize = 200;
           let width = img.width || maxSize;
           let height = img.height || maxSize;
           if (width > height) {
@@ -148,17 +149,17 @@ const compressBase64Avatar = (dataUrl, callback) => {
               height = Math.round((height * maxSize) / width);
               width = maxSize;
             }
-          } else {
-            if (height > maxSize) {
-              width = Math.round((width * maxSize) / height);
-              height = maxSize;
-            }
+          } else if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
           }
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/webp', 0.76);
+          const compressed = canvas.toDataURL('image/webp', 0.88);
           callback(compressed.length < dataUrl.length ? compressed : dataUrl);
         } catch {
           callback(dataUrl);
@@ -177,32 +178,47 @@ const safeWriteStudentsStorageMulti = (keys, list, uid = null, metaObj = null) =
   if (!Array.isArray(list)) return;
 
   runWhenIdle(() => {
+    let urlUpdated = false;
+
     list.forEach((sItem) => {
       const rawImg = sItem?.profile_image || sItem?.user?.profile_image;
-      if (sItem?.id && rawImg) {
+      if (sItem?.id && rawImg && typeof rawImg === 'string') {
+        // ✅ បើជា URL ថ្មី (Cloudflare R2) ឱ្យជំនួសរូបចាស់ភ្លាមៗដោយមិនបាច់បង្រួម
+        if (!rawImg.startsWith('data:image')) {
+          if (ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id] !== rawImg) {
+            ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id] = rawImg;
+            urlUpdated = true;
+          }
+          return;
+        }
+
         const existingCached = ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id];
-        if (existingCached && existingCached.length < 18000 && rawImg.startsWith('data:')) {
+        if (existingCached && existingCached.length <= 25000 && existingCached.startsWith('data:')) {
           return;
         }
         if (!existingCached) {
           ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id] = rawImg;
         }
-        compressBase64Avatar(rawImg, (tinyImg) => {
-          if (tinyImg) {
-            ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id] = tinyImg;
+        compressBase64Avatar(rawImg, (crispImg) => {
+          if (crispImg) {
+            ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[sItem.id] = crispImg;
             scheduleAvatarY2MapPersist(uid || ADMIN_STUDENTS_Y2_MEM_CACHE.uid);
           }
         });
       }
     });
 
+    if (urlUpdated) {
+      scheduleAvatarY2MapPersist(uid || ADMIN_STUDENTS_Y2_MEM_CACHE.uid);
+    }
+
     const compactList = list.map((item) => {
       const cachedTiny = ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[item.id];
       const slimImage =
-        cachedTiny && cachedTiny.length < 25000
-          ? cachedTiny
-          : item.profile_image && !item.profile_image.startsWith('data:')
+        item.profile_image && !item.profile_image.startsWith('data:')
           ? item.profile_image
+          : cachedTiny && cachedTiny.length <= 25000
+          ? cachedTiny
           : null;
 
       return {
@@ -253,14 +269,14 @@ const safeWriteJsonMulti = (keys, data) => {
   });
 };
 
-// ✅ បញ្ចូលរូបភាពពី Cache មកភ្ជាប់ជាមួយបញ្ជីសិស្សភ្លាមៗក្នុង 0 វិនាទី
+// ✅ ដាក់អាទិភាពរូបភាពថ្មីពី API មុន Cache ចាស់ (និងទាញពី Cache ពេល API មិនទាន់ផ្ញើមក)
 const hydrateStudentsWithAvatars = (list) => {
   if (!Array.isArray(list)) return [];
   return list.map((item) => {
     const img =
-      ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[item.id] ||
       item.profile_image ||
       item.user?.profile_image ||
+      ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[item.id] ||
       null;
     if (img && item.profile_image !== img) {
       return { ...item, profile_image: img };
@@ -1977,7 +1993,7 @@ const ManageStudentsYear2 = () => {
           ? allDeptNames.join(' + ')
           : getDepartmentDisplayName(s.department || activeDepartmentObj);
 
-return {
+      return {
         'ល.រ': idx + 1,
         'អត្តលេខសិស្ស': s.student_code || '',
         'នាមត្រកូល': s.last_name || '',
@@ -1986,7 +2002,7 @@ return {
         'អ៊ីមែល': maskEmailAddress(s.email || ''),
         'លេខទូរស័ព្ទ': s.phone || '',
         'ដេប៉ាតឺម៉ង់': deptDisplay,
-        'ឆ្នាំសិក្សា': s.batch_year || 'ជំនាន់ទី , ឆ្នាំទី1',
+        'ឆ្នាំសិក្សា': s.batch_year || 'ជំនាន់ទី , ឆ្នាំទី2',
         'កម្រិតសិក្សា': getDegreeLevelLabel(s.degree_level),
         'វេនសិក្សា': getStudyShiftLabel(s.study_shift),
       };
@@ -2030,7 +2046,7 @@ return {
     });
   };
 
- const handleDownloadTemplate = async () => {
+  const handleDownloadTemplate = async () => {
     const { default: XLSX } = await import('xlsx-js-style');
 
     const defaultDeptName = activeDepartmentObj
@@ -2039,7 +2055,7 @@ return {
     const defaultShiftKm =
       selectedShift === 'Saturday-Sunday' ? 'សៅរ៍-អាទិត្យ' : 'ចន្ទ-សុក្រ';
 
-   const blankRow = () => ({
+    const blankRow = () => ({
       'នាមត្រកូល': '',
       'នាមខ្លួន': '',
       'អ៊ីមែល': '',
@@ -2047,7 +2063,7 @@ return {
       'ភេទ': '',
       'អត្តលេខសិស្ស': '',
       'ដេប៉ាតឺម៉ង់': defaultDeptName,
-      'ជំនាន់/ឆ្នាំសិក្សា': 'ជំនាន់ទី , ឆ្នាំទី1',
+      'ជំនាន់/ឆ្នាំសិក្សា': 'ជំនាន់ទី , ឆ្នាំទី2',
       'កម្រិតសិក្សា': 'បរិញ្ញាបត្រ',
       'វេនសិក្សា': defaultShiftKm,
       'អាសយដ្ឋាន': '',
@@ -2076,19 +2092,19 @@ return {
     applyExcelStyling(XLSX, worksheet, colWidths, [3, 5, 7, 11, 12]);
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'គំរូសិស្សឆ្នាំទី១');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'គំរូសិស្សឆ្នាំទី២');
     const safeDeptSuffix = defaultDeptName
       ? `_${defaultDeptName.replace(/[\\/:*?"<>|\s]+/g, '_')}`
       : '';
-    XLSX.writeFile(workbook, `គំរូ_សិស្សឆ្នាំទី១${safeDeptSuffix}.xlsx`);
+    XLSX.writeFile(workbook, `គំរូ_សិស្សឆ្នាំទី២${safeDeptSuffix}.xlsx`);
 
     pushLocalNotification({
       titleKm: 'បានទាញយកទម្រង់គំរូ Excel',
       titleEn: 'Excel Template Downloaded',
-      descKm: 'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យសិស្សត្រូវបានទាញយកជោគជ័យ។',
-      descEn: 'The Excel template for student import was downloaded successfully.',
+      descKm: 'ទម្រង់គំរូសម្រាប់នាំចូលទិន្នន័យសិស្សឆ្នាំទី២ ត្រូវបានទាញយកជោគជ័យ។',
+      descEn: 'The Excel template for Year 2 student import was downloaded successfully.',
       category: 'download',
-      link: '/students/year-1',
+      link: '/students/year-2',
     });
   };
 
@@ -2216,7 +2232,7 @@ return {
             }
           }
 
-         const rawGender = (item.gender || '').toString().trim().toLowerCase();
+          const rawGender = (item.gender || '').toString().trim().toLowerCase();
           let gender = 'Male';
           if (rawGender === 'ប្រុស' || rawGender === 'male' || rawGender === 'm') {
             gender = 'Male';
@@ -2964,10 +2980,11 @@ return {
                     const isWeekend =
                       normalizeShiftKey(student.study_shift) ===
                       'Saturday-Sunday';
+                    // ✅ ដាក់អាទិភាពរូបភាពថ្មីពី API មុន Cache ចាស់
                     const rawAvatar =
-                      ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[student.id] ||
                       student.profile_image ||
-                      student.user?.profile_image;
+                      student.user?.profile_image ||
+                      ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[student.id];
                     const avatarUrl = getProfileImageUrl(rawAvatar);
                     const avatarKey = `std_${student.id}`;
                     const hasAvatar = Boolean(
@@ -3224,10 +3241,11 @@ return {
                 const isWeekend =
                   normalizeShiftKey(student.study_shift) ===
                   'Saturday-Sunday';
+                // ✅ ដាក់អាទិភាពរូបភាពថ្មីពី API មុន Cache ចាស់
                 const rawAvatar =
-                  ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[student.id] ||
                   student.profile_image ||
-                  student.user?.profile_image;
+                  student.user?.profile_image ||
+                  ADMIN_STUDENTS_Y2_MEM_CACHE.avatarMap[student.id];
                 const avatarUrl = getProfileImageUrl(rawAvatar);
                 const avatarKey = `mob_std_${student.id}`;
                 const hasAvatar = Boolean(

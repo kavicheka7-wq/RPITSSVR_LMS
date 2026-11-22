@@ -32,7 +32,7 @@ const CACHE_KEY_LEGACY_TEACHERS = 'cached_admin_teachers_page1';
 const CACHE_KEY_LEGACY_META = 'cached_admin_teachers_meta';
 const CACHE_KEY_SHARED_DEPTS = 'cached_admin_departments_list';
 const CACHE_KEY_SHARED_COURSES = 'cached_admin_courses_list';
-const AVATAR_STORAGE_KEY = 'cached_admin_teachers_avatars_v8';
+const AVATAR_STORAGE_KEY = 'cached_admin_teachers_avatars_v9';
 
 const getTeachersCacheKey = (uid) => `cached_admin_teachers_list_v8_${uid}`;
 const getTeachersMetaCacheKey = (uid) => `cached_admin_teachers_meta_v8_${uid}`;
@@ -88,7 +88,7 @@ const scheduleAvatarMapPersist = (uid) => {
             return {
               ...item,
               profile_image:
-                tiny && tiny.length < 25000
+                tiny && tiny.length <= 25000
                   ? tiny
                   : item.profile_image && !item.profile_image.startsWith('data:')
                   ? item.profile_image
@@ -114,23 +114,24 @@ const scheduleAvatarMapPersist = (uid) => {
   }, 300);
 };
 
-// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail តូចច្បាស់ (~3KB) ដោយរត់នៅពេល Browser ទំនេរ
+// ✅ បង្រួមរូបភាព Base64 ធំៗឱ្យទៅជា Thumbnail កម្រិត HD (200x200px WebP) ដោយរត់នៅពេល Browser ទំនេរ (រក្សា URL ពី R2 ផ្ទាល់)
 const compressBase64Avatar = (dataUrl, callback) => {
   if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
     callback(dataUrl);
     return;
   }
-  if (dataUrl.length < 16000) {
+  if (dataUrl.length <= 25000) {
     callback(dataUrl);
     return;
   }
   runWhenIdle(() => {
     try {
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
-          const maxSize = 88;
+          const maxSize = 200;
           let width = img.width || maxSize;
           let height = img.height || maxSize;
           if (width > height) {
@@ -138,17 +139,17 @@ const compressBase64Avatar = (dataUrl, callback) => {
               height = Math.round((height * maxSize) / width);
               width = maxSize;
             }
-          } else {
-            if (height > maxSize) {
-              width = Math.round((width * maxSize) / height);
-              height = maxSize;
-            }
+          } else if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
           }
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/webp', 0.76);
+          const compressed = canvas.toDataURL('image/webp', 0.88);
           callback(compressed.length < dataUrl.length ? compressed : dataUrl);
         } catch {
           callback(dataUrl);
@@ -167,32 +168,47 @@ const safeWriteTeachersStorageMulti = (keys, list, uid = null, metaObj = null) =
   if (!Array.isArray(list)) return;
 
   runWhenIdle(() => {
+    let urlUpdated = false;
+
     list.forEach((tItem) => {
       const rawImg = tItem?.profile_image || tItem?.user?.profile_image;
-      if (tItem?.id && rawImg) {
+      if (tItem?.id && rawImg && typeof rawImg === 'string') {
+        // ✅ បើជា URL ថ្មី (Cloudflare R2) ឱ្យជំនួសរូបចាស់ភ្លាមៗដោយមិនបាច់បង្រួម
+        if (!rawImg.startsWith('data:image')) {
+          if (ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] !== rawImg) {
+            ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = rawImg;
+            urlUpdated = true;
+          }
+          return;
+        }
+
         const existingCached = ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id];
-        if (existingCached && existingCached.length < 18000 && rawImg.startsWith('data:')) {
+        if (existingCached && existingCached.length <= 25000 && existingCached.startsWith('data:')) {
           return;
         }
         if (!existingCached) {
           ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = rawImg;
         }
-        compressBase64Avatar(rawImg, (tinyImg) => {
-          if (tinyImg) {
-            ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = tinyImg;
+        compressBase64Avatar(rawImg, (crispImg) => {
+          if (crispImg) {
+            ADMIN_TEACHERS_MEM_CACHE.avatarMap[tItem.id] = crispImg;
             scheduleAvatarMapPersist(uid || ADMIN_TEACHERS_MEM_CACHE.uid);
           }
         });
       }
     });
 
+    if (urlUpdated) {
+      scheduleAvatarMapPersist(uid || ADMIN_TEACHERS_MEM_CACHE.uid);
+    }
+
     const compactList = list.map((item) => {
       const cachedTiny = ADMIN_TEACHERS_MEM_CACHE.avatarMap[item.id];
       const slimImage =
-        cachedTiny && cachedTiny.length < 25000
-          ? cachedTiny
-          : item.profile_image && !item.profile_image.startsWith('data:')
+        item.profile_image && !item.profile_image.startsWith('data:')
           ? item.profile_image
+          : cachedTiny && cachedTiny.length <= 25000
+          ? cachedTiny
           : null;
 
       return {
@@ -241,14 +257,14 @@ const safeWriteJsonMulti = (keys, data) => {
   });
 };
 
-// ✅ បញ្ចូលរូបភាពពី Cache មកភ្ជាប់ជាមួយបញ្ជីគ្រូបង្រៀនភ្លាមៗក្នុង 0 វិនាទី
+// ✅ ដាក់អាទិភាពរូបភាពថ្មីពី API មុន Cache ចាស់ (និងទាញពី Cache ពេល API មិនទាន់ផ្ញើមក)
 const hydrateTeachersWithAvatars = (list) => {
   if (!Array.isArray(list)) return [];
   return list.map((item) => {
     const img =
-      ADMIN_TEACHERS_MEM_CACHE.avatarMap[item.id] ||
       item.profile_image ||
       item.user?.profile_image ||
+      ADMIN_TEACHERS_MEM_CACHE.avatarMap[item.id] ||
       null;
     if (img && item.profile_image !== img) {
       return { ...item, profile_image: img };
@@ -2067,10 +2083,11 @@ const ManageTeachers = () => {
                     .filter(Boolean);
 
                   const isFemale = isFemaleGender(teacher.gender);
+                  // ✅ ដាក់អាទិភាពរូបភាពថ្មីពី API មុន Cache ចាស់
                   const rawAvatar =
-                    ADMIN_TEACHERS_MEM_CACHE.avatarMap[teacher.id] ||
                     teacher.profile_image ||
-                    teacher.user?.profile_image;
+                    teacher.user?.profile_image ||
+                    ADMIN_TEACHERS_MEM_CACHE.avatarMap[teacher.id];
                   const avatarUrl = getProfileImageUrl(rawAvatar);
                   const avatarKey = `tch_${teacher.id}`;
                   const hasAvatar = Boolean(
@@ -2247,10 +2264,11 @@ const ManageTeachers = () => {
                 .filter(Boolean);
 
               const isFemale = isFemaleGender(teacher.gender);
+              // ✅ ដាក់អាទិភាពរូបភាពថ្មីពី API មុន Cache ចាស់
               const rawAvatar =
-                ADMIN_TEACHERS_MEM_CACHE.avatarMap[teacher.id] ||
                 teacher.profile_image ||
-                teacher.user?.profile_image;
+                teacher.user?.profile_image ||
+                ADMIN_TEACHERS_MEM_CACHE.avatarMap[teacher.id];
               const avatarUrl = getProfileImageUrl(rawAvatar);
               const avatarKey = `mob_tch_${teacher.id}`;
               const hasAvatar = Boolean(

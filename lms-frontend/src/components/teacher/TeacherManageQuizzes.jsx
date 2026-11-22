@@ -183,7 +183,6 @@ const extractExactDateTimeParts = (rawVal) => {
 
   const str = String(rawVal).trim();
 
-  // ✅ ១. បើមានសញ្ញា Timezone នៅខាងចុង (ដូចជា Z ឬ +07:00) ត្រូវឱ្យ new Date() បម្លែងមកម៉ោងកម្ពុជា (+07:00) ជាមុន
   if (/([zZ]|[+-]\d{2}:?\d{2})$/.test(str)) {
     const d = new Date(str);
     if (!isNaN(d.getTime())) {
@@ -197,7 +196,6 @@ const extractExactDateTimeParts = (rawVal) => {
     }
   }
 
-  // ✅ ២. បើគ្មានសញ្ញា Timezone ទេ (ឧ. "2026-11-21 17:40:00" ឬពី input datetime-local) ទើបកាត់យកតម្លៃផ្ទាល់
   const match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
   if (match) {
     return {
@@ -223,7 +221,6 @@ const extractExactDateTimeParts = (rawVal) => {
   return null;
 };
 
-// ✅ កែសម្រួលឱ្យលោតចូល input="datetime-local" ត្រឹមត្រូវតាម Local Time
 const toDatetimeLocalInput = (dateVal) => {
   const parts = extractExactDateTimeParts(dateVal);
   if (!parts) return '';
@@ -235,7 +232,6 @@ const toDatetimeLocalInput = (dateVal) => {
   return `${y}-${m}-${d}T${hr}:${min}`;
 };
 
-// ✅ កែសម្រួលពេលបញ្ជូនទៅ Backend (យកម៉ោង Local ទៅតែម្ដង មិនបាច់បំប្លែង)
 const toBackendDateTime = (inputVal) => {
   const parts = extractExactDateTimeParts(inputVal);
   if (!parts) return null;
@@ -396,8 +392,10 @@ const pushLocalNotification = (notif) => {
 };
 
 // ============================================================================
-// 📌 អនុគមន៍បំបែកសំណួរឆ្លាតវៃពីអត្ថបទ Word / Text (Smart Paste Parser)
+// 📌 អនុគមន៍បំបែកសំណួរឆ្លាតវៃពី Word / PDF / អត្ថបទ (គាំទ្រទាំងលេខខ្មែរ និងឡាតាំង)
 // ============================================================================
+const KHMER_OPT_TO_LATIN = { 'ក': 'A', 'ខ': 'B', 'គ': 'C', 'ឃ': 'D' };
+
 const parseSmartQuestionsFromText = (rawText) => {
   if (!rawText || !rawText.trim()) return [];
 
@@ -418,9 +416,10 @@ const parseSmartQuestionsFromText = (rawText) => {
       continue;
     }
     const isNewQuestionStart =
-      /^(?:សំណួរទី\s*\d+|Q\d+|\d+[\.\)\:])\s+/i.test(line) &&
+      /^(?:សំណួរទី\s*[\d០-៩]+|Q\d+|[\d០-៩]+[\.\)\:])\s+/i.test(line) &&
       currentBlock.length > 0 &&
-      currentBlock.some((l) => /^[A-Da-d][\.\)\:]\s+/.test(l));
+      (currentBlock.some((l) => /^[A-Da-dកខគឃ][\.\)\:]\s+/.test(l)) ||
+        currentBlock.some((l) => /^(?:ចម្លើយ|answer|ans)\s*[:៖]?/i.test(l)));
 
     if (isNewQuestionStart) {
       blocks.push(currentBlock);
@@ -444,16 +443,26 @@ const parseSmartQuestionsFromText = (rawText) => {
           return;
         }
 
-        const optMatch = line.match(/^([A-Da-d])[\.\)\:]\s*(.+)$/);
+        const optMatch = line.match(/^([A-Da-dកខគឃ])[\.\)\:]\s*(.+)$/);
         if (optMatch) {
           let optText = optMatch[2].trim();
           let isMarkedCorrect = false;
-          if (optText.startsWith('*') || optText.endsWith('*') || /\(ត្រូវ\)|\(correct\)/i.test(optText)) {
+          if (
+            optText.startsWith('*') ||
+            optText.endsWith('*') ||
+            /\(ត្រូវ\)|\(correct\)/i.test(optText)
+          ) {
             isMarkedCorrect = true;
-            optText = optText.replace(/^\*+|\*+$/g, '').replace(/\(ត្រូវ\)|\(correct\)/gi, '').trim();
+            optText = optText
+              .replace(/^\*+|\*+$/g, '')
+              .replace(/\(ត្រូវ\)|\(correct\)/gi, '')
+              .trim();
           }
+          const rawLetter = optMatch[1];
+          const normalizedLetter = KHMER_OPT_TO_LATIN[rawLetter] || rawLetter.toUpperCase();
           options.push({
-            letter: optMatch[1].toUpperCase(),
+            letter: normalizedLetter,
+            rawLetter,
             option_text: optText,
             is_correct: isMarkedCorrect,
           });
@@ -465,7 +474,7 @@ const parseSmartQuestionsFromText = (rawText) => {
 
       const cleanQuestionText = questionLines
         .join(' ')
-        .replace(/^(?:សំណួរទី\s*\d+|Q\d+|\d+[\.\)\:])\s*/i, '')
+        .replace(/^(?:សំណួរទី\s*[\d០-៩]+|Q\d+|[\d០-៩]+[\.\)\:])\s*/i, '')
         .trim();
 
       if (!cleanQuestionText) return null;
@@ -481,13 +490,16 @@ const parseSmartQuestionsFromText = (rawText) => {
           lowerOpts.some((t) => t.includes('false') || t.includes('មិនពិត'));
 
         questionType = isTf ? 'TrueFalse' : 'MCQ';
-        const ansUpper = detectedAnswer.toUpperCase();
+        const ansClean = detectedAnswer.replace(/[\.\)\:]+$/, '').trim();
+        const ansUpper = (KHMER_OPT_TO_LATIN[ansClean] || ansClean).toUpperCase();
+
         finalOptions = options.map((o) => ({
           option_text: o.option_text,
           is_correct:
             o.is_correct ||
             (ansUpper !== '' &&
               (ansUpper === o.letter ||
+                ansClean === o.rawLetter ||
                 ansUpper === o.option_text.toUpperCase())),
         }));
       } else if (
@@ -622,16 +634,17 @@ export default function TeacherManageQuizzes() {
   const [deleteQuestionTarget, setDeleteQuestionTarget] = useState(null);
 
   // ============================================================================
-  // 📌 Smart Import Modal States (Excel + Word Paste + Quick-Check Preview)
+  // 📌 Smart Import Modal States (Excel / Word / PDF + Write/Paste + Preview)
   // ============================================================================
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importMode, setImportMode] = useState('excel');
+  const [importMode, setImportMode] = useState('file'); // 'file' | 'write'
   const [importCourseId, setImportCourseId] = useState('');
   const [importTitle, setImportTitle] = useState('');
   const [importDuration, setImportDuration] = useState(60);
   const [importStartDate, setImportStartDate] = useState('');
   const [importEndDate, setImportEndDate] = useState('');
   const [importFile, setImportFile] = useState(null);
+  const [isParsingFile, setIsParsingFile] = useState(false);
   const [importPasteText, setImportPasteText] = useState('');
   const [importedQuestions, setImportedQuestions] = useState([]);
   const [importError, setImportError] = useState('');
@@ -871,7 +884,6 @@ export default function TeacherManageQuizzes() {
     }
   }, [currentTeacherId]);
 
-  // ✅ Auto-Sync ចំនួនសិស្សប្រឡងភ្លាមៗ ពេលប្ដូរ Tab មកវិញ ឬរៀងរាល់ 30 វិនាទី
   useEffect(() => {
     const syncNow = () => {
       if (
@@ -1607,7 +1619,6 @@ export default function TeacherManageQuizzes() {
     }
   };
 
-  // ✅ អនុគមន៍រក្សាទុកពិន្ទុសិស្ស (ប្រើបានទាំងក្នុងតារាង និងក្នុងផ្ទាំងអានចម្លើយ)
   const handleSaveManualAttemptScore = async (attempt, overrideScore20 = null) => {
     if (!viewingQuiz || !attempt || savingAttemptScoreId) return;
     const rawTotalVal = parseFloat(viewingQuiz.total_mark) || 20;
@@ -1738,16 +1749,17 @@ export default function TeacherManageQuizzes() {
   };
 
   // ============================================================================
-  // 📌 ផ្នែកទី៥៖ នាំចូលសំណួរឆ្លាតវៃ (Excel & Word Paste + Preview & Quick-Check)
+  // 📌 ផ្នែកទី៥៖ នាំចូលសំណួរឆ្លាតវៃ (Excel / Word / PDF & សរសេរផ្ទាល់)
   // ============================================================================
   const resetImportModal = () => {
     setShowImportModal(false);
-    setImportMode('excel');
+    setImportMode('file');
     setImportTitle('');
     setImportDuration(60);
     setImportStartDate('');
     setImportEndDate('');
     setImportFile(null);
+    setIsParsingFile(false);
     setImportPasteText('');
     setImportedQuestions([]);
     setImportError('');
@@ -1810,108 +1822,192 @@ export default function TeacherManageQuizzes() {
     XLSX.writeFile(workbook, 'quiz_questions_template.xlsx');
   };
 
-  const handleExcelFileUpload = async (e) => {
+  // ✅ អនុគមន៍អានឯកសារឆ្លាតវៃ៖ គាំទ្រ Excel (.xlsx, .xls, .csv), Word (.docx), និង PDF (.pdf)
+  const handleSmartFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     setImportFile(file);
     setImportError('');
+    setIsParsingFile(true);
 
     if (!importTitle.trim()) {
-      setImportTitle(file.name.replace(/\.(xlsx|xls|csv)$/i, ''));
+      setImportTitle(file.name.replace(/\.(xlsx|xls|csv|docx|pdf)$/i, ''));
     }
 
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+
     try {
-      const { default: XLSX } = await import('xlsx-js-style');
       const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array' });
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
 
-      const parsed = rows
-        .map((row, idx) => {
-          const getVal = (keys) => {
-            for (const k of Object.keys(row)) {
-              const lower = k.toLowerCase();
-              if (keys.some((target) => lower.includes(target))) {
-                return String(row[k] ?? '').trim();
+      // ១. ឯកសារ Excel / CSV
+      if (['xlsx', 'xls', 'csv'].includes(ext)) {
+        const { default: XLSX } = await import('xlsx-js-style');
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+
+        const parsed = rows
+          .map((row, idx) => {
+            const getVal = (keys) => {
+              for (const k of Object.keys(row)) {
+                const lower = k.toLowerCase();
+                if (keys.some((target) => lower.includes(target))) {
+                  return String(row[k] ?? '').trim();
+                }
               }
+              return '';
+            };
+
+            const qText = getVal(['ខ្លឹមសារ', 'សំណួរ', 'question']);
+            if (!qText) return null;
+
+            const rawType = getVal(['ប្រភេទ', 'type']).toLowerCase();
+            const markVal = parseFloat(getVal(['ពិន្ទុ', 'mark', 'score'])) || 2;
+            const optA = getVal(['ជម្រើស a', 'option a', 'a']);
+            const optB = getVal(['ជម្រើស b', 'option b', 'b']);
+            const optC = getVal(['ជម្រើស c', 'option c', 'c']);
+            const optD = getVal(['ជម្រើស d', 'option d', 'd']);
+            const correctRaw = getVal(['ចម្លើយ', 'correct', 'answer']).trim();
+            const correctUpper = correctRaw.toUpperCase();
+
+            let qType = 'Essay';
+            if (rawType.includes('mcq') || rawType.includes('qcm') || rawType.includes('ពហុ')) {
+              qType = 'MCQ';
+            } else if (rawType.includes('true') || rawType.includes('tf') || rawType.includes('ពិត')) {
+              qType = 'TrueFalse';
+            } else if (rawType.includes('essay') || rawType.includes('សរសេរ')) {
+              qType = 'Essay';
+            } else if (optA && optB) {
+              qType = 'MCQ';
             }
-            return '';
-          };
 
-          const qText = getVal(['ខ្លឹមសារ', 'សំណួរ', 'question']);
-          if (!qText) return null;
+            let options = [];
+            if (qType === 'MCQ') {
+              const rawOpts = [
+                { letter: 'A', text: optA },
+                { letter: 'B', text: optB },
+                { letter: 'C', text: optC },
+                { letter: 'D', text: optD },
+              ].filter((o) => o.text !== '');
 
-          const rawType = getVal(['ប្រភេទ', 'type']).toLowerCase();
-          const markVal = parseFloat(getVal(['ពិន្ទុ', 'mark', 'score'])) || 2;
-          const optA = getVal(['ជម្រើស a', 'option a', 'a']);
-          const optB = getVal(['ជម្រើស b', 'option b', 'b']);
-          const optC = getVal(['ជម្រើស c', 'option c', 'c']);
-          const optD = getVal(['ជម្រើស d', 'option d', 'd']);
-          const correctRaw = getVal(['ចម្លើយ', 'correct', 'answer']).trim();
-          const correctUpper = correctRaw.toUpperCase();
+              options = rawOpts.map((o) => ({
+                option_text: o.text,
+                is_correct:
+                  correctUpper !== '' &&
+                  (correctUpper === o.letter || correctUpper === o.text.toUpperCase()),
+              }));
+            } else if (qType === 'TrueFalse') {
+              const cLow = correctRaw.toLowerCase();
+              const isTrue = cLow === 'true' || cLow === 'ពិត' || cLow === 't' || cLow === 'a';
+              const isFalse = cLow === 'false' || cLow === 'មិនពិត' || cLow === 'f' || cLow === 'b';
+              options = [
+                { option_text: 'ពិត (True)', is_correct: isTrue },
+                { option_text: 'មិនពិត (False)', is_correct: isFalse },
+              ];
+            }
 
-          let qType = 'Essay';
-          if (rawType.includes('mcq') || rawType.includes('qcm') || rawType.includes('ពហុ')) {
-            qType = 'MCQ';
-          } else if (rawType.includes('true') || rawType.includes('tf') || rawType.includes('ពិត')) {
-            qType = 'TrueFalse';
-          } else if (rawType.includes('essay') || rawType.includes('សរសេរ')) {
-            qType = 'Essay';
-          } else if (optA && optB) {
-            qType = 'MCQ';
+            return {
+              id: `xls_${Date.now()}_${idx}`,
+              question_text: qText,
+              question_type: qType,
+              mark: markVal,
+              options,
+            };
+          })
+          .filter(Boolean);
+
+        if (parsed.length === 0) {
+          setImportError(
+            t(
+              'រកមិនឃើញសំណួរក្នុងឯកសារ Excel នេះទេ! សូមប្រើគំរូ Excel ដែលប្រព័ន្ធផ្ដល់ជូន។',
+              'No questions found in this Excel file! Please use the Excel template.'
+            )
+          );
+        }
+        setImportedQuestions(parsed);
+      }
+      // ២. ឯកសារ Word (.docx)
+      else if (ext === 'docx') {
+        const mammoth = await import('mammoth');
+        const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+        const extractedText = result?.value || '';
+        const parsed = parseSmartQuestionsFromText(extractedText);
+
+        if (parsed.length === 0) {
+          setImportError(
+            t(
+              'រកមិនឃើញសំណួរក្នុងឯកសារ Word នេះទេ! សូមពិនិត្យថាឯកសារមានដកឃ្លា ១ បន្ទាត់រវាងសំណួរនីមួយៗ។',
+              'No questions found in this Word file! Ensure questions are separated by blank lines.'
+            )
+          );
+        }
+        setImportedQuestions(parsed);
+      }
+      // ៣. ឯកសារ PDF (.pdf)
+      else if (ext === 'pdf') {
+        const pdfjsLib = await import('pdfjs-dist');
+        if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+        }
+        const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+        let fullText = '';
+
+        for (let p = 1; p <= pdf.numPages; p++) {
+          const page = await pdf.getPage(p);
+          const textContent = await page.getTextContent();
+          let lastY = null;
+          const pageLines = [];
+          let currentLine = '';
+
+          for (const item of textContent.items) {
+            const str = item.str || '';
+            const y = item.transform ? Math.round(item.transform[5]) : null;
+            if (lastY !== null && y !== null && Math.abs(y - lastY) > 5) {
+              if (currentLine.trim()) pageLines.push(currentLine.trim());
+              currentLine = str;
+            } else {
+              currentLine +=
+                (currentLine && str && !currentLine.endsWith(' ') && !str.startsWith(' ')
+                  ? ' '
+                  : '') + str;
+            }
+            if (y !== null) lastY = y;
           }
+          if (currentLine.trim()) pageLines.push(currentLine.trim());
+          fullText += pageLines.join('\n') + '\n\n';
+        }
 
-          let options = [];
-          if (qType === 'MCQ') {
-            const rawOpts = [
-              { letter: 'A', text: optA },
-              { letter: 'B', text: optB },
-              { letter: 'C', text: optC },
-              { letter: 'D', text: optD },
-            ].filter((o) => o.text !== '');
-
-            options = rawOpts.map((o) => ({
-              option_text: o.text,
-              is_correct:
-                correctUpper !== '' &&
-                (correctUpper === o.letter || correctUpper === o.text.toUpperCase()),
-            }));
-          } else if (qType === 'TrueFalse') {
-            const cLow = correctRaw.toLowerCase();
-            const isTrue = cLow === 'true' || cLow === 'ពិត' || cLow === 't' || cLow === 'a';
-            const isFalse = cLow === 'false' || cLow === 'មិនពិត' || cLow === 'f' || cLow === 'b';
-            options = [
-              { option_text: 'ពិត (True)', is_correct: isTrue },
-              { option_text: 'មិនពិត (False)', is_correct: isFalse },
-            ];
-          }
-
-          return {
-            id: `xls_${Date.now()}_${idx}`,
-            question_text: qText,
-            question_type: qType,
-            mark: markVal,
-            options,
-          };
-        })
-        .filter(Boolean);
-
-      if (parsed.length === 0) {
+        const parsed = parseSmartQuestionsFromText(fullText);
+        if (parsed.length === 0) {
+          setImportError(
+            t(
+              'មិនអាចទាញយកសំណួរពី PDF នេះបានទេ (អាចជា PDF ស្កេនជារូបភាព ឬគ្មានអត្ថបទ)។ សូមសាកល្បងប្រើ Word (.docx) ឬ Excel (.xlsx)។',
+              'Could not extract questions from this PDF (it may be a scanned image). Please try Word (.docx) or Excel (.xlsx).'
+            )
+          );
+        }
+        setImportedQuestions(parsed);
+      } else {
         setImportError(
           t(
-            'រកមិនឃើញសំណួរក្នុងឯកសារនេះទេ! សូមប្រើគំរូ Excel ដែលប្រព័ន្ធផ្ដល់ជូន។',
-            'No questions found in this file! Please use the Excel template.'
+            'ប្រព័ន្ធគាំទ្រតែឯកសារ Excel (.xlsx, .csv), Word (.docx), និង PDF (.pdf) ប៉ុណ្ណោះ!',
+            'Only Excel (.xlsx, .csv), Word (.docx), and PDF (.pdf) files are supported!'
           )
         );
+        setImportedQuestions([]);
       }
-      setImportedQuestions(parsed);
     } catch (err) {
-      console.error('Excel parse error:', err);
+      console.error('Smart file parse error:', err);
       setImportError(
-        t('មិនអាចអានឯកសារនេះបានទេ សូមពិនិត្យទម្រង់ .xlsx ម្ដងទៀត។', 'Failed to read Excel file.')
+        t(
+          'មិនអាចអានឯកសារនេះបានទេ សូមពិនិត្យទម្រង់ឯកសារម្ដងទៀត។',
+          'Failed to read this file. Please check the file format.'
+        )
       );
       setImportedQuestions([]);
+    } finally {
+      setIsParsingFile(false);
     }
   };
 
@@ -2118,7 +2214,6 @@ export default function TeacherManageQuizzes() {
       setSubmissions(validAttempts);
       QUIZZES_MEM_CACHE.resultsByQuiz[quiz.id] = validAttempts;
 
-      // ✅ Update ចំនួនសិស្សប្រឡងក្នុងតារាងភ្លាមៗឱ្យត្រូវតាមចំនួនពិត
       setQuizzes((prev) => {
         const updated = prev.map((q) =>
           q.id === quiz.id ? { ...q, attempts_count: validAttempts.length } : q
@@ -3470,7 +3565,7 @@ export default function TeacherManageQuizzes() {
       )}
 
       {/* ================================================================== */}
-      {/* MODAL - 2: Smart Question Import (Excel + Word Paste + Quick-Check)*/}
+      {/* MODAL - 2: Smart Question Import (Excel/Word/PDF + Write/Paste)    */}
       {/* ================================================================== */}
       {showImportModal && (
         <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/60 md:backdrop-blur-md p-4">
@@ -3480,7 +3575,7 @@ export default function TeacherManageQuizzes() {
                 <span className="quz-pill-emerald bg-emerald-100 text-emerald-600 p-2.5 rounded-xl border border-emerald-200">
                   <ArrowUpTrayIcon className="h-5 w-5" />
                 </span>
-                {t('នាំចូលសំណួរឆ្លាតវៃ (Excel / Word)', 'Smart Question Import (Excel / Word)')}
+                {t('នាំចូលសំណួរឆ្លាតវៃ (Excel / Word / PDF)', 'Smart Question Import (Excel / Word / PDF)')}
               </h2>
               <button
                 type="button"
@@ -3581,38 +3676,39 @@ export default function TeacherManageQuizzes() {
                   </div>
                 </div>
 
+                {/* Tab ទាំង ២៖ ១. នាំចូលពីឯកសារ (Excel/Word/PDF) | ២. សរសេរ ឬបិទភ្ជាប់សំណួរ */}
                 <div className="quz-shift-tabs inline-flex p-1 bg-gray-100 rounded-xl border border-gray-200/70 gap-1">
                   <button
                     type="button"
-                    onClick={() => setImportMode('excel')}
+                    onClick={() => setImportMode('file')}
                     className={`px-4 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
-                      importMode === 'excel'
+                      importMode === 'file'
                         ? 'bg-emerald-600 text-white shadow-xs'
                         : 'quz-shift-btn text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    {t('១. នាំចូលពី Excel (.xlsx)', '1. Import Excel (.xlsx)')}
+                    {t('១. នាំចូលពីឯកសារ (Excel / Word / PDF)', '1. Import File (Excel / Word / PDF)')}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setImportMode('paste')}
+                    onClick={() => setImportMode('write')}
                     className={`px-4 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
-                      importMode === 'paste'
+                      importMode === 'write'
                         ? 'bg-indigo-600 text-white shadow-xs'
                         : 'quz-shift-btn text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    {t('២. បិទភ្ជាប់ពី Word / អត្ថបទ', '2. Paste from Word / Text')}
+                    {t('២. សរសេរ ឬបិទភ្ជាប់សំណួរ', '2. Write or Paste Questions')}
                   </button>
                 </div>
 
-                {importMode === 'excel' && (
+                {importMode === 'file' && (
                   <div className="quz-subbox bg-gray-50/70 p-4 rounded-2xl border border-gray-200/80 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="quz-label text-xs font-bold text-gray-700">
                         {t(
-                          'គាំទ្រសំណួរចម្រុះ (MCQ, ពិត/មិនពិត, សំណួរសរសេរ) ក្នុងឯកសារតែមួយ',
-                          'Supports mixed MCQ, True/False, and Essay in one file'
+                          'គាំទ្រសំណួរចម្រុះ (MCQ, ពិត/មិនពិត, សំណួរសរសេរ) ក្នុងឯកសារ Excel, Word (.docx) ឬ PDF',
+                          'Auto-detects MCQ, True/False, and Essay from Excel, Word (.docx), or PDF'
                         )}
                       </span>
                       <button
@@ -3625,39 +3721,53 @@ export default function TeacherManageQuizzes() {
                       </button>
                     </div>
                     <label
-                      htmlFor="excel-quiz-input"
+                      htmlFor="smart-quiz-file-input"
                       className="quz-surface-card flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-emerald-300 rounded-xl cursor-pointer bg-white hover:bg-emerald-50/40 transition-all"
                     >
-                      <DocumentIcon className="h-8 w-8 text-emerald-500 mb-1.5" />
-                      <span className="quz-text-primary text-xs sm:text-sm font-bold text-gray-800">
-                        {importFile
-                          ? importFile.name
-                          : t('ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ .xlsx ឬ .csv', 'Click to select .xlsx or .csv file')}
-                      </span>
+                      {isParsingFile ? (
+                        <>
+                          <ArrowPathIcon className="h-8 w-8 text-emerald-500 animate-spin mb-1.5" />
+                          <span className="quz-text-primary text-xs sm:text-sm font-bold text-gray-800">
+                            {t('កំពុងអាន និងបំបែកសំណួរពីឯកសារ...', 'Reading & parsing questions...')}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <DocumentIcon className="h-8 w-8 text-emerald-500 mb-1.5" />
+                          <span className="quz-text-primary text-xs sm:text-sm font-bold text-gray-800">
+                            {importFile
+                              ? importFile.name
+                              : t(
+                                  'ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ .xlsx, .docx, ឬ .pdf',
+                                  'Click to select .xlsx, .docx, or .pdf file'
+                                )}
+                          </span>
+                        </>
+                      )}
                       <input
-                        id="excel-quiz-input"
+                        id="smart-quiz-file-input"
                         type="file"
-                        accept=".xlsx,.xls,.csv"
-                        onChange={handleExcelFileUpload}
+                        accept=".xlsx,.xls,.csv,.docx,.pdf"
+                        onChange={handleSmartFileUpload}
                         className="hidden"
                       />
                     </label>
                   </div>
                 )}
 
-                {importMode === 'paste' && (
+                {importMode === 'write' && (
                   <div className="quz-subbox bg-gray-50/70 p-4 rounded-2xl border border-gray-200/80 space-y-3">
                     <p className="quz-text-secondary text-xs font-medium text-gray-600">
                       {t(
-                        'បិទភ្ជាប់សំណួរពី Word (ដកឃ្លា ១ បន្ទាត់រវាងសំណួរនីមួយៗ)។ បើមានជម្រើស A. B. C. D. ប្រព័ន្ធចាប់ជា MCQ ស្វ័យប្រវត្តិ!',
-                        'Paste questions from Word (separate each question with a blank line). A. B. C. D. options are auto-detected as MCQ.'
+                        'សរសេរ ឬបិទភ្ជាប់សំណួរ (ដកឃ្លា ១ បន្ទាត់រវាងសំណួរនីមួយៗ)។ ប្រព័ន្ធនឹងបែងចែក MCQ (A. B. C. D. ឬ ក. ខ. គ. ឃ.), ពិត/មិនពិត, និងសំណួរសរសេរដោយស្វ័យប្រវត្តិ!',
+                        'Write or paste questions (separate with a blank line). Automatically detects MCQ (A-D / ក-ឃ), True/False, and Essay!'
                       )}
                     </p>
                     <textarea
                       rows={5}
                       value={importPasteText}
                       onChange={(e) => setImportPasteText(e.target.value)}
-                      placeholder={`1. តើ HTML ប្រើសម្រាប់ធ្វើអ្វី?\nA. បង្កើតគ្រោងឆ្អឹងគេហទំព័រ\nB. គ្រប់គ្រង Database\nC. កាត់តវីដេអូ\n\n2. ចូរពន្យល់អំពី Frontend និង Backend។`}
+                      placeholder={`1. តើ HTML ប្រើសម្រាប់ធ្វើអ្វី?\nA. បង្កើតគ្រោងឆ្អឹងគេហទំព័រ\nB. គ្រប់គ្រង Database\nC. កាត់តវីដេអូ\nចម្លើយ: A\n\n2. CSS ប្រើសម្រាប់តុបតែងគេហទំព័រ។ (ពិត/មិនពិត)\nចម្លើយ: ពិត\n\n3. ចូរពន្យល់អំពី Frontend និង Backend។`}
                       className="quz-input w-full px-3.5 py-2.5 text-xs font-medium border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none"
                     />
                     <button
@@ -3827,7 +3937,10 @@ export default function TeacherManageQuizzes() {
                     type="submit"
                     form="smartImportForm"
                     disabled={
-                      isImporting || importedQuestions.length === 0 || missingAnswerCount > 0
+                      isImporting ||
+                      isParsingFile ||
+                      importedQuestions.length === 0 ||
+                      missingAnswerCount > 0
                     }
                     className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-all shadow-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
