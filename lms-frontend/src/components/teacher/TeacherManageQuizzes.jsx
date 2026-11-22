@@ -22,7 +22,6 @@ import {
   EyeIcon,
   AcademicCapIcon,
   DocumentCheckIcon,
-  ArrowDownTrayIcon,
   DocumentIcon,
   CheckBadgeIcon,
   ChartBarIcon,
@@ -1762,159 +1761,6 @@ export default function TeacherManageQuizzes() {
     setImportPasteText('');
     setImportedQuestions([]);
     setImportError('');
-  };
-
-  const downloadSampleExcel = async () => {
-    const { default: XLSX } = await import('xlsx-js-style');
-    const sampleRows = [
-      {
-        'ប្រភេទ (MCQ/TrueFalse/Essay)': 'MCQ',
-        'ខ្លឹមសារសំណួរ': 'តើ HTML ប្រើសម្រាប់ធ្វើអ្វី?',
-        'ពិន្ទុ': 5,
-        'ជម្រើស A': 'បង្កើតគ្រោងឆ្អឹងគេហទំព័រ',
-        'ជម្រើស B': 'គ្រប់គ្រង Database',
-        'ជម្រើស C': 'រចនាប្រព័ន្ធប្រតិបត្តិការ',
-        'ជម្រើស D': 'កាត់តវីដេអូ',
-        'ចម្លើយត្រូវ (A/B/C/D ឬ ពិត/មិនពិត)': 'A',
-      },
-      {
-        'ប្រភេទ (MCQ/TrueFalse/Essay)': 'TrueFalse',
-        'ខ្លឹមសារសំណួរ': 'CSS ត្រូវបានប្រើសម្រាប់តុបតែងពណ៌ និងរូបរាងគេហទំព័រ។',
-        'ពិន្ទុ': 5,
-        'ជម្រើស A': '',
-        'ជម្រើស B': '',
-        'ជម្រើស C': '',
-        'ជម្រើស D': '',
-        'ចម្លើយត្រូវ (A/B/C/D ឬ ពិត/មិនពិត)': 'ពិត',
-      },
-      {
-        'ប្រភេទ (MCQ/TrueFalse/Essay)': 'Essay',
-        'ខ្លឹមសារសំណួរ': 'ចូរពន្យល់អំពីភាពខុសគ្នារវាង Frontend និង Backend។',
-        'ពិន្ទុ': 10,
-        'ជម្រើស A': '',
-        'ជម្រើស B': '',
-        'ជម្រើស C': '',
-        'ជម្រើស D': '',
-        'ចម្លើយត្រូវ (A/B/C/D ឬ ពិត/មិនពិត)': '',
-      },
-    ];
-
-    const worksheet = XLSX.utils.json_to_sheet(sampleRows);
-    applyExcelStyling(
-      XLSX,
-      worksheet,
-      [
-        { wch: 26 },
-        { wch: 42 },
-        { wch: 10 },
-        { wch: 26 },
-        { wch: 24 },
-        { wch: 24 },
-        { wch: 22 },
-        { wch: 28 },
-      ],
-      []
-    );
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Questions');
-    XLSX.writeFile(workbook, 'quiz_questions_template.xlsx');
-  };
-
-// ✅ ទាញយកគំរូឯកសារ Word (.doc) ដែលអាចបើកកែក្នុង MS Word រួច Save As .docx
-  const downloadSampleWord = () => {
-    const htmlContent = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office"
-            xmlns:w="urn:schemas-microsoft-com:office:word"
-            xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="utf-8" />
-        <title>Quiz Questions Template</title>
-        <style>
-          body { font-family: 'Khmer OS Siemreap', 'Battambang', Arial, sans-serif; font-size: 11pt; line-height: 1.7; }
-          h2 { color: #1e3a8a; }
-          .note { color: #475569; font-size: 10pt; margin-bottom: 16px; }
-        </style>
-      </head>
-      <body>
-        <h2>គំរូសំណួរប្រឡង (Word Template)</h2>
-        <p class="note">* សម្គាល់៖ សូមដកឃ្លា ១ បន្ទាត់រវាងសំណួរនីមួយៗ និងរក្សាទុកជាឯកសារ .docx មុនពេលនាំចូលប្រព័ន្ធ។</p>
-
-        <p>1. តើ HTML ប្រើសម្រាប់ធ្វើអ្វី?<br/>
-        A. បង្កើតគ្រោងឆ្អឹងគេហទំព័រ<br/>
-        B. គ្រប់គ្រង Database<br/>
-        C. រចនាប្រព័ន្ធប្រតិបត្តិការ<br/>
-        D. កាត់តវីដេអូ<br/>
-        ចម្លើយ: A</p>
-
-        <p>2. CSS ត្រូវបានប្រើសម្រាប់តុបតែងពណ៌ និងរូបរាងគេហទំព័រ។ (ពិត/មិនពិត)<br/>
-        ចម្លើយ: ពិត</p>
-
-        <p>3. ចូរពន្យល់អំពីភាពខុសគ្នារវាង Frontend និង Backend។</p>
-      </body>
-      </html>
-    `;
-
-    const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'quiz_questions_template.doc';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  // ✅ បើកផ្ទាំងគំរូ PDF ស្អាត (គាំទ្រពុម្ពអក្សរខ្មែរ ១០០% សម្រាប់ Save as PDF)
-  const downloadSamplePdf = () => {
-    const printWin = window.open('', '_blank', 'width=850,height=700');
-    if (!printWin) return;
-    printWin.document.write(`
-      <!DOCTYPE html>
-      <html lang="km">
-      <head>
-        <meta charset="utf-8" />
-        <title>quiz_questions_template.pdf</title>
-        <style>
-          body { font-family: 'Khmer OS Siemreap', 'Battambang', 'Noto Sans Khmer', sans-serif; padding: 36px; line-height: 1.8; color: #1e293b; }
-          h2 { color: #1e3a8a; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
-          .note { background: #f8fafc; border-left: 4px solid #3b82f6; padding: 10px 14px; font-size: 13px; margin-bottom: 22px; }
-          .q { margin-bottom: 20px; font-size: 14px; }
-          @media print { .no-print { display: none; } }
-        </style>
-      </head>
-      <body>
-        <h2>គំរូសំណួរប្រឡង (PDF Template)</h2>
-        <div class="note">
-          * សម្គាល់៖ ប្រព័ន្ធគាំទ្រសំណួរ MCQ (A-D ឬ ក-ឃ), ពិត/មិនពិត, និងសំណួរសរសេរ។ សូមជ្រើសរើស "Save as PDF" ក្នុងផ្ទាំង Print ដើម្បីរក្សាទុក។
-        </div>
-
-        <div class="q">
-          1. តើ HTML ប្រើសម្រាប់ធ្វើអ្វី?<br/>
-          A. បង្កើតគ្រោងឆ្អឹងគេហទំព័រ<br/>
-          B. គ្រប់គ្រង Database<br/>
-          C. រចនាប្រព័ន្ធប្រតិបត្តិការ<br/>
-          D. កាត់តវីដេអូ<br/>
-          ចម្លើយ: A
-        </div>
-
-        <div class="q">
-          2. CSS ត្រូវបានប្រើសម្រាប់តុបតែងពណ៌ និងរូបរាងគេហទំព័រ។ (ពិត/មិនពិត)<br/>
-          ចម្លើយ: ពិត
-        </div>
-
-        <div class="q">
-          3. ចូរពន្យល់អំពីភាពខុសគ្នារវាង Frontend និង Backend។
-        </div>
-
-        <script>
-          window.onload = function () { window.print(); };
-        </script>
-      </body>
-      </html>
-    `);
-    printWin.document.close();
   };
 
   // ✅ អនុគមន៍អានឯកសារឆ្លាតវៃ៖ គាំទ្រ Excel (.xlsx, .xls, .csv), Word (.docx), និង PDF (.pdf)
@@ -3806,37 +3652,6 @@ export default function TeacherManageQuizzes() {
                           'Auto-detects MCQ, True/False, and Essay from Excel, Word (.docx), or PDF'
                         )}
                       </span>
-
-                      {/* ⬇️ ដាក់កូដប៊ូតុងទាំង ៣ នៅត្រង់នេះ */}
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="quz-text-secondary text-[11px] font-bold text-gray-500">
-                          {t('គំរូ៖', 'Templates:')}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={downloadSampleExcel}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 text-xs font-extrabold transition cursor-pointer"
-                        >
-                          <ArrowDownTrayIcon className="h-3.5 w-3.5" />
-                          Excel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={downloadSampleWord}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30 text-xs font-extrabold transition cursor-pointer"
-                        >
-                          <ArrowDownTrayIcon className="h-3.5 w-3.5" />
-                          Word
-                        </button>
-                        <button
-                          type="button"
-                          onClick={downloadSamplePdf}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 text-xs font-extrabold transition cursor-pointer"
-                        >
-                          <ArrowDownTrayIcon className="h-3.5 w-3.5" />
-                          PDF
-                        </button>
-                      </div>
                     </div>
                     <label
                       htmlFor="smart-quiz-file-input"
