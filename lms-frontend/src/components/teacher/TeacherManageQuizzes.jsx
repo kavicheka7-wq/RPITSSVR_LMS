@@ -18,7 +18,6 @@ import {
   ClockIcon,
   CheckCircleIcon,
   XCircleIcon,
-  DocumentArrowUpIcon,
   DocumentTextIcon,
   EyeIcon,
   AcademicCapIcon,
@@ -2572,7 +2571,7 @@ export default function TeacherManageQuizzes() {
                   }}
                   className="inline-flex items-center justify-center px-4 py-3 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-sm font-bold rounded-xl transition-all cursor-pointer animate-fadeIn"
                 >
-                  <DocumentArrowUpIcon className="h-5 w-5 mr-2" />
+                  <DocumentIcon className="h-5 w-5 mr-2" />
                   {t('នាំចូលសំណួរ', 'Import Questions')}
                 </button>
                 <button
@@ -3571,11 +3570,11 @@ export default function TeacherManageQuizzes() {
         <div className="fixed inset-0 m-0 z-50 flex items-center justify-center bg-slate-900/60 md:backdrop-blur-md p-4">
           <div className="quz-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-transparent">
             <div className="quz-modal-bar flex justify-between items-center px-6 py-5 border-b border-gray-100 bg-gray-50/50 shrink-0">
-              <h2 className="quz-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
+             <h2 className="quz-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
                 <span className="quz-pill-emerald bg-emerald-100 text-emerald-600 p-2.5 rounded-xl border border-emerald-200">
-                  <DocumentArrowUpIcon className="h-5 w-5" />
+                  <DocumentIcon className="h-5 w-5" />
                 </span>
-                {t('នាំចូលសំណួរឆ្លាតវៃ (Excel / Word / PDF)', 'Smart Question Import (Excel / Word / PDF)')}
+                {t('នាំចូលសំណួរ (Excel/Word/PDF)', 'Import Questions (Excel/Word/PDF)')}
               </h2>
               <button
                 type="button"
@@ -3947,7 +3946,7 @@ export default function TeacherManageQuizzes() {
                     {isImporting ? (
                       <ArrowPathIcon className="h-5 w-5 animate-spin" />
                     ) : (
-                      <DocumentArrowUpIcon className="h-5 w-5" />
+                      <DocumentIcon className="h-5 w-5" />
                     )}
                     {t('រក្សាទុក និងនាំចូល', 'Save & Import')} ({importedQuestions.length})
                   </button>
