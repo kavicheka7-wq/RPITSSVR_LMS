@@ -3,499 +3,765 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Assignment;
-use App\Models\Attendance;
-use App\Models\Course;
 use App\Models\Department;
-use App\Models\Enrollment;
-use App\Models\Grade;
-use App\Models\Lesson;
 use App\Models\Role;
-use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
-use Carbon\Carbon;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
-class AdminReportController extends Controller
+class AdminTeacherController extends Controller
 {
-    // =========================================================================
-    // 📌 Helper Functions (សម្រាប់ប្រើរួមក្នុងរបាយការណ៍ទាំង ៤)
-    // =========================================================================
-
     /**
-     * រៀបចំឈ្មោះតាមលំដាប់ «នាមត្រកូល មុន នាមខ្លួន»
+     * បម្លែង និងបង្រួមរូបភាពដែលបានបង្ហោះ ទៅជា Base64 Data URI ស្រាលបំផុត (ការពារបាត់រូបលើ Railway និងបង្ហាញលឿន 0ms)
      */
-    private function formatFullName($entity, string $fallback = 'N/A'): string
+    private function encodeUploadedImageToBase64($file): ?string
     {
-        if (!$entity) {
-            return $fallback;
+        if (!$file || !$file->isValid()) {
+            return null;
         }
 
-        $full = trim(($entity->last_name ?? '') . ' ' . ($entity->first_name ?? ''));
-        if ($full !== '') {
-            return $full;
+        $realPath = $file->getRealPath();
+        $contents = file_get_contents($realPath);
+        if ($contents === false) {
+            return null;
         }
 
-        return !empty($entity->name) ? trim((string) $entity->name) : $fallback;
+        if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
+            $srcImg = @imagecreatefromstring($contents);
+            if ($srcImg !== false) {
+                $width = imagesx($srcImg);
+                $height = imagesy($srcImg);
+                $maxDim = 240;
+
+                if ($width > $maxDim || $height > $maxDim) {
+                    if ($width > $height) {
+                        $newWidth = $maxDim;
+                        $newHeight = (int) round(($height * $maxDim) / $width);
+                    } else {
+                        $newHeight = $maxDim;
+                        $newWidth = (int) round(($width * $maxDim) / $height);
+                    }
+                } else {
+                    $newWidth = $width;
+                    $newHeight = $height;
+                }
+
+                $dstImg = imagecreatetruecolor($newWidth, $newHeight);
+                $white = imagecolorallocate($dstImg, 255, 255, 255);
+                imagefilledrectangle($dstImg, 0, 0, $newWidth, $newHeight, $white);
+                imagecopyresampled($dstImg, $srcImg, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+
+                ob_start();
+                imagejpeg($dstImg, null, 82);
+                $compressedContents = ob_get_clean();
+
+                imagedestroy($srcImg);
+                imagedestroy($dstImg);
+
+                if ($compressedContents !== false && strlen($compressedContents) < strlen($contents)) {
+                    return 'data:image/jpeg;base64,' . base64_encode($compressedContents);
+                }
+            }
+        }
+
+        $mime = $file->getMimeType() ?: 'image/jpeg';
+        return 'data:' . $mime . ';base64,' . base64_encode($contents);
     }
 
     /**
-     * គណនាភាគរយវត្តមានសរុប (Present + Late + 0.5 * Permission)
+     * ✅ បង្រួមរូបថតគ្រូចាស់ៗក្នុង Database (> 25KB) ឱ្យមកទំហំច្បាស់ល្អ (200x200px HD) និងទុកក្នុង Cache (រំលង URL ពី R2)
      */
-    private function calculateAttendanceRate(int $total, int $present, int $late, int $permission): float
+    private function compressExistingTeacherAvatarIfHeavy(?string $rawImage, int $teacherId): ?string
     {
-        if ($total <= 0) {
-            return 0;
+        if (!$rawImage) {
+            return null;
+        }
+        $trimmed = trim($rawImage);
+        if ($trimmed === '' || strlen($trimmed) <= 25000 || !str_starts_with($trimmed, 'data:image')) {
+            return $trimmed ?: null;
         }
 
-        $effective = $present + $late + ($permission * 0.5);
+        $cacheKey = 'adm_tch_avatar_v2_' . $teacherId . '_' . md5(substr($trimmed, 0, 100) . strlen($trimmed));
 
-        return min(100, round(($effective / $total) * 100, 1));
+        return Cache::remember($cacheKey, 86400, function () use ($trimmed) {
+            if (!preg_match('/^data:([^;]+);base64,(.+)$/s', $trimmed, $m)) {
+                return $trimmed;
+            }
+            $binary = base64_decode(preg_replace('/\s+/', '', $m[2]));
+            if (!$binary || !function_exists('imagecreatefromstring')) {
+                return $trimmed;
+            }
+            try {
+                $src = @imagecreatefromstring($binary);
+                if ($src !== false) {
+                    $w = imagesx($src);
+                    $h = imagesy($src);
+                    $maxDim = 200;
+
+                    if ($w > $maxDim || $h > $maxDim) {
+                        $newW = $w > $h ? $maxDim : max(1, (int) round(($w * $maxDim) / $h));
+                        $newH = $w > $h ? max(1, (int) round(($h * $maxDim) / $w)) : $maxDim;
+                    } else {
+                        $newW = $w;
+                        $newH = $h;
+                    }
+
+                    $dst = imagecreatetruecolor($newW, $newH);
+                    if (function_exists('imagewebp')) {
+                        imagealphablending($dst, false);
+                        imagesavealpha($dst, true);
+                        $transparent = imagecolorallocatealpha($dst, 255, 255, 255, 127);
+                        imagefilledrectangle($dst, 0, 0, $newW, $newH, $transparent);
+                    } else {
+                        $white = imagecolorallocate($dst, 255, 255, 255);
+                        imagefilledrectangle($dst, 0, 0, $newW, $newH, $white);
+                    }
+                    imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $w, $h);
+
+                    ob_start();
+                    if (function_exists('imagewebp')) {
+                        imagewebp($dst, null, 88);
+                        $outMime = 'image/webp';
+                    } else {
+                        imagejpeg($dst, null, 88);
+                        $outMime = 'image/jpeg';
+                    }
+                    $out = ob_get_clean();
+                    imagedestroy($src);
+                    imagedestroy($dst);
+
+                    if ($out && strlen($out) < strlen($binary)) {
+                        return 'data:' . $outMime . ';base64,' . base64_encode($out);
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+            return $trimmed;
+        });
     }
 
     /**
-     * អនុវត្តតម្រងដេប៉ាតឺម៉ង់ មុខវិជ្ជា និងពាក្យស្វែងរក (ប្រើរួមសម្រាប់ Enrollments និង Grades)
+     * រៀបចំទិន្នន័យគ្រូបង្រៀនដោយភ្ជាប់រូបភាពពី user (បើខ្វះ) រួចលុបរូបភាពស្ទួនក្នុង relation user ចេញដើម្បីឱ្យ JSON ស្រាលជាងមុន 2 ដង
      */
-    private function applyCommonFilters(Builder $query, Request $request): Builder
+    private function deduplicateTeacherAvatar($teacher)
     {
+        if (!$teacher) {
+            return $teacher;
+        }
+        if (empty($teacher->profile_image) && !empty($teacher->user?->profile_image)) {
+            $teacher->profile_image = $teacher->user->profile_image;
+        }
+        if (!empty($teacher->profile_image)) {
+            $teacher->profile_image = $this->compressExistingTeacherAvatarIfHeavy($teacher->profile_image, (int) $teacher->id);
+        }
+        if ($teacher->relationLoaded('user') && $teacher->user) {
+            unset($teacher->user->profile_image);
+        }
+        return $teacher;
+    }
+
+    /**
+     * បម្លែងគ្រប់ទម្រង់ថ្ងៃខែឆ្នាំកំណើត (30-04-2005, 30/04/2005, លេខខ្មែរ, ឬលេខ Excel) ទៅជា YYYY-MM-DD សម្រាប់ MySQL
+     */
+    private function normalizeDateOfBirth($value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d');
+        }
+
+        $str = trim((string) $value);
+        if ($str === '' || $str === '-' || strtolower($str) === 'null' || strtolower($str) === 'n/a') {
+            return null;
+        }
+
+        $str = str_replace(
+            ['០', '១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩'],
+            ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
+            $str
+        );
+
+        if (is_numeric($str) && (float) $str > 1000 && (float) $str < 100000) {
+            return gmdate('Y-m-d', ((int) round((float) $str) - 25569) * 86400);
+        }
+
+        if (preg_match('/^(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})$/', $str, $m)) {
+            $first = (int) $m[1];
+            $second = (int) $m[2];
+            $year = (int) $m[3];
+            $day = ($second > 12 && $first <= 12) ? $second : $first;
+            $month = ($second > 12 && $first <= 12) ? $first : $second;
+            if (checkdate($month, $day, $year)) {
+                return sprintf('%04d-%02d-%02d', $year, $month, $day);
+            }
+        }
+
+        if (preg_match('/^(\d{4})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{1,2})/', $str, $m)) {
+            if (checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+                return sprintf('%04d-%02d-%02d', (int) $m[1], (int) $m[2], (int) $m[3]);
+            }
+        }
+
+        try {
+            return Carbon::parse(str_replace('/', '-', $str))->format('Y-m-d');
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Display a listing of all teachers
+     * GET /admin/teachers
+     */
+    public function index(Request $request)
+    {
+        $perPage = max(1, min(500, (int) ($request->per_page ?? 15)));
+
+        // ✅ មិនទាញ profile_image ស្ទួនពីតារាង users ទេ ដើម្បីកាត់បន្ថយការប្រើប្រាស់ RAM ៥០%
+        $query = Teacher::with([
+            'department:id,department_name',
+            'user:id,status,email',
+            'role:id,role_name',
+        ])->select([
+            'id', 'user_id', 'role_id', 'department_id',
+            'teacher_code', 'first_name', 'last_name', 'gender',
+            'date_of_birth', 'email', 'phone', 'profile_image',
+            'specialization', 'employment_type', 'created_at',
+        ]);
+
         if ($request->filled('department_id')) {
-            $query->whereHas('course', function ($q) use ($request) {
-                $q->where('department_id', $request->department_id);
-            });
+            $query->where('department_id', $request->department_id);
         }
 
-        if ($request->filled('course_id')) {
-            $query->where('course_id', $request->course_id);
+        if ($request->filled('employment_type')) {
+            $query->where('employment_type', $request->employment_type);
         }
 
         if ($request->filled('search')) {
-            $search = trim((string) $request->search);
-            $matchedStudentUserIds = Student::where('student_code', 'like', "%{$search}%")
-                ->pluck('user_id')
-                ->filter()
-                ->all();
-
-            $query->where(function ($q) use ($search, $matchedStudentUserIds) {
-                if (!empty($matchedStudentUserIds)) {
-                    $q->orWhereIn('student_id', $matchedStudentUserIds);
-                }
-
-                $q->orWhereHas('student', function ($sq) use ($search) {
-                    $sq->where('first_name', 'like', "%{$search}%")
-                        ->orWhere('last_name', 'like', "%{$search}%")
-                        ->orWhere(DB::raw("CONCAT(last_name, ' ', first_name)"), 'like', "%{$search}%")
-                        ->orWhere(DB::raw("CONCAT(first_name, ' ', last_name)"), 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%");
-                })->orWhereHas('course', function ($cq) use ($search) {
-                    $cq->where('course_name', 'like', "%{$search}%")
-                        ->orWhere('course_code', 'like', "%{$search}%");
-                });
+            $search = trim($request->search);
+            $query->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                  ->orWhere('last_name', 'like', "%{$search}%")
+                  ->orWhere(DB::raw("CONCAT(first_name, ' ', last_name)"), 'like', "%{$search}%")
+                  ->orWhere('teacher_code', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('phone', 'like', "%{$search}%")
+                  ->orWhere('specialization', 'like', "%{$search}%");
             });
         }
 
-        return $query;
+        $teachers = $query->orderBy('first_name')->paginate($perPage);
+
+        $missingImgUserIds = collect($teachers->items())
+            ->filter(fn ($t) => empty($t->profile_image) && !empty($t->user_id))
+            ->pluck('user_id')
+            ->unique()
+            ->values()
+            ->all();
+
+        $fallbackAvatars = !empty($missingImgUserIds)
+            ? User::whereIn('id', $missingImgUserIds)
+                ->whereNotNull('profile_image')
+                ->pluck('profile_image', 'id')
+            : collect();
+
+        $items = collect($teachers->items())->map(function ($teacher) use ($fallbackAvatars) {
+            if (empty($teacher->profile_image) && isset($fallbackAvatars[$teacher->user_id])) {
+                $teacher->profile_image = $fallbackAvatars[$teacher->user_id];
+            }
+            return $this->deduplicateTeacherAvatar($teacher);
+        })->all();
+
+        return response()->json([
+            'data' => $items,
+            'meta' => [
+                'current_page' => $teachers->currentPage(),
+                'last_page' => $teachers->lastPage(),
+                'per_page' => $teachers->perPage(),
+                'total' => $teachers->total(),
+            ],
+            'message' => 'បានទាញយកបញ្ជីគ្រូបង្រៀនដោយជោគជ័យ',
+        ]);
     }
 
     /**
-     * ទាញព័ត៌មានសិស្សដោយមិនទាញ profile_image និងផ្គូផ្គងទាំង user_id និង id
+     * Store a newly created teacher
+     * POST /admin/teachers
      */
-    private function getStudentProfilesMap(array $studentIds): Collection
+    public function store(Request $request)
     {
-        if (empty($studentIds)) {
-            return collect();
+        if ($request->filled('date_of_birth')) {
+            $request->merge(['date_of_birth' => $this->normalizeDateOfBirth($request->input('date_of_birth'))]);
         }
 
-        $profiles = Student::whereIn('user_id', $studentIds)
-            ->orWhereIn('id', $studentIds)
-            ->select('id', 'user_id', 'student_code', 'gender', 'batch_year', 'study_shift')
-            ->get();
+        $validated = $request->validate([
+            'first_name' => 'required|string|max:100',
+            'last_name' => 'required|string|max:100',
+            'gender' => 'nullable|in:Male,Female,Other',
+            'date_of_birth' => 'nullable|date',
+            'email' => 'required|email|unique:users,email|unique:teachers,email',
+            'phone' => 'nullable|string|max:20',
+            'password' => 'required|string|min:6',
+            'status' => 'nullable|in:active,inactive',
+            'department_id' => 'nullable|exists:departments,id',
+            'teacher_code' => 'nullable|string|max:50|unique:teachers,teacher_code',
+            'specialization' => 'nullable|string|max:255',
+            'employment_type' => 'nullable|in:Full-time,Part-time,Contract',
+            'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
+        ]);
 
-        $map = collect();
-        foreach ($profiles as $profile) {
-            if ($profile->user_id) {
-                $map->put($profile->user_id, $profile);
+        $teacherRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%teacher%'])->first()
+            ?? Role::find(2);
+        $teacherRoleId = $teacherRole?->id ?? 2;
+
+        $teacher = DB::transaction(function () use ($validated, $request, $teacherRoleId) {
+            $profileImagePath = null;
+            if ($request->hasFile('profile_image')) {
+                $profileImagePath = $this->encodeUploadedImageToBase64($request->file('profile_image'));
             }
-            $map->put($profile->id, $profile);
-        }
 
-        return $map;
-    }
+            $cleanEmail = strtolower(trim($validated['email']));
+            $cleanFirst = trim($validated['first_name']);
+            $cleanLast = trim($validated['last_name']);
 
-    // =========================================================================
-    // 📌 ១. របាយការណ៍ទិដ្ឋភាពទូទៅ (Overview Report)
-    // =========================================================================
+            $user = User::create([
+                'first_name' => $cleanFirst,
+                'last_name' => $cleanLast,
+                'email' => $cleanEmail,
+                'password' => Hash::make($validated['password']),
+                'phone' => $validated['phone'] ?? null,
+                'gender' => $validated['gender'] ?? null,
+                'status' => $validated['status'] ?? 'active',
+                'role_id' => $teacherRoleId,
+                'profile_image' => $profileImagePath,
+            ]);
 
-    public function getOverviewReport(Request $request)
-    {
-        $data = Cache::remember('admin_overview_report', 300, function () {
-            $studentRoleId = Role::whereRaw('LOWER(role_name) LIKE ?', ['%student%'])->value('id') ?? 3;
-            $teacherRoleId = Role::whereRaw('LOWER(role_name) LIKE ?', ['%teacher%'])->value('id') ?? 2;
+            $teacher = Teacher::create([
+                'user_id' => $user->id,
+                'role_id' => $teacherRoleId,
+                'teacher_code' => !empty($validated['teacher_code'])
+                    ? trim($validated['teacher_code'])
+                    : $this->generateTeacherCode(),
+                'first_name' => $cleanFirst,
+                'last_name' => $cleanLast,
+                'gender' => $validated['gender'] ?? null,
+                'date_of_birth' => $this->normalizeDateOfBirth($validated['date_of_birth'] ?? null),
+                'email' => $cleanEmail,
+                'phone' => $validated['phone'] ?? null,
+                'department_id' => $validated['department_id'] ?? null,
+                'specialization' => $validated['specialization'] ?? null,
+                'employment_type' => $validated['employment_type'] ?? 'Full-time',
+                'profile_image' => $profileImagePath,
+            ]);
 
-            $totalStudents = Student::count() ?: User::where('role_id', $studentRoleId)->count();
-            $totalTeachers = Teacher::count() ?: User::where('role_id', $teacherRoleId)->count();
-
-            $attendanceStats = Attendance::selectRaw("
-                COUNT(*) as total,
-                SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
-                SUM(CASE WHEN LOWER(status) = 'late' THEN 1 ELSE 0 END) as late,
-                SUM(CASE WHEN LOWER(status) = 'permission' THEN 1 ELSE 0 END) as permission
-            ")->first();
-
-            $overallAttendanceRate = $this->calculateAttendanceRate(
-                (int) ($attendanceStats->total ?? 0),
-                (int) ($attendanceStats->present ?? 0),
-                (int) ($attendanceStats->late ?? 0),
-                (int) ($attendanceStats->permission ?? 0)
-            );
-
-            $departmentDistribution = Department::withCount(['courses', 'students', 'teachers'])
-                ->get()
-                ->map(fn ($dept) => [
-                    'id' => $dept->id,
-                    'department_name' => $dept->department_name,
-                    'department_code' => $dept->department_code,
-                    'students_count' => (int) ($dept->students_count ?? 0),
-                    'teachers_count' => (int) ($dept->teachers_count ?? 0),
-                    'courses_count' => (int) ($dept->courses_count ?? 0),
-                ])
-                ->values()
-                ->all();
-
-            $enrollmentTrend = Enrollment::select(
-                DB::raw("DATE_FORMAT(created_at, '%Y-%m') as month"),
-                DB::raw('COUNT(*) as count')
-            )
-                ->where('created_at', '>=', now()->subMonths(6))
-                ->groupBy('month')
-                ->orderBy('month', 'asc')
-                ->get()
-                ->map(fn ($row) => [
-                    'month' => $row->month,
-                    'count' => (int) $row->count,
-                ])
-                ->values()
-                ->all();
-
-            return [
-                'stats' => [
-                    'total_students' => (int) $totalStudents,
-                    'total_teachers' => (int) $totalTeachers,
-                    'total_courses' => Course::count(),
-                    'total_departments' => Department::count(),
-                    'total_enrollments' => Enrollment::count(),
-                    'total_lessons' => Lesson::count(),
-                    'total_assignments' => Assignment::count(),
-                    'overall_attendance_rate' => $overallAttendanceRate,
-                ],
-                'department_distribution' => $departmentDistribution,
-                'enrollment_trend' => $enrollmentTrend,
-            ];
+            $loaded = $teacher->load(['department:id,department_name', 'user:id,status,email', 'role:id,role_name']);
+            return $this->deduplicateTeacherAvatar($loaded);
         });
 
-        return response()->json($data);
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
+
+        return response()->json([
+            'message' => 'បានបង្កើតគណនីគ្រូបង្រៀនដោយជោគជ័យ',
+            'data' => $teacher,
+        ], 201);
     }
 
-    // =========================================================================
-    // 📌 ២. របាយការណ៍ការចុះឈ្មោះសិក្សា (Enrollment Report)
-    // =========================================================================
-
-    public function getEnrollmentReport(Request $request)
+    /**
+     * Display the specified teacher
+     * GET /admin/teachers/{teacher}
+     */
+    public function show(Teacher $teacher)
     {
-        $baseQuery = $this->applyCommonFilters(Enrollment::query(), $request);
+        $loaded = $teacher->load(['department:id,department_name', 'user:id,status,email,profile_image', 'role:id,role_name']);
+        $this->deduplicateTeacherAvatar($loaded);
 
-        if ($request->filled('status')) {
-            $baseQuery->where('status', $request->status);
+        return response()->json([
+            'data' => $loaded,
+            'message' => 'បានទាញយកទិន្នន័យគ្រូបង្រៀនដោយជោគជ័យ',
+        ]);
+    }
+
+    /**
+     * Update the specified teacher
+     * PUT /admin/teachers/{teacher}
+     */
+    public function update(Request $request, Teacher $teacher)
+    {
+        if ($request->filled('date_of_birth')) {
+            $request->merge(['date_of_birth' => $this->normalizeDateOfBirth($request->input('date_of_birth'))]);
         }
 
-        $summaryRow = (clone $baseQuery)->selectRaw("
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'active' OR status IS NULL OR status = '' THEN 1 ELSE 0 END) as active,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-            SUM(CASE WHEN status IN ('dropped', 'inactive', 'cancelled') THEN 1 ELSE 0 END) as dropped
-        ")->first();
+        $validated = $request->validate([
+            'first_name' => 'required|string|max:100',
+            'last_name' => 'required|string|max:100',
+            'gender' => 'nullable|in:Male,Female,Other',
+            'date_of_birth' => 'nullable|date',
+            'email' => [
+                'required', 'email',
+                Rule::unique('users', 'email')->ignore($teacher->user_id),
+                Rule::unique('teachers', 'email')->ignore($teacher->id),
+            ],
+            'phone' => 'nullable|string|max:20',
+            'password' => 'nullable|string|min:6',
+            'status' => 'nullable|in:active,inactive',
+            'department_id' => 'nullable|exists:departments,id',
+            'teacher_code' => [
+                'nullable', 'string', 'max:50',
+                Rule::unique('teachers', 'teacher_code')->ignore($teacher->id),
+            ],
+            'specialization' => 'nullable|string|max:255',
+            'employment_type' => 'nullable|in:Full-time,Part-time,Contract',
+            'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
+        ]);
 
-        $perPage = max(1, min(200, (int) ($request->per_page ?? 15)));
-
-        $paginated = $baseQuery
-            ->with([
-                'student:id,first_name,last_name,email,gender',
-                'course:id,course_name,course_code,department_id',
-                'course.department:id,department_name',
-            ])
-            ->orderBy('created_at', 'desc')
-            ->paginate($perPage);
-
-        $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter()->values()->all();
-        $studentProfiles = $this->getStudentProfilesMap($studentIds);
-
-        $items = collect($paginated->items())->map(function ($enr) use ($studentProfiles) {
-            $studentUser = $enr->student;
-            $studentProfile = $studentProfiles->get($enr->student_id);
-
-            $enrolledDateStr = 'N/A';
-            $rawDate = $enr->enrolled_date ?? $enr->created_at;
-            if ($rawDate) {
-                try {
-                    $enrolledDateStr = Carbon::parse($rawDate)->format('Y-m-d');
-                } catch (\Throwable $e) {
-                    $enrolledDateStr = substr((string) $rawDate, 0, 10);
+        DB::transaction(function () use ($validated, $request, $teacher) {
+            $profileImagePath = $teacher->profile_image;
+            if ($request->hasFile('profile_image')) {
+                if (
+                    $teacher->profile_image &&
+                    !str_starts_with($teacher->profile_image, 'data:') &&
+                    !str_starts_with($teacher->profile_image, 'http')
+                ) {
+                    Storage::disk('public')->delete($teacher->profile_image);
+                }
+                $encoded = $this->encodeUploadedImageToBase64($request->file('profile_image'));
+                if ($encoded) {
+                    $profileImagePath = $encoded;
                 }
             }
 
-            return [
-                'id' => $enr->id,
-                'student_id' => $enr->student_id,
-                'student_name' => $this->formatFullName($studentUser),
-                'student_code' => $studentProfile->student_code ?? ('STD-' . $enr->student_id),
-                'gender' => $studentProfile->gender ?? $studentUser->gender ?? null,
-                'batch_year' => $studentProfile->batch_year ?? null,
-                'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
-                'email' => $studentUser->email ?? 'N/A',
-                'course_name' => $enr->course->course_name ?? 'N/A',
-                'course_code' => $enr->course->course_code ?? 'N/A',
-                'department_name' => $enr->course->department->department_name ?? 'N/A',
-                'status' => $enr->status ?? 'active',
-                'enrolled_date' => $enrolledDateStr,
-            ];
+            $cleanEmail = strtolower(trim($validated['email']));
+            $cleanFirst = trim($validated['first_name']);
+            $cleanLast = trim($validated['last_name']);
+
+            if ($teacher->user) {
+                $userData = [
+                    'first_name' => $cleanFirst,
+                    'last_name' => $cleanLast,
+                    'email' => $cleanEmail,
+                    'phone' => $validated['phone'] ?? $teacher->user->phone,
+                    'gender' => $validated['gender'] ?? $teacher->user->gender,
+                    'status' => $validated['status'] ?? $teacher->user->status,
+                    'profile_image' => $profileImagePath ?? $teacher->user->profile_image,
+                ];
+
+                if (!empty($validated['password'])) {
+                    $userData['password'] = Hash::make($validated['password']);
+                }
+
+                $teacher->user->update($userData);
+            }
+
+            $teacher->update([
+                'teacher_code' => !empty($validated['teacher_code'])
+                    ? trim($validated['teacher_code'])
+                    : $teacher->teacher_code,
+                'first_name' => $cleanFirst,
+                'last_name' => $cleanLast,
+                'gender' => $validated['gender'] ?? $teacher->gender,
+                'date_of_birth' => array_key_exists('date_of_birth', $validated)
+                    ? $this->normalizeDateOfBirth($validated['date_of_birth'])
+                    : $teacher->date_of_birth,
+                'email' => $cleanEmail,
+                'phone' => $validated['phone'] ?? $teacher->phone,
+                'department_id' => $validated['department_id'] ?? $teacher->department_id,
+                'specialization' => $validated['specialization'] ?? $teacher->specialization,
+                'employment_type' => $validated['employment_type'] ?? $teacher->employment_type,
+                'profile_image' => $profileImagePath,
+            ]);
         });
 
-        return response()->json([
-            'summary' => [
-                'total' => (int) ($summaryRow->total ?? 0),
-                'active' => (int) ($summaryRow->active ?? 0),
-                'completed' => (int) ($summaryRow->completed ?? 0),
-                'dropped' => (int) ($summaryRow->dropped ?? 0),
-            ],
-            'data' => $items,
-            'meta' => [
-                'current_page' => $paginated->currentPage(),
-                'last_page' => $paginated->lastPage(),
-                'per_page' => $paginated->perPage(),
-                'total' => $paginated->total(),
-            ],
-        ]);
-    }
-
-    // =========================================================================
-    // 📌 ៣. របាយការណ៍វត្តមានសិស្ស (Attendance Report)
-    // =========================================================================
-
-    public function getAttendanceReport(Request $request)
-    {
-        $baseQuery = Attendance::query()
-            ->when($request->filled('department_id'), function ($q) use ($request) {
-                $q->whereHas('course', fn ($cq) => $cq->where('department_id', $request->department_id));
-            })
-            ->when($request->filled('course_id'), fn ($q) => $q->where('course_id', $request->course_id))
-            ->when($request->filled('date_from'), fn ($q) => $q->whereDate('attendance_date', '>=', $request->date_from))
-            ->when($request->filled('date_to'), fn ($q) => $q->whereDate('attendance_date', '<=', $request->date_to));
-
-        $summaryRaw = (clone $baseQuery)->selectRaw("
-            COUNT(*) as total_records,
-            SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
-            SUM(CASE WHEN LOWER(status) = 'absent' THEN 1 ELSE 0 END) as absent,
-            SUM(CASE WHEN LOWER(status) = 'late' THEN 1 ELSE 0 END) as late,
-            SUM(CASE WHEN LOWER(status) = 'permission' THEN 1 ELSE 0 END) as permission
-        ")->first();
-
-        $totalRecords = (int) ($summaryRaw->total_records ?? 0);
-        $presentCount = (int) ($summaryRaw->present ?? 0);
-        $absentCount = (int) ($summaryRaw->absent ?? 0);
-        $lateCount = (int) ($summaryRaw->late ?? 0);
-        $permissionCount = (int) ($summaryRaw->permission ?? 0);
-
-        $attendanceSubquery = Attendance::selectRaw("
-            course_id,
-            COUNT(*) as total,
-            SUM(CASE WHEN LOWER(status) = 'present' THEN 1 ELSE 0 END) as present,
-            SUM(CASE WHEN LOWER(status) = 'absent' THEN 1 ELSE 0 END) as absent,
-            SUM(CASE WHEN LOWER(status) = 'late' THEN 1 ELSE 0 END) as late,
-            SUM(CASE WHEN LOWER(status) = 'permission' THEN 1 ELSE 0 END) as permission
-        ")
-            ->when($request->filled('date_from'), fn ($q) => $q->whereDate('attendance_date', '>=', $request->date_from))
-            ->when($request->filled('date_to'), fn ($q) => $q->whereDate('attendance_date', '<=', $request->date_to))
-            ->groupBy('course_id');
-
-        $coursesResult = Course::with([
-            'department:id,department_name',
-            'teacher:id,first_name,last_name,email',
-        ])
-            ->when($request->filled('department_id'), fn ($q) => $q->where('department_id', $request->department_id))
-            ->when($request->filled('course_id'), fn ($q) => $q->where('courses.id', $request->course_id))
-            ->leftJoinSub($attendanceSubquery, 'att_stats', function ($join) {
-                $join->on('courses.id', '=', 'att_stats.course_id');
-            })
-            ->select([
-                'courses.id',
-                'courses.course_name',
-                'courses.course_code',
-                'courses.department_id',
-                'courses.teacher_id',
-                DB::raw('COALESCE(att_stats.total, 0) as total'),
-                DB::raw('COALESCE(att_stats.present, 0) as present'),
-                DB::raw('COALESCE(att_stats.absent, 0) as absent'),
-                DB::raw('COALESCE(att_stats.late, 0) as late'),
-                DB::raw('COALESCE(att_stats.permission, 0) as permission'),
-            ])
-            ->get();
-
-        $relevantTeacherIds = $coursesResult->pluck('teacher_id')->filter()->unique()->values()->all();
-        $teachersMap = collect();
-        if (!empty($relevantTeacherIds)) {
-            $teachers = Teacher::select('id', 'user_id', 'first_name', 'last_name')
-                ->whereIn('user_id', $relevantTeacherIds)
-                ->orWhereIn('id', $relevantTeacherIds)
-                ->get();
-
-            foreach ($teachers as $teacher) {
-                if ($teacher->user_id) {
-                    $teachersMap->put($teacher->user_id, $teacher);
-                }
-                $teachersMap->put($teacher->id, $teacher);
-            }
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
+        if ($teacher->user_id) {
+            Cache::forget('lms_auth_user_payload_' . $teacher->user_id);
         }
 
-        $courseBreakdown = $coursesResult->map(function ($course) use ($teachersMap) {
-            $cTotal = (int) $course->total;
-            $cPresent = (int) $course->present;
-            $cAbsent = (int) $course->absent;
-            $cLate = (int) $course->late;
-            $cPermission = (int) $course->permission;
-
-            $teacherName = $this->formatFullName($course->teacher, '');
-            if ($teacherName === '') {
-                $teacherName = $this->formatFullName($teachersMap->get($course->teacher_id), 'មិនស្គាល់គ្រូបង្រៀន');
-            }
-
-            return [
-                'course_id' => $course->id,
-                'course_name' => $course->course_name,
-                'course_code' => $course->course_code,
-                'department_name' => $course->department->department_name ?? 'N/A',
-                'teacher_name' => $teacherName,
-                'total' => $cTotal,
-                'present' => $cPresent,
-                'absent' => $cAbsent,
-                'late' => $cLate,
-                'permission' => $cPermission,
-                'rate' => $this->calculateAttendanceRate($cTotal, $cPresent, $cLate, $cPermission),
-            ];
-        });
+        $freshTeacher = $teacher->fresh(['department:id,department_name', 'user:id,status,email', 'role:id,role_name']);
+        $this->deduplicateTeacherAvatar($freshTeacher);
 
         return response()->json([
-            'summary' => [
-                'total_records' => $totalRecords,
-                'present' => $presentCount,
-                'absent' => $absentCount,
-                'late' => $lateCount,
-                'permission' => $permissionCount,
-                'rate' => $this->calculateAttendanceRate($totalRecords, $presentCount, $lateCount, $permissionCount),
-            ],
-            'course_breakdown' => $courseBreakdown,
+            'message' => 'បានកែប្រែព័ត៌មានគ្រូបង្រៀនដោយជោគជ័យ',
+            'data' => $freshTeacher,
         ]);
     }
 
-    // =========================================================================
-    // 📌 ៤. របាយការណ៍លទ្ធផលសិក្សា និងពិន្ទុ (Academic Report)
-    // =========================================================================
-
-    public function getAcademicReport(Request $request)
+    /**
+     * Remove the specified teacher
+     * DELETE /admin/teachers/{teacher}
+     */
+    public function destroy(Teacher $teacher)
     {
-        $baseQuery = $this->applyCommonFilters(Grade::query(), $request);
+        $teacherName = trim($teacher->first_name . ' ' . $teacher->last_name);
+        $userId = $teacher->user_id;
 
-        $gradeCols = Cache::remember('lms_grades_optional_cols_v1', 86400, fn () => [
-            'midterm' => Schema::hasColumn('grades', 'midterm_score'),
-            'exam' => Schema::hasColumn('grades', 'exam_score'),
-        ]);
+        if (
+            $teacher->profile_image &&
+            !str_starts_with($teacher->profile_image, 'data:') &&
+            !str_starts_with($teacher->profile_image, 'http')
+        ) {
+            Storage::disk('public')->delete($teacher->profile_image);
+        }
 
-        $midtermAvgSelect = !empty($gradeCols['midterm']) ? 'AVG(midterm_score) as avg_midterm,' : '0 as avg_midterm,';
-        $examAvgSelect = !empty($gradeCols['exam']) ? 'AVG(exam_score) as avg_exam,' : '0 as avg_exam,';
-
-        $summaryRaw = (clone $baseQuery)->selectRaw("
-            COUNT(*) as total_graded,
-            AVG(assignment_score) as avg_assignment,
-            AVG(quiz_score) as avg_quiz,
-            {$midtermAvgSelect}
-            {$examAvgSelect}
-            AVG(final_score) as avg_final,
-            SUM(CASE WHEN UPPER(TRIM(grade_letter)) IN ('A', 'A+') THEN 1 ELSE 0 END) as grade_a,
-            SUM(CASE WHEN UPPER(TRIM(grade_letter)) IN ('B', 'B+') THEN 1 ELSE 0 END) as grade_b,
-            SUM(CASE WHEN UPPER(TRIM(grade_letter)) IN ('C', 'C+') THEN 1 ELSE 0 END) as grade_c,
-            SUM(CASE WHEN UPPER(TRIM(grade_letter)) = 'D' THEN 1 ELSE 0 END) as grade_d,
-            SUM(CASE WHEN UPPER(TRIM(grade_letter)) = 'F' OR (grade_letter IS NULL AND final_score < 50) THEN 1 ELSE 0 END) as grade_f,
-            SUM(CASE WHEN final_score >= 50 AND UPPER(TRIM(COALESCE(grade_letter, ''))) != 'F' THEN 1 ELSE 0 END) as passed_count,
-            SUM(CASE WHEN final_score < 50 OR UPPER(TRIM(COALESCE(grade_letter, ''))) = 'F' THEN 1 ELSE 0 END) as failed_count
-        ")->first();
-
-        $perPage = max(1, min(200, (int) ($request->per_page ?? 50)));
-
-        $paginated = (clone $baseQuery)
-            ->with([
-                'student:id,first_name,last_name,email,gender',
-                'course:id,course_name,course_code,department_id',
-                'course.department:id,department_name',
-            ])
-            ->orderBy('id', 'desc')
-            ->paginate($perPage);
-
-        $studentIds = collect($paginated->items())->pluck('student_id')->unique()->filter()->values()->all();
-        $studentProfiles = $this->getStudentProfilesMap($studentIds);
-
-        $gradeList = collect($paginated->items())->map(function ($g) use ($studentProfiles) {
-            $studentUser = $g->student;
-            $studentProfile = $studentProfiles->get($g->student_id);
-
-            return [
-                'id' => $g->id,
-                'student_id' => $g->student_id,
-                'student_name' => $this->formatFullName($studentUser),
-                'student_code' => $studentProfile->student_code ?? ('STD-' . $g->student_id),
-                'gender' => $studentProfile->gender ?? $studentUser->gender ?? null,
-                'batch_year' => $studentProfile->batch_year ?? null,
-                'study_shift' => $studentProfile->study_shift ?? 'Monday-Friday',
-                'course_name' => $g->course->course_name ?? 'N/A',
-                'course_code' => $g->course->course_code ?? 'N/A',
-                'department_name' => $g->course->department->department_name ?? 'N/A',
-                'assignment_score' => round((float) ($g->assignment_score ?? 0), 2),
-                'quiz_score' => round((float) ($g->quiz_score ?? 0), 2),
-                'midterm_score' => round((float) ($g->midterm_score ?? 0), 2),
-                'exam_score' => round((float) ($g->exam_score ?? 0), 2),
-                'final_score' => round((float) ($g->final_score ?? 0), 2),
-                'grade_letter' => $g->grade_letter ?? 'N/A',
-            ];
+        DB::transaction(function () use ($teacher) {
+            $targetUser = $teacher->user;
+            $teacher->delete();
+            if ($targetUser) {
+                $targetUser->delete();
+            }
         });
 
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
+        if ($userId) {
+            Cache::forget('lms_auth_user_payload_' . $userId);
+        }
+
         return response()->json([
-            'summary' => [
-                'total_graded' => (int) ($summaryRaw->total_graded ?? 0),
-                'avg_assignment' => round((float) ($summaryRaw->avg_assignment ?? 0), 1),
-                'avg_quiz' => round((float) ($summaryRaw->avg_quiz ?? 0), 1),
-                'avg_midterm' => round((float) ($summaryRaw->avg_midterm ?? 0), 1),
-                'avg_exam' => round((float) ($summaryRaw->avg_exam ?? 0), 1),
-                'avg_final' => round((float) ($summaryRaw->avg_final ?? 0), 1),
-                'passed_count' => (int) ($summaryRaw->passed_count ?? 0),
-                'failed_count' => (int) ($summaryRaw->failed_count ?? 0),
-                'grade_distribution' => [
-                    'A' => (int) ($summaryRaw->grade_a ?? 0),
-                    'B' => (int) ($summaryRaw->grade_b ?? 0),
-                    'C' => (int) ($summaryRaw->grade_c ?? 0),
-                    'D' => (int) ($summaryRaw->grade_d ?? 0),
-                    'F' => (int) ($summaryRaw->grade_f ?? 0),
-                ],
-            ],
-            'data' => $gradeList,
-            'meta' => [
-                'current_page' => $paginated->currentPage(),
-                'last_page' => $paginated->lastPage(),
-                'per_page' => $paginated->perPage(),
-                'total' => $paginated->total(),
-            ],
+            'message' => "បានលុបគណនីគ្រូបង្រៀន '{$teacherName}' ដោយជោគជ័យ",
         ]);
+    }
+
+    /**
+     * Get all teachers for export without pagination
+     * GET /admin/teachers/export-all
+     */
+    public function exportAll(Request $request)
+    {
+        if ($request->query('format') === 'json') {
+            $teachers = [];
+            Teacher::with([
+                'department:id,department_name',
+                'user:id,status,email',
+                'role:id,role_name',
+            ])
+                ->select([
+                    'id', 'user_id', 'role_id', 'department_id',
+                    'teacher_code', 'first_name', 'last_name', 'gender',
+                    'date_of_birth', 'email', 'phone', 'profile_image',
+                    'specialization', 'employment_type', 'created_at',
+                ])
+                ->orderBy('first_name')
+                ->chunk(500, function ($chunk) use (&$teachers) {
+                    $missingUserIds = $chunk
+                        ->filter(fn ($t) => empty($t->profile_image) && !empty($t->user_id))
+                        ->pluck('user_id')
+                        ->unique()
+                        ->values()
+                        ->all();
+
+                    $fallbackAvatars = !empty($missingUserIds)
+                        ? User::whereIn('id', $missingUserIds)
+                            ->whereNotNull('profile_image')
+                            ->pluck('profile_image', 'id')
+                        : collect();
+
+                    foreach ($chunk as $teacher) {
+                        if (empty($teacher->profile_image) && isset($fallbackAvatars[$teacher->user_id])) {
+                            $teacher->profile_image = $fallbackAvatars[$teacher->user_id];
+                        }
+                        $teachers[] = $this->deduplicateTeacherAvatar($teacher);
+                    }
+                });
+
+            return response()->json([
+                'data' => $teachers,
+                'message' => 'បានទាញយកទិន្នន័យគ្រូបង្រៀនទាំងអស់ដោយជោគជ័យ',
+            ]);
+        }
+
+        $filename = 'Teachers_List_' . date('Y-m-d') . '.csv';
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
+        ];
+
+        return response()->stream(function () {
+            $handle = fopen('php://output', 'w');
+            fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
+
+            fputcsv($handle, [
+                'No',
+                'Teacher Code',
+                'First Name',
+                'Last Name',
+                'Gender',
+                'Email',
+                'Phone',
+                'Department',
+                'Specialization',
+                'Employment Type',
+                'Date of Birth',
+                'Status',
+            ]);
+
+            $index = 1;
+            Teacher::with([
+                'department:id,department_name',
+                'user:id,status,email',
+                'role:id,role_name',
+            ])
+                ->select([
+                    'id', 'user_id', 'role_id', 'department_id',
+                    'teacher_code', 'first_name', 'last_name', 'gender',
+                    'date_of_birth', 'email', 'phone',
+                    'specialization', 'employment_type',
+                ])
+                ->orderBy('first_name')
+                ->chunk(500, function ($teachers) use ($handle, &$index) {
+                    foreach ($teachers as $t) {
+                        $gender = $t->gender === 'Male'
+                            ? 'ប្រុស (Male)'
+                            : ($t->gender === 'Female' ? 'ស្រី (Female)' : ($t->gender ?? ''));
+                        $status = ($t->user->status ?? $t->status ?? 'active') === 'active'
+                            ? 'សកម្ម (Active)'
+                            : 'អសកម្ម (Inactive)';
+
+                        fputcsv($handle, [
+                            $index++,
+                            $t->teacher_code ?? '',
+                            $t->first_name ?? '',
+                            $t->last_name ?? '',
+                            $gender,
+                            $t->email ?? '',
+                            $t->phone ?? '',
+                            $t->department->department_name ?? '',
+                            $t->specialization ?? '',
+                            $t->employment_type ?? '',
+                            $t->date_of_birth ?? '',
+                            $status,
+                        ]);
+                    }
+                });
+
+            fclose($handle);
+        }, 200, $headers);
+    }
+
+    /**
+     * Import multiple teachers
+     * POST /admin/teachers/import
+     */
+    public function import(Request $request)
+    {
+        $request->validate([
+            'teachers' => 'required|array|min:1',
+            'teachers.*.first_name' => 'required|string|max:100',
+            'teachers.*.last_name' => 'required|string|max:100',
+            'teachers.*.email' => 'required|email',
+        ]);
+
+        $teacherRole = Role::whereRaw('LOWER(role_name) LIKE ?', ['%teacher%'])->first()
+            ?? Role::find(2);
+        $teacherRoleId = $teacherRole?->id ?? 2;
+
+        $importedCount = 0;
+        $skipped = [];
+
+        DB::transaction(function () use ($request, $teacherRoleId, &$importedCount, &$skipped) {
+            $emails = collect($request->teachers)
+                ->pluck('email')
+                ->filter()
+                ->map(fn ($e) => strtolower(trim($e)))
+                ->toArray();
+
+            $existingEmails = User::whereIn('email', $emails)->pluck('email')
+                ->merge(Teacher::whereIn('email', $emails)->pluck('email'))
+                ->map(fn ($e) => strtolower(trim($e)))
+                ->unique()
+                ->toArray();
+
+            foreach ($request->teachers as $index => $item) {
+                $cleanEmail = strtolower(trim($item['email']));
+
+                if (in_array($cleanEmail, $existingEmails, true)) {
+                    $skipped[] = [
+                        'row' => $index + 1,
+                        'email' => $item['email'],
+                        'reason' => 'អ៊ីមែលនេះមានរួចហើយ (Email already exists)',
+                    ];
+                    continue;
+                }
+
+                $existingEmails[] = $cleanEmail;
+
+                $password = !empty($item['password']) ? $item['password'] : '12345678';
+                $gender = in_array($item['gender'] ?? '', ['Male', 'Female', 'Other']) ? $item['gender'] : null;
+                $employmentType = in_array($item['employment_type'] ?? '', ['Full-time', 'Part-time', 'Contract'])
+                    ? $item['employment_type']
+                    : 'Full-time';
+                $status = in_array($item['status'] ?? '', ['active', 'inactive']) ? $item['status'] : 'active';
+
+                $cleanFirst = trim($item['first_name']);
+                $cleanLast = trim($item['last_name']);
+
+                $user = User::create([
+                    'first_name' => $cleanFirst,
+                    'last_name' => $cleanLast,
+                    'email' => $cleanEmail,
+                    'password' => Hash::make($password),
+                    'phone' => $item['phone'] ?? null,
+                    'gender' => $gender,
+                    'status' => $status,
+                    'role_id' => $teacherRoleId,
+                ]);
+
+                $requestedCode = !empty($item['teacher_code']) ? trim($item['teacher_code']) : null;
+                if ($requestedCode && Teacher::where('teacher_code', $requestedCode)->exists()) {
+                    $requestedCode = null;
+                }
+
+                Teacher::create([
+                    'user_id' => $user->id,
+                    'role_id' => $teacherRoleId,
+                    'teacher_code' => $requestedCode ?: $this->generateTeacherCode(),
+                    'first_name' => $cleanFirst,
+                    'last_name' => $cleanLast,
+                    'gender' => $gender,
+                    'date_of_birth' => $this->normalizeDateOfBirth($item['date_of_birth'] ?? null),
+                    'email' => $cleanEmail,
+                    'phone' => $item['phone'] ?? null,
+                    'department_id' => $item['department_id'] ?? null,
+                    'specialization' => $item['specialization'] ?? null,
+                    'employment_type' => $employmentType,
+                ]);
+
+                $importedCount++;
+            }
+        });
+
+        Cache::forget('admin_dashboard_stats');
+        Cache::forget('admin_overview_report');
+
+        return response()->json([
+            'message' => "នាំចូលគ្រូបង្រៀនចំនួន {$importedCount} នាក់ដោយជោគជ័យ",
+            'imported_count' => $importedCount,
+            'skipped' => $skipped,
+        ]);
+    }
+
+    private function generateTeacherCode(): string
+    {
+        $year = date('Y');
+        $nextNum = (int) Teacher::max('id') + 1;
+        do {
+            $code = 'TCH-' . $year . '-' . str_pad((string) $nextNum, 4, '0', STR_PAD_LEFT);
+            $nextNum++;
+        } while (Teacher::where('teacher_code', $code)->exists());
+
+        return $code;
     }
 }

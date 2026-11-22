@@ -78,7 +78,7 @@ class AdminStudentController extends Controller
     }
 
     /**
-     * ✅ បង្រួមរូបថតសិស្សចាស់ៗក្នុង Database ដែលមានទំហំធំពេក (> 20KB) ឱ្យស្រាលបំផុត និងទុកក្នុង Cache
+     * ✅ បង្រួមរូបថតសិស្សចាស់ៗក្នុង Database (> 25KB) ឱ្យមកទំហំច្បាស់ល្អ (200x200px HD) និងទុកក្នុង Cache (រំលង URL ពី R2)
      */
     private function compressExistingAvatarIfHeavy(?string $rawImage, int $studentId): ?string
     {
@@ -86,11 +86,11 @@ class AdminStudentController extends Controller
             return null;
         }
         $trimmed = trim($rawImage);
-        if ($trimmed === '' || strlen($trimmed) <= 20000 || !str_starts_with($trimmed, 'data:image')) {
+        if ($trimmed === '' || strlen($trimmed) <= 25000 || !str_starts_with($trimmed, 'data:image')) {
             return $trimmed ?: null;
         }
 
-        $cacheKey = 'adm_std_avatar_v1_' . $studentId . '_' . md5(substr($trimmed, 0, 100) . strlen($trimmed));
+        $cacheKey = 'adm_std_avatar_v2_' . $studentId . '_' . md5(substr($trimmed, 0, 100) . strlen($trimmed));
 
         return Cache::remember($cacheKey, 86400, function () use ($trimmed) {
             if (!preg_match('/^data:([^;]+);base64,(.+)$/s', $trimmed, $m)) {
@@ -105,23 +105,42 @@ class AdminStudentController extends Controller
                 if ($src !== false) {
                     $w = imagesx($src);
                     $h = imagesy($src);
-                    $maxDim = 120;
-                    $newW = $w > $h ? $maxDim : max(1, (int) round(($w * $maxDim) / $h));
-                    $newH = $w > $h ? max(1, (int) round(($h * $maxDim) / $w)) : $maxDim;
+                    $maxDim = 200;
+
+                    if ($w > $maxDim || $h > $maxDim) {
+                        $newW = $w > $h ? $maxDim : max(1, (int) round(($w * $maxDim) / $h));
+                        $newH = $w > $h ? max(1, (int) round(($h * $maxDim) / $w)) : $maxDim;
+                    } else {
+                        $newW = $w;
+                        $newH = $h;
+                    }
 
                     $dst = imagecreatetruecolor($newW, $newH);
-                    $white = imagecolorallocate($dst, 255, 255, 255);
-                    imagefilledrectangle($dst, 0, 0, $newW, $newH, $white);
+                    if (function_exists('imagewebp')) {
+                        imagealphablending($dst, false);
+                        imagesavealpha($dst, true);
+                        $transparent = imagecolorallocatealpha($dst, 255, 255, 255, 127);
+                        imagefilledrectangle($dst, 0, 0, $newW, $newH, $transparent);
+                    } else {
+                        $white = imagecolorallocate($dst, 255, 255, 255);
+                        imagefilledrectangle($dst, 0, 0, $newW, $newH, $white);
+                    }
                     imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $w, $h);
 
                     ob_start();
-                    imagejpeg($dst, null, 80);
+                    if (function_exists('imagewebp')) {
+                        imagewebp($dst, null, 88);
+                        $outMime = 'image/webp';
+                    } else {
+                        imagejpeg($dst, null, 88);
+                        $outMime = 'image/jpeg';
+                    }
                     $out = ob_get_clean();
                     imagedestroy($src);
                     imagedestroy($dst);
 
                     if ($out && strlen($out) < strlen($binary)) {
-                        return 'data:image/jpeg;base64,' . base64_encode($out);
+                        return 'data:' . $outMime . ';base64,' . base64_encode($out);
                     }
                 }
             } catch (\Throwable $e) {
