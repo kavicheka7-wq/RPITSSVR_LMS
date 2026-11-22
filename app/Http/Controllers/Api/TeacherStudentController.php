@@ -77,7 +77,7 @@ class TeacherStudentController extends Controller
     }
 
     /**
-     * ✅ បង្រួមរូបថតសិស្សដែលធំៗ (Base64 រាប់មេកាបៃ) មកទំហំតូចល្មម (80x80px ~3KB) និងទុកក្នុង Cache ការពារកុំឱ្យគាំង RAM លើ Railway
+     * ✅ បង្រួមរូបថតសិស្សដែលធំៗ (Base64 រាប់មេកាបៃ) មកទំហំច្បាស់ល្អ (200x200px HD) និងទុកក្នុង Cache ការពារកុំឱ្យគាំង RAM លើ Railway
      */
     private function optimizeStudentAvatarFast(?string $rawImage, int $studentId): ?string
     {
@@ -94,13 +94,13 @@ class TeacherStudentController extends Controller
             return $this->avatarMemo[$studentId];
         }
 
-        // បើជារូបតូចស្រាប់ (< 15KB) ឬជា URL ធម្មតា មិនបាច់បង្រួមទេ
-        if (strlen($trimmed) <= 15000 && (str_starts_with($trimmed, 'data:image') || str_starts_with($trimmed, 'http'))) {
+        // បើជារូបតូចស្រាប់ (< 25KB) ឬជា URL ធម្មតា (Cloudflare R2) មិនបាច់បង្រួមទេ
+        if (strlen($trimmed) <= 25000 && (str_starts_with($trimmed, 'data:image') || str_starts_with($trimmed, 'http'))) {
             $this->avatarMemo[$studentId] = $trimmed;
             return $trimmed;
         }
 
-        $cacheKey = 'tch_std_avatar_v2_' . $studentId . '_' . md5(substr($trimmed, 0, 100) . strlen($trimmed));
+        $cacheKey = 'tch_std_avatar_v3_' . $studentId . '_' . md5(substr($trimmed, 0, 100) . strlen($trimmed));
 
         $optimized = Cache::remember($cacheKey, 86400, function () use ($trimmed) {
             $binaryData = null;
@@ -133,7 +133,7 @@ class TeacherStudentController extends Controller
                     if ($srcImg !== false) {
                         $w = imagesx($srcImg);
                         $h = imagesy($srcImg);
-                        $maxDim = 80;
+                        $maxDim = 200;
 
                         if ($w > $maxDim || $h > $maxDim) {
                             if ($w > $h) {
@@ -157,10 +157,10 @@ class TeacherStudentController extends Controller
 
                         ob_start();
                         if (function_exists('imagewebp')) {
-                            imagewebp($dstImg, null, 75);
+                            imagewebp($dstImg, null, 88);
                             $outMime = 'image/webp';
                         } else {
-                            imagejpeg($dstImg, null, 78);
+                            imagejpeg($dstImg, null, 88);
                             $outMime = 'image/jpeg';
                         }
                         $compressedBytes = ob_get_clean();

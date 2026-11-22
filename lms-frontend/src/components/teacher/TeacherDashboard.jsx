@@ -32,7 +32,7 @@ import {
 // 📌 ផ្នែកទី១៖ ប្រព័ន្ធផ្ទុកទិន្នន័យល្បឿនលឿន (0ms Cache & Safe Non-Blocking Prefetcher)
 // ============================================================================
 const LAST_ACTIVE_TEACHER_UID_KEY = 'lms_last_active_teacher_uid';
-const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v1';
+const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v2';
 const getStatsCacheKey = (uid) => `cached_teacher_dashboard_stats_v8_${uid}`;
 const getActivitiesCacheKey = (uid) => `cached_teacher_dashboard_activities_v8_${uid}`;
 
@@ -66,7 +66,7 @@ const readStorageJson = (key, fallback) => {
   }
 };
 
-// ✅ បង្រួមរូបភាពសិស្សទុកមុនក្នុង cached_teacher_student_avatars_v1 នៅពេល Browser ទំនេរ (មិនបង្រួមដដែលៗ)
+// ✅ បង្រួមរូបភាពសិស្សកម្រិត HD (200x200px WebP) ទុកមុនក្នុង cached_teacher_student_avatars_v2 នៅពេល Browser ទំនេរ
 const cacheStudentAvatarsInBackground = (studentsList, onAvatarsUpdated) => {
   if (!Array.isArray(studentsList) || studentsList.length === 0) return;
 
@@ -94,17 +94,19 @@ const cacheStudentAvatarsInBackground = (studentsList, onAvatarsUpdated) => {
       const rawImg = stu.profile_image || stu.user?.profile_image || null;
       if (!rawImg || typeof rawImg !== 'string') return;
 
-      // ✅ បើធ្លាប់បង្រួមទុករួចហើយ និងមានទំហំតូចស្រាប់ មិនបាច់គូរ Canvas ឡើងវិញទេ
       const existing = avatarMap[stu.id];
-      if (existing && existing.length < 18000 && rawImg.startsWith('data:')) {
-        return;
-      }
 
-      if (!rawImg.startsWith('data:image') || rawImg.length < 12000) {
+      // ✅ បើជា URL ថ្មី (Cloudflare R2) ឬរូបស្រាលស្រាប់ (< 25KB) ឱ្យរក្សាទុកផ្ទាល់ភ្លាមៗ
+      if (!rawImg.startsWith('data:image') || rawImg.length < 25000) {
         if (existing !== rawImg) {
           avatarMap[stu.id] = rawImg;
           hasChanges = true;
         }
+        return;
+      }
+
+      // ✅ បើធ្លាប់បង្រួមទុករួចហើយ និងមានទំហំតូចស្រាប់ មិនបាច់គូរ Canvas ឡើងវិញទេ
+      if (existing && existing.length <= 25000 && rawImg.startsWith('data:')) {
         return;
       }
 
@@ -115,7 +117,7 @@ const cacheStudentAvatarsInBackground = (studentsList, onAvatarsUpdated) => {
         img.onload = () => {
           try {
             const canvas = document.createElement('canvas');
-            const maxSize = 80;
+            const maxSize = 200;
             let w = img.width || maxSize;
             let h = img.height || maxSize;
             if (w > h) {
@@ -123,19 +125,19 @@ const cacheStudentAvatarsInBackground = (studentsList, onAvatarsUpdated) => {
                 h = Math.round((h * maxSize) / w);
                 w = maxSize;
               }
-            } else {
-              if (h > maxSize) {
-                w = Math.round((w * maxSize) / h);
-                h = maxSize;
-              }
+            } else if (h > maxSize) {
+              w = Math.round((w * maxSize) / h);
+              h = maxSize;
             }
             canvas.width = w;
             canvas.height = h;
             const ctx = canvas.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(img, 0, 0, w, h);
-            const tinyWebp = canvas.toDataURL('image/webp', 0.76);
+            const crispWebp = canvas.toDataURL('image/webp', 0.88);
             avatarMap[stu.id] =
-              tinyWebp.length < rawImg.length ? tinyWebp : rawImg;
+              crispWebp.length < rawImg.length ? crispWebp : rawImg;
             hasChanges = true;
           } catch {}
           pendingCount--;
@@ -169,7 +171,7 @@ const stripHeavyBase64FromList = (data) => {
     if (
       typeof copy.profile_image === 'string' &&
       copy.profile_image.startsWith('data:') &&
-      copy.profile_image.length > 12000
+      copy.profile_image.length > 25000
     ) {
       copy.profile_image = null;
     }
@@ -799,7 +801,7 @@ export default function TeacherDashboard() {
     return (parts[0]?.[0] || 'S').toUpperCase();
   };
 
-  // ✅ ទាញរូបភាពសិស្សពីសកម្មភាព ឬពី cached_teacher_student_avatars_v1
+  // ✅ ទាញរូបភាពសិស្សពីសកម្មភាព ឬពី cached_teacher_student_avatars_v2
   const resolveActivityAvatarUrl = useCallback(
     (act) => {
       if (!act) return null;

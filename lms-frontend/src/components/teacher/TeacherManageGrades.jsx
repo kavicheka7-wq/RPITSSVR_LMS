@@ -27,7 +27,7 @@ import {
 const CACHE_KEY_SHARED_COURSES = 'cached_teacher_courses_list_v6';
 const CACHE_KEY_SHARED_STUDENTS = 'cached_teacher_students_list_v6';
 const CACHE_KEY_SHARED_MAP = 'cached_teacher_course_map_v6';
-const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v1';
+const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v2';
 
 const getCoursesCacheKey = (uid) => `cached_teacher_courses_list_v8_${uid}`;
 const getStudentsCacheKey = (uid) => `cached_teacher_students_list_v8_${uid}`;
@@ -85,12 +85,12 @@ const getAvatarMapSync = () => {
   return GRADES_MEM_CACHE.avatarMap;
 };
 
-// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 80x80px (~2KB) ដោយរត់នៅពេលទំនេរ
+// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 200x200px HD WebP (រក្សា URL ពី R2 ផ្ទាល់)
 const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
   if (!studentId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
 
   const map = getAvatarMapSync();
-  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
+  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 25000) {
     map[studentId] = rawDataUrl;
     if (typeof onCompressed === 'function') onCompressed(studentId, rawDataUrl);
     return;
@@ -107,7 +107,7 @@ const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
-          const maxSize = 80;
+          const maxSize = 200;
           let w = img.width || maxSize;
           let h = img.height || maxSize;
           if (w > h) {
@@ -115,19 +115,19 @@ const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
               h = Math.round((h * maxSize) / w);
               w = maxSize;
             }
-          } else {
-            if (h > maxSize) {
-              w = Math.round((w * maxSize) / h);
-              h = maxSize;
-            }
+          } else if (h > maxSize) {
+            w = Math.round((w * maxSize) / h);
+            h = maxSize;
           }
           canvas.width = w;
           canvas.height = h;
           const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, w, h);
-          const tinyWebp = canvas.toDataURL('image/webp', 0.78);
+          const crispWebp = canvas.toDataURL('image/webp', 0.88);
           const bestImg =
-            tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
+            crispWebp.length < rawDataUrl.length ? crispWebp : rawDataUrl;
           map[studentId] = bestImg;
           if (typeof onCompressed === 'function') onCompressed(studentId, bestImg);
         } catch {}
@@ -183,7 +183,13 @@ const persistStudentsAndAvatarsSafely = (uid, studentsList) => {
 
       if (stu.id && rawImg) {
         const existingCached = avatarMap[stu.id];
-        if (!existingCached || existingCached.length > 12000) {
+        if (!rawImg.startsWith('data:image')) {
+          // ✅ បើជា URL ថ្មី (Cloudflare R2) ឱ្យជំនួសរូបចាស់ភ្លាមៗ
+          avatarMap[stu.id] = rawImg;
+          if (stu.user_id) {
+            avatarMap[stu.user_id] = rawImg;
+          }
+        } else if (!existingCached || existingCached.length > 25000) {
           pendingCompressCount++;
           compressStudentAvatarAsync(stu.id, rawImg, () => {
             if (stu.user_id) {
@@ -201,7 +207,7 @@ const persistStudentsAndAvatarsSafely = (uid, studentsList) => {
       if (
         typeof copy.profile_image === 'string' &&
         copy.profile_image.startsWith('data:') &&
-        copy.profile_image.length > 12000
+        copy.profile_image.length > 25000
       ) {
         copy.profile_image = null;
       }
@@ -247,7 +253,11 @@ const persistCourseScoresSafely = (uid, courseId, scoresList) => {
       const recId = row.student_record_id || row.id;
       if (recId && rawImg) {
         const existingCached = avatarMap[recId];
-        if (!existingCached || existingCached.length > 12000) {
+        if (!rawImg.startsWith('data:image')) {
+          // ✅ បើជា URL ថ្មី (Cloudflare R2) ឱ្យជំនួសរូបចាស់ភ្លាមៗ
+          avatarMap[recId] = rawImg;
+          if (row.student_id) avatarMap[row.student_id] = rawImg;
+        } else if (!existingCached || existingCached.length > 25000) {
           compressStudentAvatarAsync(recId, rawImg, (_, compressed) => {
             if (row.student_id) avatarMap[row.student_id] = compressed;
           });
@@ -258,7 +268,7 @@ const persistCourseScoresSafely = (uid, courseId, scoresList) => {
       if (
         typeof copy.profile_image === 'string' &&
         copy.profile_image.startsWith('data:') &&
-        copy.profile_image.length > 12000
+        copy.profile_image.length > 25000
       ) {
         copy.profile_image = null;
       }
@@ -721,12 +731,12 @@ const formatScoresList = (scoresData, courseId = '') => {
     );
 
     const resolvedAvatar =
-      avatarMap[recId] ||
-      avatarMap[resolvedUserId] ||
       s.profile_image ||
       s.user?.profile_image ||
       s.student?.profile_image ||
       s.student?.user?.profile_image ||
+      avatarMap[recId] ||
+      avatarMap[resolvedUserId] ||
       null;
 
     return {
@@ -786,10 +796,10 @@ const buildInstantCourseScores = (
       const targetUserId = std.user_id || std.user?.id || std.id;
       const isEnrolledAny = isStudentEnrolledInAnyTeacherCourse(std, courseMap);
       const stdAvatar =
-        avatarMap[std.id] ||
-        avatarMap[targetUserId] ||
         std.profile_image ||
         std.user?.profile_image ||
+        avatarMap[std.id] ||
+        avatarMap[targetUserId] ||
         null;
 
       const matchedScore = scoreLookup.find(
@@ -1201,7 +1211,7 @@ const TeacherManageGrades = () => {
       return;
     }
 
-    // ១. ទាញបញ្ជីសិស្សមុនគេ និងបង្រួមរូបភាពទុកក្នុង Avatar Dictionary នៅពេលទំនេរ
+    // ១. ទាញបញ្ជីសិស្សមុនគេ និងរក្សារូបភាព HD ទុកក្នុង Avatar Dictionary នៅពេលទំនេរ
     api
       .get('/teacher/students')
       .then((stdRes) => {
@@ -2276,12 +2286,12 @@ const TeacherManageGrades = () => {
 
                   const avatarMap = getAvatarMapSync();
                   const rawAvatar =
-                    avatarMap[item.student_record_id] ||
-                    avatarMap[item.student_id] ||
                     item.profile_image ||
                     item.student?.profile_image ||
                     item.student?.user?.profile_image ||
-                    item.user?.profile_image;
+                    item.user?.profile_image ||
+                    avatarMap[item.student_record_id] ||
+                    avatarMap[item.student_id];
                   const avatarUrl = getProfileImageUrl(rawAvatar);
                   const avatarKey = `grd_std_${item.student_id || idx}`;
                   const hasAvatar = Boolean(

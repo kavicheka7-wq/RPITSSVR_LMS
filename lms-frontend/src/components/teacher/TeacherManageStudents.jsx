@@ -23,7 +23,7 @@ import {
 const CACHE_KEY_SHARED_STUDENTS = 'cached_teacher_students_list_v6';
 const CACHE_KEY_SHARED_COURSES = 'cached_teacher_courses_list_v6';
 const CACHE_KEY_SHARED_MAP = 'cached_teacher_course_map_v6';
-const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v1';
+const CACHE_KEY_STUDENT_AVATARS = 'cached_teacher_student_avatars_v2';
 
 const getStudentsCacheKey = (uid) => `cached_teacher_students_list_v8_${uid}`;
 const getCoursesCacheKey = (uid) => `cached_teacher_courses_list_v8_${uid}`;
@@ -71,13 +71,13 @@ const getAvatarMapSync = () => {
   return MEMORY_CACHE.avatarMap;
 };
 
-// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 80x80px (~2KB) ដោយរត់នៅពេលទំនេរ
+// ✅ បង្រួមរូបភាព Base64 ធំៗរបស់សិស្សម្នាក់ៗឱ្យមកត្រឹម 200x200px HD WebP (រក្សា URL ពី R2 ផ្ទាល់)
 const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
   if (!studentId || !rawDataUrl || typeof rawDataUrl !== 'string') return;
 
   const map = getAvatarMapSync();
-  // បើជារូបភាព URL ធម្មតា ឬរូបភាពតូចស្រាប់ (< 12KB) រក្សាទុកភ្លាមៗ
-  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 12000) {
+  // បើជារូបភាព URL (Cloudflare R2) ឬរូបភាពតូចស្រាប់ (< 25KB) រក្សាទុកភ្លាមៗ
+  if (!rawDataUrl.startsWith('data:image') || rawDataUrl.length < 25000) {
     map[studentId] = rawDataUrl;
     if (typeof onCompressed === 'function') onCompressed(studentId, rawDataUrl);
     return;
@@ -95,7 +95,7 @@ const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
-          const maxSize = 80;
+          const maxSize = 200;
           let w = img.width || maxSize;
           let h = img.height || maxSize;
           if (w > h) {
@@ -103,18 +103,18 @@ const compressStudentAvatarAsync = (studentId, rawDataUrl, onCompressed) => {
               h = Math.round((h * maxSize) / w);
               w = maxSize;
             }
-          } else {
-            if (h > maxSize) {
-              w = Math.round((w * maxSize) / h);
-              h = maxSize;
-            }
+          } else if (h > maxSize) {
+            w = Math.round((w * maxSize) / h);
+            h = maxSize;
           }
           canvas.width = w;
           canvas.height = h;
           const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, w, h);
-          const tinyWebp = canvas.toDataURL('image/webp', 0.78);
-          const bestImg = tinyWebp.length < rawDataUrl.length ? tinyWebp : rawDataUrl;
+          const crispWebp = canvas.toDataURL('image/webp', 0.88);
+          const bestImg = crispWebp.length < rawDataUrl.length ? crispWebp : rawDataUrl;
           map[studentId] = bestImg;
           if (typeof onCompressed === 'function') onCompressed(studentId, bestImg);
         } catch {}
@@ -167,7 +167,10 @@ const persistStudentsAndAvatarsSafely = (uid, studentsList) => {
 
       if (stu.id && rawImg) {
         const existingCached = avatarMap[stu.id];
-        if (!existingCached || existingCached.length > 12000) {
+        if (!rawImg.startsWith('data:image')) {
+          // ✅ បើជា URL ថ្មី (Cloudflare R2) ឱ្យជំនួសរូបចាស់ភ្លាមៗ
+          avatarMap[stu.id] = rawImg;
+        } else if (!existingCached || existingCached.length > 25000) {
           pendingCompressCount++;
           compressStudentAvatarAsync(stu.id, rawImg, () => {
             pendingCompressCount--;
@@ -182,7 +185,7 @@ const persistStudentsAndAvatarsSafely = (uid, studentsList) => {
       if (
         typeof copy.profile_image === 'string' &&
         copy.profile_image.startsWith('data:') &&
-        copy.profile_image.length > 12000
+        copy.profile_image.length > 25000
       ) {
         copy.profile_image = null;
       }
@@ -627,7 +630,7 @@ const TeacherManageStudents = () => {
           ? rawStd.data
           : [];
 
-        // ✅ រក្សាទុកបញ្ជីសិស្ស និងបង្រួមរូបភាពសិស្សជា Thumbnail (~2KB) នៅពេលទំនេរ
+        // ✅ រក្សាទុកបញ្ជីសិស្ស និងរូបភាព HD នៅពេលទំនេរ
         persistStudentsAndAvatarsSafely(currentTeacherId, latestStudents);
 
         const hydrated = hydrateStudentsWithAvatars(latestStudents);
@@ -1606,9 +1609,9 @@ const TeacherManageStudents = () => {
 
                     const avatarMap = getAvatarMapSync();
                     const rawAvatar =
-                      avatarMap[student.id] ||
                       student.profile_image ||
                       student.user?.profile_image ||
+                      avatarMap[student.id] ||
                       avatarMap[student.user_id];
                     const avatarUrl = getProfileImageUrl(rawAvatar);
                     const avatarKey = `tstd_${student.id}`;
@@ -1790,9 +1793,9 @@ const TeacherManageStudents = () => {
                 );
                 const avatarMap = getAvatarMapSync();
                 const rawAvatar =
-                  avatarMap[student.id] ||
                   student.profile_image ||
                   student.user?.profile_image ||
+                  avatarMap[student.id] ||
                   avatarMap[student.user_id];
                 const avatarUrl = getProfileImageUrl(rawAvatar);
                 const avatarKey = `tstd_${student.id}`;
