@@ -3513,10 +3513,10 @@ export default function TeacherManageQuizzes() {
           <div className="quz-modal-card bg-white rounded-[1.5rem] shadow-2xl w-full max-w-4xl flex flex-col max-h-[92vh] overflow-hidden border border-transparent">
             <div className="quz-modal-bar flex justify-between items-center px-6 py-5 border-b border-gray-100 bg-gray-50/50 shrink-0">
              <h2 className="quz-text-primary text-lg sm:text-xl font-extrabold text-gray-900 flex items-center gap-2.5">
-                <span className="quz-pill-emerald bg-emerald-100 text-emerald-600 p-2.5 rounded-xl border border-emerald-200">
+                <span className="quz-pill-blue bg-blue-100 text-blue-600 p-2.5 rounded-xl border border-blue-200">
                   <DocumentIcon className="h-5 w-5" />
                 </span>
-                {t('នាំចូលសំណួរ (Excel/Word/PDF)', 'Import Questions (Excel/Word/PDF)')}
+                {t('នាំចូលសំណួរ', 'Import Questions')}
               </h2>
               <button
                 type="button"
@@ -3648,8 +3648,8 @@ export default function TeacherManageQuizzes() {
                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="quz-label text-xs font-bold text-gray-700">
                         {t(
-                          'គាំទ្រសំណួរចម្រុះ (MCQ, ពិត/មិនពិត, សំណួរសរសេរ) ក្នុងឯកសារ Word (.docx)',
-                          'Auto-detects MCQ, True/False, and Essay from Word (.docx)'
+                          'គាំទ្រសំណួរចម្រុះ (MCQ, ពិត/មិនពិត, សំណួរសរសេរ) ក្នុងឯកសារ Word',
+                          'Auto-detects MCQ, True/False, and Essay from Word'
                         )}
                       </span>
                     </div>
@@ -3671,8 +3671,8 @@ export default function TeacherManageQuizzes() {
                             {importFile
                               ? importFile.name
                               : t(
-                                  'ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ Word (.docx)',
-                                  'Click to select Word (.docx) file'
+                                  'ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ Word',
+                                  'Click to select Word file'
                                 )}
                           </span>
                         </>
@@ -3875,7 +3875,7 @@ export default function TeacherManageQuizzes() {
                       importedQuestions.length === 0 ||
                       missingAnswerCount > 0
                     }
-                    className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-all shadow-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-all shadow-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     {isImporting ? (
                       <ArrowPathIcon className="h-5 w-5 animate-spin" />
