@@ -3643,13 +3643,13 @@ export default function TeacherManageQuizzes() {
                   </button>
                 </div>
 
-                {importMode === 'file' && (
+               {importMode === 'file' && (
                   <div className="quz-subbox bg-gray-50/70 p-4 rounded-2xl border border-gray-200/80 space-y-3">
                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="quz-label text-xs font-bold text-gray-700">
                         {t(
-                          'គាំទ្រសំណួរចម្រុះ (MCQ, ពិត/មិនពិត, សំណួរសរសេរ) ក្នុងឯកសារ Excel, Word (.docx) ឬ PDF',
-                          'Auto-detects MCQ, True/False, and Essay from Excel, Word (.docx), or PDF'
+                          'គាំទ្រសំណួរចម្រុះ (MCQ, ពិត/មិនពិត, សំណួរសរសេរ) ក្នុងឯកសារ Word (.docx)',
+                          'Auto-detects MCQ, True/False, and Essay from Word (.docx)'
                         )}
                       </span>
                     </div>
@@ -3671,8 +3671,8 @@ export default function TeacherManageQuizzes() {
                             {importFile
                               ? importFile.name
                               : t(
-                                  'ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ .xlsx, .docx, ឬ .pdf',
-                                  'Click to select .xlsx, .docx, or .pdf file'
+                                  'ចុចទីនេះដើម្បីជ្រើសរើសឯកសារ Word (.docx)',
+                                  'Click to select Word (.docx) file'
                                 )}
                           </span>
                         </>
@@ -3680,7 +3680,7 @@ export default function TeacherManageQuizzes() {
                       <input
                         id="smart-quiz-file-input"
                         type="file"
-                        accept=".xlsx,.xls,.csv,.docx,.pdf"
+                        accept=".docx"
                         onChange={handleSmartFileUpload}
                         className="hidden"
                       />
