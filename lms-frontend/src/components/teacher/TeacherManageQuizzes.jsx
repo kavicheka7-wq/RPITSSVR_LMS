@@ -3233,8 +3233,8 @@ export default function TeacherManageQuizzes() {
                                               onClick={() => handleMcqCorrectToggle(oIdx)}
                                               className={`h-6 w-6 rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 mr-1 ${
                                                 opt.is_correct
-                                                  ? 'bg-emerald-500 text-white shadow-xs'
-                                                  : 'border-2 border-gray-300 dark:border-slate-600 hover:border-emerald-400 text-transparent'
+                                                  ? 'bg-blue-500 text-white shadow-xs'
+                                                  : 'border-2 border-gray-300 dark:border-slate-600 hover:border-blue-400 text-transparent'
                                               }`}
                                               title={t('កំណត់ជាចម្លើយត្រឹមត្រូវ', 'Set correct answer')}
                                             >
@@ -3256,13 +3256,13 @@ export default function TeacherManageQuizzes() {
                                             onClick={() => setTfCorrect('true')}
                                             className={`flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs font-extrabold transition-all cursor-pointer ${
                                               tfCorrect === 'true'
-                                                ? 'quz-pill-emerald bg-emerald-50 border-emerald-400 text-emerald-800 shadow-2xs'
+                                                ? 'quz-pill-blue bg-blue-50 border-blue-400 text-blue-800 shadow-2xs'
                                                 : 'quz-surface-card quz-text-secondary bg-white border-gray-200 text-gray-600'
                                             }`}
                                           >
                                             <CheckCircleIcon
                                               className={`h-4 w-4 ${
-                                                tfCorrect === 'true' ? 'text-emerald-600' : 'text-gray-300'
+                                                tfCorrect === 'true' ? 'text-blue-600' : 'text-gray-300'
                                               }`}
                                             />
                                             {t('ពិត (True)', 'True')}
@@ -3624,7 +3624,7 @@ export default function TeacherManageQuizzes() {
                     onClick={() => setImportMode('file')}
                     className={`px-4 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
                       importMode === 'file'
-                        ? 'bg-emerald-600 text-white shadow-xs'
+                        ? 'bg-blue-600 text-white shadow-xs'
                         : 'quz-shift-btn text-gray-600 hover:text-gray-900'
                     }`}
                   >
@@ -3635,7 +3635,7 @@ export default function TeacherManageQuizzes() {
                     onClick={() => setImportMode('write')}
                     className={`px-4 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
                       importMode === 'write'
-                        ? 'bg-indigo-600 text-white shadow-xs'
+                        ? 'bg-blue-600 text-white shadow-xs'
                         : 'quz-shift-btn text-gray-600 hover:text-gray-900'
                     }`}
                   >
@@ -3655,18 +3655,18 @@ export default function TeacherManageQuizzes() {
                     </div>
                     <label
                       htmlFor="smart-quiz-file-input"
-                      className="quz-surface-card flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-emerald-300 rounded-xl cursor-pointer bg-white hover:bg-emerald-50/40 transition-all"
+                      className="quz-surface-card flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-blue-300 rounded-xl cursor-pointer bg-white hover:bg-blue-50/40 transition-all"
                     >
                       {isParsingFile ? (
                         <>
-                          <ArrowPathIcon className="h-8 w-8 text-emerald-500 animate-spin mb-1.5" />
+                          <ArrowPathIcon className="h-8 w-8 text-blue-500 animate-spin mb-1.5" />
                           <span className="quz-text-primary text-xs sm:text-sm font-bold text-gray-800">
                             {t('កំពុងអាន និងបំបែកសំណួរពីឯកសារ...', 'Reading & parsing questions...')}
                           </span>
                         </>
                       ) : (
                         <>
-                          <DocumentIcon className="h-8 w-8 text-emerald-500 mb-1.5" />
+                          <DocumentIcon className="h-8 w-8 text-blue-500 mb-1.5" />
                           <span className="quz-text-primary text-xs sm:text-sm font-bold text-gray-800">
                             {importFile
                               ? importFile.name
