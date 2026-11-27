@@ -1683,12 +1683,12 @@ const AdminReports = () => {
               <div className="rep-surface-card bg-white rounded-2xl sm:rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="rep-table-bar px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 bg-white print:px-0 print:py-2 print:border-0">
                   <h3 className="rep-text-primary print-muol text-base sm:text-[18px] print:text-[12px] font-extrabold text-gray-900">
-                    <span className="only-print hidden mr-1">២.</span>
+                    <span className="hidden print:inline mr-1">២.</span>
                     {t('ព័ត៌មានលម្អិតតាមដេប៉ាតឺម៉ង់', 'Department Breakdown Details')}
                   </h3>
                 </div>
 
-                <div className="hidden md:block print:block overflow-x-auto">
+                <div className="hidden md:block print:block overflow-x-auto print:overflow-visible print:w-full">
                   <table className="min-w-full border-collapse">
                     <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
                       <tr>
@@ -1879,7 +1879,7 @@ const AdminReports = () => {
                   </h3>
                 </div>
 
-                <div className="hidden md:block print:block overflow-x-auto">
+                <div className="hidden md:block print:block overflow-x-auto print:overflow-visible print:w-full">
                   <table className="min-w-full border-collapse">
                     <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
                       <tr>
@@ -2697,12 +2697,12 @@ const AdminReports = () => {
               <div className="rep-surface-card bg-white rounded-2xl sm:rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="rep-table-bar px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 bg-white print:px-0 print:py-2 print:border-0">
                   <h3 className="rep-text-primary print-muol text-base sm:text-[18px] print:text-[12px] font-extrabold text-gray-900">
-                    <span className="only-print hidden mr-1">២.</span>
+                    <span className="hidden print:inline mr-1">២.</span>
                     {t('បញ្ជីពិន្ទុ និងលទ្ធផលសិក្សាសិស្ស', 'Detailed Student Scores & Results')}
                   </h3>
                 </div>
 
-                <div className="hidden md:block print:block overflow-x-auto">
+                <div className="hidden md:block print:block overflow-x-auto print:overflow-visible print:w-full">
                   <table className="min-w-full border-collapse">
                     <thead className="rep-table-head bg-gray-50 border-b border-gray-100">
                       <tr>
@@ -3213,7 +3213,7 @@ const AdminReports = () => {
           }
           th, td {
             border: 1px solid #000000 !important;
-            padding: 8px 10px !important;
+            padding: 4px 6px !important;
             color: #000000 !important;
             font-family: 'Khmer OS Siemreap', 'Siemreap', sans-serif !important;
             line-height: 1.6 !important;
