@@ -671,9 +671,15 @@ const AdminDashboard = () => {
           const Icon = stat.icon;
           const isLastItem = index === statCards.length - 1;
           return (
-            <Link
+           <Link
               key={index}
               to={stat.link || '#'}
+              onClick={(e) => {
+                if (stat.link?.startsWith('#')) {
+                  e.preventDefault();
+                  document.querySelector(stat.link)?.scrollIntoView({ behavior: 'smooth' });
+                }
+              }}
               className={`admin-surface-card bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 border border-gray-100 hover:border-blue-200 shadow-sm hover:shadow-xl transition-all duration-200 group hover:-translate-y-1 flex flex-col justify-between relative overflow-hidden ${
                 isLastItem
                   ? 'col-span-2 md:col-span-1 xl:col-span-1'
@@ -863,7 +869,8 @@ const AdminDashboard = () => {
       {/* ================================================================== */}
       {/* 📌 4. RECENT USERS (Table on iPad/Desktop, Smart Cards on Phone)   */}
       {/* ================================================================== */}
-      <div className="w-full">
+      {/* ================================================================== */}
+      <div id="recent-users" className="w-full scroll-mt-24">
         <div className="admin-surface-card bg-white rounded-2xl sm:rounded-[1.75rem] border border-gray-100 shadow-sm overflow-hidden">
           <div className="admin-card-divider px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-100 flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
