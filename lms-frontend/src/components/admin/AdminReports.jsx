@@ -1744,7 +1744,7 @@ const AdminReports = () => {
                   </table>
                 </div>
 
-                <div className="md:hidden no-print p-3.5 space-y-2.5 bg-gray-50/40">
+                <div className="md:hidden print:hidden p-3.5 space-y-2.5 bg-gray-50/40">
                   {departmentChartData.length === 0 ? (
                     <p className="py-8 text-center text-gray-400 text-xs font-bold">
                       {t('មិនរកឃើញទិន្នន័យទេ', 'No records found')}
@@ -1978,7 +1978,7 @@ const AdminReports = () => {
                   </table>
                 </div>
 
-                <div className="md:hidden no-print p-3.5 space-y-3 bg-gray-50/40">
+                <div className="md:hidden print:hidden p-3.5 space-y-3 bg-gray-50/40">
                   {!Array.isArray(enrollmentData?.data) ||
                   enrollmentData.data.length === 0 ? (
                     <p className="py-10 text-center text-gray-400 text-xs font-bold">
@@ -2370,7 +2370,7 @@ const AdminReports = () => {
                     </table>
                   </div>
 
-                  <div className="md:hidden p-3.5 space-y-2.5 bg-gray-50/40">
+                  <div className="md:hidden print:hidden p-3.5 space-y-2.5 bg-gray-50/40">
                     {paginatedAttendanceCourses.length === 0 ? (
                       <p className="py-10 text-center text-gray-400 text-xs font-bold">
                         {t('មិនរកឃើញទិន្នន័យអវត្តមានទេ', 'No attendance records found')}
@@ -2811,7 +2811,7 @@ const AdminReports = () => {
                   </table>
                 </div>
 
-                <div className="md:hidden no-print p-3.5 space-y-3 bg-gray-50/40">
+                <div className="md:hidden print:hidden p-3.5 space-y-3 bg-gray-50/40">
                   {enrichedAcademicRows.length === 0 ? (
                     <p className="py-10 text-center text-gray-400 text-xs font-bold">
                       {t('មិនរកឃើញទិន្នន័យពិន្ទុទេ', 'No grade records found')}
@@ -3192,8 +3192,7 @@ const AdminReports = () => {
           .rep-surface-card,
           .rep-table-bar,
           .rep-table-head,
-          .rep-table-body,
-          .rep-score-cell {
+          .rep-table-body {
             background: transparent !important;
             background-color: transparent !important;
             color: #000000 !important;
