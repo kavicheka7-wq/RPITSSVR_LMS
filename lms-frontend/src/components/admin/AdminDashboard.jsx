@@ -520,7 +520,7 @@ const AdminDashboard = () => {
       bgColor: 'bg-blue-50',
       textColor: 'text-blue-600',
       themeClass: 'admin-stat-blue',
-      link: '/reports',
+      link: '#recent-users',
     },
     {
       title: t('សិស្សសរុប', 'Total Students'),
